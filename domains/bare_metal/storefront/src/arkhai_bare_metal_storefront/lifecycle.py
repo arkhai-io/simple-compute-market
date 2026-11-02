@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 import sqlite3
@@ -14,12 +13,11 @@ from arkhai_compute.end_classification import CommandEnd, classify_site_end
 from compute_provisioning_contracts.lease_ends import LeaseEndedEvent, SignedLeaseEndedReport, verify_lease_end
 
 from market_arkhai_mediation.adapter import MediationAdapter
-from market_arkhai_mediation.claims import sign_claim
 from market_arkhai_mediation.client import MediationClient, MediationCredential
-from market_arkhai_mediation.contract import INTERFACE, wire
-from market_arkhai_mediation.models import DeliveryEndClaim
+from market_arkhai_mediation.contract import INTERFACE
 from market_core.schemas import Agreement
-from market_deal_lifecycle.adapters import DisputeAdapterTable, PaymentAdapterTable, PaymentSelector
+from market_deal_lifecycle.adapters import DeliveryEndIntent, DisputeAdapterTable, PaymentAdapterTable, PaymentSelector
+from market_deal_lifecycle.claims import DeliveryEndClaims
 from market_deal_lifecycle_contracts.models import Accepted, CommitMessage, ListDealsRequest, Pending, Rejected, SubmitResponse, Unknown
 from market_deal_servicing import (
     Classification, DealWatch, DeliveryIngress, EndService, EndSession,
@@ -112,15 +110,16 @@ class BareMetalLifecycle:
             return False
 
     def dispute(self, binding):
-        credential = self.runtime.settlement_composition.disputes.config.credential_for(binding.authority)
-        if credential is None:
-            raise ValueError("Agreement dispute credential is missing")
-        key = binding.authority.model_dump_json()
-        if key not in self.clients:
-            self.clients[key] = MediationClient(
-                binding.authority, MediationCredential(binding.authority.identity, credential.api_key_env),
-            )
-        return MediationAdapter(binding, json.loads(self.agreement_bytes(binding.negotiation_id)), self.clients[key], clock=self.clock)
+        client = None
+        if self.credential_available(binding.authority):
+            credential = self.runtime.settlement_composition.disputes.config.credential_for(binding.authority)
+            key = binding.authority.model_dump_json()
+            if key not in self.clients:
+                self.clients[key] = MediationClient(
+                    binding.authority, MediationCredential(binding.authority.identity, credential.api_key_env),
+                )
+            client = self.clients[key]
+        return MediationAdapter(binding, json.loads(self.agreement_bytes(binding.negotiation_id)), client, clock=self.clock)
 
     def watch(self, deal, payment, dispute):
         account = payment.data.mandate.to.root if payment else ""
@@ -194,14 +193,16 @@ class BareMetalLifecycle:
         ), now=now, classification=Classification(kind="terms", evidence_refs=[cause]))
 
     def receipt_claim(self, negotiation_id, at):
-        agreement, _ = self.agreement(negotiation_id)
-        if agreement.settlement is None or agreement.settlement.lifecycle is None:
+        # Ingress holds its write transaction; this immutable binding read
+        # must not open a competing writer while building a local claim.
+        with sqlite3.connect(self.path) as conn:
+            binding = SellerSession(conn, initialize=False).read(negotiation_id).dispute_binding
+        adapter = self.seller.disputes.resolve(binding) if binding else None
+        if not isinstance(adapter, DeliveryEndClaims):
             return None
-        return wire(sign_claim(
-            agreement=hashlib.sha256(canonical_json(json.loads(self.agreement_bytes(negotiation_id)))).hexdigest(),
-            signer=self.runtime.marketplace_signer,
-            claim=DeliveryEndClaim(kind="delivery_end", ended_at=at, delivered=True, cause="payer"),
-        ))
+        return adapter.sign_delivery_end(
+            DeliveryEndIntent(ended_at=at, delivered=True, cause="payer"), self.runtime.marketplace_signer,
+        )
 
     def verify_site(self, negotiation_id, body, headers):
         with sqlite3.connect(self.path) as conn:

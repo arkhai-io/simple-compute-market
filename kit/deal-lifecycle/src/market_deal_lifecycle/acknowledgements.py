@@ -2,31 +2,13 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
-from typing import Protocol
 
 from market_deal_lifecycle_contracts.models import (
-    AuthorityView, DeliveryView, EndDeliveryAcknowledgement, EndDeliveryMessage,
-    Instant, LifecycleRead, Rejected, SignedEndDeliveryReceipt,
+    EndDeliveryAcknowledgement, EndDeliveryMessage, SignedEndDeliveryReceipt,
 )
 from market_deal_lifecycle_contracts.routes import lifecycle_route
-from market_identity import Identity, TrustedIdentitySet, canonical_json, verify_request, verify_response
-from pydantic import TypeAdapter
-
-
-class ReceiptStore(Protocol):
-    async def get_or_record(
-        self, negotiation_id: str, operation_key: str, request_digest: str, received_at: int,
-    ) -> int:
-        """Atomically retain the first receipt, return it on retry, refuse changed content."""
-        ...
-
-
-async def receipt_time(request: EndDeliveryMessage, received_at: int, store: ReceiptStore) -> int:
-    TypeAdapter(Instant).validate_python(received_at)
-    digest = hashlib.sha256(canonical_json(request)).hexdigest()
-    return await store.get_or_record(request.negotiation_id, request.operation_key, digest, received_at)
+from market_identity import Identity, TrustedIdentitySet, verify_request, verify_response
 
 
 def verify_end_acknowledgement(
@@ -64,12 +46,3 @@ def verify_end_acknowledgement(
     if not 200 <= receipt.response.status < 300:
         raise ValueError("a rejected response is not an end acknowledgement")
     return acknowledgement
-
-
-def read_without_adapter(
-    negotiation_id: str, mechanism: str, delivery: DeliveryView, *, commitment_ref: str | None = None,
-) -> LifecycleRead:
-    return LifecycleRead(
-        negotiation_id=negotiation_id, commitment_ref=commitment_ref, delivery=delivery,
-        authority=AuthorityView(outcome=Rejected(reason=f"{mechanism} has no lifecycle adapter")),
-    )

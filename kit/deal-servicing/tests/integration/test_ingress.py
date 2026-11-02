@@ -77,5 +77,5 @@ async def test_future_start_failure_defers_exact_filing_across_restart(rig):
         intent = next(item for item in EndSession(conn).intents("deal") if item.kind == "filing")
         assert intent.not_before == intent.payload["payload"]["ended_at"] == 200
     result = await rig["service"]().dispatch_filings("deal")
-    assert result.status == "pending"
+    assert [(item.intent_ref, item.outcome.status) for item in result] == [(intent.intent_ref, "pending")]
     rig["dispute"].submit.assert_not_called()

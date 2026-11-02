@@ -1592,3 +1592,60 @@ Reproducible first use and sensitivity evidence:
 is `kit/deal-servicing/README.md`; review implementation rationale is in `design.md`.
 Permanent specification/architecture promotion remains in the existing
 post-code-review closeout, with no owner decision reopened.
+
+## Implementation review 19/20 disposition
+
+### Lifecycle filing and buyer-end repairs
+
+| Findings | Disposition and commits |
+| --- | --- |
+| S-F1 / O-F2 | `33d777ba0` reserves one original semantic delivery-end writer in caller-owned durable storage and adopts one equivalent signed case. `3531af8b0` correlates seller-failure site echoes without another filing; `15c0d39f8` proves concurrent adoption across reconstructed SQLite callers. Unsupported revisions/ambiguous or unresolved originals return repair required; the published API cannot safely map linked revisions, so SCM refuses rather than computes a monetary delta or allocates a new key. |
+| O-F5 / O-F6 | `ac139c842` retries uncertain surrender before fixing a case and skips automatic payer filing for a non-surrender selected end. `3531af8b0` signs concurrence only for the selected surrender. The signed client accepts withdrawal of concurrence when newly selected earlier evidence supersedes surrender. |
+| O-F11 | `3531af8b0` makes rejected filings terminal, exposes every intent/outcome through read/list, and marks repair required after restart instead of resubmitting forever. |
+| O-F12 | `eccc87ea1` supports credential-independent local claims through the pinned mediation adapter. `d65e98e86` dispatches both compute receipt callbacks through their selected adapter tables; absent adapters return no claim. Read-only binding lookup remains safe inside ingress's write transaction. |
+| O-F13 | `211e29f7b` removes the unused duplicate receipt-store/no-adapter helpers and their helper-only assertions. Kept public receipt persistence, retry and no-adapter delivery assertions are exercised through the real servicing/client surfaces. |
+| O-F14 | `3531af8b0` fixes never-delivered claims at Agreement start, including a pre-start failure recorded late. The design/delta correction reconciles the old minimum expression with mediation's at-or-after-start guard; no filing is future-dated. |
+| O-F15 | `3531af8b0` validates operator payload/time before consuming its operation key, allowing a corrected retry. |
+| O-F1 client seam | `ac139c842` adds the signed client's permanent suite and test target; `299adfd7c` wires it into the repository aggregate and asserts mediation first-use outcomes. The parallel servicing owner supplies that kit's aggregate target. Named verification tasks remain unchanged. |
+| O-F16 requested kit seam | `cf580bb6f` avoids a revision write on unchanged phase admission while retaining end/deadline checks. Compute cycle/report recovery is owned by the parallel domain repair. |
+
+The review corrections are recorded in `design.md`, the deal-lifecycle and
+buyer-orchestration deltas, and the affected kit READMEs. Subsystem-spec and
+architecture promotion remains the reviewed closeout work at 16.9; no roadmap,
+campaign status or archival transition is made by this repair round.
+
+Evidence and reproducible first use:
+`docs/attachments/aeet-review-19-20-fix-a/index.md`. All behavioral regression
+checks were run against the reviewed source and fail before their repairs.
+Focused checks pass: contracts 37, foundation 61, mediation 45, buyer 20, signed
+client 2, servicing 9, and 3 receipt-adapter checks in each compute domain.
+Mediation resource/model checks and mediation/servicing typing pass. `make lock`
+was run after the client test dependency; check-locks is part of qualification.
+The final-head `make check-architecture`, `make check-packaging`, `make
+check-locks`, `make check-comment-hygiene`, strict OpenSpec validation and full
+`make test` all pass (combined chain 7m 41s with proxy exclusions and the Podman
+shim). The preceding complete chain also passed. No hosted mediation deployment
+or deployed monetary-ruling qualification is claimed by this kit repair.
+
+### Parallel repair integration checkpoint
+
+- `7fb2dae69` merges the lifecycle repair into `8b1a5cfb5`, preserving the
+  domain and servicing disposition notes. Seller reads combine current authority
+  outcomes with respondent and filing repair state; dispatch retains per-filing
+  progress and terminal rejections while keeping database work off-loop. Both
+  servicing and signed-client targets remain in the kit aggregate.
+- `1d713730c` makes both receipt callbacks' immutable binding reads schema-free.
+  The first aggregate exposed schema initialization on a second connection under
+  ingress's write lock; all six unchanged domain receipt-adapter checks pass after
+  the repair. The deferred-filing assertion follows the per-filing result shape
+  and still requires the exact pending filing and no authority submission.
+- Validation: `make dist`; servicing 48, foundation 61, buyer 20, signed client 2,
+  mediation 45 and payments 98 tests; servicing typing and all nine asserted
+  first-use examples; mediation typing/resources/models and asserted first use;
+  architecture, packaging, locks, comment hygiene and strict pinned OpenSpec
+  validation pass. The full `make test` re-drive passes on `1d713730c` in 7m26s
+  with the prescribed proxy exclusions and Podman shim, including release tooling
+  and Helm structural/render checks.
+- Setup, observations and reproduction:
+  `docs/attachments/aeet-fix-a-integration/index.md`. This integrates the parallel
+  kit repairs, not the remaining domain work or reviewed closeout promotion.

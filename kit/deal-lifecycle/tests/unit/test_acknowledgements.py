@@ -1,6 +1,5 @@
 """Kept end receipts verify offline against the Agreement, without rewriting evidence."""
 
-import asyncio
 import base64
 import json
 
@@ -14,19 +13,8 @@ from market_deal_lifecycle_contracts.models import (
     EndDeliveryAcknowledgement, EndDeliveryMessage, SignedEndDeliveryReceipt,
 )
 from market_deal_lifecycle.acknowledgements import (
-    read_without_adapter, receipt_time, verify_end_acknowledgement,
+    verify_end_acknowledgement,
 )
-
-
-class Receipts:
-    def __init__(self):
-        self.values = {}
-
-    async def get_or_record(self, negotiation_id, operation_key, digest, received_at):
-        previous = self.values.setdefault((negotiation_id, operation_key), (digest, received_at))
-        if previous[0] != digest:
-            raise ValueError("receipt retry changed content")
-        return previous[1]
 
 
 def signers(scheme):
@@ -60,14 +48,9 @@ def signed_receipt(buyer, seller, *, request_id="request", receipt_at=100):
     return receipt, report
 
 
-def test_supplied_at_is_refused_and_retry_keeps_the_first_receipt():
+def test_supplied_at_is_refused():
     with pytest.raises(ValueError):
         EndDeliveryMessage(negotiation_id="n", operation_key="op", at=1)
-    request, store = EndDeliveryMessage(negotiation_id="n", operation_key="op"), Receipts()
-    async def drive():
-        assert await receipt_time(request, 100, store) == 100
-        assert await receipt_time(request, 110, store) == 100
-    asyncio.run(drive())
 
 
 @pytest.mark.parametrize("scheme", ["ed25519", "eip191"])
@@ -96,18 +79,6 @@ def test_response_context_and_status_are_signed(field, value):
     altered = receipt.model_copy(update={"response": receipt.response.model_copy(update={field: value})})
     with pytest.raises(ValueError, match="signature binding"):
         verify_end_acknowledgement(altered, negotiation_id="n", buyer=buyer.identity, seller=seller.identity)
-
-
-def test_read_without_adapter_does_not_hide_evidence_or_invent_authority_state():
-    buyer, seller, _ = signers("ed25519")
-    receipt, report = signed_receipt(buyer, seller)
-    acknowledgement = verify_end_acknowledgement(receipt, negotiation_id="n",
-                                                buyer=buyer.identity, seller=seller.identity)
-    read = read_without_adapter("n", "example.no-adapter", acknowledgement.delivery)
-    assert read.authority.outcome.status == "rejected"
-    assert "example.no-adapter" in read.authority.outcome.reason
-    assert read.authority.state is None and read.authority.events == []
-    assert read.delivery.site_reports[0].body == report
 
 
 def test_claim_embedding_preserves_the_interface_owned_claim_without_rewriting():

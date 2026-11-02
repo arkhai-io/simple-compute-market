@@ -164,6 +164,11 @@ class Unknown(WireModel):
 LifecycleOutcome = Annotated[Accepted | Rejected | Pending | Unknown, Field(discriminator="status")]
 
 
+class FilingProgress(WireModel):
+    intent_ref: Reference
+    outcome: LifecycleOutcome
+
+
 class CommitMessage(WireModel):
     kind: Literal["commit"] = "commit"
     negotiation_id: Reference
@@ -254,6 +259,7 @@ class LifecycleRead(WireModel):
     commitment_ref: Reference | None = None
     authority: AuthorityView
     delivery: DeliveryView
+    filings: list[FilingProgress] = Field(default_factory=list)
 
 
 class DealSummary(WireModel):
@@ -266,6 +272,7 @@ class DealSummary(WireModel):
     deadline: Instant | None = None
     has_open_extension: bool
     open_cases: list[Reference]
+    filings: list[FilingProgress] = Field(default_factory=list)
 
 
 class DealPage(WireModel):

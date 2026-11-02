@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from market_deal_lifecycle_contracts.models import LifecycleCommand
@@ -20,6 +20,7 @@ class OperationStore(Protocol):
 class OperationKeys:
     negotiation_id: str
     operation_key: str
+    store: OperationStore | None = field(default=None, compare=False, repr=False)
 
     def _derive(self, family: str, subject: str) -> str:
         return hashlib.sha256(frame_fields((
@@ -41,4 +42,4 @@ async def remember_command(command: LifecycleCommand, store: OperationStore) -> 
     digest = hashlib.sha256(canonical_json(command)).hexdigest()
     if not await store.check_and_record(command.negotiation_id, command.operation_key, digest):
         return None
-    return OperationKeys(command.negotiation_id, command.operation_key)
+    return OperationKeys(command.negotiation_id, command.operation_key, store)

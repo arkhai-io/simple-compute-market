@@ -149,6 +149,16 @@ async def end_delivery(lifecycle: BuyerLifecycle, negotiation_id: str) -> EndDel
             }))
         else:
             kept_acknowledgement = plan.progress.acknowledgement
+            if kept_acknowledgement is None:
+                # An uncertain surrender may already be durable at the seller.
+                # Resolve its same key before fixing a claim or signing a time.
+                return journal.save(plan, progress=plan.progress.model_copy(update={
+                    "case": Pending(reason="filing awaits the original surrender acknowledgement"),
+                })).progress
+            if kept_acknowledgement.selected_end.cause != "buyer_surrender":
+                return journal.save(plan, progress=plan.progress.model_copy(update={
+                    "case": Rejected(reason="selected end is not buyer surrender; no automatic payer filing"),
+                })).progress
             intent = DeliveryEndIntent(
                 ended_at=kept_acknowledgement.receipt_at if kept_acknowledgement else plan.progress.observed_at,
                 delivered=True, cause="payer",

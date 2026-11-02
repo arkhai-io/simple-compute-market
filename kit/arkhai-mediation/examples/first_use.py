@@ -56,6 +56,9 @@ async def main():
         )
         appended = await submit_dispute(append, binding, table, operations)
         final = await adapter.read()
+        assert lost.status == "unknown" and len(observed.cases) == 1
+        assert appended.status == "accepted" and len(peer.cases) == 1
+        assert final.outcome.status == "accepted" and [event.sequence for event in final.disputes] == [1, 2]
         print(json.dumps({
             "target": "kit-owned in-process contract fake; no hosted service",
             "persona": "payee claimant",
