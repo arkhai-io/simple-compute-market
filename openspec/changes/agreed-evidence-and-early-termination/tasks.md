@@ -108,7 +108,7 @@ by dispute interface", "Evidence is keyed by negotiation" and "A dispute is one 
       "Malformed terms are refused" and "Dispute timing terms are bounded" scenarios (the window
       shorter than the delivery deadline plus the authority's minimum included), and that
       a term change changes the option ID through the existing option-ID function.
-- [ ] 2.3 In `kit/deal-lifecycle`, define the payment-adapter and dispute-adapter protocols and
+- [x] 2.3 In `kit/deal-lifecycle`, define the payment-adapter and dispute-adapter protocols and
       their tables (payment by negotiation ID, mechanism and arbiter or oracle; dispute by
       `adjudication.dispute.interface`), injected by compositions; the deal-level dispute
       intent delivery_end {ended_at, delivered, cause: payee|payer}, filed by either party, never a payments event; derivation of each part's stop authorities from entitlements plus
