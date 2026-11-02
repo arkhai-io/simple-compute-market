@@ -149,6 +149,7 @@ class Stage12a_SecondDealActive:
         require_state(deal_state, "deal_lease", "seller_listing_id")
         assert deal_state.deal_lease.refresh()["status"] == "released"
         step_listing_reconciliation(storefront_admin_client)
+        advance_storefront(storefront_admin_client, "publication")
         assert registry_client.get_listing(deal_state.seller_listing_id).status == "open"
         delete_mock_rules_if_present(provisioning_test_client.vm_rules, PROV_RULE_ID, REMOVE_RULE_ID)
         deal_state.lifecycle_purchase = vm_lifecycle_buyer.purchase(
@@ -179,6 +180,7 @@ class Stage12b_BuyerSurrendersTwice:
         site = provisioning_client.get_lease(purchase.reservation_id)
         assert site.status == "releasing", site
         assert len(site.end_reports) == 1, site
+        assert site.release_job_id == purchase.fulfillment_id, site
         for item in delivery["site_reports"]:
             report = SignedLeaseEndedReport.model_validate_json(base64.b64decode(item["body"]))
             event = verify_lease_end(report, capacity_reservation_id=purchase.reservation_id,
@@ -216,6 +218,7 @@ class Stage12c_CapacityReleasedOnce:
         assert delivery["recorded_end"] == purchase.receipt["selected_end"]
         site = provisioning_client.get_lease(purchase.reservation_id)
         assert site.status == "released" and len(site.end_reports) == 1, site
+        assert site.release_job_id == purchase.fulfillment_id, site
         released = [e for e in storefront_admin_client.get_events(
             stage="fulfillment", negotiation_id=purchase.negotiation_id).events if e.event == "capacity_released"]
         assert len(released) == 1, released
