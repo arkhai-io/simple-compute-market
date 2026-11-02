@@ -47,7 +47,7 @@ enabled = true
 # Each chain's Alkahest address book: the same anvil book the VM storefront
 # uses (one anvil deployment), bind-mounted into this container.
 address_books = { anvil = "/app/alkahest_anvil_addresses.json" }
-oracle_gated = false
+release_models = ["recipient"]
 trusted_oracle_addresses = []
 # `interruptible`/`interruptible_oracle_addresses` are deliberately absent.
 # They configure VM spot interruption, which this domain does not sell, and

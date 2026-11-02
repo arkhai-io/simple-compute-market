@@ -280,10 +280,8 @@ priority = []
 enabled = false
 # Each chain's address book; a chain not named uses the SDK's built-in addresses.
 # address_books = { ethereum_sepolia = "/path/to/alkahest.json" }
-# oracle_gated = false
+# release_models = ["recipient"]
 # trusted_oracle_addresses = []
-# interruptible = false
-# interruptible_oracle_addresses = []
 
 [Settlement.arkhai_payments]
 enabled = false

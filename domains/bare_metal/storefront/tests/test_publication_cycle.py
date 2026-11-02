@@ -1698,7 +1698,11 @@ async def test_an_alkahest_listing_advertises_the_recipient_arbiter_paying_the_s
     db, tmp_path, monkeypatch
 ):
     signer = create_signer("ed25519", b"\x21" * 32)
-    composition, clauses = alkahest_publication(tmp_path, monkeypatch, signer)
+    _composition, clauses = alkahest_publication(tmp_path, monkeypatch, signer)
+    composition = anvil_alkahest(signer, section={
+        "release_models": ["recipient", "oracle_gated"],
+        "trusted_oracle_addresses": ["0x" + "cd" * 20],
+    })
     storefront = Storefront(db, {"site-a": Site(pool("pool-1", member("r1", "pool-1")))})
     storefront.terms = publication_payload_builder(
         _settling_runtime(db, signer, composition, clauses)
@@ -1708,7 +1712,12 @@ async def test_an_alkahest_listing_advertises_the_recipient_arbiter_paying_the_s
 
     body = storefront.registries.sent[0][3]
     assert [escrow["chain_name"] for escrow in body["accepted_escrows"]] == ["anvil"]
-    assert body["demands"] == [RECIPIENT_CONDITION]
+    assert body["demands"][0] == RECIPIENT_CONDITION
+    options = body["settlement_options"]
+    assert len(options) == 2
+    assert len({option["option_id"] for option in options}) == 2
+    assert all("lifecycle" not in option for option in options)
+    assert [option["settlement"]["accepted_escrow"]["demand"] for option in options] == body["demands"]
 
 
 def _settling_runtime(db, signer, composition, clauses=CONFIGURED_CLAUSES, *, sites=()):
@@ -1741,7 +1750,7 @@ def _settling_runtime(db, signer, composition, clauses=CONFIGURED_CLAUSES, *, si
 
 #: An oracle-gated section naming no oracle: Alkahest is unready for a
 #: configuration blocker, whatever its chain answers.
-NO_ORACLE = {"oracle_gated": True, "trusted_oracle_addresses": []}
+NO_ORACLE = {"release_models": ["oracle_gated"], "trusted_oracle_addresses": []}
 
 
 def unprobed_chain() -> AlkahestChainProbe:

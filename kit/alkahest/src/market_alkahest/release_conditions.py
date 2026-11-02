@@ -20,8 +20,8 @@ A domain delivers only some of these models; an interruptible deal, for
 instance, presumes a listing that can be preempted. Each domain's Alkahest
 seller entry therefore declares the models it delivers, and a composition passes
 them to the Alkahest preflight as ``deliverable_release_models``, which reports a
-model outside them as a configuration blocker: an undeliverable model costs the
-seller Alkahest, never the storefront. :func:`escrow_release_conditions`, which
+model outside them as a configuration blocker. The composition also validates
+that list at startup and refuses any model its domain cannot deliver. :func:`escrow_release_conditions`, which
 every domain's publication calls, derives conditions only while Alkahest is ready.
 """
 
@@ -46,7 +46,8 @@ from .settlement_config import (
     AlkahestSettlementConfig,
     ReleaseModelError,
     alkahest_address_book,
-    configured_release_model,
+    configured_release_models,
+    require_deliverable_release_models,
 )
 
 
@@ -60,8 +61,9 @@ def release_conditions(
     chain_names: Iterable[str],
     chains: Mapping[str, Any],
     wallet_address: str,
+    release_model: str | None = None,
 ) -> list[dict[str, Any]]:
-    """One release condition per named chain, ordered by chain name.
+    """One release condition per chain and offered model, in configuration order.
 
     ``chains`` maps each configured chain's name to its configuration. Each
     chain's arbiter is read from the address book ``config`` names for it
@@ -73,7 +75,7 @@ def release_conditions(
     oracle-gated or interruptible model with no oracle of its own or whose
     oracle is the seller wallet: the party collecting cannot also decide
     collection, so no condition stands in for a missing oracle. Raises
-    ``ReleaseModelError`` for a contradictory model, which startup refuses.
+    ``ReleaseModelError`` for a requested model the section does not offer.
     Alkahest readiness reports each oracle case as a blocker, so a caller that
     derives only for a ready mechanism, as :func:`escrow_release_conditions`
     does, never meets them.
@@ -85,7 +87,27 @@ def release_conditions(
     if unknown:
         raise ValueError(f"settlement clause references unknown chain {unknown[0]!r}")
 
-    model = configured_release_model(config)
+    models = configured_release_models(config)
+    if release_model is not None:
+        if release_model not in models:
+            raise ReleaseModelError("release model is not offered by Settlement.alkahest")
+        models = (release_model,)
+    return [
+        condition
+        for model in models
+        for condition in _conditions_for_model(
+            config, model, names=names, wallet_address=wallet_address
+        )
+    ]
+
+
+def _conditions_for_model(
+    config: AlkahestSettlementConfig | None,
+    model: str,
+    *,
+    names: list[str],
+    wallet_address: str,
+) -> list[dict[str, Any]]:
     wallet = wallet_address.lower()
     if model == ORACLE_GATED_RELEASE:
         oracle = _first(config.trusted_oracle_addresses) if config else ""
@@ -160,7 +182,8 @@ __all__ = [
     "RECIPIENT_RELEASE",
     "RELEASE_MODELS",
     "ReleaseModelError",
-    "configured_release_model",
+    "configured_release_models",
+    "require_deliverable_release_models",
     "escrow_release_conditions",
     "release_conditions",
 ]

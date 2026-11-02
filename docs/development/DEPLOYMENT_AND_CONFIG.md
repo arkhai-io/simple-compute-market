@@ -1468,9 +1468,10 @@ servicing alike. The two retired keys, `[Chains.<name>].alkahest_address_config_
 and `[Settlement.alkahest].address_config_path`, are refused before the settlement
 section is resolved, with a diagnostic naming the table. The settlement migration
 commands, `market-storefront config migrate --scope settlement` and the buyer's
-`market config migrate --scope settlement`, move them into it; the bare-metal and
-API-credit storefronts have no such command, and their operators move the key by
-hand. A chain's own key moves to that chain's entry, and the
+`market config migrate --scope settlement`, move them into it. Bare-metal sellers use
+`bare-metal-storefront config migrate --config /path/storefront.toml --scope settlement`
+with the same `--check` or `--write --backup` modes. The API-credit storefront has no
+migration command; its operators move the key by hand. A chain's own key moves to that chain's entry, and the
 section key to the one configured chain, or else to the chains whose own keys name
 the same book. Where it cannot tell which chains the section key served, or a chain
 would be given two different books, it refuses and names the keys; an empty key is
@@ -1486,6 +1487,43 @@ The address is optional: absent, it is derived from the key. An address that nam
 another account than the key's makes Alkahest unready
 (`alkahest.wallet_address_mismatch`) and leaves the storefront running. A buyer's
 address names nothing an escrow pays, and is not compared with its key.
+
+### Alkahest release models
+
+`[Settlement.alkahest].release_models` is the ordered, nonempty, duplicate-free list
+of release models offered by the seller: `recipient` (the default), `oracle_gated`,
+and `interruptible`. Every published escrow shape gets one option per model.
+Each option's `settlement.accepted_escrow.demand` pins its own chain, arbiter and
+demand data; it has no `lifecycle` terms, since Alkahest has no lifecycle adapter.
+Interruptibility is not a listing-resource attribute: choosing the splitter option
+chooses that release condition, without changing the other options on the listing.
+
+```toml
+[Settlement.alkahest]
+enabled = true
+release_models = ["recipient", "interruptible"]
+# Configure interruptible_oracle_addresses with a trusted third-party oracle.
+```
+
+`trusted_oracle_addresses` is valid only when `oracle_gated` is listed, and
+`interruptible_oracle_addresses` only when `interruptible` is listed. Those models
+need their respective oracle list before Alkahest is ready; the first address is
+the release oracle, and it must not be the seller's wallet or signing account.
+Wallet, address-book and chain readiness still apply to every offered model.
+A domain refuses startup if any listed model is not one it can deliver: bare metal
+accepts recipient and oracle-gated release, never interruptible; the API-credit
+storefront accepts recipient release only. VM supports all three models.
+
+The old `oracle_gated` and `interruptible` boolean settings are rejected. The
+settlement migration maps `oracle_gated = true` to `["oracle_gated"]`,
+`interruptible = true` to `["interruptible"]`, and neither true (including both
+absent) to `["recipient"]`, removing the flags. Both true is contradictory and
+refused. A conflicting existing `release_models` list is refused without modifying
+the file or backup. Dry-run lists redacted key changes; write validates the whole
+candidate and preserves the existing atomic replacement and restrictive backup
+contract. Repeating it is a no-op. Legacy boolean environment overrides must be
+replaced with the corresponding `SETTLEMENT__ALKAHEST__RELEASE_MODELS` list override,
+not copied as boolean values.
 
 Publication config migrates separately from the `[Settlement]` hierarchy. The migration converts an unambiguous single-mechanism legacy price into one complete typed clause. It refuses a dual-mechanism source whose one scalar price has no authoritative asset scale, and refuses per-model legacy pricing, which needs manual clauses.
 

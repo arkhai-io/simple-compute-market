@@ -10,10 +10,12 @@ from importlib.metadata import PackageNotFoundError, version
 import typer
 
 from .admin_cli import reporting_failures
+from .config_migration import config_app
 from .pool_override_cli import pool_override_app
 from .publication_cli import close_all_open_listings, run_publication_cycle
 
 app = typer.Typer(no_args_is_help=True)
+app.add_typer(config_app, name="config", help="Migrate public seller configuration.")
 app.add_typer(
     pool_override_app,
     name="pool-override",

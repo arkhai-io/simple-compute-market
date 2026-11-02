@@ -61,7 +61,7 @@ async def test_an_escrow_released_by_a_trusted_oracle_is_collected() -> None:
     conditions = release_conditions(
         AlkahestSettlementConfig(
             enabled=True,
-            oracle_gated=True,
+            release_models=["oracle_gated"],
             trusted_oracle_addresses=(oracle_address,),
             address_books={_CHAIN_NAME: _ALKAHEST_ADDRESSES_PATH},
         ),

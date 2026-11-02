@@ -121,9 +121,8 @@ bare-metal-storefront:
         # Release 1's dev-env address book, mounted by alkahestAddressBook.
         address_books:
           anvil: /etc/arkhai/alkahest/alkahest_anvil_addresses.json
-        oracle_gated: false
+        release_models: [recipient]
         trusted_oracle_addresses: []
-        interruptible: false
         interruptible_oracle_addresses: []
     # Anvil account 8's address; its key is in the overlay Secret above.
     Wallet:

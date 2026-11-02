@@ -15,7 +15,8 @@ from market_alkahest import (
     ALKAHEST_MECHANISM_ID,
     RECIPIENT_RELEASE,
     AlkahestChainProbe,
-    configured_release_model,
+    require_deliverable_release_models,
+    RECIPIENT_RELEASE,
     escrow_release_conditions,
 )
 from market_arkhai_payments import (
@@ -286,19 +287,15 @@ def alkahest_ready(readiness: Sequence[MechanismReadiness]) -> bool:
 
 
 def require_coherent_release_model(settlement_config: Any = None) -> None:
-    """Refuse a configured Alkahest section that selects contradictory models.
-
-    A section stating both the oracle-gated and the interruptible model is
-    incoherent configuration rather than an unusable mechanism, so it stops
-    startup, enabled or not; a coherent model API credits cannot deliver is a
-    readiness blocker instead. With no ``settlement_config``, the storefront's
-    own configuration is resolved.
-    """
+    """Refuse Alkahest release models that API-credit delivery cannot honor."""
     if settlement_config is None:
         settlement_config = build_storefront_settlement_registry().resolve(
             storefront_config.settlement_config_mapping(), role="seller"
         )
-    configured_release_model(settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY))
+    require_deliverable_release_models(
+        settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY),
+        SELLER_STAGES[ALKAHEST_MECHANISM_ID].release_models,
+    )
 
 
 def record_servicing_event(event: str, fields: dict[str, Any]) -> None:

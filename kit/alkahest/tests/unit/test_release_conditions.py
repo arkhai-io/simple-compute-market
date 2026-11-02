@@ -18,7 +18,7 @@ from market_alkahest import (
     RECIPIENT_RELEASE,
     AlkahestSettlementConfig,
     ReleaseModelError,
-    configured_release_model,
+    configured_release_models,
     escrow_release_conditions,
     release_conditions,
 )
@@ -109,7 +109,7 @@ def test_a_chain_the_table_names_no_book_for_uses_the_sdks_addresses(books, chai
 
 
 def test_the_oracle_gated_model_names_the_first_trusted_oracle(_config, chains):
-    config = _config(oracle_gated=True, trusted_oracle_addresses=[ORACLE, OTHER_ORACLE])
+    config = _config(release_models=["oracle_gated"], trusted_oracle_addresses=[ORACLE, OTHER_ORACLE])
 
     assert _conditions(config, chains, ["anvil"]) == [
         {
@@ -121,7 +121,7 @@ def test_the_oracle_gated_model_names_the_first_trusted_oracle(_config, chains):
 
 
 def test_the_interruptible_model_names_its_configured_refund_authority(_config, chains):
-    config = _config(interruptible=True, interruptible_oracle_addresses=[ORACLE])
+    config = _config(release_models=["interruptible"], interruptible_oracle_addresses=[ORACLE])
 
     assert _conditions(config, chains, ["base_sepolia"]) == [
         {
@@ -135,11 +135,11 @@ def test_the_interruptible_model_names_its_configured_refund_authority(_config, 
 def test_an_interruptible_model_without_its_oracle_is_refused(_config, chains):
     """No condition stands in for a missing oracle, the seller wallet least of all."""
     with pytest.raises(ValueError, match="requires an interruptible oracle"):
-        _conditions(_config(interruptible=True), chains, ["anvil"])
+        _conditions(_config(release_models=["interruptible"]), chains, ["anvil"])
 
 
 def test_the_seller_wallet_cannot_be_its_own_interruptible_oracle(_config, chains):
-    config = _config(interruptible=True, interruptible_oracle_addresses=[WALLET])
+    config = _config(release_models=["interruptible"], interruptible_oracle_addresses=[WALLET])
 
     with pytest.raises(ValueError, match="equals the storefront wallet"):
         _conditions(config, chains, ["anvil"])
@@ -162,38 +162,45 @@ def test_an_unconfigured_chain_is_refused(chains):
 
 def test_an_oracle_gated_model_without_an_oracle_is_refused(_config, chains):
     with pytest.raises(ValueError, match="requires a trusted oracle"):
-        _conditions(_config(oracle_gated=True), chains, ["anvil"])
+        _conditions(_config(release_models=["oracle_gated"]), chains, ["anvil"])
 
 
 def test_the_seller_wallet_cannot_be_its_own_oracle(_config, chains):
     """The party collecting cannot also be the party deciding collection."""
-    config = _config(oracle_gated=True, trusted_oracle_addresses=[WALLET])
+    config = _config(release_models=["oracle_gated"], trusted_oracle_addresses=[WALLET])
 
     with pytest.raises(ValueError, match="equals the storefront wallet"):
         _conditions(config, chains, ["anvil"])
 
 
-def test_oracle_gated_and_interruptible_are_mutually_exclusive(_config, chains):
+def test_oracle_gated_and_interruptible_are_independent_options(_config, chains):
     config = _config(
-        oracle_gated=True, trusted_oracle_addresses=[ORACLE], interruptible=True
+        release_models=["oracle_gated", "interruptible"],
+        trusted_oracle_addresses=[ORACLE],
+        interruptible_oracle_addresses=[OTHER_ORACLE],
     )
 
-    with pytest.raises(ReleaseModelError, match="mutually exclusive"):
-        configured_release_model(config)
-    with pytest.raises(ReleaseModelError, match="mutually exclusive"):
-        _conditions(config, chains, ["anvil"])
+    assert configured_release_models(config) == (ORACLE_GATED_RELEASE, INTERRUPTIBLE_RELEASE)
+    conditions = _conditions(config, chains, ["anvil"])
+    assert [condition["arbiter"] for condition in conditions] == [
+        ARBITERS["anvil"]["trusted_oracle_arbiter"].lower(),
+        ARBITERS["anvil"]["erc20_splitter"].lower(),
+    ]
+    assert [condition["demand_data"]["oracle"] for condition in conditions] == [
+        ORACLE.lower(), OTHER_ORACLE.lower()
+    ]
 
 
 @pytest.mark.parametrize(
     ("policy", "model"),
     [
         ({}, RECIPIENT_RELEASE),
-        ({"oracle_gated": True, "trusted_oracle_addresses": [ORACLE]}, ORACLE_GATED_RELEASE),
-        ({"interruptible": True}, INTERRUPTIBLE_RELEASE),
+        ({"release_models": ["oracle_gated"], "trusted_oracle_addresses": [ORACLE]}, ORACLE_GATED_RELEASE),
+        ({"release_models": ["interruptible"]}, INTERRUPTIBLE_RELEASE),
     ],
 )
 def test_each_section_selects_one_model(_config, policy, model):
-    assert configured_release_model(_config(**policy)) == model
+    assert configured_release_models(_config(**policy)) == (model,)
 
 
 def _escrow(chain_name: str) -> dict:
@@ -268,7 +275,7 @@ def test_no_condition_is_advertised_while_alkahest_is_unready(_config, chains, r
 
     assert (
         escrow_release_conditions(
-            _config(oracle_gated=True),
+            _config(release_models=["oracle_gated"]),
             escrows,
             readiness=readiness,
             chains=chains,

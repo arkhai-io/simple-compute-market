@@ -25,7 +25,8 @@ from market_alkahest import (
     ALKAHEST_CONFIG_KEY,
     ALKAHEST_MECHANISM_ID,
     AlkahestChainProbe,
-    configured_release_model,
+    RELEASE_MODELS,
+    require_deliverable_release_models,
 )
 from market_arkhai_payments import (
     PaymentSellerStage,
@@ -810,19 +811,14 @@ async def preflight_settlement_mechanisms(
 def require_coherent_release_model(
     settlement_config: SettlementConfig | None = None,
 ) -> None:
-    """Refuse a configured Alkahest section that selects contradictory models.
-
-    A section stating both the oracle-gated and the interruptible model names
-    two arbiters for one escrow, which is incoherent configuration rather than
-    an unusable mechanism, so it stops startup, enabled or not. A coherent model
-    the domain cannot deliver is a readiness blocker instead. With no
-    ``settlement_config``, the storefront's own configuration is resolved.
-    """
+    """Validate Alkahest release models before constructing runtime services."""
     if settlement_config is None:
         settlement_config = build_storefront_settlement_registry().resolve(
             storefront_config.settlement_config_mapping(), role="seller"
         )
-    configured_release_model(settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY))
+    require_deliverable_release_models(
+        settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY), RELEASE_MODELS
+    )
 
 
 def _alkahest_release_models(domain: MarketDomainContract) -> frozenset[str]:
@@ -861,7 +857,10 @@ def build_vm_settlement_composition(
         storefront_config.settlement_config_mapping(),
         role="seller",
     )
-    require_coherent_release_model(settlement_config)
+    require_deliverable_release_models(
+        settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY),
+        _alkahest_release_models(domain),
+    )
     alkahest_section = settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY)
     mechanism_resources: dict[str, Any] = {
         "marketplace_signer": marketplace_signer,

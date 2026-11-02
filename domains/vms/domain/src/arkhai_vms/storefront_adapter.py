@@ -59,8 +59,6 @@ def vm_candidate_skip_keys(candidate: dict[str, Any]) -> set[str]:
 
 def vm_listing_resource_for_listing(
     candidate: dict[str, Any],
-    *,
-    interruptible: bool = False,
 ) -> dict[str, Any]:
     """Build the VM-domain listing payload for a publication candidate.
 
@@ -87,9 +85,6 @@ def vm_listing_resource_for_listing(
     # nothing is constructed, published only when something prices the shape.
     if candidate.get("asking_rate") is not None:
         listing_resource["asking_rate"] = dict(candidate["asking_rate"])
-    if interruptible:
-        listing_resource["interruptible"] = True
-        listing_resource["settlement_model"] = "splitter_refund"
     return listing_resource
 
 

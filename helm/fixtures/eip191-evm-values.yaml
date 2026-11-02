@@ -89,7 +89,6 @@ storefront:
             enabled: true
             address_books:
               anvil: /etc/arkhai/alkahest/alkahest_anvil_addresses.json
-            oracle_gated: false
+            release_models: [recipient]
             trusted_oracle_addresses: []
-            interruptible: false
             interruptible_oracle_addresses: []
