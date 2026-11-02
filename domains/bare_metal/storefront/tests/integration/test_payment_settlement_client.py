@@ -45,6 +45,7 @@ from arkhai_bare_metal_storefront.settlement_composition import (
     BareMetalStorefrontSettlementComposition,
 )
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
+from arkhai_bare_metal_buyer.evidence import evidence_store
 
 PAYER = "11111111-1111-4111-8111-111111111111"
 PAYEE = "22222222-2222-4222-8222-222222222222"
@@ -654,8 +655,15 @@ async def test_the_buy_command_settles_over_a_run_log_a_later_command_reloads(
             "buy", LISTING, "--option-id", option.option_id, "--ssh-public-key", SSH_KEY
         )
         teardown = buyer.run("teardown", "--run-id", bought["run_id"])
+        retried = buyer.run("teardown", "--run-id", bought["run_id"])
+        assert retried["observed_at"] == teardown["observed_at"]
+        assert retried["acknowledgement"]["receipt_at"] == teardown["acknowledgement"]["receipt_at"]
+        kept = await evidence_store().read(teardown["negotiation_id"])
+        assert {"end_delivery_observation", "end_delivery_receipt"} <= {item.kind for item in kept.items}
 
     assert payments.count("approve") == 1
     assert len(provisioning.begin_calls) == 1
-    assert teardown["state"] == "terminating"
-    assert provisioning.terminated == [("reservation-pay", "buyer_teardown")]
+    assert teardown["delivery"]["status"] == "accepted"
+    assert teardown["acknowledgement"]["delivery"]["progress"] == "tearing_down"
+    assert teardown["payment"]["status"] == "rejected"
+    assert provisioning.terminated == [("reservation-pay", "buyer-surrender:" + teardown["acknowledgement"]["operation_key"])]

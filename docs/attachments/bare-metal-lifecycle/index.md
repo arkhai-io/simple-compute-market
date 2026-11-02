@@ -68,8 +68,9 @@ seller's exact source reference preserves its lawful classification and creates
 no seller-failure filing. A synthetic report predating that request correctly did
 not correlate; the corrected diagnostic uses the site's actual later instant.
 
-This does not qualify an actual mediation service, respondent case execution,
-authenticated site callback/pull transport or real hardware teardown.
+This does not qualify an actual mediation service, respondent case execution
+or real hardware teardown. The continuation below drives callback/pull transport
+through the mounted in-process application.
 
 ## Regression and checks
 
@@ -109,7 +110,7 @@ the servicing kit once, removes duplicate mediation manifest/workflow entries,
 and states the exact storefront dependencies. Its focused 1,858-case rerun and
 the final complete aggregate pass. No known failure is carried as unrelated.
 
-## Remaining implementation
+## Prior recovery checkpoint
 
 The recovery implementation adds a durable 100-deal page rotation and an
 independent `delivery-recovery` loop. One failed authority read cannot suppress
@@ -126,8 +127,8 @@ Public seller pages exclude uncommitted rows; recovery can explicitly include
 them. Shared authorization/billing refuses to act on unverified commitment.
 No VM source, dependency declaration, configuration model or wire codec changed.
 
-Before completing 15.2 and the bare-metal half of 7.4, retain these prerequisites
-and finish the following work:
+That checkpoint left the following work. The continuation below implements the
+code paths while keeping deployed qualification open:
 
 - Mount authenticated site-report receipt and recover exact reports from lease
   reads; update neutral delivery progress only on proven release.
@@ -142,6 +143,79 @@ and finish the following work:
 The real-host lane remains unavailable without an operator-owned host. Pending
 work is not counted as passing. Permanent documentation promotion remains
 reviewed closeout, with destinations recorded in the change's task checkpoint.
+
+## Canonical buyer and site-report continuation
+
+The continuation composes hosted commit and buyer end through `BuyerLifecycle`
+with the profile-adjacent file evidence store and its durable end journal.
+`market bare-metal teardown --run-id <run>` prints separate payment, delivery
+and case outcomes; `market bare-metal delivery --run-id <run>` reads their
+independent records. The old domain teardown HTTP route and settlement transport
+are removed. Alkahest settlement and contact introduction remain on their
+existing paths. A synchronous command uses a short-lived event-loop thread so
+an application embedding the CLI can already own an event loop.
+
+The accepted site's authenticated `lease-ended` callback retains the exact
+report and verifies both the transport's service identity and the report proof
+against that reservation's site. The independent recovery loop reads the
+selected site's lease and retains the same original signed report when push is
+missed. The site's routing binding survives release for later report recovery.
+An intended-end report leaves progress at `tearing_down`; only the separate
+release callback or an authenticated released lease advances it to `released`.
+
+The existing first-use entry point now drives report push, refreshed transport
+retries, lease-read recovery, wrong-site refusal, exact report reads and the
+separate proven-release callback. All three invocations above pass. The existing
+CLI integration also reopens the buyer composition, retries surrender, and
+observes unchanged receipt/observation time and retained observation/receipt
+evidence with one physical termination:
+
+~~~sh
+(cd domains/bare_metal/storefront && uv run --find-links ../../../.dist pytest -q \
+  tests/integration/test_payment_settlement_client.py)
+~~~
+
+Two minimal shared fixes accompany the domain work: receipt acknowledgement does
+not require an installed dispute adapter (nor invent a refund), and report
+replay compares the immutable signed report rather than requiring refreshed
+push headers to equal pull's absent headers. The first exact body and headers
+remain retained. No VM production source, configuration model or wire codec is
+changed. Buyer dependencies on the existing lifecycle client/contracts are
+explicit, generated consumer locks are refreshed, and the release-guide buyer
+row includes them once.
+
+Existing scenario functions now send canonical surrender, retrieve and verify
+site reports before release, and observe neutral released progress separately.
+The real-host scenario uses the installed buyer's actual `--run-id` command
+surface and its delivery read; no operator host is prepared or claimed.
+**Fresh-stack mock-deal and real payment/mediation qualification remain unrun.**
+Neither 15.2 nor 7.4 is checked off by this checkpoint. Continue by building a
+fresh owned mock lane from this branch, readiness-gating payment/mediation and
+dispute-bearing publication, then running `e2e_bare_metal_mock_deal`. Run the
+existing hosted payment scenario as well to qualify commit/replay against real
+HTTP authorities. The real-host lane still needs an operator-owned target.
+
+Initial regression found that an embedded CLI caller already owned an event
+loop and that recovery did not consume the bare-metal-only acceptance event.
+The thread bridge fixes the former; canonical `negotiation_completed` plus
+retained Agreement bytes/data in the run end fixes the latter. A callback trust
+fixture manufactured a fulfillment without its delivery journal; it now seeds
+the journal in an explicit transaction, without weakening identity assertions.
+No permanent test function was added or removed.
+
+Continuation validation passes: the complete `make test` aggregate in **8m10s**
+with proxy exclusions and the shell-local Podman shim, including **522** bare-metal
+storefront cases, **16** buyer cases, **18** lifecycle-buyer cases, **315** e2e
+harness unit cases, **1,858** release-tooling cases and Helm render/structural
+checks. This aggregate does not run deployed domain scenarios. Fresh `make dist`,
+affected generated locks, architecture, packaging, lock currency, comment hygiene
+and pinned strict OpenSpec validation also pass. The existing optional
+Torch-dependent VM collection skip remains; no skip was added.
+
+Build/lock continuation must use repository-root `make dist` and
+`make lock PROJECTS="domains/bare_metal/buyer domains/bare_metal/storefront e2e-tests"`.
+The package Makefiles have neither `build` nor `lock` targets; trying those did not
+regenerate artifacts. The corrected root targets and subsequent checks passed.
 
 ## Cleanup
 

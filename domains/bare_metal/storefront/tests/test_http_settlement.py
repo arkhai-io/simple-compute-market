@@ -868,7 +868,7 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
 
     assert settled.status == "settlement_verified"
     assert ready["state"] == "active"
-    assert tearing_down["state"] == "terminating"
+    assert tearing_down["delivery"]["progress"] == "tearing_down"
     assert torn_down["state"] == "torn_down"
     assert recorded == {"capacity_reservation_id": "reservation-a", "state": "released"}
     assert released["state"] == "released"
@@ -879,7 +879,7 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
     assert capacity.reserve_calls[0]["claim"]["gpu_model"] == LISTING_HARDWARE["gpu_model"]
     assert capacity.reserve_calls[0]["claim"]["dimensions"] == {"units": 1}
     assert len(provisioning.begin_calls) == 1
-    assert provisioning.terminations == [("reservation-a", "buyer_teardown")]
+    assert provisioning.terminations == [("reservation-a", "buyer-surrender:" + tearing_down["operation_key"])]
     assert provisioning.teardown_calls == []
     # The storefront never releases capacity itself.
     assert restarted_capacity.site_client.releases == []

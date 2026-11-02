@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from .evidence import evidence_store
-
+import base64
 import json
 import logging
 import os
@@ -57,9 +56,10 @@ from market_settlement_runtime import derive_obligation_ref
 
 from .config import BareMetalBuyerConfig, load_bare_metal_buyer_config
 from .fulfillment import BareMetalFulfillmentTransport
+from .evidence import evidence_store
+from .lifecycle import buyer_lifecycle, run_sync
 from market_arkhai_payments import PaymentApproval
 
-from .arkhai_payments import BareMetalSettlementTransport
 from .settlement_composition import BUYER_STAGES, validate_authority
 
 # The commands build their collaborators through the factories below: a Typer
@@ -297,6 +297,34 @@ def fulfillment_access(
     _json(fulfillment.access(deal.negotiation_id))
 
 
+def _lifecycle_for_run(run_id: str, config_path: str | None):
+    deal, identity, trust = _recovered_deal(run_id, config_path)
+    config = load_bare_metal_buyer_config(config_path)
+    if not deal.agreement_bytes:
+        raise typer.BadParameter("run has no retained accepted Agreement bytes")
+    return deal, buyer_lifecycle(
+        agreement_bytes=base64.b64decode(deal.agreement_bytes, validate=True),
+        settlement_data=deal.settlement_data, seller_url=deal.seller_url,
+        signer=identity.signer, publishers=trust(), config=config,
+        approval=payment_approval(config) if config.arkhai_payments else None,
+    )
+
+
+@bare_metal_app.command("delivery")
+def delivery_status(
+    run_id: str = typer.Option(...),
+    config: str | None = typer.Option(None, "--config"),
+) -> None:
+    """Read delivery, site reports and authority progress independently."""
+    deal, context = _lifecycle_for_run(run_id, config)
+
+    async def read():
+        async with context as lifecycle:
+            return await lifecycle.read(deal.negotiation_id)
+
+    _json(run_sync(read))
+
+
 @bare_metal_app.command("teardown")
 def teardown_fulfillment(
     run_id: str = typer.Option(...),
@@ -304,8 +332,20 @@ def teardown_fulfillment(
 ) -> None:
     """Revoke buyer access and converge physical capacity release."""
 
-    deal, _, fulfillment = _recovered_transports(run_id, config)
-    _json(fulfillment.teardown(deal.negotiation_id))
+    deal, context = _lifecycle_for_run(run_id, config)
+
+    async def end():
+        async with context as lifecycle:
+            progress = await lifecycle.end_delivery(deal.negotiation_id)
+            # Retain the signed delivery read and its embedded site reports even
+            # without an independently configured site trust root on the buyer.
+            try:
+                await lifecycle.peer.read(deal.negotiation_id)
+            except Exception:
+                logging.getLogger(__name__).warning("delivery read unavailable; end progress is retained")
+            return progress
+
+    _json(run_sync(end))
 
 
 
@@ -482,7 +522,8 @@ def buy_bare_metal(
         return
     stage.validate_acceptance(outcome, approval)
     run_log.event(
-        "agreement_accepted",
+        "negotiation_completed",
+        status="agreed",
         negotiation_id=outcome.negotiation_id,
         agreement_ref=outcome.negotiation_id,
         settlement_data=outcome.settlement_data,
@@ -493,17 +534,13 @@ def buy_bare_metal(
             plan=outcome.settlement_plan,
         ),
     )
-    settlement = BareMetalSettlementTransport(
-        seller_url=listing.storefront_url,
-        principal=identity.principal,
-        signer=identity.signer,
-        resolve_seller_principals=lambda: seller_principals,
-        timeout=buyer_config.timeout_seconds,
-    )
     transaction, fulfillment = stage.settle(
         outcome=outcome,
         approval=approval,
-        transport=settlement,
+        seller_url=listing.storefront_url,
+        signer=identity.signer,
+        publishers=seller_principals,
+        config=buyer_config,
         timeout=payment_timeout_seconds,
         run_log=run_log,
     )
@@ -513,6 +550,8 @@ def buy_bare_metal(
         agreed_amount=outcome.agreed_amount,
         transaction_id=transaction,
         fulfillment=fulfillment,
+        agreement_bytes=outcome.agreement_bytes,
+        settlement_data=outcome.settlement_data,
         accepted_provision_terms=outcome.to_dict().get("accepted_provision_terms"),
         **settlement_acceptance_fields(
             negotiation_id=outcome.negotiation_id,

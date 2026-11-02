@@ -212,13 +212,13 @@ def test_bare_metal_complete_deal(
     state.complete(DealStage.SETTLEMENT)
 
     result = _json_result(
-        bare_metal_buyer_cli.run(["bare-metal", "result", "--from", buy.run_id, "--json"]),
+        bare_metal_buyer_cli.run(["bare-metal", "result", "--run-id", buy.run_id]),
         command="market bare-metal result",
     )
     state.complete(DealStage.DELIVERY, delivery=result)
 
     access = _json_result(
-        bare_metal_buyer_cli.run(["bare-metal", "access", "--from", buy.run_id, "--json"]),
+        bare_metal_buyer_cli.run(["bare-metal", "access", "--run-id", buy.run_id]),
         command="market bare-metal access",
     )
     known_hosts_file = tmp_path / "known_hosts"
@@ -230,12 +230,12 @@ def test_bare_metal_complete_deal(
     assert first_access.returncode == 0
     assert first_access.stdout == "arkhai-bare-metal-access-ok"
 
-    _json_result(
-        bare_metal_buyer_cli.run(
-            ["bare-metal", "teardown", "request", "--from", buy.run_id, "--json"]
-        ),
-        command="market bare-metal teardown request",
+    surrendered = _json_result(
+        bare_metal_buyer_cli.run(["bare-metal", "teardown", "--run-id", buy.run_id]),
+        command="market bare-metal teardown",
     )
+    assert surrendered["delivery"]["status"] == "accepted"
+    assert surrendered["acknowledgement"]["receipt_at"] is not None
     terminal_status = str(_setting("TERMINAL_TEARDOWN_STATUS", "released"))
     deadline = time.monotonic() + float(_setting("TEARDOWN_TIMEOUT_SECONDS", 300))
     teardown: dict[str, Any] | None = None
@@ -244,16 +244,15 @@ def test_bare_metal_complete_deal(
             bare_metal_buyer_cli.run(
                 [
                     "bare-metal",
-                    "teardown",
-                    "status",
-                    "--from",
+                    "delivery",
+                    "--run-id",
                     buy.run_id,
-                    "--json",
                 ]
             ),
-            command="market bare-metal teardown status",
+            command="market bare-metal delivery",
         )
-        if teardown.get("status") == terminal_status:
+        if teardown["delivery"]["progress"] == terminal_status:
+            assert teardown["delivery"]["site_reports"], "proven release has no retained site end report"
             break
         time.sleep(float(_setting("POLL_INTERVAL_SECONDS", 2)))
     else:
