@@ -213,7 +213,7 @@ delivering and advertising its own mode. They sell nothing until you declare
 capacity into them. A VM pool, seeded or your own, may omit `playbook_path`:
 its jobs then run the service's `vm_playbook_path`, fixed into each job when it
 is prepared. A mounted pool document replaces the seed, and creates its own
-pools before host inventory is imported; no pool name, `default` included, is
+pools before host definitions are imported; no pool name, `default` included, is
 required. To start a fresh site with other pools while keeping pools
 administrable through the API, point `pool_seed_path` at your own pool
 document: under compose, mount the file into `seller-provisioning` and set
@@ -255,8 +255,7 @@ declared attribute is published to storefronts. `DEPLOYMENT_AND_CONFIG.md`'s
 "Capacity definitions" describes the document's rules in full.
 
 A host record describes how to reach a machine, never its hardware: editing a
-host's inventory line leaves its declaration as it is. Change the declaration
-instead.
+host's entry leaves its declaration as it is. Change the declaration instead.
 
 A machine without GPUs omits `gpu_count` and `gpu_model` from its declaration;
 the two are stated together or not at all. Its pool then states the shapes it
@@ -269,8 +268,8 @@ without GPUs may also land on a GPU host's spare vCPUs and memory.
 ## 4. Prepare your KVM hosts
 
 The provisioning service creates VMs by running Ansible against your KVM hosts
-over SSH, so the stack needs a key that reaches them and an inventory naming
-them before it starts.
+over SSH, so the stack needs a key that reaches them and a host definitions
+document declaring them before it starts.
 
 1. Generate an SSH keypair the provisioning container will use to reach
    your KVM hosts, install the pubkey on each host, and put the privkey
@@ -282,48 +281,53 @@ them before it starts.
    chmod 600 ./keys/id_ed25519
    ```
 
-2. List the execution hosts the service registers:
+2. Declare the execution hosts the service registers, in a host definitions
+   document, for example `./host-definitions.yaml`:
 
-   ```bash
-   cd domains/vms/provisioning/iac/ansible/inventory
-   cp provisioning-hosts.example provisioning-hosts.ini
-   # edit provisioning-hosts.ini with your real KVM host(s)
+   ```yaml
+   hosts:
+     - host_id: kvm1
+       pool_id: vm-default
+       connection:
+         kind: ssh
+         version: 2
+         public:
+           ssh_host: 10.0.0.5
+           public_host: 203.0.113.9
+           ssh_user: ubuntu
+           key_path: /home/appuser/.ssh/id_ed25519
    ```
 
-   The provisioning service registers every host entry in this file as a host,
-   whatever section it is listed under. A host line's `pool_id=<id>` places the
-   host in that pool, which must exist; an empty `pool_id=` unplaces it; a line
-   with no `pool_id` leaves a new host unplaced and an existing host's pool as it
-   is. List only execution hosts: relay proxies and other infrastructure you
-   manage with the IaC playbooks go in `hosts` in the same directory
-   (`cp hosts.example hosts`), which the service is never given. Storefront listings reference trusted projected
-   `pool_id`/`resource_id`; they do not carry a `host_id`. Each host line's
-   `ansible_host` is how the provisioning service reaches the host over SSH.
-   If buyers reach that host
-   on a **different** address than the provisioner does (e.g. the provisioner
-   is on a private/overlay network but the VM port-forwards are exposed on a
-   public IP), add a `public_host=` var — that's the address put in the
-   tenant's connection details:
+   The provisioning service reconciles this document at startup whenever it
+   changes: edit it and restart the service, and the hosts it names are
+   registered or replaced as it states them; a restart with the document
+   unchanged leaves alone whatever you have changed through the API. Each entry
+   declares its whole host: an omitted `pool_id` unplaces the host, and an
+   omitted `enabled` enables it. A host the document does not name is left as it
+   is, and the service logs it as not named. `key_path` is the key's path inside
+   the container — compose mounts `./keys/id_ed25519` there — and the document
+   never carries a key. A document the service cannot apply, such as one naming
+   a pool that does not exist, stops the service from starting, naming the
+   problem; check a changed document first with `POST
+   /api/v1/hosts/definitions/import` and `"validate_only": true`.
+   `DEPLOYMENT_AND_CONFIG.md`'s "Host definitions" describes the document's
+   rules in full.
 
-   ```ini
-   [kvm_hosts]
-   kvm1  ansible_host=10.0.0.5  public_host=203.0.113.9  ansible_user=ubuntu  ansible_ssh_private_key_file=~/.ssh/id_ed25519
-   ```
+   List only execution hosts. `ssh_host` is how the provisioning service
+   reaches the host over SSH. If buyers reach that host on a **different**
+   address than the provisioner does (e.g. the provisioner is on a
+   private/overlay network but the VM port-forwards are exposed on a public IP),
+   state `public_host` — that's the address put in the tenant's connection
+   details; without it, they fall back to `ssh_host`. The port a VM's buyer is
+   given is always that guest's own forwarded or relay port, never the host's: a
+   host's `public_port` is a bare-metal tenant's route, and a VM create ignores
+   it. Storefront listings reference trusted projected `pool_id`/`resource_id`;
+   they do not carry a `host_id`. Work runs only against registered hosts, and
+   a host named only in a file the service has not applied is refused at
+   dispatch.
 
-   Without `public_host`, the connection details fall back to `ansible_host`.
-   The port a VM's buyer is given is always that guest's own forwarded or relay
-   port, never the host's: a host line's `public_port=` is a bare-metal tenant's
-   route, and a VM create ignores it.
-
-   `provisioning-hosts.ini` seeds the host registry when the provisioning service starts with
-   no hosts registered. Work then runs only against registered hosts, never
-   against the file. To add a host to a running deployment, import the file
-   again (`POST /api/v1/hosts/import`) or register the host (`POST
-   /api/v1/hosts`). A host that is only in the file is refused at dispatch.
-
-   A host line describes how to reach the machine, not its hardware: `gpus=` and
-   `gpu_model=`, like any variable the service does not read, are ignored, and
-   neither applying the inventory nor `POST /api/v1/hosts` creates a capacity
+   A host entry describes how to reach the machine, not its hardware: neither
+   the document, `POST /api/v1/hosts`, nor the INI import creates a capacity
    declaration. Declare each host's capacity yourself, as "Declaring capacity"
    describes, naming the host's `host_id`. A host that existed when its site
    upgraded to declared capacity received a declaration derived from its GPUs
@@ -331,12 +335,30 @@ them before it starts.
    `{gpu_count: <gpus>}`, `gpu_model` as an attribute, in the host's pool); that
    declaration is an ordinary one, and stays reservable if the code is rolled
    back.
-   The provisioning image bakes the inventory in at build time — rebuild
-   after edits:
+
+   The Ansible INI inventory is Ansible's own host list, for preparing hosts
+   with the IaC playbooks from your own machine; the service does not read it
+   at startup, and the provisioning image does not include it:
 
    ```bash
-   make build-seller
+   cd domains/vms/provisioning/iac/ansible/inventory
+   cp provisioning-hosts.example provisioning-hosts.ini
+   # edit provisioning-hosts.ini with the same KVM host(s)
    ```
+
+   Relay proxies and other infrastructure you manage with the IaC playbooks go
+   in `hosts` in the same directory (`cp hosts.example hosts`). To register
+   hosts from an INI file on a running deployment instead, submit it to
+   `POST /api/v1/hosts/import`.
+
+   **Upgrading a seller stack whose provisioning service already registers
+   hosts.** The service refuses to start while `inventory_path` or
+   `inventory_ini` is stated, even empty, so remove either first. The upgraded
+   service keeps every registered host. Since `compose/seller.yml` requires a
+   document, mount one holding `hosts: []` for the first start, which applies
+   nothing and leaves every host as it is. Then export its registry with
+   `GET /api/v1/hosts/definitions/export`, save the export, edited as you need,
+   as your host definitions document, and mount it in place of the empty one.
 
 3. KVM host prerequisites: ansible user has passwordless sudo
    (`sudo -n true && echo ok`), is in the `libvirt` group, and
@@ -353,24 +375,28 @@ them before it starts.
 ## 5. Bring it up
 
 `compose/seller.yml` bundles the storefront and provisioning services. It needs
-two operator-provided files: `config.seller.toml` and the SSH private key from
-the previous section. Pass absolute paths via env to avoid docker compose's
+three operator-provided files: `config.seller.toml`, and the SSH private key and
+host definitions document from the previous section, which it mounts into the
+provisioning service and names with `PROVISIONING_HOST_DEFINITIONS_PATH`. Pass
+absolute paths via env to avoid docker compose's
 relative-path-resolves-from-the-compose-file gotcha:
 
 ```bash
 SELLER_CONFIG_PATH="$PWD/config.seller.toml" \
 SELLER_SSH_PRIVKEY="$PWD/keys/id_ed25519" \
+SELLER_HOST_DEFINITIONS="$PWD/host-definitions.yaml" \
 docker compose -f compose/seller.yml up -d
 
 docker compose -f compose/seller.yml logs -f seller-storefront
 ```
 
-Smoke-test that the provisioning service reaches each host:
+Smoke-test that the provisioning container reaches each host with the mounted
+key, naming the host's `ssh_host` and `ssh_user` from its entry:
 
 ```bash
-docker compose -f compose/seller.yml exec seller-provisioning ansible \
-  -i /opt/domains/vms/provisioning/iac/ansible/inventory/provisioning-hosts.ini \
-  <your_host_alias> -m ping
+docker compose -f compose/seller.yml exec seller-provisioning ansible all \
+  -i '<ssh_host>,' -u <ssh_user> \
+  --private-key /home/appuser/.ssh/id_ed25519 -m ping
 ```
 
 `SUCCESS / ping: pong` means a settled deal will create a VM on that host.
@@ -453,8 +479,9 @@ nothing. The upgrade is one-way; there is no supported downgrade.
 
 Before upgrading, declare at provisioning everything the CSV described:
 
-1. **Hosts and capacity.** Register each host in the provisioning service's
-   host inventory and declare what it sells as capacity, as "Declaring
+1. **Hosts and capacity.** Register each host with the provisioning service, in
+   its host definitions document or through the host API, and declare what it
+   sells as capacity, as "Declaring
    capacity" above describes. A CSV row's `attribute.vm_host` names the host,
    and its `value` and `attribute.vcpu_count`, `ram_gb`, and `disk_gb` become
    the declaration's `capacity`.

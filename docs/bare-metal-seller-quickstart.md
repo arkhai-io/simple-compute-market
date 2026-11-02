@@ -22,8 +22,8 @@ buyer-side escrow requirements.
 - The staged internal wheels and the images built from this checkout.
 - Canonical marketplace principals and matching role-scoped signer files for
   the registry, storefront, and selected-site provisioning authority.
-- An Ansible inventory containing a real whole-host SSH target and a dedicated
-  provisioning SSH private-key file.
+- A host definitions document declaring a real whole-host SSH target, and a
+  dedicated provisioning SSH private-key file.
 - A Resource Pool document that explicitly declares `bare_metal`; absence is
   not a permissive default.
 - One strict shared settlement configuration, the `[Settlement]` section of the storefront's configuration. Alkahest roles require chain configuration and the wallet key in the storefront's Secret overlay, whose account, funded, is the public seller address. Payments-only roles use public service, account, and receipt-trust settings without wallet or RPC inputs. Never put a wallet private key, payment credential, or provider object in Compose, the public configuration file, or this document.
@@ -44,24 +44,41 @@ configuration files.
 
 ## Define the selected site
 
-Create an operator-owned inventory file outside the repository:
+Create an operator-owned host definitions document outside the repository:
 
-```ini
-[bare_metal_nodes]
-host-ca-h200-01 ansible_host=10.0.0.25 public_host=203.0.113.25 public_port=22 ansible_user=ubuntu pool_id=whole-host-california
+```yaml
+hosts:
+  - host_id: host-ca-h200-01
+    pool_id: whole-host-california
+    connection:
+      kind: ssh
+      version: 2
+      public:
+        ssh_host: 10.0.0.25
+        ssh_user: ubuntu
+        public_host: 203.0.113.25
+        public_port: 22
+        key_path: /home/appuser/.ssh/id_ed25519
 ```
 
-The addresses are documentation values; use your own.
+The addresses are documentation values; use your own. `key_path` is the
+provisioning SSH key's path inside the container, where the stack mounts
+`BARE_METAL_PROVISIONING_SSH_PRIVATE_KEY_FILE`; the document never carries a
+key.
 
-The provisioning service registers every host entry in this file as a host; the
-section name is yours to choose and means nothing to it. List only execution
-hosts. A host's `pool_id` places it in that pool, which must exist; an empty
-`pool_id=` unplaces it, and a host with none is registered unplaced. Registering
-a host declares none of its capacity: a machine is sold only once you register it
-as a Physical Resource, as "Start and inspect" below describes.
+The provisioning service reconciles the document at startup whenever it
+changes, after the pool document. List only execution hosts. Each entry declares
+its whole host: its `pool_id` places it in that pool, which must exist, and an
+entry with none unplaces it; an omitted `enabled` enables it. A host the
+document does not name is left as it is and logged as not named. A document the
+service cannot apply — one naming a pool that does not exist, say — stops it
+from starting, naming the problem. Registering a host declares none of its
+capacity: a machine is sold only once you register it as a Physical Resource,
+as "Start and inspect" below describes. `DEPLOYMENT_AND_CONFIG.md`'s "Host
+definitions" describes the document's rules in full.
 
 Create a Resource Pool document outside the repository. The pool id must match
-the inventory host's `pool_id`; executor connectivity remains service-owned:
+the host entry's `pool_id`; executor connectivity remains service-owned:
 
 ```yaml
 pools:
@@ -99,15 +116,26 @@ host record it names determine execution. The playbook is fixed into each grant
 and reclaim when it is prepared, so changing the setting affects only jobs
 prepared afterwards.
 
-The mounted inventory seeds the host registry when the provisioning service
-starts with no hosts registered; it is not read at execution. A host added to it
-later must be imported (`POST /api/v1/hosts/import`) before work can be
-dispatched to it. A host's `public_host` and `public_port` are the endpoint a buyer
-is given: the route a tenant takes to the machine, each falling back to the
-connection's own address and port when the entry states none. The provisioning
-service's own route stays `ansible_host` and `ansible_port`. Every host is stored as
-an `ssh` connection at version 2; a host stored at version 1 runs nothing until it is
-imported again or updated at version 2.
+Edit the document and restart the provisioning service to add or change a host;
+a restart with the document unchanged applies nothing, so changes made through
+the API survive it. Check a changed document first with `POST
+/api/v1/hosts/definitions/import` and `"validate_only": true`. Work runs only
+against registered hosts, never against the file. A host's `public_host` and
+`public_port` are the endpoint a buyer is given: the route a tenant takes to the
+machine, each falling back to the connection's own address and port when the
+entry states none. The provisioning service's own route stays `ssh_host` and
+`ssh_port`. Every host is stored as an `ssh` connection at version 2; a host
+stored at version 1 runs nothing until it is submitted again at version 2.
+
+The Ansible INI inventory remains Ansible's own host list for preparing hosts,
+and the input of `POST /api/v1/hosts/import`, which registers hosts from it on a
+running service; the service does not read it at startup. A site that stated
+`inventory_path` or `inventory_ini` must remove it before upgrading, since the
+service refuses to start while either is stated. The upgraded service keeps
+every registered host; the stack requires a document, so mount one holding
+`hosts: []` for that first start, which applies nothing. Then export its
+registry with `GET /api/v1/hosts/definitions/export`, edit the export as you
+need, and mount it in place of the empty one.
 
 The pool declaration is authoritative. Do not add `vm` merely to make a
 request pass; add it only if the same pool and executor can actually deliver
@@ -146,7 +174,7 @@ export BARE_METAL_STOREFRONT_CONFIG_FILE=/run/operator/storefront.toml
 export BARE_METAL_STOREFRONT_SECRETS_FILE=/run/operator/storefront.secrets.toml
 export BARE_METAL_PROVISIONING_IDENTITY_ENV_FILE=/run/operator/provisioning-identity.env
 export BARE_METAL_PROVISIONING_SSH_PRIVATE_KEY_FILE=/run/operator/site-ssh-key
-export BARE_METAL_PROVISIONING_INVENTORY_FILE=/run/operator/bare-metal-hosts.ini
+export BARE_METAL_PROVISIONING_HOST_DEFINITIONS_FILE=/run/operator/host-definitions.yaml
 export BARE_METAL_POOL_DEFINITIONS_FILE=/run/operator/resource-pools.yaml
 
 export BARE_METAL_REGISTRY_AUTHORITY_ID=bare-metal-registry
@@ -295,9 +323,9 @@ listing and is reported by name.
 
 The URL path's Physical Resource id, the `host_id`, and `physical_host_id` are
 separate fields with the exact values shown by their roles. `host_id` is the
-host's inventory alias, the first token of its line in the Ansible inventory;
+host's registered id, its entry's `host_id` in the host definitions document;
 `physical_host_id` identifies the physical machine for cross-mode accounting.
-Do not substitute the provider id or public IP for the inventory alias.
+Do not substitute the provider id or public IP for the host id.
 `physical_host_id` and `allocation_mode` belong at the top level of
 `attributes`, where the site authority's exclusive/shareable accounting reads
 them; `bare_metal_publication` carries only whether the machine is offered and

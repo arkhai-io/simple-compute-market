@@ -77,7 +77,9 @@ renamed setting is refused rather than ignored, because an ignored key would
 silently fall back to a default the operator meant to replace: the service's
 first startup step refuses a configuration stating the retired `playbook_path`
 in any layer, environment included, naming `vm_playbook_path`, and the
-provisioning chart's values schema refuses `config.playbook_path`. A setting
+provisioning chart's values schema refuses `config.playbook_path`. The same step
+refuses the retired `inventory_ini` and `inventory_path`, whatever value either
+states, naming `host_definitions_path` (see "Host definitions"). A setting
 retired because the service stopped needing it, such as
 `default_pool_inventory_group` and `default_host_id`, is not refused, since
 ignoring it changes nothing the service does.
@@ -882,26 +884,66 @@ of its own.
 ## Definition documents
 
 A service may be given the path to a YAML document describing resources it
-should hold — relays, pools, capacity declarations. The document is mounted
-like any other configuration file and is not a Secret: it carries endpoints,
-windows, quantities, and the *names* of profile keys, never a credential.
+should hold — relays, pools, hosts, capacity declarations. The document is
+mounted like any other configuration file and is not a Secret: it carries
+endpoints, addresses, windows, quantities, and the *names* of profile keys and
+key files, never a credential.
 
-Three settings name such a document, all read by the provisioning service:
-`relay_definitions_path`, `pool_definitions_path`, and
+Four settings name such a document, all read by the provisioning service:
+`relay_definitions_path`, `pool_definitions_path`, `host_definitions_path`, and
 `capacity_definitions_path`. The provisioning chart derives each from the
-presence of its value under `definitions` (`relays`, `pools`, `capacity`) rather
-than configuring it beside the document, because two independent settings can
-disagree and the failure when they do is silent: the document renders, the
-volume mounts, and the service skips an unset path while everything looks
-configured. The chart's schema refuses the pool and capacity paths under
-`config` for that reason. Every value is empty by default, so a deployment that
-supplies none is managed entirely through the API.
+presence of its value under `definitions` (`relays`, `pools`, `hosts`,
+`capacity`) rather than configuring it beside the document, because two
+independent settings can disagree and the failure when they do is silent: the
+document renders, the volume mounts, and the service skips an unset path while
+everything looks configured. The chart's schema refuses every one of the four
+paths under `config` for that reason. Every value is empty by default, so a
+deployment that supplies none is managed entirely through the API.
 
 Startup imports them in dependency order: relays, then pools (which may name a
-relay), then the pool seed on a fresh site, then host inventory, then capacity
-(whose declarations name a pool and may name a host). Every pool a capacity
-document names must exist when it is imported: from the pool document, or, on a
-fresh site with none, from the seed.
+relay), then the pool seed on a fresh site, then the check of every stored pool,
+then hosts (whose entries may name a pool), then capacity (whose declarations
+name a pool and may name a host). Every pool a host or capacity document names
+must exist when it is imported: already stored, or created by the pool document,
+or, on a fresh site with none, by the seed.
+
+### The method a document kind follows
+
+This is the method a document kind is held to, and each kind's section below
+states only its own rules. The host document follows all of it, and a new kind
+follows it. The others diverge in part: the capacity document has no export,
+the relay document has no import route or export, and the pool document's
+import and export answer in their own shapes.
+
+- **One path setting, derived by the chart.** `<kind>_definitions_path` is set
+  by the provisioning chart from `definitions.<kind>`, rendered into its
+  ConfigMap so that an edit rolls the pod through the ConfigMap checksum,
+  refused under `config`, and mounted under a name `configFiles` refuses.
+- **A digest kind, recorded in the apply's transaction.** A startup applies a
+  document only when its digest differs from the one recorded under its kind
+  (see "Reconciliation follows the document, not the process").
+- **A session-scoped apply that fails whole.** Validation is strict and runs in
+  two stages, reporting every problem with its location; any problem leaves the
+  document unapplied, fails startup, and records no digest. An entry equal to
+  stored state writes nothing.
+- **An explicit import that always reconciles.** The kind's import route records
+  no digest and offers `validate_only`, answering one response: whether it
+  applied, the planned or applied changes, and every problem with a path and a
+  code. An applying request with any problem answers 422 and applies nothing;
+  `validate_only` answers 200.
+- **Validate before the release.** Submit a changed document to its import
+  route with `validate_only` before the release that mounts it: the chart
+  replaces the pod with `Recreate`, so a document the service refuses at
+  startup leaves nothing serving, while the pre-flight reports the same
+  problems against live state without applying anything.
+- **A stated rule for entries it stops naming** (see "What a document does to
+  entries it stops naming").
+- **No credential.** A secret is named by its profile key or file path.
+- **A slot in startup's dependency order**, above.
+- **A canonical export where the kind round-trips**, so an existing site can
+  produce a first document that reproduces its state.
+
+### Pool definitions
 
 Migration creates no pool, and no pool name is special: a pool document need
 not name `default`, and any pool may be disabled. A configured pool document
@@ -966,32 +1008,6 @@ it from the pool's configured VM defaults (`default_vm_ram`, `default_vm_vcpus`,
 `default_vm_disk_size`), where set, or leave it to the provisioning playbook.
 Keep enough capacity for every dimension a pool's shapes omit.
 
-Host inventory is not a definition document, and the digest reconciliation
-described below does not apply to it. The inventory (`inventory_ini`, or the file
-at `inventory_path`) seeds the host registry only when no host is registered yet,
-and is not read again. Execution renders its inventory from the registered host
-record the work names, never from the file. A host added to the file after first boot is
-therefore not registered, and dispatch to it is refused until it is imported
-through `POST /api/v1/hosts/import` or registered through `POST /api/v1/hosts`.
-An entry's `public_port=` names the port a buyer reaches the host on, read with
-`ansible_port=`'s rule: a value that is not a port from 1 to 65535 rejects its entry
-with a warning, while the others are imported. Beside `public_host=`, it is the
-tenant-facing route, each falling back to the connection's own address and port.
-Every `ssh` host connection, through the API or an inventory, is stored at version 2,
-and a request stating no version or another is refused. A host stored at version 1
-runs nothing until it is moved forward explicitly: an update
-(`PUT /api/v1/hosts/{host_id}`) restating every stored public field, `key_path`
-included where the host has one, at version 2, or an import naming the same key.
-No host write, from the inventory, the import API, or the host API, places a host
-in a pool it does not name or declares any of its capacity: an INI entry's
-`pool_id=<id>` places or moves the host, an empty `pool_id=` unplaces it, and an
-entry with no `pool_id` leaves an existing host's pool unchanged and a new host
-unplaced. A host record describes how to reach a machine, not its hardware: an
-entry's `gpus=` and `gpu_model=`, like every variable the parser does not read,
-are ignored without a warning, and the host API ignores `gpu_count` and
-`gpu_model` in a request body as it ignores any field it does not define. A
-machine's hardware is stated, and sold, only through a capacity declaration.
-
 ### Reconciliation follows the document, not the process
 
 Import treats its document as authoritative. It overwrites entries that differ
@@ -1035,6 +1051,138 @@ host's inventory by the upgrade migration, or be backing a live reservation, and
 operator editing an unrelated entry means to switch off. A capacity document
 therefore adds and updates declarations and never removes one; disabling is an
 explicit `enabled: false`, in the document or through the API.
+
+A host absent from the document is **retained**, its enabled state included, and
+each apply reports it as registered and not named: in the startup log, and in
+the import response's `not_named`. Hosts registered through the API, as every
+end-to-end lane registers them, coexist with the document; and disabling a host
+does not stop its capacity declarations selling, so a removed line would
+otherwise become capacity that cannot be delivered. Disabling a host is an
+explicit `enabled: false`, in the document or through the API.
+
+### Host definitions
+
+A host document holds a top-level `hosts` list. Each entry has the host
+registration API's field names: `host_id`, an optional `pool_id`, an optional
+`enabled`, and a `connection` of `kind`, a required `version`, and `public` —
+for `ssh`, `ssh_host`, `ssh_user`, `ssh_port`, `public_host`, `public_port`, and
+`key_path`:
+
+```yaml
+hosts:
+  - host_id: kvm1
+    pool_id: vm-default
+    connection:
+      kind: ssh
+      version: 2
+      public:
+        ssh_host: 10.0.0.5
+        public_host: 203.0.113.9
+        ssh_user: ubuntu
+        key_path: /home/appuser/.ssh/id_ed25519
+```
+
+- **An entry declares its whole host.** Applying it registers the host or
+  replaces all of its non-secret state: an omitted `pool_id`, or `pool_id:
+  null`, unplaces the host, and an omitted `enabled` enables it, so a host
+  disabled or moved through the API is restored to the document's statement by
+  the next change to the document unless the document restates it. A pool
+  change runs the host pool-change hooks, as an update through the API does.
+  `enabled: null` is a value of the wrong type, and `hosts: []` is a valid
+  document that applies nothing.
+- **The connection is replaced through its kind's codec.** An entry equal to the
+  stored host once the codec has filled in its defaults — `ssh_port` 22 and
+  `ssh_user` `root` for `ssh` — writes nothing, so an entry that omits them
+  equals a host stored with them. A version or kind the service does not serve
+  is refused, naming it.
+- **No credential.** An entry stating `connection.secrets` is refused. A key is
+  named by `key_path`, a file on the service's filesystem — under Helm a Secret
+  volume the operator mounts — or kept from the stored host by naming none: a
+  host holding a protected key keeps it. An entry naming no `key_path` for a
+  host whose key is a key file, or for a new host, is refused naming the entry.
+  Registering a host with key material stays an API act: `POST /api/v1/hosts`
+  with `secrets`, or the INI route's `embedded` mode.
+- **Any problem leaves the whole document unapplied.** Structural problems —
+  unparseable YAML, a root that is not a mapping (an empty file included), a
+  missing or non-list `hosts`, an unknown field, a missing `host_id`,
+  `connection`, or `connection.version`, a `host_id` named twice, a value of the
+  wrong type — are all reported with their locations, and a document with any is
+  checked no further. A structurally valid document reports every refusal stored
+  state decides: an unknown pool, a connection its codec refuses, and a pool
+  move a pool-change hook refuses (`pool_change_refused`). At startup a refused
+  document fails the start, naming each problem, and records no digest; a
+  configured path with no document fails startup too.
+- **A refused move keeps the service down.** The VM hook refuses moving a host
+  whose VM tunnel a buyer holds to a pool dialling another relay, or to no pool.
+  At startup that refusal fails the start, and the chart's `Recreate` leaves no
+  pod serving while the leases cannot drain; revert the edit to recover. Submit
+  a changed document with `validate_only` first, which reports the same refusal
+  against live state.
+
+`GET /api/v1/hosts/definitions/export` returns every registered host as a host
+document, `application/yaml`, ordered by `host_id`, stating each host's
+`pool_id` and `enabled` always and no secret; a host holding a protected key
+appears with no `key_path`. A host whose connection kind the service does not
+serve, or whose stored connection is at a version its codec does not serve,
+gets no entry; a document built from the export therefore does not name it, and
+importing it reports the host as not named. Importing an unedited export
+changes nothing.
+
+`POST /api/v1/hosts/definitions/import` submits a document with `yaml_text` and
+`validate_only`. It always reconciles, whatever digest startup recorded, and
+records none. Its response states whether it applied, the created, updated, and
+unchanged hosts (`diff`), the registered hosts not named (`not_named`), and
+every problem with a `path`, a `code`, and a message. An applying request with
+any problem answers 422 carrying that response under `detail` and applies
+nothing; `validate_only` answers 200 with the problems and the planned changes.
+An applying request whose commit meets a host another request registered at
+the same moment answers 409 and applies nothing.
+Both routes admit the administrator alone; the typed family client's
+`export_hosts()` and `import_host_definitions()` call them.
+
+Hosts are imported after pools and the stored-pool check, so every pool an entry
+names exists, and before capacity. A site with no recorded `hosts` digest
+applies its host document when one is first configured, exactly as any changed
+document; a site that configures none keeps its registered hosts as they are.
+
+**Upgrading from an INI inventory.** Startup reads no INI. `inventory_ini` and
+`inventory_path` are retired: a configuration stating either, in any layer and
+with any value, an empty one included, refuses to start, naming
+`host_definitions_path`. Before upgrading, drop both — including an empty
+`inventory_ini` from the provisioning-secrets Secret a Helm deployment mounts.
+The upgraded service keeps every registered host and, until a host document is
+configured, applies none. Then export the registry from it, edit the export into
+the site's host document, and mount it: under Helm as `definitions.hosts`, under
+Compose at the path `PROVISIONING_HOST_DEFINITIONS_PATH` names. The first start
+with it applies it.
+
+**The INI import route.** `POST /api/v1/hosts/import` keeps the Ansible
+implementation's INI format and its own rules; it is not reconciled and reads
+or records no digest. It upserts: an entry's `pool_id=<id>` places or moves the
+host, an empty `pool_id=` unplaces it, and an entry with no `pool_id` leaves an
+existing host's pool unchanged and a new host unplaced. An entry's
+`public_port=` names the port a buyer reaches the host on, read with
+`ansible_port=`'s rule: a value that is not a port from 1 to 65535 rejects its
+entry with a warning, while the others are imported. Beside `public_host=`, it
+is the tenant-facing route, each falling back to the connection's own address
+and port.
+
+Every `ssh` host connection, through the API, a document, or an INI import, is
+stored at version 2, and a request stating no version or another is refused. A
+host stored at version 1 runs nothing until it is moved forward explicitly: an
+update (`PUT /api/v1/hosts/{host_id}`) restating every stored public field,
+`key_path` included where the host has one, at version 2, or an import naming
+the same key. Execution renders its inventory only from the registered host
+record the work names; a host named only by a file or a refused document is
+refused at dispatch.
+
+No host write, from a document, either import route, or the host API, declares
+any of a host's capacity. A host record describes how to reach a machine, not
+its hardware: an INI entry's `gpus=` and `gpu_model=`, like every variable the
+parser does not read, are ignored without a warning, and the host API ignores
+`gpu_count` and `gpu_model` in a request body as it ignores any field it does
+not define. A machine's hardware is stated, and sold, only through a capacity
+declaration.
 
 ### Capacity definitions
 

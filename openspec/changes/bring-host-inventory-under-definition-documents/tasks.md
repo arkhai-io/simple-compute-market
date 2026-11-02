@@ -1178,7 +1178,7 @@ Files: `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/seller-quickstart.md`;
 `docs/bare-metal-seller-quickstart.md`; `domains/vms/provisioning/iac/README.md`;
 `domains/vms/provisioning/iac/ansible/inventory/provisioning-hosts.example`.
 
-- [ ] 7.1 `DEPLOYMENT_AND_CONFIG.md`, "Definition documents" (D13, D3, D7, D14):
+- [x] 7.1 `DEPLOYMENT_AND_CONFIG.md`, "Definition documents" (D13, D3, D7, D14):
   open with the method every kind follows, as D13 lists it — the validate-only
   pre-flight before a release included — and state each kind's own rules under
   it. Replace the "Host inventory is not a definition document" paragraph with a
@@ -1189,7 +1189,21 @@ Files: `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/seller-quickstart.md`;
   `Recreate`, and the upgrade path (drop `inventory_ini` and `inventory_path`,
   export, edit, mount). Correct the pool-and-capacity-only refusal sentence: every
   kind's path is refused under `config`.
-- [ ] 7.2 The seller quickstarts, the IaC README, and the example INI (D2, D6,
+  *Drafted.* The section's opening names all four kinds and paths, states that
+  the chart refuses every path under `config`, and gives the startup order with
+  the stored-pool check and hosts; a new "Every kind follows one method"
+  subsection lists D13's points, the validate-only pre-flight before a release
+  among them. The "Host inventory is not a definition document" paragraph is
+  replaced by a "Host definitions" subsection after "What a document does to
+  entries it stops naming" (which gains the host retention rule): the fields
+  and an example, whole replacement and what it restores, codec-filled
+  defaults, no credential, whole-document failure and its startup effect, a
+  refused move keeping the service down under `Recreate`, the export and the
+  import routes with their response and 422/200, the startup order and first
+  document, the upgrade path, and the INI import route's own rules, which the
+  replaced paragraph carried. The retired-settings paragraph under
+  "Profile-based configuration" names the two retired keys too.
+- [x] 7.2 The seller quickstarts, the IaC README, and the example INI (D2, D6,
   D12): `docs/seller-quickstart.md`'s section 4 step 2 and "Bring it up", and
   `docs/bare-metal-seller-quickstart.md`'s "Define the selected site" and
   "Configure public bindings", describe the host document, its compose variable,
@@ -1199,12 +1213,63 @@ Files: `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/seller-quickstart.md`;
   host list and the input of the import route, not what the service reads at
   startup. Verify: `make check-doc-citations CHANGE=bring-host-inventory-under-definition-documents`
   reports nothing these drafts introduced.
-- [ ] 7.3 **Verification checkpoint.** `make check-doc-citations
+  *Drafted.* `docs/seller-quickstart.md`: section 4 step 2 declares hosts in a
+  host document (with the `key_path` the compose stack mounts), describes its
+  reconciliation and validate-only check, keeps the INI as Ansible's own list
+  and the import route's input, and gives the export-edit-mount upgrade; "Bring
+  it up" passes `SELLER_HOST_DEFINITIONS`, which `compose/seller.yml` requires;
+  stray "inventory" mentions in "Declaring capacity" and "Upgrading from CSV
+  inventory" now name host definitions and entries; the smoke test, which named
+  an INI the image does not contain, pings the host's `ssh_host` from inside the
+  container with the mounted key. `docs/bare-metal-seller-quickstart.md`: "Define the
+  selected site" declares the host in a host document, the INI kept for Ansible
+  and the import route, with the upgrade; "Configure public bindings" exports
+  `BARE_METAL_PROVISIONING_HOST_DEFINITIONS_FILE`; the prerequisites and the
+  `host_id` explanation under "Start and inspect" no longer say inventory
+  alias. The IaC README and the headers of `provisioning-hosts.example` and
+  `hosts.example` say the INI is Ansible's own host list and the import
+  route's input, not read at startup. `make check-change`, whose checks include
+  the documentation citations: passed.
+- [x] 7.3 **Verification checkpoint.** `make check-doc-citations
   CHANGE=bring-host-inventory-under-definition-documents`; `make
   check-comment-hygiene`. A read of every changed document against the code of
   sections 1–5: the setting names, the routes, the response codes, the chart
   value, and the compose variables match.
   End-to-end: none — documentation only. None is owed.
+  *Run.* `make check-change` (documentation citations and comment hygiene among
+  its checks): passed. Read against the code of sections 1–5: the setting,
+  route, response field, status, chart value, and compose variable names
+  match; see the fresh-context check below.
+
+Section 7 notes:
+
+- **Drafts, reconciled at closeout.** 8.9 reconciles these with the final code
+  and writes the permanent documents these drafts do not touch: `TESTING.md`'s
+  "Host Requirement Enforcement", the architecture companions, and
+  `ARCHITECTURE.md`'s "Resource pools".
+- **Correction to a section 4 note.** That note said `compose/seller.yml`
+  relied on `settings.toml`'s `inventory_path` default naming an INI baked into
+  the image. The provisioning image never contained it:
+  `provisioning/compute/service/Dockerfile.dockerignore` excludes
+  `provisioning-hosts*` but the example. So the seller stack registered no host
+  from the INI before section 4 either, and the quickstart's former "rebuild
+  after edits" and in-container `-i …/provisioning-hosts.ini` smoke test were
+  already false; 7.2 corrected both.
+- **The upgrade under Compose needs an empty document first.** Both compose
+  stacks require a host document, so the quickstarts tell an upgrading operator
+  to start once with `hosts: []`, which applies nothing and keeps every host,
+  then export, edit, and mount — the export route exists only in the upgraded
+  service.
+- **Fresh-context check.** No startup INI seeding left in the changed
+  documents, no placement or citation problem, and 7.1 complete with D13's
+  method first. Fixed: the INI-in-image claim and smoke test (above); the
+  bare-metal upgrade path that could not start; the method heading claiming
+  every kind follows it, and capacity "following all of it" though it has no
+  export; "predate" reading as history; pools a document may name that are
+  already stored; the import's 409 on a concurrent registration; `hosts.example`
+  saying the service never registers its entries, which the INI import route
+  would. Earlier, before the check finished: exporting from a service that has
+  no export route yet, and a forward-looking "yet".
 
 ## 8. Closeout
 

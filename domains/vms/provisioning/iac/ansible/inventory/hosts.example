@@ -8,8 +8,8 @@
 # proxies and remote provisioning workers. The hosts you sell are in
 # `provisioning-hosts.ini` in the same directory (see
 # provisioning-hosts.example). Run playbooks against the whole directory,
-# `-i inventory/`, so they see both; the provisioning service is given only
-# `provisioning-hosts.ini`, and never registers anything listed here.
+# `-i inventory/`, so they see both. Never submit this file to the provisioning
+# service's INI import route, which registers every entry it is given.
 #
 # The VM-operations playbook also records each VM it creates here, under
 # `[kvms]`, and removes it when the VM is undefined; that group is written for

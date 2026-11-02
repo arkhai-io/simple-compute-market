@@ -73,8 +73,12 @@ against the whole directory (`-i inventory/`):
 - `inventory/hosts` (from `hosts.example`): infrastructure you manage with
   these playbooks.
 - `inventory/provisioning-hosts.ini` (from `provisioning-hosts.example`): the
-  hosts you sell. The provisioning service is given this file alone and
-  registers every host entry in it, whatever its section.
+  hosts you sell, as Ansible's own host list, which the host-setup and
+  VM-operations playbooks run against. The provisioning service does not read
+  it at startup: it registers the hosts its host definitions document declares
+  (`docs/development/DEPLOYMENT_AND_CONFIG.md`, "Host definitions"), and
+  registers this file's entries only when it is submitted to
+  `POST /api/v1/hosts/import`. Keep the two lists of sold hosts in step.
 
 ```ini
 # inventory/hosts
