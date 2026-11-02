@@ -1621,3 +1621,26 @@ check-locks`, `make check-comment-hygiene`, strict OpenSpec validation and full
 `make test` all pass (combined chain 7m 41s with proxy exclusions and the Podman
 shim). The preceding complete chain also passed. No hosted mediation deployment
 or deployed monetary-ruling qualification is claimed by this kit repair.
+
+### Parallel repair integration checkpoint
+
+- `7fb2dae69` merges the lifecycle repair into `8b1a5cfb5`, preserving the
+  domain and servicing disposition notes. Seller reads combine current authority
+  outcomes with respondent and filing repair state; dispatch retains per-filing
+  progress and terminal rejections while keeping database work off-loop. Both
+  servicing and signed-client targets remain in the kit aggregate.
+- `1d713730c` makes both receipt callbacks' immutable binding reads schema-free.
+  The first aggregate exposed schema initialization on a second connection under
+  ingress's write lock; all six unchanged domain receipt-adapter checks pass after
+  the repair. The deferred-filing assertion follows the per-filing result shape
+  and still requires the exact pending filing and no authority submission.
+- Validation: `make dist`; servicing 48, foundation 61, buyer 20, signed client 2,
+  mediation 45 and payments 98 tests; servicing typing and all nine asserted
+  first-use examples; mediation typing/resources/models and asserted first use;
+  architecture, packaging, locks, comment hygiene and strict pinned OpenSpec
+  validation pass. The full `make test` re-drive passes on `1d713730c` in 7m26s
+  with the prescribed proxy exclusions and Podman shim, including release tooling
+  and Helm structural/render checks.
+- Setup, observations and reproduction:
+  `docs/attachments/aeet-fix-a-integration/index.md`. This integrates the parallel
+  kit repairs, not the remaining domain work or reviewed closeout promotion.
