@@ -376,7 +376,7 @@ The storefront MUST compare ended_at, delivered and cause with durable available
 
 ### Requirement: Receipts embed reusable signed claims
 
-When buyer surrender is the selected end, the storefront end_delivery receipt MUST embed SignedDeliveryEndClaim(cause=payer, delivered=true) at its durable receipt time, signed by Agreement.seller through its dispute adapter. An earlier selected end MUST suppress that claim and automatic payer filing. Same-key retry MUST preserve identical claim/proof while that surrender remains selected. The buyer MUST verify and retain it and MAY file it later in Filing.concurrence. It MUST NOT claim the receipt attests an earlier time.
+For selected buyer surrender, end_delivery MUST embed SignedDeliveryEndClaim(cause=payer, delivered=true) at durable receipt time, signed by Agreement.seller through its dispute adapter. An earlier selected end MUST suppress the claim and automatic payer filing. Same-key retry MUST preserve claim/proof while surrender stays selected. The buyer MUST verify/retain it and MAY later file Filing.concurrence. It MUST NOT claim the receipt attests earlier time.
 
 #### Scenario: Payments is unreachable
 
@@ -542,7 +542,7 @@ The codec MUST include early_termination.premature_stop_penalty in Agreement byt
 
 ### Requirement: The seller files ends its terms do not entitle
 
-For an unentitled site withdrawal or failed/never-started delivery, end service MUST journal `delivery_end(cause=payee)` for filing through the dispute adapter at the actual end. Never-delivered timing MUST follow "Never-delivered correction has a fixed non-future basis". A correlated end MUST adopt its controlling source's classification and filing without a second seller fault. A later superseded source MUST remain evidence without a new filing; an established earlier failure MUST remain correctable.
+An unentitled site withdrawal or failed/never-started delivery MUST journal `delivery_end(cause=payee)` for dispute-adapter filing at actual end. Never-delivered timing MUST follow "Never-delivered correction has a fixed non-future basis". A correlated end MUST adopt its controller's classification/filing, not a second fault. A later superseded source MUST remain evidence without a new filing; an established earlier failure MUST remain correctable.
 
 #### Scenario: A withdrawal is reported late
 
@@ -672,7 +672,7 @@ When the mechanism has no adapter the buyer half's `read` MUST return the author
 
 ### Requirement: The seller half lists deals
 
-The seller half MUST offer `submit`, `read`, `list`, and `watch`. `list` MUST return bounded pages with a continuation token. Each deal MUST carry its negotiation ID, commitment reference, domain, mechanism, entitlements, lifecycle state (unstarted, running, ending, ended, repair required), current deadline, whether any part has an open extension, and its open cases. A deal with only `once` parts MUST be running from its verified commitment until delivery ends. A rejected required filing MUST remain terminal, mark the deal repair required, and be exposed with every filing's outcome in `read` and `list`; it MUST NOT be resubmitted automatically.
+The seller half MUST offer `submit`, `read`, `list`, and `watch`. `list` MUST return bounded pages with a continuation token and each deal's negotiation ID, commitment reference, domain, mechanism, entitlements, lifecycle state, current deadline, open-extension flag and open cases. Once-only deals MUST run from verified commitment until delivery ends. Rejected required filings MUST remain terminal, set repair required, expose every filing outcome in read/list and MUST NOT auto-resubmit.
 
 #### Scenario: A rejected filing is visible after restart
 
@@ -683,6 +683,11 @@ The seller half MUST offer `submit`, `read`, `list`, and `watch`. `list` MUST re
 
 - **WHEN** a seller with no committed deals calls `list`
 - **THEN** it receives an empty page, not an error
+
+#### Scenario: Listed lifecycle states are explicit
+
+- **WHEN** a deal is returned by `list`
+- **THEN** its lifecycle state is unstarted, running, ending, ended or repair required
 
 ### Requirement: Adapters resolve per mechanism and arbiter
 

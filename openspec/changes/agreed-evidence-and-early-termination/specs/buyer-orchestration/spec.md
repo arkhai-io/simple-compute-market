@@ -56,7 +56,7 @@ The buyer half MUST stop at the payment authority first through the payment adap
 
 ### Requirement: Buyer end claims preserve their evidence basis
 
-The buyer half MUST use acknowledged receipt when available, otherwise retain its observed time as contested evidence. Default end recovery MUST retry an uncertain surrender under its original key before fixing a filing; a caller MAY explicitly submit a contested claim. An acknowledgement selecting a non-surrender end MUST suppress automatic payer filing. It MUST put a matching receipt's SignedDeliveryEndClaim in Filing.concurrence. Without valid payee agreement it MUST report triage; receipt-backed claims MUST follow the authority's mapping/time/replay guards. Surrender MUST NOT erase priced notice.
+The buyer half MUST use the acknowledged receipt, else keep observed time as contested evidence. Uncertain surrender MUST retry its original key before filing unless the caller explicitly contests. A selected non-surrender end MUST suppress automatic payer filing. A matching receipt's SignedDeliveryEndClaim MUST be Filing.concurrence. Without valid payee agreement it MUST report triage; receipt-backed claims MUST obey authority mapping/time/replay guards. Surrender MUST NOT erase priced notice.
 
 #### Scenario: No receipt is available
 
