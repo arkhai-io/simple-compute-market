@@ -1505,6 +1505,30 @@ typed, versioned settings section".
       lanes read it.
 
 
+### Target-profile build-context safeguard
+
+Follow-up to 10.2: `.dockerignore` must exclude the renamed local target as well
+as the retired filename, preserving the existing image boundary when
+`e2e-tests/Dockerfile` copies its configuration directory. The committed example
+remains in the image. This is a private-input exclusion correction, not a new
+target format or a change to the scenario's behavior. Completed tasks above are
+preserved.
+
+An actual Docker build/COPY component check used visibly synthetic target files
+and the same configuration-directory COPY. Before the correction the current
+local filename entered the result; after it, both current and retired local
+filenames were absent while the committed example remained. Fixture containers
+were never started, and only their temporary contexts, containers and images
+were removed. This check used a separate daemon, leaving the frozen source
+validation undisturbed. It proves the build-context exclusion, not a leak from
+an already-built image: the actual operator profiles remain outside this
+checkout. Packaging, change/citation, privacy and diff checks passed. A bounded
+fresh-context compliance check found only the initially missing evidence note,
+now recorded here. No runtime, dependency, lock or scenario changes were made;
+no hardware proof or second full-suite run is claimed. No end-to-end scenario
+exercises an ignored local target in a build context; the dedicated component
+check supplies that evidence.
+
 ### Section 10 handoff
 
 The target reader, ignored profile and visibly fictitious example now use
