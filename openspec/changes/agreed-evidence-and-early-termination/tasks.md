@@ -380,9 +380,13 @@ bare-metal storefronts' publication and migration modules
 (`domains/vms/storefront/src/market_storefront/publication_migration.py`,
 `settlement_composition.py`, and their bare-metal counterparts), `DEPLOYMENT_AND_CONFIG.md`.
 
-- [ ] 4.1 Replace `oracle_gated` and `interruptible` with `release_models` drawn from
+- [x] 4.1 Replace `oracle_gated` and `interruptible` with `release_models` drawn from
       `recipient`, `oracle_gated` and `interruptible`, validating oracle settings against the
       listed models. Verify: `kit/alkahest` unit tests for each model and each refusal.
+  - Verified: Alkahest unit suite, 447 passed. Configuration accepts ordered,
+    nonempty unique model lists, rejects obsolete flags and oracle-address lists
+    for unoffered models, and derives separate chain conditions for each model.
+    Domain composition and option materialization follow in 4.2.
 - [ ] 4.2 Publish one Alkahest option per listed model in the VM and bare-metal storefronts, with
       no lifecycle terms (no Alkahest lifecycle adapter exists). Verify: application-integration
       test for `release_models = ["recipient", "interruptible"]` publishing two options without

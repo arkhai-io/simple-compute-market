@@ -7,7 +7,7 @@ import json
 import re
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from market_core.schemas import settlement_option_schema, settlement_option_params
 from market_settlement_runtime import (
@@ -128,9 +128,10 @@ class AlkahestSettlementConfig(BaseModel):
     #: Each configured chain's address book, by chain name; a chain's book is
     #: resolved through :func:`alkahest_address_book`.
     address_books: dict[str, str] = Field(default_factory=dict)
-    oracle_gated: bool = False
+    release_models: tuple[Literal["recipient", "oracle_gated", "interruptible"], ...] = (
+        "recipient",
+    )
     trusted_oracle_addresses: tuple[str, ...] = ()
-    interruptible: bool = False
     interruptible_oracle_addresses: tuple[str, ...] = ()
     #: How often each configured chain is probed, at most.
     probe_interval_seconds: PositiveSeconds = Field(
@@ -169,6 +170,7 @@ class AlkahestSettlementConfig(BaseModel):
         return value
 
     @field_validator(
+        "release_models",
         "trusted_oracle_addresses",
         "interruptible_oracle_addresses",
         mode="before",
@@ -176,6 +178,13 @@ class AlkahestSettlementConfig(BaseModel):
     @classmethod
     def accept_toml_address_lists(cls, values: Any) -> Any:
         return tuple(values) if isinstance(values, list) else values
+
+    @field_validator("release_models")
+    @classmethod
+    def validate_release_models(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        if not values or len(set(values)) != len(values):
+            raise ValueError("release_models must be non-empty and unique")
+        return values
 
     @field_validator("trusted_oracle_addresses", "interruptible_oracle_addresses")
     @classmethod
@@ -193,9 +202,9 @@ class AlkahestSettlementConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_oracle_policy(self) -> AlkahestSettlementConfig:
-        if not self.oracle_gated and self.trusted_oracle_addresses:
+        if ORACLE_GATED_RELEASE not in self.release_models and self.trusted_oracle_addresses:
             raise ValueError("trusted_oracle_addresses requires oracle_gated")
-        if not self.interruptible and self.interruptible_oracle_addresses:
+        if INTERRUPTIBLE_RELEASE not in self.release_models and self.interruptible_oracle_addresses:
             raise ValueError("interruptible_oracle_addresses requires interruptible")
         return self
 
@@ -212,24 +221,21 @@ class ReleaseModelError(ValueError):
     """The configured release model is contradictory or cannot be delivered."""
 
 
-def configured_release_model(config: AlkahestSettlementConfig | None) -> str:
-    """The release model ``config`` selects; no section selects ``recipient``.
+def configured_release_models(config: AlkahestSettlementConfig | None) -> tuple[str, ...]:
+    """The ordered models offered by the section; omission offers recipient release."""
+    return config.release_models if config is not None else (RECIPIENT_RELEASE,)
 
-    Raises ``ReleaseModelError`` when the section selects both the oracle-gated
-    and the interruptible model, since an escrow has one arbiter.
-    """
-    if config is None:
-        return RECIPIENT_RELEASE
-    if config.oracle_gated and config.interruptible:
+
+def require_deliverable_release_models(
+    config: AlkahestSettlementConfig | None, deliverable: Any
+) -> None:
+    """Refuse startup when the domain cannot deliver an offered release model."""
+    unsupported = set(configured_release_models(config)) - set(deliverable)
+    if unsupported:
         raise ReleaseModelError(
-            "Settlement.alkahest oracle and interruptible policies are mutually "
-            "exclusive"
+            "Settlement.alkahest.release_models contains models this domain cannot "
+            f"deliver: {', '.join(sorted(unsupported))}"
         )
-    if config.oracle_gated:
-        return ORACLE_GATED_RELEASE
-    if config.interruptible:
-        return INTERRUPTIBLE_RELEASE
-    return RECIPIENT_RELEASE
 
 
 def alkahest_address_book(
@@ -320,14 +326,14 @@ def _release_model_blockers(
     """
     blockers: list[ReadinessBlocker] = []
     accounts = seller_accounts if role == "seller" else frozenset()
-    if config.oracle_gated and not config.trusted_oracle_addresses:
+    if ORACLE_GATED_RELEASE in config.release_models and not config.trusted_oracle_addresses:
         blockers.append(
             _configuration_blocker(
                 "alkahest.oracle_policy_invalid",
                 "oracle-gated settlement requires a trusted oracle address",
             )
         )
-    if config.interruptible and not config.interruptible_oracle_addresses:
+    if INTERRUPTIBLE_RELEASE in config.release_models and not config.interruptible_oracle_addresses:
         blockers.append(
             _configuration_blocker(
                 "alkahest.interruptible_policy_invalid",
@@ -336,8 +342,12 @@ def _release_model_blockers(
         )
     # The party collecting an escrow cannot also decide whether it collects.
     oracles = (
-        config.trusted_oracle_addresses[:1] if config.oracle_gated else ()
-    ) + (config.interruptible_oracle_addresses[:1] if config.interruptible else ())
+        config.trusted_oracle_addresses[:1]
+        if ORACLE_GATED_RELEASE in config.release_models else ()
+    ) + (
+        config.interruptible_oracle_addresses[:1]
+        if INTERRUPTIBLE_RELEASE in config.release_models else ()
+    )
     if any(oracle in accounts for oracle in oracles):
         blockers.append(
             _configuration_blocker(
@@ -346,21 +356,15 @@ def _release_model_blockers(
             )
         )
     if deliverable is not None:
-        try:
-            model = configured_release_model(config)
-        except ReleaseModelError:
-            # Not a blocker: a section selecting two release models is
-            # incoherent, and its composer refuses it at startup through
-            # ``configured_release_model`` before readiness runs.
-            model = None
-        if model is not None and model not in set(deliverable):
-            blockers.append(
-                _configuration_blocker(
-                    "alkahest.release_model_undeliverable",
-                    f"the configured {model!r} release model is not one this "
-                    "storefront's domain delivers",
+        for model in configured_release_models(config):
+            if model not in set(deliverable):
+                blockers.append(
+                    _configuration_blocker(
+                        "alkahest.release_model_undeliverable",
+                        f"the configured {model!r} release model is not one this "
+                        "storefront's domain delivers",
+                    )
                 )
-            )
     return blockers
 
 
@@ -537,12 +541,9 @@ async def alkahest_preflight(
 ) -> MechanismReadiness:
     """Observe Alkahest prerequisites without submitting a transaction.
 
-    A section that parses but under which no deal could settle is reported
-    through configuration blockers, never refused, so a storefront that cannot
-    settle through Alkahest still runs its other mechanisms. A section that
-    selects both the oracle-gated and the interruptible model is incoherent
-    rather than unusable; its composer refuses it at startup, and readiness does
-    not report it. The composing storefront supplies, beside its wallet and
+    Unusable wallet, oracle and chain inputs are configuration blockers, so
+    other mechanisms can keep running. A domain must refuse models it cannot
+    deliver at startup; preflight also reports those models to diagnostic callers. The composing storefront supplies, beside its wallet and
     chains:
 
     - ``deliverable_release_models``: the release models its domain's Alkahest
@@ -657,8 +658,7 @@ async def alkahest_preflight(
     )
 
     details: dict[str, Any] = {
-        "oracle_gated": config.oracle_gated,
-        "interruptible": config.interruptible,
+        "release_models": list(config.release_models),
     }
     if len(chain_names) == 1:
         details["chain"] = chain_names[0]
@@ -958,7 +958,7 @@ def create_alkahest_registration(
         publication_input_validator=validate_alkahest_publication_input,
         buyer_compatibility=alkahest_buyer_compatibility,
         public_detail_keys=frozenset(
-            {"chain", "asset", "oracle_gated", "interruptible", "chain_probe"}
+            {"chain", "asset", "release_models", "chain_probe"}
         ),
     )
 
@@ -969,7 +969,8 @@ __all__ = [
     "RECIPIENT_RELEASE",
     "RELEASE_MODELS",
     "ReleaseModelError",
-    "configured_release_model",
+    "configured_release_models",
+    "require_deliverable_release_models",
     "ALKAHEST_CONFIG_KEY",
     "AlkahestPublicationInput",
     "alkahest_chain_projection",

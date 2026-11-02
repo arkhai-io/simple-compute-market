@@ -33,9 +33,14 @@ from pydantic import ValidationError
     "payload",
     [
         {"enabled": False, "wallet": {"private_key": "secret"}},
+        {"release_models": []},
+        {"release_models": ["unknown"]},
+        {"release_models": ["recipient", "recipient"]},
+        {"oracle_gated": False},
+        {"interruptible": False},
         {"enabled": False, "chains": {}},
         {"enabled": False, "trusted_oracle_addresses": ["0x" + "11" * 20]},
-        {"enabled": False, "oracle_gated": True, "trusted_oracle_addresses": ["bad"]},
+        {"enabled": False, "release_models": ["oracle_gated"], "trusted_oracle_addresses": ["bad"]},
     ],
 )
 def test_alkahest_config_rejects_foreign_or_invalid_fields(payload: dict) -> None:
@@ -132,27 +137,27 @@ async def test_a_complete_seller_section_is_ready() -> None:
     ("policy", "resources", "expected"),
     [
         (
-            {"oracle_gated": True},
+            {"release_models": ["oracle_gated"]},
             {},
             ("alkahest.oracle_policy_invalid", "configuration"),
         ),
         (
-            {"oracle_gated": True, "trusted_oracle_addresses": [WALLET]},
+            {"release_models": ["oracle_gated"], "trusted_oracle_addresses": [WALLET]},
             {},
             ("alkahest.oracle_is_seller_wallet", "configuration"),
         ),
         (
-            {"interruptible": True},
+            {"release_models": ["interruptible"]},
             {"deliverable_release_models": frozenset({"interruptible"})},
             ("alkahest.interruptible_policy_invalid", "configuration"),
         ),
         (
-            {"interruptible": True, "interruptible_oracle_addresses": [WALLET]},
+            {"release_models": ["interruptible"], "interruptible_oracle_addresses": [WALLET]},
             {"deliverable_release_models": frozenset({"interruptible"})},
             ("alkahest.oracle_is_seller_wallet", "configuration"),
         ),
         (
-            {"interruptible": True, "interruptible_oracle_addresses": [ORACLE]},
+            {"release_models": ["interruptible"], "interruptible_oracle_addresses": [ORACLE]},
             {},
             ("alkahest.release_model_undeliverable", "configuration"),
         ),
@@ -510,8 +515,8 @@ async def test_the_address_is_omitted() -> None:
 @pytest.mark.parametrize(
     "policy",
     [
-        {"oracle_gated": True, "trusted_oracle_addresses": [WALLET]},
-        {"interruptible": True, "interruptible_oracle_addresses": [WALLET]},
+        {"release_models": ["oracle_gated"], "trusted_oracle_addresses": [WALLET]},
+        {"release_models": ["interruptible"], "interruptible_oracle_addresses": [WALLET]},
     ],
     ids=["trusted-oracle", "interruptible-oracle"],
 )
@@ -574,7 +579,7 @@ async def test_a_buyer_is_never_compared_with_the_release_oracle() -> None:
     # own wallet is the configured oracle is not refused for it.
     status = await alkahest_preflight(
         AlkahestSettlementConfig(
-            enabled=True, oracle_gated=True, trusted_oracle_addresses=(WALLET,)
+            enabled=True, release_models=["oracle_gated"], trusted_oracle_addresses=(WALLET,)
         ),
         {
             "wallet": {"address": WALLET},
@@ -618,8 +623,7 @@ async def test_ready_alkahest_preflight_is_observational_and_public_only() -> No
     assert "never-report" not in projection
     assert "private-rpc" not in projection
     assert status.public_details == {
-        "oracle_gated": False,
-        "interruptible": False,
+        "release_models": ["recipient"],
         "chain": "ethereum_sepolia",
     }
 
@@ -683,7 +687,7 @@ async def test_a_disabled_section_names_what_would_stop_its_servicing(
 ) -> None:
     config = AlkahestSettlementConfig(
         enabled=False,
-        oracle_gated=True,
+        release_models=["oracle_gated"],
         trusted_oracle_addresses=["0x" + "cd" * 20],
     )
 
