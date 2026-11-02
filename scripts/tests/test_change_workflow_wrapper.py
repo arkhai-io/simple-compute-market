@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from change_workflow.common import StepError
+from change_workflow.harness import anchored
 from change_workflow.log import log_path, note_orchestrator, read_log, record_outcome
 from change_workflow.outcome import harness_schema, load_schema, outcome_problems
 from change_workflow.running import Run, live_runs, recorded_run, runs_directory
@@ -38,8 +39,9 @@ def test_a_run_is_headless_held_to_its_rules_and_given_the_schema(tmp_path: Path
     assert option(command, "--output-format") == "stream-json"
     assert "--verbose" in command
     assert json.loads(option(command, "--json-schema")) == harness_schema(load_schema())
-    assert option_rules(command, "--allowedTools") == list(rules.allow)
-    assert option_rules(command, "--disallowedTools") == list(rules.deny)
+    assert option_rules(command, "--allowedTools") == [anchored(r, tmp_path) for r in rules.allow]
+    assert option_rules(command, "--disallowedTools") == [anchored(r, tmp_path)
+                                                          for r in rules.deny]
     assert "--resume" not in command
     # Its own session, never one inherited from the environment it was started in.
     assert uuid.UUID(option(command, "--session-id")).version == 4
@@ -186,7 +188,8 @@ def test_planning_resumes_the_design_session(tmp_path: Path) -> None:
 
     assert option(claude.commands[1], "--resume") == "design-1"
     assert claude.commands[1][2] == f"/change-plan {CHANGE}"
-    assert option_rules(claude.commands[1], "--allowedTools") == list(load_steps()["plan"].allow)
+    assert option_rules(claude.commands[1], "--allowedTools") == [
+        anchored(r, tmp_path) for r in load_steps()["plan"].allow]
     assert (line["step"], line["session"]) == ("plan", "design-1")
 
 
@@ -237,7 +240,7 @@ def test_a_fresh_run_granted_rules_holds_them_for_that_run_alone(tmp_path: Path)
     line = wrapper.run("validate", CHANGE, granted=granted)
     rerun = wrapper.run("validate", CHANGE)
 
-    table = list(load_steps()["validate"].allow)
+    table = [anchored(r, tmp_path) for r in load_steps()["validate"].allow]
     assert option_rules(claude.commands[0], "--allowedTools") == [*table, *granted]
     assert line["granted"] == granted
     assert option_rules(claude.commands[1], "--allowedTools") == table

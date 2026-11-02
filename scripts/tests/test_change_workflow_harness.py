@@ -1,12 +1,14 @@
-"""Codex's plain output is condensed into a readable progress stream, and a run on
-Claude is marked as the wrapper's in its environment."""
+"""Codex's plain output is condensed into a readable progress stream, a run on
+Claude is marked as the wrapper's in its environment, and its file-tool rules are
+anchored at the checkout it starts in."""
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-from change_workflow.harness import UNATTENDED_RUN, Progress, run_claude
+from change_workflow.harness import UNATTENDED_RUN, Progress, anchored, claude_command, run_claude
+from change_workflow.steps import Model, StepRules
 
 
 def test_the_process_a_claude_run_starts_sees_it_is_the_wrappers(tmp_path: Path) -> None:
@@ -18,6 +20,38 @@ def test_the_process_a_claude_run_starts_sees_it_is_the_wrappers(tmp_path: Path)
     status = run_claude(command, tmp_path, said.append)
 
     assert (status, said) == (0, ["1\n"])
+
+
+def test_relative_file_rules_are_anchored_at_the_checkout(tmp_path: Path) -> None:
+    # A step that changes directory partway through must keep the files its table
+    # grants: a bare or ./ pattern would otherwise resolve against the new
+    # working directory.
+    root = tmp_path.resolve().as_posix()
+
+    assert anchored("Edit(openspec/changes/README.md)", tmp_path) == \
+        f"Edit(/{root}/openspec/changes/README.md)"
+    assert anchored("Write(./docs/**)", tmp_path) == f"Write(/{root}/docs/**)"
+    assert anchored("Read(**/*.py)", tmp_path) == f"Read(/{root}/**/*.py)"
+
+
+def test_other_rules_pass_unchanged(tmp_path: Path) -> None:
+    for rule in ("Read", "Grep", "Bash(make check-*)", "Edit(//etc/hosts)",
+                 "Edit(~/notes.md)", "Edit(/openspec/**)", "WebFetch(domain:github.com)"):
+        assert anchored(rule, tmp_path) == rule
+
+
+def test_the_command_anchors_table_granted_and_deny_rules(tmp_path: Path) -> None:
+    rules = StepRules(skill="change-validate", allow=("Read", "Edit(openspec/**)"),
+                      deny=("Edit(.claude/**)",))
+    model = Model(harness="claude", model="claude-sonnet-5-5", effort=None)
+    root = tmp_path.resolve().as_posix()
+
+    command = claude_command("go", rules, None, model, root=tmp_path,
+                             granted=("Edit(docs/x.md)",))
+
+    allowed = command[command.index("--allowedTools") + 1:command.index("--disallowedTools")]
+    assert allowed == ["Read", f"Edit(/{root}/openspec/**)", f"Edit(/{root}/docs/x.md)"]
+    assert command[command.index("--disallowedTools") + 1:] == [f"Edit(/{root}/.claude/**)"]
 
 
 CODEX_SESSION = """Reading additional input from stdin...
