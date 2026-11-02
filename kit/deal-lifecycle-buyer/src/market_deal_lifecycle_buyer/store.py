@@ -64,7 +64,11 @@ class FileEvidenceStore:
         envelope = captured.envelope
         payload = json.loads(captured.body) if captured.body else {}
         negotiation_id = payload.get("negotiation_id") if isinstance(payload, dict) else None
-        if not negotiation_id and envelope.operation == "negotiate_continue":
+        # Peer acknowledgements and empty-body reads identify the deal in the
+        # signed route context, not necessarily in their response payload.
+        if not negotiation_id and envelope.operation in {
+            "negotiate_continue", "lifecycle_peer", "lifecycle_buyer_read",
+        }:
             negotiation_id = envelope.resource
         with self._connection() as db:
             if not negotiation_id:
