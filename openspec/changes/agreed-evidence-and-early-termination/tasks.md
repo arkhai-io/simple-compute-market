@@ -604,6 +604,14 @@ paid-out money" (client side) and "Dispute writes are idempotent". Files: new
 `docs/development/ARCHITECTURE.toml` (`[[disputes]]` row).
 
 - [ ] 12.1 Vendor the published arkhai.mediation.v1 baseline (arkhai-payments main b98fed26; payments 3be127e4) with SOURCE provenance. At this same gate, wait for the proposed delivery_end revision before vendoring DeliveryEndClaim, SignedDeliveryEndClaim, Filing/Append.concurrence, ruling basis and GET /respondent. Include canonical frame and ed25519/eip191 vectors, both cause mappings, setup identification, pre-start/replay guards and netting. Candidate resources are kit-owned/unpublished, never live. Supply installed schema/model/vector metadata APIs and shared signing fixtures from one canonical source; both in-process fake and HTTP double consume them. Register [[disputes]] and verify built-wheel resources and architecture boundary. Baseline work may start now; final claim mapping and setup enablement wait for the revision.
+  - [x] Published baseline: exact schema/vectors, installed resources and transport models,
+        shared record-signing fixtures, and the dispute-kit registration. All eight
+        signed producer records round-trip and verify from the built wheel; model drift,
+        mypy, architecture, packaging, comment hygiene and strict OpenSpec checks pass.
+        No claim, concurrence, respondent or setup model has been invented.
+  - [ ] Delivery-end revision: waits for publication with both signature-scheme vectors;
+        12.3–12.5 remain gated.
+
 - [ ] 12.2 Implement the adapter and client: file, append and read at the Agreement's origin with
       credentials bound by identity; build and validate free-form requests; return the authority's answers, per-part
       `held` / `not_held`, errors and `pending` as lifecycle outcomes; verify record entries.

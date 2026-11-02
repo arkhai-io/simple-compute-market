@@ -10,7 +10,10 @@ version = 1
 
 # Dispute interfaces register their identity, kit and vocabulary tokens just
 # like mechanisms. A dispute kit has kind "dispute" and no mechanism scope.
-disputes = []
+[[disputes]]
+name = "arkhai-mediation"
+kit = "arkhai-kit-arkhai-mediation"
+tokens = ["arkhai.mediation.v1"]
 
 # Lowest first. A package may depend on its own layer or a lower one.
 [layers]

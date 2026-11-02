@@ -1,0 +1,22 @@
+{
+  "interface": "arkhai.mediation.v1",
+  "published": true,
+  "revision": "b98fed26ef373045124b3e89bf14c7c1552b46bd",
+  "payments_revision": "3be127e4",
+  "files": {
+    "mediation.schema.json": {
+      "source": "schema/mediation.schema.json",
+      "sha256": "f69d05d4ceef54170a3ff52f9de482a5d0dbcf0be2b55c86c9f1398103eb170e"
+    },
+    "mediation.vectors.json": {
+      "source": "test-vectors/mediation.json",
+      "sha256": "9e5f918df7098ceb5dbe127522ef6355c876e77efb8178c6a4cb8850e05e1ae0"
+    }
+  },
+  "capabilities": [
+    "effects",
+    "file",
+    "append",
+    "read_record"
+  ]
+}

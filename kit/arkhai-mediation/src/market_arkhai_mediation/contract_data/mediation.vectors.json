@@ -1,0 +1,1550 @@
+{
+  "protocol": "arkhai.mediation.v1",
+  "keys": {
+    "mediation_seed_hex": "0707070707070707070707070707070707070707070707070707070707070707",
+    "record_key": "ed25519:6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+    "identity": {
+      "scheme": "ed25519",
+      "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+    }
+  },
+  "description": {
+    "dispute": {
+      "interface": "arkhai.mediation.v1",
+      "origin": "https://mediation.example",
+      "account": "33333333-3333-4333-8333-333333333333",
+      "record_key": "ed25519:6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "params": {
+        "procedure": "optimistic"
+      }
+    },
+    "payment_mechanisms": [
+      "arkhai.payments.v1"
+    ],
+    "minimum_dispute_window_seconds": 1209600,
+    "minimum_case_hold_max_seconds": null,
+    "filing_fee": "0",
+    "filing_deposit": "0",
+    "case_concurrency": {
+      "repeated_cases": "allowed",
+      "concurrent_cases": "independent",
+      "extensions": "per_case",
+      "case_hold_release": "after_all_case_extensions_lifted",
+      "rulings": "net_prior_effects"
+    },
+    "case_dismissal": {
+      "automatic": "all_parts_definitively_not_held_at_filing",
+      "ungrounded": "operator_may_dismiss",
+      "inactivity_timeout_seconds": null,
+      "operator_response_max_seconds": null
+    },
+    "record_retention": {
+      "record_key": "valid",
+      "origin": "reachable",
+      "through": "deal_lifetime_and_dispute_window_and_any_open_case"
+    },
+    "default_outcome": null,
+    "agreement_projection": "AgreementProjection"
+  },
+  "mappings": [
+    {
+      "name": "timed-once-and-rate",
+      "agreement": {
+        "start_utc": "2027-01-15T08:00:00Z",
+        "duration_seconds": 3600,
+        "settlement": {
+          "mechanism": "arkhai.payments.v1",
+          "params": {
+            "adjudication": {
+              "version": 1,
+              "dispute": {
+                "interface": "arkhai.mediation.v1",
+                "origin": "https://mediation.example",
+                "account": "33333333-3333-4333-8333-333333333333",
+                "record_key": "ed25519:6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+                "params": {
+                  "procedure": "optimistic"
+                }
+              },
+              "dispute_window_seconds": 1209600,
+              "case_hold_max_seconds": null
+            }
+          }
+        }
+      },
+      "mandate": {
+        "from": "11111111-1111-4111-8111-111111111111",
+        "to": "22222222-2222-4222-8222-222222222222",
+        "deal": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
+        "fee": {
+          "bps": 250
+        },
+        "nonce": "mediation-vector-1",
+        "expires": 1800000000,
+        "parts": [
+          {
+            "kind": "once",
+            "asset": "USD/6",
+            "amount": "9007199254740993",
+            "end": {
+              "at": 1800003600,
+              "partialPeriod": "charged"
+            },
+            "hold": {
+              "afterStop": "PT1209600S"
+            },
+            "maxHoldExtension": null,
+            "authorities": {
+              "stop": [
+                {
+                  "account": "33333333-3333-4333-8333-333333333333",
+                  "notice": "PT0S",
+                  "partialPeriod": "chosen"
+                }
+              ],
+              "reverse": [
+                "22222222-2222-4222-8222-222222222222",
+                "33333333-3333-4333-8333-333333333333"
+              ],
+              "extend": [
+                "33333333-3333-4333-8333-333333333333"
+              ]
+            }
+          },
+          {
+            "kind": "rate",
+            "asset": "USD/6",
+            "amount": "2",
+            "period": "PT1S",
+            "reserveAhead": "PT5M",
+            "end": {
+              "at": 1800003600,
+              "partialPeriod": "charged"
+            },
+            "hold": {
+              "afterStop": "P14D"
+            },
+            "maxHoldExtension": null,
+            "authorities": {
+              "stop": [
+                {
+                  "account": "33333333-3333-4333-8333-333333333333",
+                  "notice": "PT0S",
+                  "partialPeriod": "chosen"
+                },
+                {
+                  "account": "11111111-1111-4111-8111-111111111111",
+                  "notice": "PT30S",
+                  "partialPeriod": "charged"
+                }
+              ],
+              "reverse": [
+                "33333333-3333-4333-8333-333333333333"
+              ],
+              "extend": [
+                "33333333-3333-4333-8333-333333333333"
+              ],
+              "start": [
+                "22222222-2222-4222-8222-222222222222"
+              ]
+            }
+          }
+        ]
+      },
+      "result": {
+        "mapping": {
+          "status": "mapped",
+          "expected": {
+            "end": 1800003600,
+            "hold": {
+              "afterStop": "PT1209600S"
+            },
+            "maxHoldExtension": null,
+            "authorities": {
+              "stop": [
+                {
+                  "account": "33333333-3333-4333-8333-333333333333",
+                  "notice": "PT0S",
+                  "partialPeriod": "chosen"
+                }
+              ],
+              "reverse": [
+                "33333333-3333-4333-8333-333333333333"
+              ],
+              "extend": [
+                "33333333-3333-4333-8333-333333333333"
+              ]
+            }
+          }
+        },
+        "mismatches": []
+      }
+    },
+    {
+      "name": "setup-once-end-at-agreement-start",
+      "agreement": {
+        "start_utc": "2027-01-15T08:00:00Z",
+        "duration_seconds": 3600,
+        "settlement": {
+          "mechanism": "arkhai.payments.v1",
+          "params": {
+            "adjudication": {
+              "version": 1,
+              "dispute": {
+                "interface": "arkhai.mediation.v1",
+                "origin": "https://mediation.example",
+                "account": "33333333-3333-4333-8333-333333333333",
+                "record_key": "ed25519:6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+                "params": {
+                  "procedure": "optimistic"
+                }
+              },
+              "dispute_window_seconds": 1209600,
+              "case_hold_max_seconds": null
+            }
+          }
+        }
+      },
+      "mandate": {
+        "from": "11111111-1111-4111-8111-111111111111",
+        "to": "22222222-2222-4222-8222-222222222222",
+        "deal": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
+        "fee": {
+          "bps": 250
+        },
+        "nonce": "mediation-vector-1",
+        "expires": 1800000000,
+        "parts": [
+          {
+            "kind": "once",
+            "asset": "USD/6",
+            "amount": "9007199254740993",
+            "end": {
+              "at": 1800000000,
+              "partialPeriod": "charged"
+            },
+            "hold": {
+              "afterStop": "PT1209600S"
+            },
+            "maxHoldExtension": null,
+            "authorities": {
+              "stop": [
+                {
+                  "account": "33333333-3333-4333-8333-333333333333",
+                  "notice": "PT0S",
+                  "partialPeriod": "chosen"
+                }
+              ],
+              "reverse": [
+                "22222222-2222-4222-8222-222222222222",
+                "33333333-3333-4333-8333-333333333333"
+              ],
+              "extend": [
+                "33333333-3333-4333-8333-333333333333"
+              ]
+            }
+          },
+          {
+            "kind": "rate",
+            "asset": "USD/6",
+            "amount": "2",
+            "period": "PT1S",
+            "reserveAhead": "PT5M",
+            "end": {
+              "at": 1800003600,
+              "partialPeriod": "charged"
+            },
+            "hold": {
+              "afterStop": "P14D"
+            },
+            "maxHoldExtension": null,
+            "authorities": {
+              "stop": [
+                {
+                  "account": "33333333-3333-4333-8333-333333333333",
+                  "notice": "PT0S",
+                  "partialPeriod": "chosen"
+                },
+                {
+                  "account": "11111111-1111-4111-8111-111111111111",
+                  "notice": "PT30S",
+                  "partialPeriod": "charged"
+                }
+              ],
+              "reverse": [
+                "33333333-3333-4333-8333-333333333333"
+              ],
+              "extend": [
+                "33333333-3333-4333-8333-333333333333"
+              ],
+              "start": [
+                "22222222-2222-4222-8222-222222222222"
+              ]
+            }
+          }
+        ]
+      },
+      "result": {
+        "mapping": {
+          "status": "mapped",
+          "expected": {
+            "end": 1800003600,
+            "hold": {
+              "afterStop": "PT1209600S"
+            },
+            "maxHoldExtension": null,
+            "authorities": {
+              "stop": [
+                {
+                  "account": "33333333-3333-4333-8333-333333333333",
+                  "notice": "PT0S",
+                  "partialPeriod": "chosen"
+                }
+              ],
+              "reverse": [
+                "33333333-3333-4333-8333-333333333333"
+              ],
+              "extend": [
+                "33333333-3333-4333-8333-333333333333"
+              ]
+            }
+          }
+        },
+        "mismatches": []
+      }
+    },
+    {
+      "name": "early-termination-maximum-and-finite-cap",
+      "agreement": {
+        "start_utc": "2027-01-15T08:00:00Z",
+        "settlement": {
+          "mechanism": "arkhai.payments.v1",
+          "params": {
+            "adjudication": {
+              "version": 1,
+              "dispute": {
+                "interface": "arkhai.mediation.v1",
+                "origin": "https://mediation.example",
+                "account": "33333333-3333-4333-8333-333333333333",
+                "record_key": "ed25519:6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+                "params": {
+                  "procedure": "optimistic"
+                }
+              },
+              "dispute_window_seconds": 1209600,
+              "case_hold_max_seconds": 86400
+            },
+            "early_termination": {
+              "version": 1,
+              "max_term_seconds": 7200,
+              "premature_stop_penalty": "1500000"
+            }
+          }
+        }
+      },
+      "result": {
+        "status": "mapped",
+        "expected": {
+          "end": 1800007200,
+          "hold": {
+            "afterStop": "PT1209600S"
+          },
+          "maxHoldExtension": "PT86400S",
+          "authorities": {
+            "stop": [
+              {
+                "account": "33333333-3333-4333-8333-333333333333",
+                "notice": "PT0S",
+                "partialPeriod": "chosen"
+              }
+            ],
+            "reverse": [
+              "33333333-3333-4333-8333-333333333333"
+            ],
+            "extend": [
+              "33333333-3333-4333-8333-333333333333"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "unreadable-nontimed-terms",
+      "agreement": {
+        "settlement": {
+          "mechanism": "arkhai.payments.v1",
+          "params": {
+            "adjudication": {
+              "version": 1,
+              "dispute": {
+                "interface": "arkhai.mediation.v1",
+                "origin": "https://mediation.example",
+                "account": "33333333-3333-4333-8333-333333333333",
+                "record_key": "ed25519:6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+                "params": {
+                  "procedure": "optimistic"
+                }
+              },
+              "dispute_window_seconds": 1209600,
+              "case_hold_max_seconds": null
+            }
+          }
+        }
+      },
+      "result": {
+        "status": "unreadable",
+        "issues": [
+          {
+            "path": "duration_seconds",
+            "reason": "No readable duration_seconds or early_termination.max_term_seconds"
+          }
+        ]
+      }
+    },
+    {
+      "name": "mismatches-are-evidence",
+      "agreement": {
+        "start_utc": "2027-01-15T08:00:00Z",
+        "duration_seconds": 3600,
+        "settlement": {
+          "mechanism": "arkhai.payments.v1",
+          "params": {
+            "adjudication": {
+              "version": 1,
+              "dispute": {
+                "interface": "arkhai.mediation.v1",
+                "origin": "https://mediation.example",
+                "account": "33333333-3333-4333-8333-333333333333",
+                "record_key": "ed25519:6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+                "params": {
+                  "procedure": "optimistic"
+                }
+              },
+              "dispute_window_seconds": 1209600,
+              "case_hold_max_seconds": null
+            }
+          }
+        }
+      },
+      "mandate": {
+        "from": "11111111-1111-4111-8111-111111111111",
+        "to": "22222222-2222-4222-8222-222222222222",
+        "deal": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
+        "fee": {
+          "bps": 250
+        },
+        "nonce": "mediation-vector-1",
+        "expires": 1800000000,
+        "parts": [
+          {
+            "kind": "once",
+            "asset": "USD/6",
+            "amount": "9007199254740993",
+            "hold": {
+              "for": "P14D"
+            },
+            "maxHoldExtension": null,
+            "authorities": {
+              "stop": [
+                {
+                  "account": "33333333-3333-4333-8333-333333333333",
+                  "notice": "PT0S",
+                  "partialPeriod": "chosen"
+                }
+              ],
+              "reverse": [
+                "22222222-2222-4222-8222-222222222222",
+                "33333333-3333-4333-8333-333333333333"
+              ],
+              "extend": [
+                "33333333-3333-4333-8333-333333333333"
+              ]
+            }
+          },
+          {
+            "kind": "rate",
+            "asset": "USD/6",
+            "amount": "2",
+            "period": "PT1S",
+            "reserveAhead": "PT5M",
+            "end": {
+              "at": 1800003600,
+              "partialPeriod": "charged"
+            },
+            "hold": {
+              "afterStop": "P14D"
+            },
+            "maxHoldExtension": null,
+            "authorities": {
+              "stop": [
+                {
+                  "account": "33333333-3333-4333-8333-333333333333",
+                  "notice": "PT1S",
+                  "partialPeriod": "charged"
+                }
+              ],
+              "reverse": [
+                "33333333-3333-4333-8333-333333333333"
+              ],
+              "extend": [
+                "22222222-2222-4222-8222-222222222222"
+              ],
+              "start": [
+                "22222222-2222-4222-8222-222222222222"
+              ]
+            }
+          }
+        ]
+      },
+      "result": {
+        "mapping": {
+          "status": "mapped",
+          "expected": {
+            "end": 1800003600,
+            "hold": {
+              "afterStop": "PT1209600S"
+            },
+            "maxHoldExtension": null,
+            "authorities": {
+              "stop": [
+                {
+                  "account": "33333333-3333-4333-8333-333333333333",
+                  "notice": "PT0S",
+                  "partialPeriod": "chosen"
+                }
+              ],
+              "reverse": [
+                "33333333-3333-4333-8333-333333333333"
+              ],
+              "extend": [
+                "33333333-3333-4333-8333-333333333333"
+              ]
+            }
+          }
+        },
+        "mismatches": [
+          {
+            "path": "parts.0.end",
+            "expected": {
+              "atMost": 1800003600
+            },
+            "actual": null
+          },
+          {
+            "path": "parts.0.hold",
+            "expected": {
+              "afterStop": "PT1209600S"
+            },
+            "actual": {
+              "for": "P14D"
+            }
+          },
+          {
+            "path": "parts.1.authorities.stop",
+            "expected": [
+              {
+                "account": "33333333-3333-4333-8333-333333333333",
+                "notice": "PT0S",
+                "partialPeriod": "chosen"
+              }
+            ],
+            "actual": [
+              {
+                "account": "33333333-3333-4333-8333-333333333333",
+                "notice": "PT1S",
+                "partialPeriod": "charged"
+              }
+            ]
+          },
+          {
+            "path": "parts.1.authorities.extend",
+            "expected": [
+              "33333333-3333-4333-8333-333333333333"
+            ],
+            "actual": [
+              "22222222-2222-4222-8222-222222222222"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "filing": {
+    "idempotency_key": "filing-vector-1",
+    "request": {
+      "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+      "agreement": {
+        "start_utc": "2027-01-15T08:00:00Z",
+        "duration_seconds": 3600,
+        "settlement": {
+          "mechanism": "arkhai.payments.v1",
+          "params": {
+            "adjudication": {
+              "version": 1,
+              "dispute": {
+                "interface": "arkhai.mediation.v1",
+                "origin": "https://mediation.example",
+                "account": "33333333-3333-4333-8333-333333333333",
+                "record_key": "ed25519:6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+                "params": {
+                  "procedure": "optimistic"
+                }
+              },
+              "dispute_window_seconds": 1209600,
+              "case_hold_max_seconds": null
+            }
+          }
+        }
+      },
+      "request": {
+        "kind": "exceptional_end",
+        "at": 1800001800
+      },
+      "claim": "End delivery with the agreed self-penalty.",
+      "items": [
+        {
+          "kind": "statement",
+          "producer": "22222222-2222-4222-8222-222222222222",
+          "at": 1800001800,
+          "sha256": "d66d5644df6a47c417797c7ac5b11ef31d7dc8c88c3eca6c82fcfb115ab5b1e6",
+          "bytes": "U2VsbGVyIHN0YXRlbWVudDogaGFyZHdhcmUgZmFpbGVkLgo"
+        }
+      ]
+    },
+    "answer": {
+      "status": "accepted",
+      "case": {
+        "case_ref": "case-vector-1",
+        "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+        "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
+        "state": "open",
+        "parts": [
+          {
+            "part": 0,
+            "status": "held",
+            "extension_ref": 1
+          },
+          {
+            "part": 1,
+            "status": "held",
+            "extension_ref": 2
+          }
+        ]
+      }
+    }
+  },
+  "append": {
+    "idempotency_key": "append-vector-1",
+    "request": {
+      "case_ref": "case-vector-1",
+      "items": [
+        {
+          "kind": "statement",
+          "producer": "22222222-2222-4222-8222-222222222222",
+          "at": 1800001800,
+          "sha256": "d66d5644df6a47c417797c7ac5b11ef31d7dc8c88c3eca6c82fcfb115ab5b1e6",
+          "bytes": "U2VsbGVyIHN0YXRlbWVudDogaGFyZHdhcmUgZmFpbGVkLgo"
+        }
+      ]
+    }
+  },
+  "buyer_end": {
+    "filing": {
+      "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+      "agreement": {
+        "start_utc": "2027-01-15T08:00:00Z",
+        "duration_seconds": 3600,
+        "settlement": {
+          "mechanism": "arkhai.payments.v1",
+          "params": {
+            "adjudication": {
+              "version": 1,
+              "dispute": {
+                "interface": "arkhai.mediation.v1",
+                "origin": "https://mediation.example",
+                "account": "33333333-3333-4333-8333-333333333333",
+                "record_key": "ed25519:6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+                "params": {
+                  "procedure": "optimistic"
+                }
+              },
+              "dispute_window_seconds": 1209600,
+              "case_hold_max_seconds": null
+            }
+          }
+        }
+      },
+      "request": {
+        "kind": "buyer_end",
+        "at": 1800001800
+      },
+      "claim": "Buyer ended delivery.",
+      "items": []
+    },
+    "append_actor": "22222222-2222-4222-8222-222222222222",
+    "append": {
+      "case_ref": "case-vector-2",
+      "items": [
+        {
+          "kind": "arkhai.mediation.end_acknowledgement.v1",
+          "producer": "22222222-2222-4222-8222-222222222222",
+          "at": 1800001800,
+          "sha256": "41b3a8ccbe51bf79da2d9d39158d8027fffd14adfb56aa2e6e317a16bc3d97b2",
+          "bytes": "eyJhdCI6MTgwMDAwMTc5OX0"
+        }
+      ]
+    },
+    "routing": "operator_triage",
+    "default_effects": [
+      {
+        "kind": "end_delivery",
+        "at": 1800001800
+      },
+      {
+        "kind": "stop",
+        "part": 1,
+        "at": 1800001830,
+        "partialPeriod": "charged"
+      }
+    ]
+  },
+  "records": [
+    {
+      "message": "0000001a61726b6861692e6d6564696174696f6e2e7265636f72642e76310000004035663437376533336566666664616631316539316564323333353630333066393233616530643730663530376666363461323131623361633563636335626432",
+      "signed": {
+        "entry": {
+          "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
+          "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+          "case_ref": "case-vector-1",
+          "at": 1800001800,
+          "parts": [
+            {
+              "part": 0,
+              "status": "held",
+              "extension_ref": 1
+            },
+            {
+              "part": 1,
+              "status": "held",
+              "extension_ref": 2
+            }
+          ],
+          "issuer": {
+            "scheme": "ed25519",
+            "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+          },
+          "kind": "filed",
+          "sequence": 1,
+          "record_ref": "record-vector-1",
+          "actor": "22222222-2222-4222-8222-222222222222",
+          "filing": {
+            "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+            "agreement": {
+              "start_utc": "2027-01-15T08:00:00Z",
+              "duration_seconds": 3600,
+              "settlement": {
+                "mechanism": "arkhai.payments.v1",
+                "params": {
+                  "adjudication": {
+                    "version": 1,
+                    "dispute": {
+                      "interface": "arkhai.mediation.v1",
+                      "origin": "https://mediation.example",
+                      "account": "33333333-3333-4333-8333-333333333333",
+                      "record_key": "ed25519:6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+                      "params": {
+                        "procedure": "optimistic"
+                      }
+                    },
+                    "dispute_window_seconds": 1209600,
+                    "case_hold_max_seconds": null
+                  }
+                }
+              }
+            },
+            "request": {
+              "kind": "exceptional_end",
+              "at": 1800001800
+            },
+            "claim": "End delivery with the agreed self-penalty.",
+            "items": [
+              {
+                "kind": "statement",
+                "producer": "22222222-2222-4222-8222-222222222222",
+                "at": 1800001800,
+                "sha256": "d66d5644df6a47c417797c7ac5b11ef31d7dc8c88c3eca6c82fcfb115ab5b1e6",
+                "bytes": "U2VsbGVyIHN0YXRlbWVudDogaGFyZHdhcmUgZmFpbGVkLgo"
+              }
+            ]
+          }
+        },
+        "proof": {
+          "scheme": "ed25519",
+          "value": "3AK_1N9ELwJStWK3PtpHgjvn6rYH6WmvzEKyEgZcAYg2CHRNsXibpGRu36JRoKSTS14T1LELs94GtWUYY2PvDQ"
+        }
+      }
+    },
+    {
+      "message": "0000001a61726b6861692e6d6564696174696f6e2e7265636f72642e76310000004030626162613032323639373665363739393661306633616563383438383639653062303062373739333432316639303932303031643466343234346534643561",
+      "signed": {
+        "entry": {
+          "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
+          "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+          "case_ref": "case-vector-1",
+          "at": 1800001800,
+          "parts": [
+            {
+              "part": 0,
+              "status": "held",
+              "extension_ref": 1
+            },
+            {
+              "part": 1,
+              "status": "held",
+              "extension_ref": 2
+            }
+          ],
+          "issuer": {
+            "scheme": "ed25519",
+            "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+          },
+          "kind": "appended",
+          "sequence": 2,
+          "record_ref": "record-vector-2",
+          "actor": "11111111-1111-4111-8111-111111111111",
+          "items": [
+            {
+              "kind": "statement",
+              "producer": "22222222-2222-4222-8222-222222222222",
+              "at": 1800001800,
+              "sha256": "d66d5644df6a47c417797c7ac5b11ef31d7dc8c88c3eca6c82fcfb115ab5b1e6",
+              "bytes": "U2VsbGVyIHN0YXRlbWVudDogaGFyZHdhcmUgZmFpbGVkLgo"
+            }
+          ]
+        },
+        "proof": {
+          "scheme": "ed25519",
+          "value": "0zdWN757NIvhlIMJG7UMYMo-iAg4IWT_0c6D9Zw325eP6thBs15-_okmXjc1464AAdCs2zC60sMgOIUDG0-nAA"
+        }
+      }
+    },
+    {
+      "message": "0000001a61726b6861692e6d6564696174696f6e2e7265636f72642e76310000004064666131383632613034396436656330333431396236343364613131636366343832336338366530353931383136613433353664653032643433363464643738",
+      "signed": {
+        "entry": {
+          "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
+          "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+          "case_ref": "case-vector-1",
+          "at": 1800001800,
+          "parts": [
+            {
+              "part": 0,
+              "status": "held",
+              "extension_ref": 1
+            },
+            {
+              "part": 1,
+              "status": "held",
+              "extension_ref": 2
+            }
+          ],
+          "issuer": {
+            "scheme": "ed25519",
+            "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+          },
+          "kind": "ruled",
+          "sequence": 3,
+          "record_ref": "record-vector-3",
+          "actor": "44444444-4444-4444-8444-444444444444",
+          "outcome": [
+            {
+              "id": "case-vector-1:reverse:0",
+              "effect": {
+                "kind": "reverse",
+                "part": 0,
+                "amount": "4503599627370497"
+              },
+              "state": "prepared"
+            },
+            {
+              "id": "case-vector-1:stop:1",
+              "effect": {
+                "kind": "stop",
+                "part": 1,
+                "at": 1800001800,
+                "partialPeriod": "returned"
+              },
+              "state": "prepared"
+            },
+            {
+              "id": "case-vector-1:delivery",
+              "effect": {
+                "kind": "end_delivery",
+                "at": 1800001800
+              },
+              "state": "prepared"
+            },
+            {
+              "id": "case-vector-1:penalty",
+              "effect": {
+                "kind": "penalty",
+                "amount": "1500000"
+              },
+              "state": "prepared"
+            }
+          ]
+        },
+        "proof": {
+          "scheme": "ed25519",
+          "value": "IOW7df7wiMZdmS5VZDP3fIiAmA0sU_kj5eghT4wo7gVTJz1Z5qsz07fnJzfSN_skpCucqt9m0MThsazZnClmBg"
+        }
+      }
+    },
+    {
+      "message": "0000001a61726b6861692e6d6564696174696f6e2e7265636f72642e76310000004037376537316235653037313737333031353537393333666335313633326331313061393865643230383064363532666132303965656234346465303837336138",
+      "signed": {
+        "entry": {
+          "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
+          "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+          "case_ref": "case-vector-1",
+          "at": 1800001800,
+          "parts": [
+            {
+              "part": 0,
+              "status": "held",
+              "extension_ref": 1
+            },
+            {
+              "part": 1,
+              "status": "held",
+              "extension_ref": 2
+            }
+          ],
+          "issuer": {
+            "scheme": "ed25519",
+            "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+          },
+          "kind": "closed",
+          "sequence": 4,
+          "record_ref": "record-vector-4",
+          "actor": "33333333-3333-4333-8333-333333333333",
+          "reason": "ruled",
+          "outcome": [
+            {
+              "id": "case-vector-1:reverse:0",
+              "effect": {
+                "kind": "reverse",
+                "part": 0,
+                "amount": "4503599627370497"
+              },
+              "state": "applied"
+            },
+            {
+              "id": "case-vector-1:stop:1",
+              "effect": {
+                "kind": "stop",
+                "part": 1,
+                "at": 1800001800,
+                "partialPeriod": "returned"
+              },
+              "state": "applied"
+            },
+            {
+              "id": "case-vector-1:delivery",
+              "effect": {
+                "kind": "end_delivery",
+                "at": 1800001800
+              },
+              "state": "applied"
+            },
+            {
+              "id": "case-vector-1:penalty",
+              "effect": {
+                "kind": "penalty",
+                "amount": "1500000"
+              },
+              "state": "applied"
+            }
+          ]
+        },
+        "proof": {
+          "scheme": "ed25519",
+          "value": "EDqrVkIQvorrOr0tYTOKHiaTzf2EFpZ12zx_Il9IGkAJIaqdpVimUdbKzKaAeJXOAm4GYrRJp9eGN1CmcWoRBQ"
+        }
+      }
+    },
+    {
+      "message": "0000001a61726b6861692e6d6564696174696f6e2e7265636f72642e76310000004037383839643261616636353065653562623137346133666135343636363663326637346137376664353761383666346532343134653937623633613532313062",
+      "signed": {
+        "entry": {
+          "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
+          "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+          "case_ref": "case-vector-2",
+          "at": 1800001800,
+          "parts": [
+            {
+              "part": 0,
+              "status": "not_held",
+              "reason": "paid_out"
+            },
+            {
+              "part": 1,
+              "status": "held",
+              "extension_ref": 3
+            }
+          ],
+          "issuer": {
+            "scheme": "ed25519",
+            "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+          },
+          "kind": "filed",
+          "sequence": 5,
+          "record_ref": "record-vector-5",
+          "actor": "11111111-1111-4111-8111-111111111111",
+          "filing": {
+            "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+            "agreement": {
+              "start_utc": "2027-01-15T08:00:00Z",
+              "duration_seconds": 3600,
+              "settlement": {
+                "mechanism": "arkhai.payments.v1",
+                "params": {
+                  "adjudication": {
+                    "version": 1,
+                    "dispute": {
+                      "interface": "arkhai.mediation.v1",
+                      "origin": "https://mediation.example",
+                      "account": "33333333-3333-4333-8333-333333333333",
+                      "record_key": "ed25519:6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+                      "params": {
+                        "procedure": "optimistic"
+                      }
+                    },
+                    "dispute_window_seconds": 1209600,
+                    "case_hold_max_seconds": null
+                  }
+                }
+              }
+            },
+            "request": {
+              "kind": "buyer_end",
+              "at": 1800001800
+            },
+            "claim": "Buyer ended delivery.",
+            "items": []
+          }
+        },
+        "proof": {
+          "scheme": "ed25519",
+          "value": "z3JoyXDk1p_kGDcANCrdhOAkGHhwp6rZkPfySEoalzpkgRoW4L-Jz4TuFaFLNkMwOs4FkMBl4laLo-EDT-qECg"
+        }
+      }
+    },
+    {
+      "message": "0000001a61726b6861692e6d6564696174696f6e2e7265636f72642e76310000004035333263633561323334636666363461656638346565653031653739393533363735356661386535366335366365363261613431363039623433313130666533",
+      "signed": {
+        "entry": {
+          "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
+          "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+          "case_ref": "case-vector-2",
+          "at": 1800001800,
+          "parts": [
+            {
+              "part": 0,
+              "status": "not_held",
+              "reason": "paid_out"
+            },
+            {
+              "part": 1,
+              "status": "held",
+              "extension_ref": 3
+            }
+          ],
+          "issuer": {
+            "scheme": "ed25519",
+            "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+          },
+          "kind": "appended",
+          "sequence": 6,
+          "record_ref": "record-vector-6",
+          "actor": "22222222-2222-4222-8222-222222222222",
+          "items": [
+            {
+              "kind": "arkhai.mediation.end_acknowledgement.v1",
+              "producer": "22222222-2222-4222-8222-222222222222",
+              "at": 1800001800,
+              "sha256": "41b3a8ccbe51bf79da2d9d39158d8027fffd14adfb56aa2e6e317a16bc3d97b2",
+              "bytes": "eyJhdCI6MTgwMDAwMTc5OX0"
+            }
+          ]
+        },
+        "proof": {
+          "scheme": "ed25519",
+          "value": "l712YFqjP0yi-MErw4YhEWcBCFiR-IRufvTp5hZjmBl3lyEZdM52DkV2ED6BYXA4YR-3zCns2xtJe8gzP-F5DQ"
+        }
+      }
+    },
+    {
+      "message": "0000001a61726b6861692e6d6564696174696f6e2e7265636f72642e76310000004036663161383335376239663862356637616265323562376261663366616531343966613235356537383330323062323362643839383838333237343031383033",
+      "signed": {
+        "entry": {
+          "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
+          "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+          "case_ref": "case-vector-3",
+          "at": 1800001800,
+          "parts": [
+            {
+              "part": 0,
+              "status": "not_held",
+              "reason": "paid_out"
+            },
+            {
+              "part": 1,
+              "status": "not_held",
+              "reason": "reversed"
+            }
+          ],
+          "issuer": {
+            "scheme": "ed25519",
+            "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+          },
+          "kind": "filed",
+          "sequence": 7,
+          "record_ref": "record-vector-7",
+          "actor": "11111111-1111-4111-8111-111111111111",
+          "filing": {
+            "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+            "agreement": {
+              "start_utc": "2027-01-15T08:00:00Z",
+              "duration_seconds": 3600,
+              "settlement": {
+                "mechanism": "arkhai.payments.v1",
+                "params": {
+                  "adjudication": {
+                    "version": 1,
+                    "dispute": {
+                      "interface": "arkhai.mediation.v1",
+                      "origin": "https://mediation.example",
+                      "account": "33333333-3333-4333-8333-333333333333",
+                      "record_key": "ed25519:6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+                      "params": {
+                        "procedure": "optimistic"
+                      }
+                    },
+                    "dispute_window_seconds": 1209600,
+                    "case_hold_max_seconds": null
+                  }
+                }
+              }
+            },
+            "request": {
+              "kind": "buyer_end",
+              "at": 1800001800
+            },
+            "claim": "Buyer ended delivery.",
+            "items": []
+          }
+        },
+        "proof": {
+          "scheme": "ed25519",
+          "value": "4l-ph052KQr0SZFxTMQq944UY-sI711M13S1r209YAl6PBIWKc9FacJxIUWENuAt6eQpkYcUhr2pGAbllLL4Bw"
+        }
+      }
+    },
+    {
+      "message": "0000001a61726b6861692e6d6564696174696f6e2e7265636f72642e76310000004062663438666563633264353438653363363661323037633961623566316263343436363339303030643931626362333366646366376265366461343335613064",
+      "signed": {
+        "entry": {
+          "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
+          "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+          "case_ref": "case-vector-3",
+          "at": 1800001800,
+          "parts": [
+            {
+              "part": 0,
+              "status": "not_held",
+              "reason": "paid_out"
+            },
+            {
+              "part": 1,
+              "status": "not_held",
+              "reason": "reversed"
+            }
+          ],
+          "issuer": {
+            "scheme": "ed25519",
+            "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+          },
+          "kind": "closed",
+          "sequence": 8,
+          "record_ref": "record-vector-8",
+          "actor": "33333333-3333-4333-8333-333333333333",
+          "reason": "dismissed",
+          "dismissal_reason": "nothing_held",
+          "outcome": []
+        },
+        "proof": {
+          "scheme": "ed25519",
+          "value": "Zz2liNLQl4DC9k91C6FqliMjYpApXMvW78LDT7d7V2hfttks9RXjUHLCNFSzwOrBPkD6nbBr3iicgQ9uGgjSBQ"
+        }
+      }
+    }
+  ],
+  "read": {
+    "request": {
+      "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
+      "after": 2,
+      "limit": 100
+    },
+    "page": {
+      "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
+      "entries": [
+        {
+          "entry": {
+            "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
+            "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+            "case_ref": "case-vector-1",
+            "sequence": 3,
+            "record_ref": "record-vector-3",
+            "actor": "44444444-4444-4444-8444-444444444444",
+            "at": 1800001800,
+            "parts": [
+              {
+                "part": 0,
+                "status": "held",
+                "extension_ref": 1
+              },
+              {
+                "part": 1,
+                "status": "held",
+                "extension_ref": 2
+              }
+            ],
+            "issuer": {
+              "scheme": "ed25519",
+              "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+            },
+            "kind": "ruled",
+            "outcome": [
+              {
+                "id": "case-vector-1:reverse:0",
+                "effect": {
+                  "kind": "reverse",
+                  "part": 0,
+                  "amount": "4503599627370497"
+                },
+                "state": "prepared"
+              },
+              {
+                "id": "case-vector-1:stop:1",
+                "effect": {
+                  "kind": "stop",
+                  "part": 1,
+                  "at": 1800001800,
+                  "partialPeriod": "returned"
+                },
+                "state": "prepared"
+              },
+              {
+                "id": "case-vector-1:delivery",
+                "effect": {
+                  "kind": "end_delivery",
+                  "at": 1800001800
+                },
+                "state": "prepared"
+              },
+              {
+                "id": "case-vector-1:penalty",
+                "effect": {
+                  "kind": "penalty",
+                  "amount": "1500000"
+                },
+                "state": "prepared"
+              }
+            ]
+          },
+          "proof": {
+            "scheme": "ed25519",
+            "value": "IOW7df7wiMZdmS5VZDP3fIiAmA0sU_kj5eghT4wo7gVTJz1Z5qsz07fnJzfSN_skpCucqt9m0MThsazZnClmBg"
+          }
+        },
+        {
+          "entry": {
+            "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
+            "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+            "case_ref": "case-vector-1",
+            "sequence": 4,
+            "record_ref": "record-vector-4",
+            "actor": "33333333-3333-4333-8333-333333333333",
+            "at": 1800001800,
+            "parts": [
+              {
+                "part": 0,
+                "status": "held",
+                "extension_ref": 1
+              },
+              {
+                "part": 1,
+                "status": "held",
+                "extension_ref": 2
+              }
+            ],
+            "issuer": {
+              "scheme": "ed25519",
+              "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+            },
+            "kind": "closed",
+            "reason": "ruled",
+            "outcome": [
+              {
+                "id": "case-vector-1:reverse:0",
+                "effect": {
+                  "kind": "reverse",
+                  "part": 0,
+                  "amount": "4503599627370497"
+                },
+                "state": "applied"
+              },
+              {
+                "id": "case-vector-1:stop:1",
+                "effect": {
+                  "kind": "stop",
+                  "part": 1,
+                  "at": 1800001800,
+                  "partialPeriod": "returned"
+                },
+                "state": "applied"
+              },
+              {
+                "id": "case-vector-1:delivery",
+                "effect": {
+                  "kind": "end_delivery",
+                  "at": 1800001800
+                },
+                "state": "applied"
+              },
+              {
+                "id": "case-vector-1:penalty",
+                "effect": {
+                  "kind": "penalty",
+                  "amount": "1500000"
+                },
+                "state": "applied"
+              }
+            ]
+          },
+          "proof": {
+            "scheme": "ed25519",
+            "value": "EDqrVkIQvorrOr0tYTOKHiaTzf2EFpZ12zx_Il9IGkAJIaqdpVimUdbKzKaAeJXOAm4GYrRJp9eGN1CmcWoRBQ"
+          }
+        },
+        {
+          "entry": {
+            "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
+            "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+            "case_ref": "case-vector-2",
+            "sequence": 5,
+            "record_ref": "record-vector-5",
+            "actor": "11111111-1111-4111-8111-111111111111",
+            "at": 1800001800,
+            "parts": [
+              {
+                "part": 0,
+                "status": "not_held",
+                "reason": "paid_out"
+              },
+              {
+                "part": 1,
+                "status": "held",
+                "extension_ref": 3
+              }
+            ],
+            "issuer": {
+              "scheme": "ed25519",
+              "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+            },
+            "kind": "filed",
+            "filing": {
+              "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+              "agreement": {
+                "start_utc": "2027-01-15T08:00:00Z",
+                "duration_seconds": 3600,
+                "settlement": {
+                  "mechanism": "arkhai.payments.v1",
+                  "params": {
+                    "adjudication": {
+                      "version": 1,
+                      "dispute": {
+                        "interface": "arkhai.mediation.v1",
+                        "origin": "https://mediation.example",
+                        "account": "33333333-3333-4333-8333-333333333333",
+                        "record_key": "ed25519:6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+                        "params": {
+                          "procedure": "optimistic"
+                        }
+                      },
+                      "dispute_window_seconds": 1209600,
+                      "case_hold_max_seconds": null
+                    }
+                  }
+                }
+              },
+              "request": {
+                "kind": "buyer_end",
+                "at": 1800001800
+              },
+              "claim": "Buyer ended delivery.",
+              "items": []
+            }
+          },
+          "proof": {
+            "scheme": "ed25519",
+            "value": "z3JoyXDk1p_kGDcANCrdhOAkGHhwp6rZkPfySEoalzpkgRoW4L-Jz4TuFaFLNkMwOs4FkMBl4laLo-EDT-qECg"
+          }
+        },
+        {
+          "entry": {
+            "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
+            "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+            "case_ref": "case-vector-2",
+            "sequence": 6,
+            "record_ref": "record-vector-6",
+            "actor": "22222222-2222-4222-8222-222222222222",
+            "at": 1800001800,
+            "parts": [
+              {
+                "part": 0,
+                "status": "not_held",
+                "reason": "paid_out"
+              },
+              {
+                "part": 1,
+                "status": "held",
+                "extension_ref": 3
+              }
+            ],
+            "issuer": {
+              "scheme": "ed25519",
+              "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+            },
+            "kind": "appended",
+            "items": [
+              {
+                "kind": "arkhai.mediation.end_acknowledgement.v1",
+                "producer": "22222222-2222-4222-8222-222222222222",
+                "at": 1800001800,
+                "sha256": "41b3a8ccbe51bf79da2d9d39158d8027fffd14adfb56aa2e6e317a16bc3d97b2",
+                "bytes": "eyJhdCI6MTgwMDAwMTc5OX0"
+              }
+            ]
+          },
+          "proof": {
+            "scheme": "ed25519",
+            "value": "l712YFqjP0yi-MErw4YhEWcBCFiR-IRufvTp5hZjmBl3lyEZdM52DkV2ED6BYXA4YR-3zCns2xtJe8gzP-F5DQ"
+          }
+        },
+        {
+          "entry": {
+            "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
+            "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+            "case_ref": "case-vector-3",
+            "sequence": 7,
+            "record_ref": "record-vector-7",
+            "actor": "11111111-1111-4111-8111-111111111111",
+            "at": 1800001800,
+            "parts": [
+              {
+                "part": 0,
+                "status": "not_held",
+                "reason": "paid_out"
+              },
+              {
+                "part": 1,
+                "status": "not_held",
+                "reason": "reversed"
+              }
+            ],
+            "issuer": {
+              "scheme": "ed25519",
+              "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+            },
+            "kind": "filed",
+            "filing": {
+              "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+              "agreement": {
+                "start_utc": "2027-01-15T08:00:00Z",
+                "duration_seconds": 3600,
+                "settlement": {
+                  "mechanism": "arkhai.payments.v1",
+                  "params": {
+                    "adjudication": {
+                      "version": 1,
+                      "dispute": {
+                        "interface": "arkhai.mediation.v1",
+                        "origin": "https://mediation.example",
+                        "account": "33333333-3333-4333-8333-333333333333",
+                        "record_key": "ed25519:6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+                        "params": {
+                          "procedure": "optimistic"
+                        }
+                      },
+                      "dispute_window_seconds": 1209600,
+                      "case_hold_max_seconds": null
+                    }
+                  }
+                }
+              },
+              "request": {
+                "kind": "buyer_end",
+                "at": 1800001800
+              },
+              "claim": "Buyer ended delivery.",
+              "items": []
+            }
+          },
+          "proof": {
+            "scheme": "ed25519",
+            "value": "4l-ph052KQr0SZFxTMQq944UY-sI711M13S1r209YAl6PBIWKc9FacJxIUWENuAt6eQpkYcUhr2pGAbllLL4Bw"
+          }
+        },
+        {
+          "entry": {
+            "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
+            "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+            "case_ref": "case-vector-3",
+            "sequence": 8,
+            "record_ref": "record-vector-8",
+            "actor": "33333333-3333-4333-8333-333333333333",
+            "at": 1800001800,
+            "parts": [
+              {
+                "part": 0,
+                "status": "not_held",
+                "reason": "paid_out"
+              },
+              {
+                "part": 1,
+                "status": "not_held",
+                "reason": "reversed"
+              }
+            ],
+            "issuer": {
+              "scheme": "ed25519",
+              "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+            },
+            "kind": "closed",
+            "reason": "dismissed",
+            "dismissal_reason": "nothing_held",
+            "outcome": []
+          },
+          "proof": {
+            "scheme": "ed25519",
+            "value": "Zz2liNLQl4DC9k91C6FqliMjYpApXMvW78LDT7d7V2hfttks9RXjUHLCNFSzwOrBPkD6nbBr3iicgQ9uGgjSBQ"
+          }
+        }
+      ],
+      "next_after": 8,
+      "has_more": false
+    }
+  }
+}
