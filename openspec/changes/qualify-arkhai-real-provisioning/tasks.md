@@ -3,8 +3,8 @@
 ## 1. Reconcile and prepare the equivalent method
 
 - [x] 1.1 Amend `prove-relay-provisioning/tasks.md` section 16 and `bound-bare-metal-working-data/tasks.md` section 4 with the design's exact accepted method mapping; preserve completed history and leave live boxes unchecked. Verify every original observation has an owning replacement and unrun markers are not reported passed.
-- [ ] 1.2 Prepare executable ordinary-buyer/operator inputs using supported CLI and typed APIs; inspect current helper interfaces and adapt external orchestration without importing chain-specific scenario modules. Validate target, candidate, credentials separation, pause/recovery boundaries and explicit run correlation before any mutation. Keep operational inputs and raw evidence outside Git.
-- [ ] 1.3 If actual reuse needs source changes, restrict them to shared real SSH or bare-metal working-data helpers and their lowest-level tests; record exact files and demonstrated obstacle before edits. Otherwise record no helper change required. Run affected tests, comment hygiene and packaging before an intermediate source commit; bind new source to one frozen independent review/full validation round before destructive cycles.
+- [x] 1.2 Prepare executable ordinary-buyer/operator inputs using supported CLI and typed APIs; inspect current helper interfaces and adapt external orchestration without importing chain-specific scenario modules. Validate target, candidate, credentials separation, pause/recovery boundaries and explicit run correlation before any mutation. Keep operational inputs and raw evidence outside Git. **System preparation:** installed ordinary buyer configurations, paused buyer-only routes, current inventory/candidate binding, and separate buyer/operator credentials were checked without starting a qualification rental. Exact external settings and evidence remain private.
+- [x] 1.3 If actual reuse needs source changes, restrict them to shared real SSH or bare-metal working-data helpers and their lowest-level tests; record exact files and demonstrated obstacle before edits. Otherwise record no helper change required. Run affected tests, comment hygiene and packaging before an intermediate source commit; bind new source to one frozen independent review/full validation round before destructive cycles. **Disposition:** no helper/source changes were required, so no helper tests or source validation round applied; qualification reused the frozen candidate's existing independent review/full-validation evidence. `make check-packaging` passed. Confirm comment hygiene and rerun `make check-change` after this planning amendment before committing. Formal workflow joins remain pending.
 
 ## 2. Actual Arkhai hardware qualification
 
@@ -24,7 +24,4 @@
 
 ### Section 1 handoff
 
-The owning tasks now explicitly accept the design mapping, retain their original
-markers as alternatives and keep every live checkbox pending. This is a proof
-method amendment, not executed hardware evidence. SDK implementation proceeds
-independently; operational adapter/target preparation is next.
+The owning tasks accept the method mapping; original markers remain alternatives. Buyer/operator inputs were prepared without helper source changes. Frozen validation is scoped separately from physical proof. Mandatory documentation checks remain due before commit.

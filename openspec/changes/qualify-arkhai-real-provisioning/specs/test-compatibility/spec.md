@@ -19,6 +19,11 @@ Arkhai real-hardware qualification MUST use the shipped buyer and external payme
 - **WHEN** a payment, physical target or required observation is missing or a named alternative driver was not executed
 - **THEN** qualification records that observation as unproven and does not substitute mock, native component or historical evidence for the missing real lifecycle
 
+#### Scenario: An operator supplements finite host network-policy evidence
+
+- **WHEN** an operator probes the paid deployment's shared host network policy from a separate CPU guest bound to the same pinned guest base, default bridge, virtio NIC, and loaded policy structure
+- **THEN** the recorded result is limited to the finite network paths and rules exercised; it does not replace paid-buyer evidence for customer identity, credentials, privilege, grant, GPU work, payment, delivery, teardown, access revocation, or restored capacity, and it does not establish universal network isolation
+
 ### Requirement: Equivalent physical proof preserves lifecycle invariants
 
 An alternative payment-specific qualification method MUST retain the original physical acceptance observations: relay and direct VM access, concurrent-deal and management continuity, lease expiry, repeat registration/adoption, bare-metal cleanup and refusal recovery. It MUST recover only its own rentals and preserve relay quarantine and consumed tenant identities.
