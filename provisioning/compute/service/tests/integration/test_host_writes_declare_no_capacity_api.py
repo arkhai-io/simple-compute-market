@@ -1,9 +1,11 @@
 """No host write declares capacity, through the canonical clients.
 
 A host describes how to reach a machine and sells nothing: neither an INI
-import through ``POST /api/v1/hosts/import``, nor the startup inventory seed,
-nor a create or update through the individual host API creates a capacity
-declaration, whatever pool the host is placed in. An inventory line still
+import through ``POST /api/v1/hosts/import``, nor a host definitions document
+applied at startup or through its import route, nor a create or update through
+the individual host API
+creates a capacity declaration, whatever pool the host is placed in. An
+inventory line still
 carrying ``gpus=`` and ``gpu_model=`` registers its host with those variables
 ignored. Capacity reads go through ``SiteCapacityAdminClient`` and the
 resource-pool projection through ``SiteCapacityClient``.
@@ -28,6 +30,21 @@ _INI = (
     "kvm2  ansible_host=10.0.0.2  ansible_user=ubuntu  "
     "ansible_ssh_private_key_file=/keys/id\n"
 )
+
+_HOST_DOCUMENT = """
+hosts:
+  - host_id: kvm1
+    pool_id: default
+    connection:
+      kind: ssh
+      version: 2
+      public: {ssh_host: 10.0.0.1, ssh_user: ubuntu, key_path: /keys/id}
+  - host_id: kvm2
+    connection:
+      kind: ssh
+      version: 2
+      public: {ssh_host: 10.0.0.2, ssh_user: ubuntu, key_path: /keys/id}
+"""
 
 
 async def _declared(capacity: CapacityApi) -> list[dict]:
@@ -83,23 +100,42 @@ async def test_an_inventory_line_carrying_gpu_variables_records_nothing_for_them
     assert await _projected(capacity) == []
 
 
-async def test_the_startup_inventory_seed_declares_nothing(
-    client_and_queue, capacity: CapacityApi, monkeypatch
+async def test_a_host_definitions_document_applied_at_startup_declares_nothing(
+    client_and_queue, capacity: CapacityApi, monkeypatch, tmp_path
 ):
-    """The seed step the service runs at startup, over the harness's host
-    authority. The step reads the module's settings object, so the test gives
-    it one stating ``inventory_ini``, the setting the Helm chart fills."""
+    """The host definitions step the service runs at startup, over the
+    harness's host authority. The step reads the module's settings object, so
+    the test gives it one naming the mounted document, as
+    ``host_definitions_path`` does."""
     client, _ = client_and_queue
+    document = tmp_path / "host-definitions.yaml"
+    document.write_text(_HOST_DOCUMENT, encoding="utf-8")
     monkeypatch.setattr(
         app_runtime,
         "settings",
-        SimpleNamespace(inventory_ini=_INI, resolved_inventory_path=None),
+        SimpleNamespace(resolved_host_definitions_path=document),
     )
 
-    app_runtime.seed_inventory_if_empty()
+    app_runtime.import_host_definitions_if_configured()
 
     listed = await client.family.list_hosts(include_disabled=True)
-    assert sorted(host.host_id for host in listed.hosts) == ["kvm1", "kvm2"]
+    assert {host.host_id: host.pool_id for host in listed.hosts} == {
+        "kvm1": "default",
+        "kvm2": None,
+    }
+    assert await _declared(capacity) == []
+    assert await _projected(capacity) == []
+
+
+async def test_a_host_definitions_document_imported_through_the_api_declares_nothing(
+    client_and_queue, capacity: CapacityApi
+):
+    client, _ = client_and_queue
+
+    imported = await client.family.import_host_definitions(_HOST_DOCUMENT)
+
+    assert imported.applied is True
+    assert sorted(imported.diff.created) == ["kvm1", "kvm2"]
     assert await _declared(capacity) == []
     assert await _projected(capacity) == []
 

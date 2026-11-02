@@ -252,7 +252,7 @@ def test_the_seed_runs_between_the_pool_document_and_the_declaration_check():
         names.index("import-pool-definitions")
         < names.index("seed-initial-pools")
         < names.index("verify-pool-declarations")
-        < names.index("seed-inventory")
+        < names.index("import-host-definitions")
     )
 
 

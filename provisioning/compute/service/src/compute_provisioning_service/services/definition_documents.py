@@ -1,9 +1,9 @@
 """Reconciling mounted definition documents, gated on the document changing.
 
 Import treats its document as authoritative: it overwrites entries that differ
-from it and, for pools, disables entries it does not name. Capacity documents
-retain the entries they do not name; a contributed document's own apply step
-decides what it does with them. That authority
+from it and, for pools, disables entries it does not name. Host and capacity
+documents retain the entries they do not name; a contributed document's own
+apply step decides what it does with them. That authority
 belongs to the act of an operator submitting a document. A process start is not
 a submission.
 
@@ -43,14 +43,34 @@ from market_site import (
 )
 
 from compute_provisioning import DefinitionDocumentContribution
+from compute_provisioning.hosts.definitions import reconcile_host_definitions_in_session
+from compute_provisioning.hosts.service import HostAuthority
+from compute_provisioning_contracts import HostDefinitionProblem
 
 from compute_provisioning_service.db.models import DefinitionDocumentImport, ResourcePool
 
 logger = logging.getLogger(__name__)
 
 _CAPACITY = "capacity"
+_HOSTS = "hosts"
 _POOLS = "pools"
 _POOL_SEED = "pool-seed"
+
+
+class HostDefinitionsRejected(ValueError):
+    """A host definitions document with problems; nothing was applied.
+
+    Each problem carries its location in the document and its code; one that
+    stored state decides, such as a refused pool move, also names the host its
+    entry declares, so a refused start says which host to correct.
+    """
+
+    def __init__(self, problems: tuple[HostDefinitionProblem, ...]) -> None:
+        self.problems = problems
+        super().__init__(
+            "host definitions refused: "
+            + "; ".join(f"{p.path} ({p.code}): {p.message}" for p in problems)
+        )
 
 
 class CapacityDefinitionsRejected(ValueError):
@@ -94,12 +114,14 @@ class DefinitionDocumentImporter:
         pool_service: Any,
         contributed: Sequence[DefinitionDocumentContribution] = (),
         capacity_ledger: CapacityLedgerService | None = None,
+        host_authority: HostAuthority | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._settings = settings
         self._pool_service = pool_service
         self._contributed = tuple(contributed)
         self._capacity_ledger = capacity_ledger
+        self._host_authority = host_authority
 
     # ------------------------------------------------------------------
     # Entry points
@@ -162,9 +184,26 @@ class DefinitionDocumentImporter:
             logger.info("Pool seed: created pool %s from %s", pool_id, path)
         return ImportOutcome(_POOL_SEED, True, f"created={len(diff.created)}")
 
+    def import_host_definitions(self) -> ImportOutcome:
+        """Reconcile host definitions.
+
+        They run after pools, which an entry names, whether from the pool
+        document or the fresh-site seed, and after the stored-pool check; and
+        before capacity, whose declarations may name a host. A first document on
+        a site that already registers hosts applies like any changed one: no
+        digest is recorded for it yet.
+        """
+        return self._import(
+            kind=_HOSTS,
+            path=getattr(self._settings, "resolved_host_definitions_path", None),
+            label="Host-definitions",
+            apply=self._apply_hosts,
+        )
+
     def import_capacity_definitions(self) -> ImportOutcome:
         """Reconcile capacity declarations. They run after pools, which a
-        declaration names, and after host seeding."""
+        declaration names, and after host definitions, since a declaration may
+        name a host."""
         # The ledger's serialization lock spans the whole import, through the
         # commit that records the digest, so no reservation is admitted
         # between a declaration's checks and its commit.
@@ -226,6 +265,25 @@ class DefinitionDocumentImporter:
         return (
             f"created={len(diff.created)} updated={len(diff.updated)} "
             f"disabled={len(diff.disabled)} unchanged={len(diff.unchanged)}"
+        )
+
+    def _apply_hosts(self, db: Any, yaml_text: str) -> str:
+        if self._host_authority is None:
+            raise RuntimeError("host definitions need the host authority")
+        outcome = reconcile_host_definitions_in_session(db, self._host_authority, yaml_text)
+        if not outcome.valid:
+            # Raising rolls back the apply's transaction, so whatever an entry
+            # or a pool-change hook wrote is discarded, no entry lands, and no
+            # digest is recorded: the next startup retries.
+            raise HostDefinitionsRejected(outcome.problems)
+        diff = outcome.diff
+        # A host the document stops naming is retained, never disabled, so the
+        # operator is told which registered hosts it leaves as they are.
+        not_named = ", ".join(outcome.not_named) if outcome.not_named else "none"
+        return (
+            f"created={len(diff.created)} updated={len(diff.updated)} "
+            f"unchanged={len(diff.unchanged)}; registered and not named, "
+            f"left as they are: {not_named}"
         )
 
     def _apply_capacity(self, db: Any, yaml_text: str) -> str:

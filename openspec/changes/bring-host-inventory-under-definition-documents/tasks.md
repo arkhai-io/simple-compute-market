@@ -661,7 +661,7 @@ where they state or describe the inventory settings;
 test_test_controller.py,test_vms_api.py}` and any other the search finds); new
 `tests/integration/test_host_definitions_startup.py`.
 
-- [ ] 4.1 The `hosts` document kind (D1, D8). Add `host_definitions_path` to
+- [x] 4.1 The `hosts` document kind (D1, D8). Add `host_definitions_path` to
   `settings.toml` (empty by default, with a comment describing the document as
   the capacity setting's does) and `Settings.resolved_host_definitions_path`
   (`None` when empty). `DefinitionDocumentImporter` gains
@@ -672,7 +672,21 @@ test_test_controller.py,test_vms_api.py}` and any other the search finds); new
   and unchanged counts and names the registered hosts not named. Persistence
   integration (`test_definition_document_digest.py`): the `hosts` kind is
   recorded apart from pools, relays, and capacity.
-- [ ] 4.2 The startup step (D6, D7, D8). Replace `seed-inventory` in
+  *Done.* The importer takes the host authority as an injected collaborator
+  (`host_authority=`, which `app_runtime._definition_importer` passes from
+  `container.resolved_host_authority`) and its applier calls the kit's
+  `reconcile_host_definitions_in_session` in the gate's own session. An invalid
+  outcome raises `HostDefinitionsRejected`, whose message lists every problem
+  as `path (code): message`; a stored-state problem's message also names its
+  host, a structural one only its location. The applied detail,
+  logged by the gate, is `created=… updated=… unchanged=…; registered and not
+  named, left as they are: <ids or none>`. Persistence integration
+  (`test_definition_document_digest.py`, the real importer and host authority
+  against migrated in-memory SQLite): a host document recorded as `hosts` with
+  the pools, relays, and capacity digests recorded beforehand unchanged, and a
+  second import of it not reapplied — passed in the service suite. Unit
+  (`test_config.py`): the path resolves when stated and is `None` by default.
+- [x] 4.2 The startup step (D6, D7, D8). Replace `seed-inventory` in
   `app_runtime.startup_steps()` with `import-host-definitions` at the same place —
   after `verify-pool-declarations`, before `import-capacity-definitions` — and
   remove `seed_inventory_if_empty` and its `parse_inventory_ini` import. Update
@@ -690,7 +704,28 @@ test_test_controller.py,test_vms_api.py}` and any other the search finds); new
   fails naming the host, nothing applied, no digest); and the modified "Fresh
   selected-site inventory binds to a bare-metal pool" with a `bare_metal.ansible`
   pool document and an unknown pool failing startup.
-- [ ] 4.3 Retire the inventory settings (D2). Add `inventory_ini` and
+  *Done.* `import-host-definitions` (`import_host_definitions_if_configured`)
+  sits where `seed-inventory` sat; `seed_inventory_if_empty` and the
+  `parse_inventory_ini` import are gone, and the capacity importer's docstring
+  names host definitions. Persistence integration
+  (`tests/integration/test_host_definitions_startup.py`, the service's own
+  startup entry points and importer against file-backed SQLite, real pool and
+  host documents, the host authority built by the container's
+  `_make_host_authority` with the real `ssh` codec and VM's
+  `HOST_POOL_CHANGE_HOOKS`): every listed scenario, plus a host naming a pool
+  the fresh-site seed creates. "Work can be dispatched to it" is shown as far as
+  this level reaches: the host authority's `lookup`, the read dispatch makes
+  before running, returns the added host. "An unchanged document" shows the
+  API's disable surviving with `updated_at` kept and the gate's "unchanged"
+  log line. The first-document case (D6) registers hosts through
+  `register_host` first, then shows the document replacing the one it names,
+  adding one, and keeping and logging the disabled host it does not name. The
+  hook case seeds a relay row and a port lease as the pool-move tests seed
+  them; the document names a new host before the refused move, and neither
+  lands. Passed in the service suite. Unit (`test_worker.py`): the step's
+  place after the pool document, the seed, and the declaration check, and
+  before capacity.
+- [x] 4.3 Retire the inventory settings (D2). Add `inventory_ini` and
   `inventory_path` to `config.RETIRED_SETTINGS`, both replaced by
   `host_definitions_path`, so any statement in any layer refuses startup, an
   empty one included. Remove `Settings.resolved_inventory_path`. Remove every
@@ -715,7 +750,46 @@ test_test_controller.py,test_vms_api.py}` and any other the search finds); new
   `resolved_inventory_path` outside the retirement list, its tests, the Ansible
   distribution's transient inventory mechanics, and `openspec/changes/archive`
   finds nothing in the service.
-- [ ] 4.4 **Verification checkpoint.** Unit: the service's `test_config.py`.
+  *Done.* `RETIRED_SETTINGS` maps both keys to `host_definitions_path`;
+  `resolved_inventory_path` is gone; both keys and the seeding comment are out
+  of `settings.toml`, `inventory_path` out of `config-docker.yml` and
+  `config-local.yml.example` (which now shows a commented
+  `host_definitions_path`), `PROVISIONING_INVENTORY_PATH` out of the service
+  `Makefile`'s `serve`, and the inventory comments out of `config-mock.yml`
+  and `config.yml`; the harness settings in `conftest.py` and
+  `test_test_controller.py` no longer set `resolved_inventory_path`. Unit
+  (`test_config.py`, the service's own loader over its `settings.toml` and one
+  profile): each key refused in a profile, an empty value included, and through
+  the `PROVISIONING_` environment layer, an empty `PROVISIONING_INVENTORY_INI`
+  included, naming `host_definitions_path`; all three retired keys named at
+  once. Application integration (`test_retired_settings_startup.py`): the
+  app's lifespan refuses an empty `inventory_ini` and an `inventory_path`
+  before its second step runs. *Departure:* "The packaged configuration is
+  started unchanged" is a unit test in `test_config.py`, not in
+  `test_retired_settings_startup.py`, since it reads only the loader's output:
+  the packaged `settings.toml` and `config.yml` under no profile and under each
+  packaged profile (`docker`, `mock`, `seller`, found from the packaged
+  `config/` directory), loaded with no dotenv file, state no retired setting,
+  and the refusal passes. No test starts the whole lifespan on packaged
+  configuration, whose later steps need a database and credentials no packaged
+  profile carries. `test_host_writes_declare_no_capacity_api.py`
+  (application integration): the startup case is now a host document applied
+  through `import_host_definitions_if_configured` over the harness's host
+  authority, registering a placed and an unplaced host and declaring nothing;
+  a new case imports the same document through the typed client's
+  `import_host_definitions`, declaring nothing. `test_vms_api.py`
+  (application integration): the dispatch case imports, through the typed
+  client, a document naming `unregistered-kvm` in an unknown pool, refused
+  (`applied: false`, `unknown_pool`), and dispatch to that host is then refused
+  404 before any job, inventory, or playbook — as the modified scenario says,
+  exactly as with no document, since a refused document writes nothing. The
+  scenario's "file" half is no longer testable: no setting names an inventory
+  file, and stating either retired one refuses startup. The repository search finds the
+  keys in the service only in `RETIRED_SETTINGS`, the `settings.toml` comment
+  that names them as retired, their tests, and `test_vms_api.py`'s
+  `start_playbook(inventory_path=…)`, the Ansible runner's transient
+  inventory.
+- [x] 4.4 **Verification checkpoint.** Unit: the service's `test_config.py`.
   Persistence integration: `test_definition_document_digest.py`,
   `test_host_definitions_startup.py`. Application integration:
   `test_retired_settings_startup.py`, `test_host_writes_declare_no_capacity_api.py`,
@@ -730,6 +804,68 @@ test_test_controller.py,test_vms_api.py}` and any other the search finds); new
   bare-metal lane's scenarios exercise startup with a configured document once
   section 5 lands. None proves the reconciliation itself, which persistence and
   application integration own; no scenario is owed.
+  *Run.* Service suite (`make test-provisioning`), after the fresh-context
+  fixes: 620 unit and 525 integration passed, the cases above among them.
+  `make test`, before those fixes, which touched only this section's tests and
+  one docstring: every suite passed up to `test-deployment-packaging`, whose
+  `scripts/tests` step passed (1805 passed, 11 skipped) and whose `make -C helm
+  test-render` could not start without a `helm` binary, as in sections 1–3;
+  this section touches nothing under `helm/`. `make check-change` (comment
+  hygiene among its checks) and `make check-packaging`: passed. End-to-end: no
+  pipeline runs in an implementation session; the planned scenarios are
+  confirmed by reading the lanes' configuration, with one correction below —
+  at this section's own commit the bare-metal lane, the Helm topology, and the
+  seller stack still depend on retired settings until section 5 changes them,
+  so the pipeline is evidence only for sections 4 and 5 together. None is owed.
+
+Section 4 notes:
+
+- **Sections 4 and 5 are one unit for the pipeline.** Section 4 makes any
+  statement of `inventory_ini` or `inventory_path` refuse startup, and three
+  deployment-side statements remain until section 5: `domains/bare_metal/compose.yml`
+  sets `PROVISIONING_INVENTORY_PATH`, the provisioning chart's `values.yaml`
+  states `config.inventory_path`, and `helm/scripts/topology-secrets.sh`
+  writes `inventory_ini: ""`. At this commit alone the bare-metal lane and any
+  Helm deployment therefore refuse to start, while the VM lane, whose compose
+  states neither, starts. `compose/seller.yml` starts but registers no host:
+  it relied on `settings.toml`'s removed `inventory_path` default naming the
+  INI baked into its image, and section 5 mounts a host document in its place.
+  The round's validation reads HEAD, after section 5.
+- **The importer takes the host authority by injection,** like the capacity
+  ledger, and the applier calls the kit's session-scoped reconciliation with
+  the gate's own session, so the digest and every host write commit or roll
+  back together. A hook's writes in a refused document roll back with it.
+- **Retired-key detection relies on Dynaconf's `exists`,** which reports an
+  empty value, from a profile or from the environment, as stated; the unit
+  tests pin both, so a loader change that dropped empty values would fail
+  them.
+- **Left for later sections:** the e2e docstrings in
+  `e2e-tests/tests/e2e/roles/scenarios/vms/` (`host_registry.py`,
+  `conftest.py`, and three scenario modules) still explain registering hosts
+  through the API by `inventory_path` being "docker-compose-specific"; and
+  `e2e-tests/tests/unit/test_domain_stack_configuration.py` pins the
+  bare-metal compose's `BARE_METAL_PROVISIONING_INVENTORY_FILE`. Section 5
+  changes that compose file, so it takes both. Permanent documents that still
+  describe startup INI seeding, each owned by a later task:
+  `DEPLOYMENT_AND_CONFIG.md`'s "Definition documents" (7.1; the new
+  `settings.toml` comment points there for the host format), the quickstarts
+  and IaC README (7.2), `TESTING.md`'s "Host Requirement Enforcement" and
+  `resource-pool-management/architecture.md` (8.9), the
+  `physical-provisioning` spec's scenario titles and evidence paragraph
+  (8.11), and the roadmap (8.5).
+- **Fresh-context check.** No layering, import, raw-call, or packaging
+  structure break; D1, D2, D6, D7, D8 hold. Fixed: the rejection docstring
+  claiming every problem names its host (structural ones name a location);
+  a unit test pinning the removed step's names, like a tombstone (removed);
+  the packaged-configuration case labelled application integration while it
+  only loads configuration (now a unit test, with dotenv off); the
+  dispatch-case note not saying the file half is untestable; "End-to-end:
+  confirmed" reading as a run; the seller stack's interim loss of hosts not
+  disclosed; `make check-packaging` not run (now run, passed); this list of
+  stale documents being incomplete. Declined: creating the hook test's relay
+  through the contributed relay-definitions step instead of a direct row —
+  the step needs the VM contribution composed, a row is the precondition the
+  hook reads, and the pool-move tests set it up the same way.
 
 ## 5. Chart, compose, and deployment scripts
 
