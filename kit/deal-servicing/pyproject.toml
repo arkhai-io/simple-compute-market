@@ -4,7 +4,7 @@ version = "0.1.0"
 license = "MIT"
 description = "Seller evidence, delivery-end journals and lifecycle observation."
 requires-python = ">=3.12"
-dependencies = ["arkhai-kit-deal-lifecycle>=0.1.0", "arkhai-kit-deal-lifecycle-contracts>=0.1.0", "arkhai-kit-identity>=0.4.0", "pydantic>=2.7"]
+dependencies = ["arkhai-kit-deal-lifecycle>=0.1.0", "arkhai-kit-deal-lifecycle-contracts>=0.1.0", "arkhai-kit-identity>=0.4.0", "pydantic>=2.7", "fastapi>=0.115"]
 
 [build-system]
 requires = ["hatchling"]
@@ -14,7 +14,7 @@ build-backend = "hatchling.build"
 packages = ["src/market_deal_servicing"]
 
 [tool.arkhai.architecture]
-allowed-dependencies = ["arkhai-kit-deal-lifecycle", "arkhai-kit-deal-lifecycle-contracts", "arkhai-kit-identity", "pydantic"]
+allowed-dependencies = ["arkhai-kit-deal-lifecycle", "arkhai-kit-deal-lifecycle-contracts", "arkhai-kit-identity", "pydantic", "fastapi"]
 
 [dependency-groups]
-dev = ["arkhai-kit-arkhai-mediation>=0.1.0", "arkhai-kit-arkhai-payments>=0.1.0", "mypy>=1.15,<2"]
+dev = ["arkhai-kit-deal-lifecycle-client>=0.1.0", "httpx>=0.27", "arkhai-kit-arkhai-mediation>=0.1.0", "arkhai-kit-arkhai-payments>=0.1.0", "mypy>=1.15,<2"]

@@ -1090,7 +1090,7 @@ and seller budget diagnostics. Implements D6 (routes) and D8 (seller budget), an
 seller's budget". Files: `kit/deal-servicing` (router factory),
 `kit/deal-lifecycle-contracts` (route contracts), `kit/storefront` composition.
 
-- [ ] 13.1 Implement the routes as a router factory the storefronts mount, never relaying a
+- [x] 13.1 Implement the routes as a router factory the storefronts mount, never relaying a
       buyer's authority command. Sign end_delivery responses using kit/identity v2 under
       the Agreement's seller principal; consume 2.4's neutral binding/verifier, never host a
       verifier buyer/dispute kits must import from servicing. Verify application-integration
