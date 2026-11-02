@@ -146,6 +146,51 @@ Verification point: unit tests in both kits; `make check-packaging`; `make check
 `make test`. End-to-end: `e2e_deal`, `e2e_bare_metal_mock_deal` and `e2e_credits_payment_deal`
 on the republished listings of 2.5; nothing composes the kits yet.
 
+### Implementation checkpoint (2026-11-02)
+
+- Implemented and committed 1.1–2.4 in order. The contracts and foundation wheels
+  are in the kit build/test aggregates. No service composes these kits yet, and
+  existing settlement-option wire bytes remain unchanged.
+- Remaining in the sections 1–2 assignment: all of 2.5, including every option
+  builder/consumer, the selection mirror and registry carrier, republishing, and
+  the three named end-to-end suites. No partial wire cutover has been made.
+- Focused verification passes: architecture fixture trees (73 tests), lifecycle
+  contracts (37 tests), lifecycle foundation (62 tests). `make check-architecture`,
+  `make check-packaging`, `make check-comment-hygiene` and pinned OpenSpec 1.14.0
+  strict validation pass. `make test` has been run repeatedly but has not passed
+  end-to-end in this environment; the unresolved setup boundary is tracked in
+  [#323](https://github.com/arkhai-io/simple-compute-market/issues/323).
+- The first full-suite attempt inherited a SOCKS proxy without `socksio`; removing
+  proxy variables exposed a malformed IPv6 entry in inherited `NO_PROXY`.
+  Both stopped at the same provisioning-client tests. A proxy-free rerun passed
+  those 607 unit tests and the provisioning integration tests, but was stopped
+  while storefront dependency resolution made no progress. The located fixture
+  defect is fixed separately: the sign-only test now injects an HTTP mock
+  transport, so it neither initializes ambient proxy transports nor performs I/O.
+  Its six tests pass under the original environment with assertions preserved.
+  The same ambient-proxy defect also affected the VM degraded-startup scenario;
+  its existing loop-registry fixture now removes proxy variables so its loopback
+  refusal boundary stays real and deterministic (two tests pass). Both fixture
+  repairs preserve all kept assertions. A subsequent full rerun retained the normal
+  dependency-download environment and passed VM storefront integration
+  (501 tests) but stopped at 55 bare-metal storefront setup failures with the same
+  missing SOCKS transport. A further run preserving HTTP/HTTPS proxies, removing
+  ALL_PROXY and limiting NO_PROXY to loopback passed 607 provisioning unit tests
+  but stopped at `test_storefront_checks_reflect_configured_url` (453 other
+  provisioning integration tests passed). Later aggregate targets were not reached.
+  No end-to-end suite was run: the 2.5 wire cutover and republish are still pending.
+- Choices: instants in the neutral wire are Unix seconds; disputed signed bodies
+  remain base64-carried exact bytes. The delivery-end intent is neutral and has
+  either cause. The acknowledgement's signed-claim slot currently accepts only
+  omission/null; concrete mediation claims and signatures fail closed until 12.1.
+  Capability support comes from injected installed-contract declarations, empty
+  by default. The term-identity test uses the existing option-ID helper with
+  encoded terms as opaque parameters; 2.5 must move it to the new lifecycle key.
+- Reproduce the library surface from a clean checkout with `make dist`, then
+  `make -C kit/deal-lifecycle-contracts test` and `make -C kit/deal-lifecycle test`.
+  This is library-only setup, with deterministic test principals and injected
+  adapters, no deployed target, seed, external credentials or resident server.
+
 ## 3. Dispute authority configuration and registry recommendations
 
 Delivers each role's authority list: `[[Dispute]]` preferences, `[[DisputeCredential]]`
