@@ -118,6 +118,14 @@ class FileEvidenceStore:
         with self._connection() as db:
             return tuple(row[0] for row in db.execute("SELECT negotiation_id FROM evidence ORDER BY negotiation_id"))
 
+    async def delete_if_unchanged(self, expected: EvidenceRecord) -> bool:
+        with self._connection() as db:
+            if self._read(db, expected.negotiation_id) != expected:
+                return False
+            db.execute("DELETE FROM evidence WHERE negotiation_id = ?", (expected.negotiation_id,))
+            db.execute("DELETE FROM requests WHERE negotiation_id = ?", (expected.negotiation_id,))
+            return True
+
     async def delete(self, negotiation_id: str) -> None:
         with self._connection() as db:
             db.execute("DELETE FROM evidence WHERE negotiation_id = ?", (negotiation_id,))

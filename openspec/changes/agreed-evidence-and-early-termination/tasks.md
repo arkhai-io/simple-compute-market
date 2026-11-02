@@ -361,7 +361,7 @@ and the negotiation controllers that consume it), new `kit/deal-lifecycle-buyer`
       under a root passed by the buyer composition beside the buyer profile, keyed by
       negotiation ID, keeping the seller's signed acceptance before `commit`. Verify: library
       integration test ("A buyer accepts").
-- [ ] 6.3 Add retention and the prune command: lifecycle deals kept per "Evidence outlives the
+- [x] 6.3 Add retention and the prune command: lifecycle deals kept per "Evidence outlives the
       deal and its cases", reading each deal through an injected reader first and deleting
       nothing it cannot read; deals with no lifecycle terms or no adapter, including today's
       Alkahest deals, kept. Verify: unit tests for each retention scenario with a fake reader;

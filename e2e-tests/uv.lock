@@ -579,6 +579,7 @@ dependencies = [
     { name = "arkhai-kit-deal-lifecycle" },
     { name = "arkhai-kit-deal-lifecycle-contracts" },
     { name = "arkhai-kit-identity" },
+    { name = "typer" },
 ]
 wheels = [
     { path = "arkhai_kit_deal_lifecycle_buyer-0.1.0-py3-none-any.whl" },

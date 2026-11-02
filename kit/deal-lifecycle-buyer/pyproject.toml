@@ -4,7 +4,7 @@ version = "0.1.0"
 license = "MIT"
 description = "Buyer-owned lifecycle evidence, retention and case export."
 requires-python = ">=3.12"
-dependencies = ["arkhai-kit-deal-lifecycle>=0.1.0", "arkhai-kit-deal-lifecycle-contracts>=0.1.0", "arkhai-kit-identity>=0.4.0"]
+dependencies = ["arkhai-kit-deal-lifecycle>=0.1.0", "arkhai-kit-deal-lifecycle-contracts>=0.1.0", "arkhai-kit-identity>=0.4.0", "typer>=0.12"]
 
 [build-system]
 requires = ["hatchling"]
@@ -20,4 +20,4 @@ testpaths = ["tests/unit", "tests/integration"]
 dev = ["pytest>=8.3.4,<9.0.0", "pytest-asyncio>=0.25", "arkhai-core-buyer>=0.6.0"]
 
 [tool.arkhai.architecture]
-allowed-dependencies = ["arkhai-kit-deal-lifecycle", "arkhai-kit-deal-lifecycle-contracts", "arkhai-kit-identity"]
+allowed-dependencies = ["arkhai-kit-deal-lifecycle", "arkhai-kit-deal-lifecycle-contracts", "arkhai-kit-identity", "typer"]
