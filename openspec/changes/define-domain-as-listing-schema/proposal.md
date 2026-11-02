@@ -1,26 +1,27 @@
 ## Why
 
-"Domain" means different things in different parts of the system, and "family" groups domains along whichever axis the word "domain" left out.
+"Domain" means different things in different parts of the system, and the package layout encodes a notion of "market" that has no fixed meaning.
 
 - **Registry.** A registry serves one listing schema, named by its descriptor's `schema` (`compute.market` v2, `api_credits` v1). `ARCHITECTURE.md` already treats the listing schema as the variation axis: "a behavior belongs in the market core when it is invariant across listing schemas".
-- **Domain contract.** A `MarketDomainContract` bundles a schema's payload codecs with one way of delivering. VM (`compute.v1`) and bare metal (`bare_metal.v1`) are two domains that publish under the one `compute.market` schema, told apart by `listing_resource.offering_mode`.
-- **Family.** A permission scope between `kit/` and a domain. The compute family shares a **schema** across two delivery backends. The proposed api family (`compose-api-family-kit`, PR #299) shares a **backend** across several schemas (API credits, inference).
+- **Domain contract.** A `MarketDomainContract` bundles a schema's payload codecs with one way of delivering. VM (`compute.v1`) and bare metal (`bare_metal.v1`) are two domains publishing under one `compute.market` schema.
+- **Family.** Sibling domains sharing a vocabulary, declared as a scope between `kit/` ("knows no market") and a domain. Compute's family shares a schema vocabulary across two delivery backends; the proposed `api` family (PR #299) shares a delivery backend across several schemas. Because `kit/` is defined as "knows no market", shared libraries that mention a market concept are pushed under `domains/` beside the domains, and a kit that supports some trades and not others has no clear home.
 
-So compute's domains are backends and api's domains are schemas. Each new market has to pick an axis; container offerings and inference both meet the question.
+In a decentralized market there is nothing that realizes "a market" beyond its registries, storefronts, and buyer clients. The only grouping with a concrete, externally visible meaning is the set of those that interoperate, which federates around a registry's schema. Code two such sets share is a library relation, as two websites sharing a web framework are not one site.
 
-`agreed-evidence-and-early-termination` (PR #296, D1) defines the protocol as discovery, negotiation, and the mechanism's commitment act; everything after commitment is lifecycle, visible to arbitration only as evidence. Delivery is then lifecycle, yet the code makes the delivery backend part of what a domain is.
+`agreed-evidence-and-early-termination` (PR #296, D1) defines the protocol as discovery, negotiation, and the mechanism's commitment act; everything after commitment is lifecycle. Delivery is then lifecycle, yet the code makes the delivery backend part of what a domain is.
 
-Hosting has the same blur. Two registries are two Helm subcharts and two processes. The "multi-domain storefront" is one route set that picks a contract by offering mode. Neither separates the interface a party speaks to from the server that implements it.
+The repository also wants inference built by composing what API credits already has rather than copying it, as bare metal was copied from VM and is still being reconciled. That needs a placement rule under which shared code has an obvious home in `kit/` and a copy is a visible structural error.
 
 ## What Changes
 
 This change settles definitions and a target shape for discussion. Implementation is split into follow-up changes once the definitions are accepted.
 
-- **A domain is one listing schema.** A domain's identity is its registry schema identity. A registry's listings are exactly that schema's values; a registry "serving several schemas" serves their union, which is one schema. Payload kinds and contract versions are scoped under the domain, not peers of it.
-- **Registry, storefront, and domain are interfaces, not servers.** A registry interface is the discovery routes and descriptor over one schema. A storefront interface is the negotiation routes over one schema. One host may serve several registry or storefront interfaces; the separation can be as shallow as the router: each interface keeps its own base URL, descriptor, principals, and record namespace, and nothing selects an interface from a payload.
-- **Whatever negotiation specializes on is a kit, and the listing advertises it.** Identity, payment with its dispute mechanism, and delivery are kit slots. A buyer and a listing are compatible when they share the domain and the buyer can use one advertised choice in every slot. Each negotiation is specialized to {domain, selected kits}, and both sides dispatch the kits' operations.
-- **Delivery is a kit, and a receipt is its negotiated detail.** Within the protocol, delivery appears only as the selected delivery kit and its parameters in the Agreement. Access information exchanged after commitment is lifecycle, and matters to the protocol only as evidence against a failure-to-deliver dispute.
-- **No family scope.** Code shared between domains is kit code, scoped to the mechanism it is, never to a set of domains. A family vocabulary is either a domain's own schema package or a kit's vocabulary.
+- **A domain is one listing schema** and the set of registries, storefronts, and buyer clients compatible with it. Payload kinds and contract versions are scoped under the domain.
+- **Registry, storefront, and domain are interfaces, not servers.** One host may serve several interfaces, separated as shallowly as the router.
+- **Whatever negotiation specializes on is a kit, and the listing advertises it.** Identity, payment with its dispute mechanism, and delivery are kit slots; compatibility is the same domain plus a usable choice in every slot.
+- **Delivery is a kit, and a receipt is its negotiated detail.**
+- **Folders claim the dependency order, and the code must not contradict the claim.** `core < kit < domains`; inside any folder, loose packages sit below its subfolders; sibling subfolders are incomparable unless an edge is declared. Domains are flat; kit is flat except for groups (`kit/api/`, `kit/compute/`, `kit/payments/`) that may claim more structure than exists yet. A contradiction means the folders or names are wrong. This one rule replaces layer and scope; kind is unchanged.
+- **Parents define interfaces; children implement them.** Machinery that must work with any member of a group speaks an interface in the loose base, which the group's members implement and a domain's entry point wires.
 
 ## Capabilities
 
@@ -32,7 +33,7 @@ None proposed yet.
 
 Expected once the design settles; spec deltas are not written yet.
 
-- `market-composition`: the domain definition; the storefront as an interface over one schema; kit slots and their dispatch.
+- `market-composition`: the domain definition; the storefront as an interface over one schema; kit slots, their interfaces, and their dispatch.
 - `negotiation-protocol`: compatibility as same domain plus a usable choice in every advertised kit slot.
 - `storefront-publication`: listings advertise delivery, as they already advertise settlement options.
 - `buyer-orchestration`: candidate selection by domain and kit compatibility.
@@ -40,22 +41,24 @@ Expected once the design settles; spec deltas are not written yet.
 
 ## Dependencies and Related Changes
 
-- Builds on `agreed-evidence-and-early-termination` D1 (protocol ends at commitment), PR #296, not yet on `dev`. That change lists "Merging the VM and bare-metal domains" as a non-goal; this change takes the question up (design.md Q1).
-- Reframes Goal 3 (one storefront serving several compute-family domains) and Goal 4 (a domain is a composition of kit). design.md, "Effect on in-flight changes", says what each active change would keep or adjust.
+- Builds on `agreed-evidence-and-early-termination` D1 (protocol ends at commitment), PR #296, not yet on `dev`.
+- Restates the placement rules of `align-package-paths-with-layers` (in design) and the families of ARCHITECTURE.md; design.md lists the paths that change.
 - Bears directly on `compose-api-family-kit` (PR #299 and its implementation stack) and the inference domain plan (PR #229): their package placement and the `[[families]]` entry are cheapest to change before they merge.
+- Agrees with the structural work in flight: every dependency the new rule flags is already an `[[exceptions]]` row or owned by `kit-owned-storefront-shell` or `move-escrow-into-alkahest`.
 
 ## Non-Goals
 
 - Changing negotiation messages, round sequencing, or the commitment act.
-- Changing payment or dispute kits beyond how a listing advertises them.
+- Changing payment or dispute kits beyond how a listing advertises them and the interface they implement.
 - Choosing container delivery, or designing any new delivery kit.
 - Implementation in this change; follow-ups are named once the definitions are accepted.
 
 ## Impact
 
-- **Vocabulary:** "domain", "family", "kit", "registry", and "storefront" are redefined across `ARCHITECTURE.md`, `ARCHITECTURE.toml`, and the market-composition capability.
-- **Packaging (follow-ups):** family kits move under `kit/` as delivery kits (`provisioning/compute`; `domains/api/*` if #299 lands first); `[[families]]` retires; the compute schema moves out of `core/registry/` to its domain.
-- **Wire (follow-ups):** listings gain a delivery advertisement; if compute becomes one domain, `listing_resource.offering_mode` becomes that advertisement and `compute.v1` / `bare_metal.v1` become delivery-kit identities.
+- **Vocabulary:** "domain", "family", "kit", "registry", "storefront", "layer", and "scope" are redefined across `ARCHITECTURE.md`, `ARCHITECTURE.toml`, and the market-composition capability.
+- **Architecture check (follow-up):** `make check-architecture` reads the order from the folder tree and declared edges instead of scope atoms.
+- **Packaging (follow-ups):** shared compute code moves to `kit/compute/`, the fork's `domains/api/*` to `kit/api/`, payment kits to `kit/payments/`; `domains/` holds only each domain's schema and entry points.
+- **Wire (follow-ups):** listings gain a delivery advertisement; compute's registry schema follows Q1.
 - **Deployment (follow-ups):** registry and storefront hosts that mount several interfaces; parallel processes remain valid.
 
 ## Permanent documentation impact
@@ -69,8 +72,8 @@ Expected once the design settles; spec deltas are not written yet.
 
 Destinations are provisional until the design is accepted.
 
-- D1 domain definition, D3 kit slots, D5 no family scope → `docs/development/ARCHITECTURE.md` ("Composition from above and below", "Package and dependency layers", "Family kits" replaced, "Shared vocabulary and identities") and `docs/development/ARCHITECTURE.toml` (`[[families]]` removed; delivery kits listed beside payment mechanisms).
-- D2 interfaces and hosting → `docs/development/ARCHITECTURE.md` ("Deployment topology", "Capacity publication and multi-domain storefront composition") and `openspec/specs/deployment-state/spec.md`.
+- D1 domain definition, D3 kit slots → `docs/development/ARCHITECTURE.md` ("Composition from above and below", "Shared vocabulary and identities") and `openspec/specs/market-composition/spec.md` with its `architecture.md`.
+- D2 interfaces and hosting → `docs/development/ARCHITECTURE.md` ("Deployment topology") and `openspec/specs/deployment-state/spec.md`.
 - D3 compatibility and D4 delivery advertisement → `openspec/specs/negotiation-protocol/spec.md`, `openspec/specs/storefront-publication/spec.md`, `openspec/specs/buyer-orchestration/spec.md`.
-- D1, D3 → `openspec/specs/market-composition/spec.md` and its `architecture.md`.
+- D5 folder order and D6 interfaces → `docs/development/ARCHITECTURE.md` ("Package and dependency layers", "Family kits" replaced) and `docs/development/ARCHITECTURE.toml`.
 - Goals 3 and 4 restated → `docs/development/ROADMAP.md`.
