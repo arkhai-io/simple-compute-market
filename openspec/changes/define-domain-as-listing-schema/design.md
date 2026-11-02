@@ -142,9 +142,13 @@ Every flagged dependency already has an `[[exceptions]]` row or an owning change
 
 ### Q1. Is compute one domain?
 
-VM and bare metal share the `compute.market` registry schema but have different listing payloads (`VmListing`, `BareMetalListing`), messages, terms, and results. Logris's view is that they are different domains because the listing layer differs. Under D1 that means the shared registry schema splits into two schemas (two registries, a buyer wanting either queries both), or becomes an explicit union with `offering_mode` as its discriminator (Q5).
+VM and bare metal publish under one registry schema, `compute.market`, but have different listing payloads (`VmListing`, `BareMetalListing`), messages, terms, and results. Work in flight already unifies their storefront implementation; that is code sharing, which D5 places in `kit/compute/` whichever way this question goes.
 
-The alternative is one domain whose listing shape means the same thing in both, with exclusivity, isolation, and access as delivery params. Under D5 this question moves only folders under `domains/`; everything shared lives in `kit/compute/` either way.
+- **A. One domain, `compute`, with VM and bare-metal delivery kits.** The listing shape describes the resources the buyer receives in either case; exclusivity, isolation, and access are how they are handed over. `offering_mode` leaves `listing_resource` and becomes the delivery advertisement, and VM's and bare metal's terms and results become delivery-kit params and results.
+- **B. Two domains, two schemas.** If buyers query them differently, or a shape field means something different in each, they need separate schemas and so separate registries (or an explicit union, Q5).
+- **Today is neither:** one registry schema, two domain contracts.
+
+Leaning A, to be tested against the schema: does any filter or field mean something different for a bare-metal listing than for a VM listing? Under D5 the answer moves only folders under `domains/`.
 
 ### Q2. How does a listing advertise delivery?
 
