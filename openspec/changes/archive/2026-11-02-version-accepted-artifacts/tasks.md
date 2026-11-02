@@ -410,44 +410,47 @@ pre-review validation evidence; this round makes no live-purchase claim.
 
 ## 4. Closeout
 
+**Closeout record (2026-11-02).** 4.1 `make check-comment-hygiene` passed. 4.2 The independent pre-closeout source review confirmed touched comments describe current invariants and found no new function-local imports. 4.3 D1–D5 and both normative deltas now map to the owning permanent locations below; promoted claims were checked against the implemented bare-metal path and retained/deletion boundaries. 4.4 Stale implementation-stage handoff wording was corrected; detailed test results and historical failures remain as provenance, with design alternatives retained in `design.md`. 4.5 Goal 1 has no accepted-artifact gap row to remove; its inventory and payment qualification boundaries remain distinct, with no new purchase claim attributed to this change. 4.6 The Goal 1 row is in closeout; its graph and dependents are unchanged. 4.7 The b253 current-source validation record reports `make check-packaging` and all five owned architecture checks passed; no architecture exception belongs to this change, and agent-skill checks are inapplicable because no agent guidance changed. Final combined-document `make check-packaging`, comment hygiene and all five owning architecture checks also passed before commit; the initial sandbox cache-write failure was preserved and the unchanged-source run completed with writable cache access. 4.8 Current-source CI 41534499721 passed all 23 jobs and public-content CI 41534499619 passed. Reused frozen runtime validation remains scoped to its recorded run: CI 41402761003 (23 jobs); E2E 41402755345 (145 VM, 65 bare-metal, 1 API-credit pass, retaining six payment-authority prerequisite skips); local coverage composed across 20 prerequisites after the recorded aggregate environment failure, not one successful aggregate; Helm's four workloads were cleaned to zero and 14 served scenarios passed with the recorded exclusions. Physical evidence is separate; this evidence-fidelity correction makes no new live-purchase claim. 4.9 Permanent documentation and this promotion map are complete; normative deltas merged at archive. 4.10 `make check-doc-citations CHANGE=version-accepted-artifacts` and pinned strict validation passed. 4.11 Pinned archive merged six requirements into `deployment-state` and `storefront-publication`; its archive validation passed and the index now targets the dated archive.
+
+
 Complete the eleven parts of
 `openspec/README.md#plan-closeout-requirements` in order after the reviewed code
 and required validation are complete (D4–D5 and repository obligations). This
 section changes documentation only; a needed code fix returns to implementation.
 
-- [ ] 4.1 **Comment hygiene:** confirm implementation already removed temporary
+- [x] 4.1 **Comment hygiene:** confirm implementation already removed temporary
   history/change/task references and run `make check-comment-hygiene`. A failure
   returns to implementation; do not edit production comments at closeout.
-- [ ] 4.2 **Import placement:** inspect imports this change added or touched and
+- [x] 4.2 **Import placement:** inspect imports this change added or touched and
   confirm module placement or a verified existing cycle/lazy-load rationale.
   A needed import move returns to implementation.
-- [ ] 4.3 **Documentation compliance:** reconcile D1–D5, both delta specs, and
+- [x] 4.3 **Documentation compliance:** reconcile D1–D5, both delta specs, and
   proposal promotion entries with the planned permanent homes; verify the
   resulting claims concern the concrete bare-metal path and bounded evolution
   obligations, not universal artifact coverage or new retirement tooling.
-- [ ] 4.4 **Narrative compression:** retain final behavior, exact validation,
+- [x] 4.4 **Narrative compression:** retain final behavior, exact validation,
   deferred work, and promotion destinations in task notes; move any necessary
   duplicated alternatives to the existing design and remove redundant chronology.
-- [ ] 4.5 **Roadmap currency:** update
+- [x] 4.5 **Roadmap currency:** update
   `docs/development/ROADMAP.md#goal-1--consolidate-physical-resource-authority-in-the-provisioning-service`
   with the bounded accepted-evidence correction where applicable. No existing
   accepted-artifact gap row is present to remove. Record that fact and any
   remaining inventory disposition without inventing cross-domain completion;
   retain the payment-qualification boundary and claim no new live purchase evidence.
-- [ ] 4.6 **Campaign index currency:** reconcile this change's row in
+- [x] 4.6 **Campaign index currency:** reconcile this change's row in
   `openspec/changes/README.md` and the Goal 1 dependency graph, retaining the
   actual closeout status and bounded acceptance description. Record whether
   the graph needs an edit; do not release dependents, which archive cleanup owns.
-- [ ] 4.7 **Packaging:** confirm `make check-packaging` and
+- [x] 4.7 **Packaging:** confirm `make check-packaging` and
   `make check-architecture-change CHANGE=version-accepted-artifacts` pass and no
   exception row is owned by this change. Record `make check-agent-skills` as
   unnecessary unless implementation actually touched agent instructions.
-- [ ] 4.8 **End-to-end pipeline:** confirm and record the exact committed-source
+- [x] 4.8 **End-to-end pipeline:** confirm and record the exact committed-source
   validation run/result and the bare-metal `e2e_bare_metal_mock_deal` evidence for
   evidence publication, resolution, and collection. Preserve explicit blocked or
   unrun status for unavailable evidence; passing unrelated lanes is not a
   substitute. Confirm the normal local/Helm/CI validation record too.
-- [ ] 4.9 **Promotion:** complete the design-promotion record. Promote D1–D4 to
+- [x] 4.9 **Promotion:** complete the design-promotion record. Promote D1–D4 to
   `docs/development/ARCHITECTURE.md#build-packaging-and-initialization`, adding
   an accepted-representation/view subsection without weakening existing explicit
   compatibility floors; to
@@ -460,12 +463,12 @@ section changes documentation only; a needed code fix returns to implementation.
   from 4.5–4.6. Existing capability and companion index entries already exist in
   `openspec/specs/README.md`; confirm no new entry is owed. Write only current
   behavior and preserve deletion/tombstoning and unsupported-mandate boundaries.
-- [ ] 4.10 **Documentation citations:** after promotion run
+- [x] 4.10 **Documentation citations:** after promotion run
   `make check-doc-citations CHANGE=version-accepted-artifacts` and pinned strict
   OpenSpec validation; resolve every absent or tombstoned citation before archive.
   Check the permanent documents written here against actual branch paths and
   implemented behavior, not only the active change's links.
-- [ ] 4.11 **Archival:** archive `version-accepted-artifacts` last with spec
+- [x] 4.11 **Archival:** archived `version-accepted-artifacts` last with spec
   synchronization enabled, merging both delta specs into their permanent homes;
   update its index link to the resulting dated archive. Verify archive validation
   and citations, retain review/triage evidence, and hand off to closeout review.

@@ -1101,6 +1101,26 @@ failure to the point of use, where it appears as a remote service refusing a
 connection rather than as a configuration error where the configuration is
 wrong.
 
+A relay entry's `grant_key_secret_key` names the profile value containing the
+Ed25519 private key as one-line standard base64 PKCS#8 DER. The importer strips
+surrounding whitespace and refuses a missing, malformed or non-Ed25519 value
+without echoing it. The profile key is resolved at relay creation; after API
+rotation the API-held key remains authoritative during document reconciliation.
+Keep the supplied profile key current when an empty-database reinstall must
+recreate the plugin's trust. A service-generated key is recoverable only from
+the service database.
+
+Relay grant signing keys have the same create-time profile resolution rule. An
+API key rotation is authoritative; a later relay-definition import does not
+replace it from the named profile key. The provisioning service's
+`relay_grant_expiry_grace_seconds` (default 3600 seconds) extends the lease end
+for the signed grant, while `relay_port_reuse_margin_seconds` (default 300
+seconds) delays reuse after that grant expiry. The allocator applies a raised
+reuse margin to already released ports. Keep the relay and provisioning clocks
+synchronized with skew well below the reuse margin; the relay plugin checks
+expiry against its own clock with no leeway. These values are service settings,
+not pool fields or buyer inputs.
+
 ## Migrations at startup
 
 A deployed service applies its pending migrations before serving
@@ -1191,6 +1211,14 @@ one: the chart deploys the service with `strategy: Recreate` over one
 ReadWriteOnce volume, and one operator upgrades sites and storefronts together
 ([`ARCHITECTURE.md`, "Operators"](ARCHITECTURE.md#operators)). Rollback is what
 remains, and the pre-upgrade backup answers it.
+
+Upgrading the compute provisioning service past the migration that moves pool
+relay references from `ansible_pool_configs.relay_id` to `pool_relays` is also
+fail-forward. The migration copies each reference and drops the old column; an
+older provisioner still reads that column and cannot serve the new schema. Take
+a database backup before upgrading. Rolling back past this migration requires
+restoring that pre-upgrade backup or rolling forward; do not run old and new
+provisioner versions against the same database.
 
 Identity-bearing database migrations validate the complete service-owned
 population and commit canonical principals, replay state, and ownership

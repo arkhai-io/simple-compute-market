@@ -2060,13 +2060,14 @@ The physical observations below are recorded through the accepted Arkhai method
 and its shipped buyer plus independent typed operator observations. The live
 relay path used the pinned container/plugin topology; native installer evidence
 remains a separate scope. Raw operational output stays outside this public
-repository. Literal original Alkahest markers remain unrun. Formal workflow
-joins and closeout remain pending.
+repository. Literal original Alkahest markers remain unrun. Platform, configuration,
+proof-method, review, validation and no-incoming-base joins are recorded for the
+unchanged source candidate; documentation closeout is recorded below.
 
 ### Accepted Arkhai proof method on this branch
 
 The owner selected Arkhai-only TEST qualification. The alternative method in
-`openspec/changes/qualify-arkhai-real-provisioning/design.md#accepted-method-mapping`
+`openspec/changes/archive/2026-11-02-qualify-arkhai-real-provisioning/design.md#accepted-method-mapping`
 is accepted for the unfinished live observations below. It drives the shipped
 buyer CLI and independent typed operator observations, reusing neutral SSH and
 bounded-data helpers without importing complete chain-specific pytest drivers.
@@ -2124,22 +2125,25 @@ passed. Completed source tasks and original implementation history are preserved
 
 ## 17. Closeout
 
+**Closeout record (2026-11-02).** 17.1 `make check-comment-hygiene` passed; reviewed comments describe current invariants. 17.2 The independent source review confirmed touched imports remain at module scope or have a recorded rationale. 17.3 D1–D23 placements follow repository documentation ownership; no package ownership or new code requirement is promoted here. 17.4 Section 16's current handoff was condensed; detailed implementation/evidence history remains, while rejected alternatives and operational limits remain in `design.md`. 17.5 Goal 1 now records both relay-backed real lanes and preserves the host-key, shared-login, emergency-rotation and future wheel-digest gaps with their triggers; unrelated gaps remain. 17.6 The Reach-hosts campaign row is in closeout and its existing graph/dependent gates remain unchanged until archive cleanup. 17.7 Current-source validation records packaging and all five architecture checks passed; no owned exception or agent-guidance check applies. Final combined-document `make check-packaging`, comment hygiene and all five owning architecture checks also passed before commit; the initial sandbox cache-write failure was preserved and the unchanged-source run completed with writable cache access. 17.8 Current-source CI 41534499721 passed all 23 jobs and public-content CI 41534499619 passed. Frozen runtime validation reuses CI 41402761003 (23 jobs), E2E 41402755345 (145 VM, 65 bare-metal, 1 API-credit pass with six payment-prerequisite skips), composed local evidence across 20 prerequisites after the recorded aggregate environment failure, and the four-workload/14-scenario Helm result, with original exclusions preserved. Real relay and physical outcomes remain separate from pipeline evidence; original Alkahest markers remain unrun. 17.9 All architecture, deployment, testing, runbook and quickstart destinations are promoted below; both normative deltas merged at archive. 17.10 `make check-doc-citations` and pinned strict validation passed. 17.11 Pinned archive merged 13 additions, 5 modifications and one renamed requirement in `physical-provisioning`, plus 2 additions and 2 modifications in `test-compatibility`; post-archive checks passed.
+
+
 Per `openspec/README.md#plan-closeout-requirements`, in that order; closeout changes
 documentation only, and a part needing a code edit returns the change to
 implementation. `admit-relay-proxies-by-grant` must be archived first.
 
-- [ ] 17.1 **Comment hygiene.** Run `make check-comment-hygiene` and confirm the comments
+- [x] 17.1 **Comment hygiene.** Run `make check-comment-hygiene` and confirm the comments
       this change added state invariants, not this change; anything to fix returns the
       change to implementation.
-- [ ] 17.2 **Import placement.** Confirm the imports this change added or touched are at
+- [x] 17.2 **Import placement.** Confirm the imports this change added or touched are at
       module level unless a verified reason keeps one local; one to move returns the
       change to implementation.
-- [ ] 17.3 **Documentation compliance.** Re-check each decision's destination below
+- [x] 17.3 **Documentation compliance.** Re-check each decision's destination below
       against `openspec/README.md`'s placement rules.
-- [ ] 17.4 **Narrative compression.** Compress completed-task notes to final behaviour,
+- [x] 17.4 **Narrative compression.** Compress completed-task notes to final behaviour,
       material evidence, deferred work, and destinations, moving rationale into
       `design.md` first.
-- [ ] 17.5 **Roadmap currency.** `docs/development/ROADMAP.md`, "Goal 1 — Consolidate
+- [x] 17.5 **Roadmap currency.** `docs/development/ROADMAP.md`, "Goal 1 — Consolidate
       physical-resource authority in the provisioning service": the current state
       records buyer access through family-owned relays for VM and bare metal, with
       admission by signed grants; remove the gap row "No end-to-end lane runs a
@@ -2153,22 +2157,22 @@ implementation. `admit-relay-proxies-by-grant` must be archived first.
       names VM's provisioning owner as the allocator's, names the compute family's
       relays instead (found by section 1's fresh-context check). Name the update in
       the promotion record.
-- [ ] 17.6 **Campaign index currency.** This change's row in
+- [x] 17.6 **Campaign index currency.** This change's row in
       `openspec/changes/README.md` ("Reach hosts and VMs that have no inbound route"),
       its campaign graph, and its `Depends on` once `admit-relay-proxies-by-grant` is
       archived; other rows' `Depends on` stay. Name the update in the promotion record.
-- [ ] 17.7 **Packaging.** `make check-packaging` and
+- [x] 17.7 **Packaging.** `make check-packaging` and
       `make check-architecture-change CHANGE=prove-relay-provisioning`.
-- [ ] 17.8 **End-to-end pipeline.** Record the passing run the latest validation names:
+- [x] 17.8 **End-to-end pipeline.** Record the passing run the latest validation names:
       the VM lane and the bare-metal lane (section 1.7's scenarios and
       `e2e_bare_metal_mock_deal`) passing with the real lanes skipping; the real lanes'
       evidence is section 16's.
-- [ ] 17.9 **Promotion.** Write the permanent documents and the design-promotion record:
+- [x] 17.9 **Promotion.** Write the permanent documents and the design-promotion record:
       - D2, D3: `docs/development/ARCHITECTURE.md` "Family kits" (the compute family
         kit's relays and the family IaC roles); `openspec/specs/physical-provisioning/architecture.md`
-        "Buyer access to rented VMs", renamed "Buyer access through relays" for both
-        domains, with the host-level client configuration belonging to the host and
-        the family roles found through the role search path;
+        "Buyer access to provisioned hosts", covering the direct bare-metal fallback and
+        relay routes for both compute domains, with host-level client configuration
+        belonging to the host and family roles found through the role search path;
         `openspec/specs/resource-pool-management/architecture.md`, whose account of a
         relay-changing host move names the VM adapter as refusing it, where the
         family's relay pool-change hook now does.
@@ -2179,10 +2183,10 @@ implementation. `admit-relay-proxies-by-grant` must be archived first.
         secrets kept out of job logs by `no_log` and the family's secret fields.
       - D14, D16, D17, D19, D20, D21, D22, D23: a new
         `physical-provisioning/architecture.md` section "Relay admission by signed
-        grants" under "Buyer access through relays" — per-lease grants and their
-        lifecycle, the grant's conformance to the tool's specification (no `iat`, JCS
-        signing, claim types, `jti` the owning reservation, thumbprint ids, public
-        keys in the plugin's format), the vector and pins checks, relay keys with the
+        grants" under "Buyer access to provisioned hosts" — per-lease grants and their
+        lifecycle, conformance to the tool specification (no `iat`, JCS signing, exact
+        claims, reservation `jti`, thumbprint ids, public-key format), the vector and
+        pins checks, relay keys with the
         profile's form and rotation keeping the profile current, admission on every
         relay as the operator's installation, one relay per operator and a shared
         relay's limits, the emergency choice per incident, the host- and relay-side
@@ -2208,8 +2212,6 @@ implementation. `admit-relay-proxies-by-grant` must be archived first.
         written; confirm they match the archived behaviour.
       - The behaviour itself: `openspec/specs/physical-provisioning/spec.md` and
         `openspec/specs/test-compatibility/spec.md`, written by the archive in 17.11.
-- [ ] 17.10 **Documentation citations.** `make check-doc-citations CHANGE=prove-relay-provisioning`,
+- [x] 17.10 **Documentation citations.** `make check-doc-citations CHANGE=prove-relay-provisioning`,
       then `openspec validate prove-relay-provisioning --strict`.
-- [ ] 17.11 **Archival.** `openspec archive prove-relay-provisioning -y`, merging the
-      deltas into `physical-provisioning` and `test-compatibility`; point the index row at
-      the archived directory.
+- [x] 17.11 **Archival.** Pinned archive merged the deltas into `physical-provisioning` and `test-compatibility`; the index row targets the dated archive. `make check-change CHANGE=prove-relay-provisioning` passed after archival.

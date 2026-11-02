@@ -897,6 +897,14 @@ needs no KVM, and must provide an operator-verified SSH host public key. Prepare
 it using the [bare-metal seller guide](../bare-metal-seller-quickstart.md#define-the-selected-site).
 Before either relayed lane, complete the deployed admission check in section 28.
 
+For a bounded bare-metal working-data policy, prepare its state and cleanup
+roots on the selected host before installing policy. Run the operator-only
+`bare-metal-working-data` host-preparation role with its explicit initialization
+setting once, then preserve the ledger across service restore and image redeploy.
+Do not initialize during grant or reclaim. A known or suspected older-ledger
+restore requires host quarantine until history is verified or the host is
+decommissioned; the helper cannot detect valid structural rollback.
+
 ## 22. Prepare The Host
 
 Prepare the host from the operator's machine with the host kit's
@@ -1017,6 +1025,16 @@ make -C e2e-tests test-module MODULE=e2e_vm_real_provisioning ACTIVE_PROFILES=lo
 # Run the separate bare-metal lane against its configured BARE_METAL_LANE services:
 make -C e2e-tests test-module MODULE=e2e_bare_metal_real_provisioning ACTIVE_PROFILES=local,real-provisioning-target
 ```
+
+The bounded helper gates are separate from deployed lifecycle evidence. Run
+`make test-bare-metal-iac` for helper unit/library integration tests and
+`make build-provisioning` followed by `make test-bare-metal-iac-native`
+for the isolated native filesystem, NSS and IPC gate. A skipped or unavailable
+native prerequisite fails that dedicated gate. Deployed qualification must separately prove an actual grant/reclaim, cleanup
+observations and successor access; it does not prove valid older-ledger rollback
+detection. A mock deal, helper tests, or force-release cannot replace that
+evidence. A refused cleanup keeps capacity held
+until normal retry or separately audited operator recovery.
 
 A run takes as long as a real create and teardown; each job is polled for up to
 30 minutes. On a host that meets section 21 every stage passes and none skips,
@@ -1355,6 +1373,11 @@ and verify admission, then call signed
 `POST /api/v1/relays/{relay_id}/grant-keys/activate`. If staging omits the
 private key the service generates one, which survives only with its database;
 do not imply that the profile now contains it.
+When an empty-database reinstall must retain the plugin's trust, keep the
+operator-supplied key in the deployment profile and keep `grant_key_secret_key`
+pointed at it; definitions are read on creation, while a later API rotation is
+not reverted by reconciliation. Retain a retired public key until its reported
+grant-validity bound has passed.
 
 Read retired keys' `grants_valid_until`. Match a key by the thumbprint printed
 by `frp-grant-admission check <path>`; remove it only once that time has passed,
@@ -1405,3 +1428,47 @@ identity) with `GET /api/v1/relays/{relay_id}/leases` while the port row still
 represents that tenancy. After port-row reuse, read
 `GET /api/v1/contract/leases/{jti}` through the signed client. Unverified log
 claims are sender-controlled; do not treat them as authenticated identities.
+
+
+## 29. Qualify an ordinary Arkhai purchase
+
+Keep buyer and operator identities separate. Use the shipped buyer CLI for every customer action and the signed typed compute-provisioning client for independent host, job, lease, and reservation observations. The operator client takes a base URL, signer, caller role, and expected authority; keep its credential material outside the buyer configuration. Bind the frozen source, selected artifacts, and public configuration identity to each run in restricted evidence.
+
+Before rollout, check the rebuilt consumer against both the currently deployed payment authority responses and the selected publication. If one check is reused for both, establish that the contracts are identical; if they differ, record a compatible rollout order before making a change. Separately verify retained historical signed bytes. Do not deploy or downgrade the authority to match the consumer.
+
+Prove genuine TEST funding at its authority before buying, then correlate the funding evidence with the accepted Agreement, signed receipt, and attributable rental charge. Existing unexplained credit does not prove funding. Serialize or independently attribute payment observations when physical lanes overlap; retain transaction and Agreement identifiers with the evidence.
+
+For a bare-metal buyer, inspect supported syntax and discover a candidate through the CLI:
+
+```bash
+market --help
+market --config <buyer.toml> bare-metal list --config <buyer.toml>
+market --config <buyer.toml> bare-metal show <listing-id> --config <buyer.toml>
+```
+
+The root and bare-metal commands load their configuration separately, so these examples supply the same profile at both scopes. Select one advertised Arkhai payment option, prepare the tenant's public SSH key, then use the ordinary buy command. It emits a run identifier and transaction/fulfillment information for follow-up:
+
+```bash
+market --config <buyer.toml> bare-metal buy <listing-id> \
+  --config <buyer.toml> \
+  --option-id <option-id> \
+  --ssh-public-key <tenant-public-key> \
+  --duration-seconds <duration>
+```
+
+For VM buyer flows, use `market listing list` and `market listing show <listing-id>`, then inspect `market buy --help`; the VM plugin's ordinary `market buy` discovers and negotiates from the configured typed resource and settlement selections. Record the emitted buyer run ID and accepted transaction/fulfillment identifiers rather than constructing a second scenario client.
+
+Using the operator's `SyncComputeProvisioningClient`, take typed pre-run reads with `list_hosts()`, `list_leases()`, and `list_jobs()`. Correlate the returned reservation and job identifiers, then use `get_lease(reservation_id)` and `get_job(job_id)` to observe the create/release lifecycle. On the buyer side, retain the actual result and authorized access views; for bare metal, the supported recovery reads are:
+
+```bash
+market --config <buyer.toml> bare-metal result --run-id <run-id> --config <buyer.toml>
+market --config <buyer.toml> bare-metal access --run-id <run-id> --config <buyer.toml>
+```
+
+Check the delivered host key, tenant identity and privilege, wrong-key refusal, and the workload on the paid guest. After the ordinary lease expires, independently observe successful teardown, absence of the guest/access, and restored capacity. A bare-metal buyer can request the ordinary teardown/recovery path with:
+
+```bash
+market --config <buyer.toml> bare-metal teardown --run-id <run-id> --config <buyer.toml>
+```
+
+Do not equate an accepted receipt with successful delivery or a payment hold with a refund. Keep raw authority responses and deployment data restricted; publish sanitized findings and explicit unrun items. A supplemental network-policy result is admissible only from an actual operator-only CPU guest on the same paid deployment, with the pinned guest base, actual default bridge and virtio NIC, and loaded policy structure bound to that deployment. A namespace-only probe is not a substitute. That guest proves only finite policy selectors it exercises and none of the paid tenant's identity, payment, grant, GPU, delivery, or lifecycle facts. Reusing this method does not claim that an older named marker ran.

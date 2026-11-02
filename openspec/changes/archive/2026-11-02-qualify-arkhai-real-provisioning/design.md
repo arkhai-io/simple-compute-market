@@ -56,7 +56,7 @@ Section 1 reconciles proof ownership and prepares executable inputs. Section 2 r
 
 | Decision | Permanent destination | Status |
 |---|---|---|
-| Payment-specific proof equivalence and observation/recovery boundaries | `openspec/specs/test-compatibility/spec.md` | Delta pending actual implementation |
-| Procedure and evidence ownership | `openspec/specs/test-compatibility/architecture.md#payment-evidence-ownership` | Promote after verified behavior |
-| Reusable ordinary buyer/observer instructions | `docs/development/TESTING.md`, `docs/development/VALIDATION_RUNBOOK.md` | Promote actual commands after execution |
-| No new repository-wide architecture | `docs/development/ARCHITECTURE.md` | Confirm no-impact at closeout |
+| Payment-specific proof equivalence and observation/recovery boundaries | `openspec/specs/test-compatibility/spec.md#requirement-arkhai-physical-qualification-uses-ordinary-buyer-settlement`; `openspec/specs/test-compatibility/spec.md#requirement-equivalent-physical-proof-preserves-lifecycle-invariants` | Merged at archive |
+| Procedure, supplemental network-method limit and evidence ownership | `openspec/specs/test-compatibility/architecture.md#payment-evidence-ownership` | Promoted in this closeout |
+| Reusable buyer/operator preparation and scenario procedures | `docs/development/TESTING.md#accepted-arkhai-purchase-qualification`; `docs/development/VALIDATION_RUNBOOK.md#29-qualify-an-ordinary-arkhai-purchase` | Promoted from completed observations |
+| No new repository-wide authority or dependency boundary | `docs/development/ARCHITECTURE.md#authority-boundaries` | No-impact disposition confirmed |

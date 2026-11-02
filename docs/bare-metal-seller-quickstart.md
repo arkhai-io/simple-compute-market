@@ -102,12 +102,13 @@ prepared afterwards.
 The mounted inventory seeds the host registry when the provisioning service
 starts with no hosts registered; it is not read at execution. A host added to it
 later must be imported (`POST /api/v1/hosts/import`) before work can be
-dispatched to it. A host's `public_host` and `public_port` are the endpoint a buyer
-is given: the route a tenant takes to the machine, each falling back to the
-connection's own address and port when the entry states none. The provisioning
-service's own route stays `ansible_host` and `ansible_port`. Every host is stored as
-an `ssh` connection at version 2; a host stored at version 1 runs nothing until it is
-imported again or updated at version 2.
+dispatched to it. A host's `public_host` and `public_port` name its direct buyer route, each
+falling back to the connection's own address and port when the entry states none.
+For a relay-backed pool, the buyer receives the leased relay endpoint instead;
+the provisioning service's management route remains `ansible_host` and
+`ansible_port`. Every host is stored as an `ssh` connection at version 2; a
+host stored at version 1 runs nothing until it is imported again or updated at
+version 2.
 
 For a relay-backed pool, set `provider_config.relay_id` to the registered
 buyer relay id. Keep the host's management connection independent of its
@@ -134,6 +135,25 @@ not merely remove an SSH key while leaving an established tenant session alive.
 A relay port remains quarantined until its grant expiry plus the reuse margin;
 released capacity does not imply immediate port reuse. Working-data deletion is
 an additional configured policy, not a promise implied by key revocation.
+
+### Bounded working-data policy
+
+Use the operator-only `bare-metal-working-data` host-preparation role to
+install the protected helper and policy. Create the required protected state
+and cleanup roots in the host's actual mount namespace before initialization.
+Initialize only through the explicit host-preparation option; normal grant and
+reclaim never initialize, reset, adopt or rebuild the UID/GID ledger. Select the
+bounded policy and its policy ID in provisioning configuration before new
+grants. Existing grants retain their selected policy through reclaim, and
+existing grants cannot be adopted into bounded cleanup.
+
+The helper removes only attributable data under its configured roots and
+refuses unknown activity or ownership rather than widening its scope. A refusal
+keeps the teardown failed and capacity held for recovery. On rollback, disable
+new bounded grants and preserve the host ledger; a structurally valid older
+ledger cannot identify itself as rolled back. Quarantine a host after known or
+suspected ledger rollback until its history is verified or the host is
+decommissioned. Do not restore the host ledger from a service database backup.
 
 The pool declaration is authoritative. Do not add `vm` merely to make a
 request pass; add it only if the same pool and executor can actually deliver

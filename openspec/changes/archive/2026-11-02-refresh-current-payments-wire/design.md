@@ -39,7 +39,7 @@ None affecting implementation. Live deployment compatibility remains an evidence
 
 | Accepted decision | Permanent location | Status |
 |---|---|---|
-| Strict published contract and current/historical conformance | `openspec/specs/market-composition/spec.md#arkhai-payments-authority-remains-external` | Delta; archive after validation |
-| Publication selection and compatibility boundary | `openspec/specs/market-composition/architecture.md#agreement-based-payment-composition` | Promote after review |
-| Hashes, generation and nullable/optional serialization | `kit/arkhai-payments/schema/SOURCE.md`, `kit/arkhai-payments/README.md` | Update with implemented behavior |
-| No new repository-wide authority or layer | `docs/development/ARCHITECTURE.md` | No architecture change intended; confirm at closeout |
+| Strict published contract and current/historical conformance | `openspec/specs/market-composition/spec.md#requirement-arkhai-payments-authority-remains-external` | Delta merged at archive |
+| Publication selection and compatibility boundary | `openspec/specs/market-composition/architecture.md#agreement-based-payment-composition` | Promoted in this closeout |
+| Published source identity, deterministic generation and nullable/optional serialization | `kit/arkhai-payments/schema/SOURCE.md`; `kit/arkhai-payments/README.md` | Existing implementation documentation confirmed current; no duplicate edit |
+| No new repository-wide authority or dependency layer | `docs/development/ARCHITECTURE.md#authority-boundaries` | No-impact disposition confirmed; no edit |

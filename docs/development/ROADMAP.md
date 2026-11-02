@@ -34,7 +34,7 @@ A Resource Pool's provider is fixed at creation on every administration path: th
 
 The VM storefront has no inventory tables, CSV import, or local listing-derivation path, and its site-scoped pool overrides are its only per-pool terms. It holds no allocation ledger, resource administration routes, or host identity on the fulfillment path. Fresh databases omit `compute_allocations`, which `kit/site`'s `CapacityReservation` supersedes, and the retired inventory tables. Older databases keep those tables frozen, with nothing reading or writing them, as input an operator may extract into provisioning.
 
-Buyer-access infrastructure is provisioning-owned. A tunnel relay is a resource in the provisioning service, referenced by the pools whose hosts dial it, holding its own rendezvous address, port window, and admission token. The VM storefront names no relay and holds no relay credential: which relay serves a host is a physical fact about where that host is, and a storefront selecting one per request would make a fleet-wide property depend on a commercial caller's configuration.
+Buyer-access infrastructure is provisioning-owned and its relay machinery belongs to the compute family. VM and bare-metal pools may name an administered relay; a per-lease signed grant binds its exact port and lifetime, and the relay-local admission plugin checks that grant without calling the provisioning service. Family roles install the pinned clients and relay configuration, keep buyer access separate from management, protect privileged administration and signing material, and remove proxies before releasing quarantined ports. Both real lanes now exercise relay-backed delivery. A shared relay still has a single client token and is not isolated at login; operators use separate issuer keys and nonoverlapping port ranges, while an emergency token/key rotation can interrupt every attached host.
 
 The committed claim now governs the fulfillment request. A reservation carries its admitted claim -- dimensions and categorical constraints both -- and the scheduler reads it back rather than trusting the request, so a GPU-reserving listing can no longer fulfill without a GPU, and the durable create handle is written by the service that dispatches it. A reservation's release handle has one name, `release_job_id`, on every lease contract and for every offering mode sharing the reservation table.
 
@@ -69,10 +69,13 @@ service and the storefronts calling it upgrade together.
 | The real runner reports no structured terminal-failure evidence, so the transport, codec, and operator failure patterns classify only mocked failures. A successful result is read in either callback form and linked to its job; a failure is still not classified | Unowned — needs a new change |
 | VM guests attach to libvirt's `default` NAT network, one bridge per host with no isolation rule, so guests on one host, including different buyers', share a layer-2 segment | Unowned — needs a new change, with VM's provisioning owner |
 | Site admission and scheduling never read a host record's enabled flag, so a create can be admitted and placed on a disabled host and its dispatch retries until an operator re-enables it | [`keep-new-deliveries-off-disabled-hosts`](../../openspec/changes/keep-new-deliveries-off-disabled-hosts/) |
-| No end-to-end lane runs a relay-backed pool, which is why a relay-backed VM's wrong delivered address went unnoticed. The real-provisioning scenario takes the access mode as a parameter, so a relay-backed run is additive | Unowned — needs a new change, beside [`relay-vm-access-without-a-dashboard`](../../openspec/changes/relay-vm-access-without-a-dashboard/) |
+| The provisioning service's Ansible configuration disables SSH host-key checking, so a man-in-the-middle can impersonate a host | Unowned — needs a new change |
+| Admission at login is deferred for a shared relay: revisit when the first site Arkhai does not control joins an Arkhai relay; port grants alone do not prevent its hosts opening client connections | Unowned — needs a new change at that trigger |
+| Emergency rotation across live hosts must reissue active grants under the newly active signing key and rotate the shared client token; each operation may interrupt every affected session once | Unowned — needs a new change before serving buyers whose operator cannot accept the per-incident choice, or at first credential compromise |
+| The relay role takes the admission-plugin wheel on the operator's word rather than checking its digest | Unowned — pin the release version and digest when the plugin publishes a distributable release |
 | Every provisioning route admits the administrator; whether every other service should take the same stance has not been decided | Unowned — needs a repository-wide decision |
 | Under a bare-metal delivery conflict — the site reporting a delivery other than the recorded result — the buyer's teardown answers the 409 `delivery_conflict` refusal instead of ending the lease, since it reads the fulfillment's status first. Whether teardown proceeds past a conflict is undecided | Unowned — needs a new change |
-| A concurrent dispatch retry for one owner can end as a false `RelayWindowExhaustedError`: `RelayPortAllocator.allocate_in_session` retries the next port on every `IntegrityError`, including the one an owner's own concurrent allocation raises. Whether it re-reads the owner's lease or refuses as a conflict is undecided | Unowned — needs a new change, with VM's provisioning owner, or whichever change next touches relay allocation |
+| A concurrent dispatch retry for one owner can end as a false `RelayWindowExhaustedError`: `RelayPortAllocator.allocate_in_session` retries the next port on every `IntegrityError`, including the one an owner's own concurrent allocation raises. Whether it re-reads the owner's lease or refuses as a conflict is undecided | Unowned — needs a new change in compute-family relay allocation |
 
 Dropping the frozen tables is deliberately excluded from the retirement and belongs to a later follow-up, once operators have had a deployment cycle to extract what they need from them.
 
@@ -337,14 +340,11 @@ Local focused suites exercise Agreement retention, mandate validation, signed re
 
 A qualified payment run needs the intended owned payments target, owner-scoped credentials, observed readiness, and the actual domain delivery authority. VM delivery, API-key use and top-up, and bare-metal authenticated access, revocation, teardown, and capacity release remain separate outcomes. Unavailable service or hardware prerequisites remain named evidence gaps, not permission to claim a simulated result.
 
-Two compute purchases have been qualified that way, each on its own host in test mode, through the buyer commands as they ship: a whole bare-metal GPU machine, and a GPU guest on an x86-64 host. Each was:
-- bought, recovered from its run log, and reached over SSH with a pinned host key;
-- checked by a bounded computation on the GPU, with no CPU fallback;
-- released normally, the guest at its natural lease expiry with no operator retry;
-- refused after teardown;
-- returned to its full capacity, with its test payment reconciled.
+Two compute purchases have been qualified that way, each on its own host in test mode, through the buyer commands as they ship: a whole bare-metal GPU machine and a GPU guest on an x86-64 host. Both used relayed delivery, reached the paid guest over SSH with a pinned host key, completed bounded GPU work without CPU fallback, ended through ordinary lifecycle handling, refused fresh access after teardown, and returned capacity. VM leases also reached natural expiry without an operator retry. Their correlated signed payment records are separate evidence from physical delivery.
 
-Funds a contract holds after release are recorded as held, not as a refund. Pipeline lanes do not replace this evidence: none configures a payments target or runs a real host.
+Separate controlled CPU direct and relay pairs establish concurrent-session and create/release behavior, not external buyer identity or GPU acceptance. Independent observations also cover invalid relay admission, same-run recovery without another debit, repeated canonical adoption, bounded bare-metal cleanup and same-job refusal recovery. The supplemental host-network probe came from an operator-only CPU guest bound to the paid deployment's guest base, bridge, NIC and loaded policy; it covers only finite paths exercised and says nothing about paid-tenant setup or universal isolation. These observations do not claim the original named Alkahest drivers ran.
+
+Later signed financial snapshots showed all observed VM holds naturally released and the bare-metal contract holds still held at the latest verified read. A held balance is not a refund or cashout. Pipeline lanes do not replace this evidence: none configures a payments target or runs a real host.
 
 What this qualification leaves open:
 - A teardown job that exhausts its retries is not re-run: the lease waits for an operator to verify the host and force-release it.
@@ -352,7 +352,7 @@ What this qualification leaves open:
   - successor listings are created unpaused;
   - no test closes a paused listing by reconciliation and reopens it;
   - bare metal has no test of a paused listing refusing an opening.
-- Current-wire producer vectors were not supplied with the payments schema snapshot. The payments kit keeps the previous publication's vectors for canonical framing alone, and pins the current wire with an explicit synthetic fixture that is not producer provenance.
+- Live API-credit purchase/top-up qualification remains separate; consumer wire compatibility does not establish an external API-credit delivery. Current producer vectors and their signature/framing checks are now available in the payment kit; this gap is closed.
 
 ---
 

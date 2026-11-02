@@ -288,11 +288,12 @@ registry alone. Splitting any part into service configuration would make the
 connection unreproducible and would express one value for every host, which is
 wrong as soon as two hosts sit behind different tunnels.
 
-Beside the provisioner's route, a connection may name the route a buyer takes:
+Beside the provisioner's route, a connection may name the direct buyer route:
 a tenant-facing `public_host` and `public_port`, each falling back to the
-connection's own address and port. A bare-metal buyer's endpoint is that route.
-A VM guest is reached at its own forwarded or relayed port, never the host's
-`public_port`.
+connection's own address and port. A bare-metal buyer uses this route when the
+pool has no buyer relay; for a relay-backed pool, the leased relay endpoint is
+delivered instead. A VM guest is reached at its own forwarded or relayed port,
+never the host's `public_host` or `public_port`.
 
 The `ssh` connection is served at version 2 alone, and a submission stating no
 version, or another, is refused. A host stored at version 1 is refused before
@@ -322,69 +323,167 @@ never occurred, so recovery MUST NOT compensate by launching another create
 playbook. The adapter remains the owner of provider metadata interpretation and
 teardown-envelope construction.
 
-## Buyer access to rented VMs
+## Buyer access to provisioned hosts
 
-A host participating in this system holds two reverse tunnels, and they are
-routinely confused. The **management tunnel** is the operator's path to the host
-itself: static for a whole provisioning service, established when the host is
-prepared outside this repository, and never written or restarted by a VM
-operation. The **VM tunnel** carries buyer access to rented VMs, with one proxy
-per VM added and removed continuously. They cannot share a process — a tunnel
-client carries exactly one rendezvous address and one admission token at the top
-level, and a proxy cannot override either — so two clients follow as a
-consequence rather than as a choice. Only the second is modelled here.
+A provisioned host has an operator management connection and may also carry a
+buyer route. They are separate authorities. The host registry stores the
+management connection needed to render provisioning inventory. A direct
+bare-metal route uses the host's buyer-facing `public_host` and `public_port`,
+each falling back to the connection address and port. A relay-backed
+bare-metal grant instead creates a per-lease TCP proxy from the host to a leased
+relay port. A VM guest is reached through its own forwarded or relayed port; the
+host's buyer-facing route is never the VM endpoint.
 
-### A relay's management surface is not a coordination interface
+### Buyer SSH uses a leased TCP port
 
-Discovering a free port by querying the relay's dashboard makes a monitoring
-surface into a distributed lock, and requires every relay to run one, publish a
-DNS name for it, hold a certificate, and distribute a second credential. Port
-allocation belongs to an authority that can also reclaim what it issued, and
-proxy verification belongs to the client that registered the proxy: asking the
-relay whether our own registration succeeded is a round trip to a third party
-about our own state.
+SSH sends no `Host` or SNI header and exchanges its version banner immediately,
+so an HTTP-style subdomain cannot select a buyer's SSH session. A TCP proxy
+uses a distinct remote port, which is the route the lease can allocate and
+reclaim.
 
-### Buyer access is port-based
+### Port allocation is not a relay-dashboard lock
 
-A buyer receives a host and a port. Subdomain routing cannot serve SSH: FRP's
-`subdomain` option belongs to its `http` and `https` proxy types, which
-demultiplex on the `Host` header, while SSH sends no SNI and no `Host` header
-and exchanges version banners immediately on connect. A `tcp` proxy binds a
-distinct port whatever the key says, so the wildcard DNS record and certificate
-that subdomain routing implies serve nothing.
+A relay dashboard is a monitoring surface, not a distributed lock: querying it
+for a free port adds relay credentials, reachability and a race to allocation,
+and asking the relay whether a client registered its own proxy adds a roundtrip
+to a third party about client-owned state. The provisioning service allocates
+from its durable lease authority; the registering client verifies its proxy.
 
-### The relay token never reaches buyer-controlled hardware
+### Relay admission is local to the relay
 
-The tunnel client runs on the host rather than inside the VM. A buyer has root
-in their VM and would therefore hold the token, and a relay's `allowPorts` spans
-the management window as well as the VM window — so a buyer holding a token
-could bind a management port freed by a dropped tunnel and answer, as that host,
-the connections the provisioning service makes to administer it. Per-VM or
-per-host tokens do not address this: the relay still admits the holder to
-whatever `allowPorts` permits. The property worth holding is that the token
-never lands on buyer-controlled hardware at all.
+The compute-family service allocates a port and signs one short, lease-bound
+grant for it. The relay plugin verifies the grant locally; neither the plugin
+nor the relay calls the provisioning service. The grant binds its audience,
+port and expiry, and admission requires a TCP proxy on that exact port, inside
+the configured issuer range and before expiry. The plugin and signer conform to the published grant protocol and vectors
+([tool documentation](../../../tools/frp-grant-admission/README.md)); the shared
+FRP role owns the verified 0.61.1 binary pin. Admission has no effect on an already registered proxy, so teardown
+removes the proxy and a released port remains quarantined through grant expiry
+plus the configured reuse margin. Keep service and relay clocks synchronized
+well below that margin; the plugin checks expiry on its own clock without
+leeway.
 
-### A relay is a resource, not pool configuration
+The versioned `frp-grant+jwt` carries a JCS-canonical compact token with `aud`,
+`exp`, `jti`, and `port`, plus `sub` when a host is recorded; its `kid` is the
+signing key's JWK thumbprint. `jti` names the owning reservation. The token has
+no `iat` or `nbf`; issuer keys are configured in the plugin's published public
+key format, and the signer is checked against the plugin's conformance vector.
 
-A relay's address, allocation window, and admission token are shared by every
-pool that points at it. Held per pool they can diverge: two pools referencing
-one rendezvous would allocate from a single listening namespace under
-disagreeing bounds, and each would hold its own copy of one credential, making
-rotation one write per pool with a missed one failing asynchronously in a tunnel
-client's log.
+### Relay credentials stay on the host and in the service
 
-Relay uniformity across a host is a limit of running one VM tunnel client per
-host, not a limit of the model. A lease records its relay, so a per-VM relay is
-already representable; what forbids it is that one client dials one rendezvous.
-A topology of one client per VM would remove the limit without a schema change.
+The buyer client runs on the host, never in a buyer-controlled VM. VM
+guest-root control does not expose host-held relay credentials. On bare metal,
+this boundary depends on the tenant remaining nonroot, the root-only client
+configuration, and the authenticated admin API on a privileged port. The host's
+buyer client uses a generated per-host admin password; binding below port 1024
+prevents a nonroot tenant from impersonating it while the client is stopped. The management
+client and management relay stay separate. Tasks that render, read or send the
+grant, relay token or admin password use Ansible `no_log`, and each domain's
+codec marks these values as secret fields for job redaction. Provider extras
+cannot override the client baseline, proxy targets or task controls.
+
+The `grant_key_secret_key` profile value is one-line standard base64 encoding
+of an Ed25519 PKCS#8 DER private key; surrounding whitespace is stripped, and
+invalid or missing values fail relay creation without echoing the secret. It is
+read when a relay is created; later API rotation remains authoritative over
+definitions reconciliation. Keep a
+controlled private-key value in the deployment profile when an empty-database
+reinstall must reproduce the plugin's trust. The relay stores its private key
+encrypted and returns public key and lifecycle metadata only. Rotation stages a
+new key, adds its public half to the plugin, then activates it; retain retired
+keys until their outstanding grants expire. Service-generated keys survive only
+with the service database. No live operation reissues existing grants or rotates
+a shared client token across hosts.
+
+### Relay installation and reload boundaries
+
+The family `relay-server` role accepts the plugin wheel, hash-pinned runtime
+requirements and configuration as operator inputs; it does not fetch or build
+them. The native installer checks candidate configuration before publication,
+uses a protected root-owned configuration (0640 under a protected 0750
+directory) and a dedicated nonroot service identity with no login or extra
+groups, and selects immutable fingerprinted program releases. A changed
+program restarts the plugin; a configuration-only change reloads the same
+program. The plugin keeps its listener bound across reload, so a native listener
+change requires explicit drained maintenance and coordinated reinstallation.
+Changes to frps version or configuration also require draining because frps
+restart interrupts its sessions. These are operator deployment boundaries; the
+service cannot prove a relay has admission configured. The [validation
+runbook](../../../docs/development/VALIDATION_RUNBOOK.md#28-prepare-and-operate-buyer-relays)
+contains the installation and deployed refusal procedures.
+
+### Relay sharing and containment
+
+A relay is shared routing state, not pool configuration. One host client has one
+rendezvous and token, so pools on that host cannot choose independent relay
+baselines. A shared relay can separate provisioning authorities with
+nonoverlapping issuer ranges and keys, but still shares its token and sessions;
+one operator's frps restart affects every user. A separate relay per operator
+is recommended. For a compromised signing key, remove it immediately and deny
+its next reconnects, or retain it until its leases end with the signing risk
+limited to its issuer. A leaked client token requires stopping admission,
+draining every lease sharing it, then rotating the token and host baselines.
+
+If teardown cannot reach the host, a relay operator must block the leased port
+and end established sockets in the relay namespace; where firewall control is
+unavailable, removing the port from `allowPorts` and restarting frps interrupts
+the shared relay. Keep containment until expiry and registration removal are
+verified. Relay containment closes the route only; reclaim still needs host
+activity termination and verified cleanup.
 
 ### Rebinding requires draining
 
-A VM's relay is fixed for its life. The buyer holds an address and a port, both
-delivered, and a remote port is not portable between relays — a port number on
-one rendezvous says nothing about the same number on another, which may already
-be leased. Moving an existing VM would strand its buyer and request a port the
-new relay may not have free. So a relay binding changes only while no affected
-host holds a lease, and disabling a pool — already a draining operation that
-excludes new scheduling without disturbing running workloads — is how an
-operator reaches that state.
+A host's relay binding cannot change while any affected lease remains active.
+The host authority composes the compute-family relay mechanism's pool-change
+check; it refuses a relay-changing move while relay leases exist. Disablement
+stops new scheduling but leaves existing leases to drain before rebinding.
+
+## Bounded bare-metal working data
+
+Bounded cleanup is an opt-in bare-metal policy; legacy key-removal, account-lock
+and home-deletion policies keep their existing semantics. Trusted deployment
+configuration selects the bounded policy and its identifier before grant, and
+the accepted reservation carries that selection through reclaim. Buyer input
+cannot select the UID, group, paths, or policy. Existing unreceipted accounts
+and grants cannot be adopted into it.
+
+A root-only host helper and protected host-local ledger own identity history.
+The helper durably consumes a fresh UID/private primary GID pair before either
+account object is created, retains consumption for the policy lifetime, and
+returns the recorded numeric identity for cleanup even after NSS no longer
+names the account. Retries of the same reservation reuse its receipt; another
+reservation never reuses consumed IDs. Service database restore, image
+redeployment and campaign reset preserve this ledger. A valid older ledger copy
+cannot detect its own rollback, so known or suspected rollback requires host
+quarantine until history is verified or the host is decommissioned.
+
+The policy's protected home, scratch and path-backed IPC roots define the whole
+deletion boundary. The helper binds root identity, device, inode and Linux mount
+identity; it walks without following symlinks or mounts, rejects root/policy
+aliases and overlap, and refuses foreign descendants, identity drift, unreadable
+inventories or mutation races instead of broadening cleanup. A selected entry's
+containing directory and ancestors must be controlled by trusted root or the
+quiesced tenant; a foreign-owned ancestor or group/other-writable directory
+without the sticky bit refuses cleanup. Effective POSIX ACL write masks are
+reflected in those mode bits. The helper retains the checked descriptor during
+removal and rechecks parent authority, so a concurrent replacement is a refusal. It removes only
+attributable entries inside selected roots. System V IPC uses owner and creator
+identity together, rechecks the object before removal, and verifies inventory
+afterwards; a recycled numeric kernel object ID alone is not attribution.
+Data outside covered roots is not deleted. Copies transferred to another UID
+and hard-linked copies outside those roots remain outside this policy.
+
+Reclaim removes the buyer proxy and revokes the bounded key through fixed-path,
+descriptor-safe helper operations before the existing activity barrier. The
+barrier verifies sessions and scheduled activity have ended; the helper separately
+checks that no process retains the numeric UID. It then cleans attributable
+scratch and IPC and validates the home. The role deletes the account without
+recursive home removal, calls the helper's descriptor-verified `remove-home`,
+removes only the receipted unused private group, then calls `verify-complete` to
+independently verify absence and record completion. A refused step fails
+teardown and keeps capacity held; retry re-reads the receipt and remaining
+state. The SSH key helper pins the home and `.ssh` through no-follow descriptors
+and replaces or removes only the validated `authorized_keys` entry, avoiding
+path traversal through tenant symlinks. This bounded key path does not change the
+legacy policy's behavior. Neither policy promises erasure of transferred data,
+external links or data outside the declared boundary.

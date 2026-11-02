@@ -80,12 +80,12 @@ The selected finite UID policy, Linux-only IPC adapter and strict refusal on for
 
 | Accepted decision | Permanent location |
 |---|---|
-| D1, D3, D4, D5, D6: bounded policy, identity, attribution, completion | `openspec/specs/physical-provisioning/spec.md` (archive delta) |
-| D2–D7 and 01-design F1: host-local ownership, ledger continuity/self-rollback limitation, bounded filesystem/IPC, retries, integration | `openspec/specs/physical-provisioning/architecture.md` |
-| D1, D3–D6: operator setup, exclusions, exhaustion, failed cleanup and operational ledger-preservation/quarantine boundary (01-design F1) | `docs/bare-metal-seller-quickstart.md`; `docs/development/VALIDATION_RUNBOOK.md` |
-| D8: bare-metal IaC test ownership and native/deployed evidence | `docs/development/TESTING.md` |
-| Readiness and remaining gaps | `docs/development/ROADMAP.md`; `openspec/changes/README.md` |
-| Repository-wide architecture | No new authority or dependency rule; confirm this disposition at closeout |
+| D1, D3–D6: bounded policy, identity consumption, attribution and completion | `openspec/specs/physical-provisioning/spec.md#requirement-bounded-working-data-cleanup-is-an-explicit-bare-metal-policy`; `#requirement-tenant-uids-remain-consumed-for-the-policy-lifetime`; `#requirement-cleanup-targets-are-protected-and-bounded`; `#requirement-tenant-ipc-cleanup-requires-unambiguous-ownership`; `#requirement-bounded-cleanup-checks-quiescence-without-owning-termination`; `#requirement-bounded-cleanup-completes-only-after-verified-absence`; `#requirement-a-bare-metal-reclaim-tolerates-an-account-its-grant-never-created` (delta merged at archive) |
+| D2–D7 and 01-design F1: helper ownership, host-ledger continuity/rollback limits, bounded filesystem and IPC cleanup, retries and integration sequencing | `openspec/specs/physical-provisioning/architecture.md#bounded-bare-metal-working-data` |
+| D1, D3–D6 and 01-design F1: operator setup, exclusions, exhaustion, refusal recovery and ledger preservation/quarantine | `docs/bare-metal-seller-quickstart.md`; `docs/development/VALIDATION_RUNBOOK.md#22-prepare-the-host`; `docs/development/VALIDATION_RUNBOOK.md#26-restore-and-cleanup` |
+| D8: IaC test ownership, native gate and deployed qualification boundary | `docs/development/TESTING.md#ansible-syntax-and-native-checks` |
+| Readiness, actual deployed observation and remaining gaps | `docs/development/ROADMAP.md#payment-qualification-boundaries`; `openspec/changes/README.md` (Reach hosts and VMs campaign) |
+| Repository-wide authority/dependency boundary | `docs/development/ARCHITECTURE.md#authority-boundaries`; no new architecture rule was needed |
 
 ## Helper wire contract (version 1)
 
@@ -248,7 +248,7 @@ This source seam does not establish live readiness without actual deployed runs.
 
 ## Arkhai qualification method amendment
 
-The accepted method in `openspec/changes/qualify-arkhai-real-provisioning/design.md#accepted-method-mapping`
+The accepted method in `openspec/changes/archive/2026-11-02-qualify-arkhai-real-provisioning/design.md#accepted-method-mapping`
 applies to unfinished deployed tasks 4.1–4.3 on this branch. Existing probe and
 independent observation semantics remain unchanged. A normal Arkhai rental and
 fresh-UID successor/refusal rental provide the ordinary teardown, held-capacity,

@@ -215,10 +215,10 @@ Disclose every unrun check.
 
 | Decision | Permanent destination |
 |---|---|
-| Accepted representation versus view; proof protocol ownership | `docs/development/ARCHITECTURE.md` |
-| Evolution preservation, reader boundaries, deletion/floor distinction | `openspec/specs/deployment-state/spec.md` and `openspec/specs/deployment-state/architecture.md` |
-| Bare-metal verification, publication, route/client and Python compatibility | `openspec/specs/storefront-publication/spec.md` and `openspec/specs/storefront-publication/architecture.md` |
-| Bounded correction and remaining inventory disposition | `docs/development/ROADMAP.md` and this change's campaign row |
+| Accepted representation versus validated application view; proof input ownership | `docs/development/ARCHITECTURE.md#accepted-representations-and-application-views` |
+| Evolution preservation, reader obligations, deletion and support-floor distinction | `openspec/specs/deployment-state/spec.md#requirement-evolution-preserves-retained-accepted-representations`; `openspec/specs/deployment-state/spec.md#requirement-preservation-respects-explicit-support-and-retention-boundaries`; `openspec/specs/deployment-state/architecture.md#compatibility-posture` |
+| Bare-metal persistence, publication, signed resolution, typed clients and deliberate Python compatibility | `openspec/specs/storefront-publication/spec.md#requirement-bare-metal-evidence-retains-its-proof-representation`; `openspec/specs/storefront-publication/spec.md#requirement-evidence-persistence-verifies-and-preserves-the-first-document`; `openspec/specs/storefront-publication/spec.md#requirement-resolution-preserves-the-existing-signed-evidence-wire-contract`; `openspec/specs/storefront-publication/spec.md#requirement-evidence-clients-retain-field-style-python-usability`; `openspec/specs/storefront-publication/architecture.md#retained-bare-metal-evidence` |
+| Roadmap and campaign readiness; no accepted-artifact gap row existed to remove, and no cross-domain completion is claimed | `docs/development/ROADMAP.md#goal-1--consolidate-physical-resource-authority-in-the-provisioning-service`; `openspec/changes/README.md` (Goal 1 row) |
 
 Permanent promotion describes only resulting implemented behavior, without claiming
 universal codec coverage or retirement tooling this change does not implement.

@@ -942,6 +942,12 @@ manifest must fail startup rather than admit mixed identity precedence.
   physical access. Check readiness before a live run and report unavailable
   service or credential prerequisites rather than run against a down target.
 
+## Accepted Arkhai purchase qualification
+
+For external physical qualification, use the shipped ordinary buyer CLI to exercise discovery, negotiation, signed TEST payment, delivery, and ordinary teardown. Collect independent lifecycle observations through the supported typed operator clients; do not import a payment-specific full-deal driver merely to obtain operator visibility. Keep buyer credentials separate from operator credentials. Bind source and selected artifacts/configuration to the run and correlate the accepted Agreement, funding evidence, receipt, rental debit, reservation, fulfillment, jobs, delivered access, and teardown observations in restricted evidence. Public summaries omit credentials, private service records, and raw deployment data.
+
+Require actual paid-buyer journeys for claims about tenant identity, negotiated privilege, grant admission, GPU work, delivery, ordinary teardown, fresh access denial, and capacity restoration. A supplemental network-policy probe is admissible only from an actual operator-only CPU guest on the same paid deployment, using the pinned guest base, its actual default bridge and virtio NIC, and the loaded policy structure. It may establish only the finite selectors observed on that path; it establishes none of the paid tenant identity, credential, privilege, grant, GPU, payment, delivery, or lifecycle facts and does not prove universal isolation. A namespace-only probe is not a substitute for this guest-path evidence. Published vectors, local component tests, and controlled smokes are narrower evidence. Record unrun markers as unrun: an equivalent ordinary-buyer method does not mean an older named test marker executed.
+
 ## Payment Receipts in Tests
 
 A seller delivers only after verifying a receipt that the payments service
@@ -1069,6 +1075,20 @@ own configuration and with the shared service configuration and image role path.
 The shared configuration contains no domain path. A structure test holds the VM
 gate's list of native modules to every module defining its skip guard. The VM
 end-to-end lane runs this gate once it has built the image.
+
+The bounded bare-metal working-data helper has its own evidence boundaries.
+`make test-bare-metal-iac` exercises its unit and library-integration behavior;
+`make build-provisioning` followed by `make test-bare-metal-iac-native`
+executes native account, filesystem and IPC behavior in a disposable isolated
+environment and fails on missing prerequisites or skips. Neither gate proves
+that an image contains the intended assets, that the role is active in a
+deployment, or that a real lease is reclaimed. A deployed qualification must additionally observe an actual lease through
+cleanup and successor access; the real-provisioning marker by itself does not
+qualify bounded cleanup. A valid older copy of the host ledger is
+not locally distinguishable from current state; operational rollback response
+is quarantine pending history verification or host decommission, not a passing
+rollback test. A rejected cleanup retains capacity; normal same-job retry is
+distinct from terminal failed-job recovery or force-release.
 
 ## Chart Render Tests
 
