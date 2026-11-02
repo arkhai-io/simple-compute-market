@@ -82,8 +82,6 @@ jobs:
             kit-deal-lifecycle-buyer: ['kit/deal-lifecycle-buyer/**', '.github/workflows/publish-pypi.yml']
             kit-arkhai-payments: ['kit/arkhai-payments/**', '.github/workflows/publish-pypi.yml']
             kit-policy: ['kit/policy/**', '.github/workflows/publish-pypi.yml']
-            kit-deal-lifecycle-contracts: ['kit/deal-lifecycle-contracts/**', '.github/workflows/publish-pypi.yml']
-            kit-deal-lifecycle: ['kit/deal-lifecycle/**', '.github/workflows/publish-pypi.yml']
             kit-settlement-runtime: ['kit/settlement-runtime/**', '.github/workflows/publish-pypi.yml']
             kit-negotiation-runtime: ['kit/negotiation-runtime/**', '.github/workflows/publish-pypi.yml']
             core: ['core/src/**', 'core/pyproject.toml', 'core/README.md', '.github/workflows/publish-pypi.yml']
@@ -149,8 +147,6 @@ jobs:
             {"key": "kit-deal-lifecycle-buyer", "path": "kit/deal-lifecycle-buyer", "dist": "arkhai-kit-deal-lifecycle-buyer"},
             {"key": "kit-arkhai-payments",    "path": "kit/arkhai-payments",              "dist": "arkhai-kit-arkhai-payments"},
             {"key": "kit-policy",             "path": "kit/policy",                       "dist": "arkhai-kit-policy"},
-            {"key": "kit-deal-lifecycle-contracts", "path": "kit/deal-lifecycle-contracts", "dist": "arkhai-kit-deal-lifecycle-contracts"},
-            {"key": "kit-deal-lifecycle", "path": "kit/deal-lifecycle", "dist": "arkhai-kit-deal-lifecycle"},
             {"key": "kit-settlement-runtime", "path": "kit/settlement-runtime",               "dist": "arkhai-kit-settlement-runtime"},
             {"key": "kit-negotiation-runtime", "path": "kit/negotiation-runtime",             "dist": "arkhai-kit-negotiation-runtime"},
             {"key": "core",                   "path": "core",                             "dist": "arkhai-core"},
