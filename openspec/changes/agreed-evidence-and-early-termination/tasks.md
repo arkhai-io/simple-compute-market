@@ -68,7 +68,7 @@ and its tests under `scripts/tests/`.
       buyer-side area's dependency rule (foundation libraries and contracts only; composed by
       buyers, never by a storefront or a site). Verify: `make check-architecture` passes on
       the unchanged tree.
-- [ ] 1.2 Teach `scripts/architecture.py` the table: load `[[disputes]]`, grant each interface
+- [x] 1.2 Teach `scripts/architecture.py` the table: load `[[disputes]]`, grant each interface
       token to its kit, add interface tokens to the vocabulary check, refuse a kit scoped to both
       a mechanism and a dispute interface, refuse a dispute kit whose sources name a registered
       payment mechanism token, and enforce the buyer-side area's dependency rule. Verify: unit

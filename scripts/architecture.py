@@ -49,7 +49,7 @@ GROUPS = {
     "layers": ("configuration", "unclassified", "layer", "cycle", "layer_scope", "override_expiry"),
     "scope": ("scope", "vocabulary"),
     "dependencies": ("undeclared_import", "unused_declaration", "declaration_expiry"),
-    "kinds": ("kind_allowlist", "package_allowlist", "plugin_in_degree"),
+    "kinds": ("kind_allowlist", "package_allowlist", "plugin_in_degree", "kit_area"),
 }
 RULES = tuple(rule for rules in GROUPS.values() for rule in rules)
 
@@ -79,19 +79,28 @@ class Rules:
     families: dict[str, dict]
     domains: dict[str, dict]
     mechanisms: dict[str, dict]
+    disputes: dict[str, dict]
+    kit_areas: dict[str, list[str]]
     plugin_groups: dict[str, str | None]
     kind_allowlists: dict[str, dict]
     vocabulary_fail_layers: frozenset[str]
     overrides: tuple[dict, ...]
     exceptions: tuple[dict, ...]
     plugin_group_rows: tuple[dict, ...] = ()
+    dispute_rows: tuple[dict, ...] = ()
 
     def element_kind(self, element: str) -> str:
         if element in self.families:
             return "family"
         if element in self.domains:
             return "domain"
-        return "mechanism"
+        return "dispute" if element in self.disputes else "mechanism"
+
+    def dispute_of_kit(self, distribution: str) -> str | None:
+        for name, dispute in self.disputes.items():
+            if normalize(dispute["kit"]) == distribution:
+                return name
+        return None
 
     def mechanism_of_kit(self, distribution: str) -> str | None:
         for name, mechanism in self.mechanisms.items():
@@ -111,6 +120,8 @@ def load_rules(root: Path) -> Rules:
         families={row["name"]: row for row in data.get("families", ())},
         domains={row["name"]: row for row in data.get("domains", ())},
         mechanisms={row["name"]: row for row in data.get("mechanisms", ())},
+        disputes={row["name"]: row for row in data.get("disputes", ())},
+        kit_areas=data.get("kit_areas", {}),
         plugin_groups={
             row["name"]: normalize(row["owner"]) if row.get("owner") else None
             for row in data.get("plugin_groups", ())
@@ -120,6 +131,7 @@ def load_rules(root: Path) -> Rules:
         overrides=tuple(data.get("overrides", ())),
         exceptions=tuple(data.get("exceptions", ())),
         plugin_group_rows=tuple(data.get("plugin_groups", ())),
+        dispute_rows=tuple(data.get("disputes", ())),
     )
 
 
@@ -178,8 +190,10 @@ def read_path(path: str, distribution: str, rules: Rules) -> Reading | None:
         return Reading("core", "library", frozenset())
     if parts[0] == "kit" and len(parts) == 2:
         mechanism = rules.mechanism_of_kit(distribution)
-        return Reading("kit", _kind_of(parts[1], rules, roles=False),
-                       frozenset({mechanism} if mechanism else ()))
+        dispute = rules.dispute_of_kit(distribution)
+        scope = frozenset(e for e in (mechanism, dispute) if e)
+        kind = "dispute" if dispute else _kind_of(parts[1], rules, roles=False)
+        return Reading("kit", kind, scope)
     if parts[0] == "roles" and len(parts) == 2:
         return Reading("composition", "executable", frozenset())
     if parts[0] != "domains" or len(parts) < 2:
@@ -198,7 +212,7 @@ def read_path(path: str, distribution: str, rules: Rules) -> Reading | None:
         return None
     last = parts[-1]
     kind = _kind_of(last, rules, roles=True) if len(parts) > 2 else "library"
-    for name in rules.mechanisms:
+    for name in rules.mechanisms.keys() | rules.disputes.keys():
         if last == name or last.endswith(f"-{name}") or f"-{name}-" in last:
             scope.add(name)
     layer = "composition" if kind == "executable" else "specialization"
@@ -292,7 +306,7 @@ def _classify(projects: dict[str, Project], rules: Rules, edges: list[Edge]) -> 
     while changed:
         changed = False
         for project in compositions:
-            mechanisms = {e for t in targets[project.name] for e in projects[t].scope if e in rules.mechanisms}
+            mechanisms = {e for t in targets[project.name] for e in projects[t].scope if e in rules.mechanisms or e in rules.disputes}
             if not mechanisms <= project.scope:
                 project.scope |= mechanisms
                 changed = True
@@ -550,11 +564,15 @@ def layer_scope(model: Model) -> list[Finding]:
         if p.layer == "core" and p.scope:
             problem = f"a core package knows {', '.join(sorted(p.scope))}"
         elif p.layer == "kit":
-            own = rules.mechanism_of_kit(p.name)
-            extra = p.scope - ({own} if own else set())
-            if extra:
-                problem = f"a kit knows {', '.join(sorted(extra))}, and only a mechanism's own kit may know it"
-        elif p.layer == "specialization" and not any(rules.element_kind(e) != "mechanism" for e in p.scope):
+            mechanism = rules.mechanism_of_kit(p.name)
+            dispute = rules.dispute_of_kit(p.name)
+            own = {e for e in (mechanism, dispute) if e}
+            extra = p.scope - own
+            if mechanism and dispute:
+                problem = "a kit is scoped to both a payment mechanism and a dispute interface"
+            elif extra:
+                problem = f"a kit knows {', '.join(sorted(extra))} outside its own mechanism or dispute interface"
+        elif p.layer == "specialization" and not any(rules.element_kind(e) in {"family", "domain"} for e in p.scope):
             problem = "a specialization knows no family or domain"
         if problem:
             findings.append(Finding("layer_scope", p.name, p.layer, problem,
@@ -580,7 +598,7 @@ def scope(model: Model) -> list[Finding]:
 def vocabulary(model: Model) -> list[Finding]:
     rules = model.rules
     tokens: dict[str, str] = {}
-    for table in (rules.families, rules.domains, rules.mechanisms):
+    for table in (rules.families, rules.domains, rules.mechanisms, rules.disputes):
         for name, row in table.items():
             for token in row.get("tokens", ()):
                 tokens[token] = name
@@ -591,14 +609,15 @@ def vocabulary(model: Model) -> list[Finding]:
             continue
         for value, site in literals:
             element = tokens.get(value)
-            if element is None or element in p.scope:
+            forbidden_mechanism = p.kind == "dispute" and element in rules.mechanisms
+            if element is None or element in p.scope and not forbidden_mechanism:
                 continue
             key = (name, value)
             if key not in findings:
                 severity = "fail" if p.layer in rules.vocabulary_fail_layers else "warn"
                 findings[key] = Finding(
                     "vocabulary", name, value,
-                    f"names {value!r}, the identity of {element}, outside its scope", [], severity)
+                    f"names {value!r}, the identity of {element}, outside its permitted vocabulary", [], severity)
             findings[key].sites.append(site)
     return list(findings.values())
 
@@ -661,6 +680,9 @@ def _within_kind_allowlist(model: Model, source: Project, target: Project, allow
         return True
     if target.name in {normalize(d) for d in allowlist.get("distributions", ())}:
         return True
+    if any(target.path in model.rules.kit_areas.get(area, ())
+           and target.kind == "library" for area in allowlist.get("areas", ())):
+        return True
     if allowlist.get("family_vocabulary"):
         vocabularies = {normalize(f["vocabulary"]) for n, f in model.rules.families.items()
                         if n in source.scope and f.get("vocabulary")}
@@ -680,6 +702,27 @@ def kind_allowlist(model: Model) -> list[Finding]:
             "kind_allowlist", source, target,
             f"is a {s.kind} package and depends on {target}, which its kind's allowlist does not name",
             _sites(edges), "fail" if allowlist.get("enforce") else "warn"))
+    return findings
+
+
+def kit_area(model: Model) -> list[Finding]:
+    """Buyer-side libraries have a foundation-only dependency and buyer-only consumers."""
+    areas = model.rules.kit_areas
+    buyer = set(areas.get("buyer", ()))
+    foundation = set(areas.get("foundation", ()))
+    findings = []
+    for (source, target), edges in _grouped(model.edges).items():
+        s, t = model.projects[source], model.projects[target]
+        if s.path in buyer and not (t.kind == "contracts" or
+                                    t.path in foundation and t.kind == "library"):
+            findings.append(Finding("kit_area", source, target,
+                                    "a buyer-side kit depends only on foundation libraries and contracts",
+                                    _sites(edges)))
+        last = s.path.rsplit("/", 1)[-1]
+        is_buyer = s.layer == "composition" and (last == "buyer" or last.endswith("-buyer"))
+        if t.path in buyer and not is_buyer:
+            findings.append(Finding("kit_area", source, target,
+                                    "only a buyer composition may consume a buyer-side kit", _sites(edges)))
     return findings
 
 
@@ -738,7 +781,7 @@ def configuration(model: Model) -> list[Finding]:
     rules = model.rules
     site = [Site(RULES_FILE.as_posix(), 1, "module")]
     problems: list[tuple[str, str, str]] = []  # (project or table, target, message)
-    elements = set(rules.families) | set(rules.domains) | set(rules.mechanisms)
+    elements = set(rules.families) | set(rules.domains) | set(rules.mechanisms) | set(rules.disputes)
 
     def unique(rows, key, table):
         seen = set()
@@ -751,6 +794,8 @@ def configuration(model: Model) -> list[Finding]:
     unique(rules.exceptions, _exception_key, "exception")
     unique(rules.overrides, lambda r: normalize(r.get("project", "")), "override")
     unique(rules.plugin_group_rows, lambda r: r.get("name"), "plugin-group")
+    unique(rules.dispute_rows, lambda r: r.get("name"), "dispute")
+    unique(rules.dispute_rows, lambda r: normalize(r.get("kit", "")), "dispute-kit")
     for name, family in rules.families.items():
         vocabulary = family.get("vocabulary")
         if vocabulary and normalize(vocabulary) not in model.projects:
@@ -761,6 +806,9 @@ def configuration(model: Model) -> list[Finding]:
     for name, mechanism in rules.mechanisms.items():
         if normalize(mechanism["kit"]) not in model.projects:
             problems.append(("mechanism", name, f"mechanism {name} names kit {mechanism['kit']}, which is not a project"))
+    for name, dispute in rules.disputes.items():
+        if normalize(dispute["kit"]) not in model.projects:
+            problems.append(("dispute", name, f"dispute interface {name} names kit {dispute['kit']}, which is not a project"))
     for group, owner in rules.plugin_groups.items():
         if owner and owner not in model.projects:
             problems.append(("plugin-group", group, f"plugin group {group} names owner {owner}, which is not a project"))
@@ -778,7 +826,7 @@ def configuration(model: Model) -> list[Finding]:
         project = normalize(row.get("project", ""))
         for element in row.get("scope", ()):
             if element not in elements:
-                problems.append((project, f"scope:{element}", f"its override row grants {element}, which is no family, domain, or mechanism"))
+                problems.append((project, f"scope:{element}", f"its override row grants {element}, which is no family, domain, mechanism, or dispute interface"))
         if (why := _owner_problem(model, row.get("owner"))):
             problems.append((project, "owner", f"its override row {why}"))
     for row in rules.exceptions:
@@ -848,6 +896,7 @@ CHECKS = {
     "declaration_expiry": declaration_expiry,
     "kind_allowlist": kind_allowlist,
     "package_allowlist": package_allowlist,
+    "kit_area": kit_area,
     "plugin_in_degree": plugin_in_degree,
     "override_expiry": override_expiry,
 }
