@@ -256,6 +256,7 @@ def _loops(runtime: BareMetalStorefrontRuntime) -> tuple[_Loop, ...]:
 
         async def payment_reconciliation_step() -> Mapping[str, Any]:
             done = await runtime.settlement_service().reconcile_payments_once()
+            await runtime.lifecycle.cycle()
             return {
                 "loop": PAYMENT_RECONCILIATION,
                 "attempted": done.attempted,

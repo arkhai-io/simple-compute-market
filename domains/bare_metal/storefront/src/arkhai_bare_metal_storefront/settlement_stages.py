@@ -308,6 +308,8 @@ async def _complete_refund(
     """Record intent, reverse, then record the refund; safe to repeat after a crash."""
 
     intent = await service.db.record_bare_metal_refund_intent(negotiation_id=negotiation_id)
+    if service.end_delivery is not None:
+        await service.end_delivery(negotiation_id, cause="seller_refund")
     if intent["status"] == "refunded":
         return
     outcome = await stage.reverse(agreement, data)

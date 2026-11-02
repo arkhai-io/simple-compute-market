@@ -91,6 +91,7 @@ class BareMetalSettlementService:
     arkhai_payments_stage: PaymentSellerStage | None = None
     stages: SettlementStageTable[Any] = SELLER_STAGES
     begin_fulfillment: BeginFulfillment | None = None
+    end_delivery: Callable[..., Awaitable[None]] | None = None
     # Steps an adopted obligation once, so fulfillment starts without waiting
     # for the worker's next pass; the worker remains its only retry path.
     service_obligation: Callable[[str], Awaitable[None]] | None = None

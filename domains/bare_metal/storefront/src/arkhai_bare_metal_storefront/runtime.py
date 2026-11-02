@@ -102,6 +102,7 @@ from .site_clients import (
     parse_site_bindings,
 )
 from .sqlite_client import SQLiteClient
+from .lifecycle import BareMetalLifecycle
 from .startup_refusal import require_publishable_storefront
 
 logger = logging.getLogger(__name__)
@@ -269,6 +270,7 @@ class BareMetalStorefrontRuntime:
     settlement_clients: Mapping[str, Any] = field(init=False, repr=False)
     settlement_runtime: SettlementRuntime = field(init=False, repr=False)
     contact_exchange: ContactExchangeComposition = field(init=False, repr=False)
+    lifecycle: BareMetalLifecycle = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "loops", self.loop_controller_factory())
@@ -337,6 +339,7 @@ class BareMetalStorefrontRuntime:
                 seller_stages=self.domain.settlement.seller_stages,
             ),
         )
+        object.__setattr__(self, "lifecycle", BareMetalLifecycle(self))
         self._compose_settlement_servicing()
         register_bare_metal_lifecycle_steps(self)
 
@@ -366,6 +369,8 @@ class BareMetalStorefrontRuntime:
             await servicing.ready(record, worker_id)
 
         async def on_terminal(record: Any, state: str, reason: str | None) -> None:
+            if state in {"expired", "reclaimed", "failed"}:
+                await self.lifecycle.local_end(record.agreement_ref, cause="settlement_" + state)
             servicing = await self._accepted_servicing(record)
             await servicing.terminal(record, state, reason)
 
@@ -495,6 +500,7 @@ class BareMetalStorefrontRuntime:
             ),
             stages=self.domain.settlement.seller_stages,
             begin_fulfillment=begin_fulfillment,
+            end_delivery=self.lifecycle.local_end,
         )
 
     def settlement_service(self) -> BareMetalSettlementService:
@@ -520,6 +526,7 @@ class BareMetalStorefrontRuntime:
             capacity_client=self.capacity_client,
             fulfillment_client=self.fulfillment_client,
             read_verified_evidence=self._settlement_service().verified_evidence,
+            lifecycle=self.lifecycle,
         )
 
     def contact_settlement_config(self) -> ContactSettlementConfig | None:

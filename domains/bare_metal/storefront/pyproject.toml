@@ -6,6 +6,9 @@ description = "Seller-side storefront composition for the Arkhai bare-metal doma
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "arkhai-kit-arkhai-mediation>=0.1.0",
+    "arkhai-kit-deal-servicing>=0.1.0",
+    "arkhai-kit-deal-lifecycle>=0.1.0",
+    "arkhai-kit-deal-lifecycle-contracts>=0.1.0",
     "arkhai-compute-provisioning-contracts>=0.11.0",
     "arkhai-kit-resource-pools-contracts>=0.2.0",
     "arkhai-bare-metal>=0.14.0",
@@ -45,6 +48,7 @@ bare_metal = "arkhai_bare_metal_storefront.contribution:BARE_METAL_STOREFRONT_CO
 
 [dependency-groups]
 dev = [
+    "arkhai-kit-deal-lifecycle-client>=0.1.0",
     "arkhai-core-storefront-client>=0.28.0",
     "pytest>=8.3.4,<10.0.0",
     "pytest-asyncio>=0.25,<2.0",

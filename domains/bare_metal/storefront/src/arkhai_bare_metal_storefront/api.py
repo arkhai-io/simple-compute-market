@@ -128,6 +128,7 @@ from .models import (
 from .negotiation_runtime import BareMetalNegotiationRefusal, exact_selection
 from .response_auth import bind_response_auth, bind_response_contract
 from .runtime import BareMetalStorefrontRuntime
+from .lifecycle_records import acceptance_envelope
 from .settlement_composition import ALKAHEST_MECHANISM
 from .settlement_service import (
     PaymentSettleResult,
@@ -164,6 +165,14 @@ async def _principal(
     now: int | None = None,
 ) -> Identity:
     bind_response_contract(request, operation=operation, resource=resource)
+
+    def capture(envelope):
+        acceptance_envelope.set(envelope)
+        request.state.acceptance_envelope = envelope
+        sink = getattr(request.app.state, "envelope_capture", None)
+        if sink is not None:
+            sink(envelope)
+
     try:
         authenticated = await authenticate_request(
             headers=request.headers,
@@ -173,7 +182,7 @@ async def _principal(
             body=body,
             expected_role=expected_role,
             raw_body=await request.body(),
-            capture=getattr(request.app.state, "envelope_capture", None),
+            capture=capture,
             replay_store=runtime.db,
             expected_principal=expected_principal,
             allowed_principals=allowed_principals,

@@ -46,6 +46,7 @@ from pydantic import BaseModel
 from .domain_runtime import get_market_domain_contract
 from .migrations import BARE_METAL_STOREFRONT_MIGRATIONS
 from .settlement_evidence import EvidencePayload
+from .lifecycle_records import register_agreement
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -839,7 +840,7 @@ class SQLiteClient(CoreSQLiteClient):
         return await asyncio.to_thread(_load)
 
     async def record_bare_metal_settlement_acceptance(
-        self, *, negotiation_id: str, agreement_bytes: bytes
+        self, *, negotiation_id: str, agreement_bytes: bytes, settlement_data: Any = None
     ) -> None:
         """Record an accepted deal's settlement identity and unverified evidence, once.
 
@@ -848,6 +849,9 @@ class SQLiteClient(CoreSQLiteClient):
         different mechanism or Agreement is a conflict, not an update.
         """
 
+        if settlement_data is None:
+            thread = await self.load_negotiation_thread_row(negotiation_id=negotiation_id)
+            settlement_data = (thread or {}).get("settlement_data")
         agreement = Agreement.model_validate_json(agreement_bytes)
         if agreement.settlement is None:
             raise ValueError("accepted Agreement has no selected settlement")
@@ -861,6 +865,8 @@ class SQLiteClient(CoreSQLiteClient):
             conn = sqlite3.connect(self.db_path)
             try:
                 with conn:
+                    conn.execute("BEGIN IMMEDIATE")
+                    register_agreement(conn, agreement_bytes, settlement_data, capture=True)
                     conn.execute(
                         "INSERT OR IGNORE INTO bare_metal_settlement_records("
                         "negotiation_id, mechanism, agreement_sha256, status, "

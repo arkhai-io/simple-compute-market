@@ -822,6 +822,7 @@ def build_bare_metal_negotiation_runtime(
         await repository.record_bare_metal_settlement_acceptance(
             negotiation_id=acceptance.negotiation_id,
             agreement_bytes=base64.b64decode(artifacts["agreement_bytes"], validate=True),
+            settlement_data=artifacts.get("settlement_data"),
         )
         plan = artifacts.get("settlement_plan")
         if isinstance(plan, Mapping):
