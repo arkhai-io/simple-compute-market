@@ -47,7 +47,7 @@ from market_storefront.failure_actions import (
 from market_storefront.middleware.seller_auth import listing_lifecycle_middleware
 from market_storefront.payment_settlement import VmPaymentsCoordinator
 from market_storefront.deal_lifecycle import VmDealLifecycle
-from market_deal_servicing import create_lifecycle_router
+from market_deal_servicing import create_lifecycle_router, PhysicalResult
 from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
 from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_storefront.utils.sqlite_client import SQLiteClient
@@ -73,6 +73,9 @@ class Delivery:
         # When set, delivery pauses after starting until ``release`` is set.
         self.started: asyncio.Event | None = None
         self.release: asyncio.Event | None = None
+
+    async def apply_end(self, *_args, **_kwargs):
+        return PhysicalResult(progress="released" if not self.starts else "tearing_down", done=not self.starts)
 
     async def __call__(self, *, context):
         self.starts.append(context.negotiation_id)
@@ -249,6 +252,7 @@ async def _harness(tmp_path, *, deposit=False, actions=("emit_event",)):
     coordinator = VmPaymentsCoordinator(domain=domain, db=db, stage=stage)
     lifecycle = VmDealLifecycle(db, SELLER, coordinator, RegistryDisputePolicy.from_document({}))
     coordinator.lifecycle = lifecycle
+    lifecycle.end.physical = delivery
     _container.resolved_sqlite_client = db
     _container.resolved_domain_registry = registry
     _container.resolved_marketplace_signer = SELLER
@@ -470,7 +474,8 @@ async def test_the_refund_failure_action_reverses_a_failed_payment_deal(make):
     evidence = await h.db.load_vm_settlement_evidence(negotiation_id=NEGOTIATION)
     assert evidence.status == "refunded"
     delivery = await h.db.load_vm_delivery(negotiation_id=NEGOTIATION)
-    assert delivery["status"] == "failed"
+    assert delivery["status"] == "ended"
+    assert h.lifecycle.seller.delivery_read(NEGOTIATION).delivery.recorded_end.cause == "settlement_refunded"
 
 
 @pytest.mark.asyncio
@@ -556,8 +561,11 @@ async def test_a_refund_after_delivery_start_records_both(make):
     evidence = await h.db.load_vm_settlement_evidence(negotiation_id=NEGOTIATION)
     assert evidence.status == "refunded"
     delivery = await h.db.load_vm_delivery(negotiation_id=NEGOTIATION)
-    assert delivery["status"] == "ready"
-    assert delivery["fulfillment_uid"] == "vm-fulfillment-1"
+    assert delivery["status"] == "ended"
+    assert delivery["connection_details"] is None
+    view = h.lifecycle.seller.delivery_read(NEGOTIATION).delivery
+    assert view.recorded_end.cause == "settlement_refunded"
+    assert view.progress == "tearing_down"
 
 
 @pytest.mark.asyncio

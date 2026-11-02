@@ -5,13 +5,17 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import sqlite3
 import time
 from datetime import datetime
 from pathlib import Path
 
+from compute_provisioning_contracts import SignedLeaseEndedReport, verify_lease_end
 from market_arkhai_mediation.adapter import MediationAdapter
+from market_arkhai_mediation.claims import sign_claim
 from market_arkhai_mediation.client import MediationClient, MediationCredential
 from market_arkhai_mediation.contract import INTERFACE
+from market_arkhai_mediation.models import DeliveryEndClaim
 from market_arkhai_payments import PaymentSettlementData
 from market_core.schemas import Agreement
 from market_deal_lifecycle.adapters import (
@@ -23,15 +27,19 @@ from market_deal_lifecycle_contracts.models import (
     Accepted, CommitMessage, ListDealsRequest, Pending, Rejected, SubmitResponse, Unknown,
 )
 from market_deal_servicing import (
-    DealWatch, DeliveryRecord, EndSession, LifecycleRouteBinding,
+    DealWatch, DeliveryIngress, DeliveryRecord, EndSession, LifecycleRouteBinding,
     LifecycleRouteServices, RespondentPoller, SellerDeal, SellerServicing,
     SellerSession, SQLiteEvidenceStore,
 )
+from market_deal_servicing.end import EndService
 from market_deal_servicing.evidence import EvidenceSession, transaction
+from market_deal_servicing.ingress import VerifiedSiteEnd
 from market_deal_servicing.journal import atomic
 from market_deal_servicing.watch import WatchSession, create_schema as create_watch_schema
 from market_identity import Identity, canonical_json
 
+from market_storefront import container
+from market_storefront.delivery_lifecycle import VmPhysicalEnd
 from market_storefront.settlement_stages import PaymentSettlementError
 
 logger = logging.getLogger(__name__)
@@ -55,6 +63,10 @@ class VmDealLifecycle:
         self.clients = {}
         self.respondents = {}
         self.continuation = None
+        self.end = EndService(self.path, VmPhysicalEnd(db), clock=clock)
+        self.ingress = DeliveryIngress(
+            self.path, clock=clock, verify_site=self.verify_site, receipt_claim=self.receipt_claim,
+        )
         payment_entries = []
         if payments is not None:
             payment_entries.append((PaymentSelector("arkhai.payments.v1"), self.payment_adapter))
@@ -66,7 +78,7 @@ class VmDealLifecycle:
         )
 
     def accepted(self, negotiation_id):
-        with transaction(self.path) as conn:
+        with sqlite3.connect(self.path) as conn:
             row = conn.execute(
                 "SELECT agreement_bytes,settlement_data FROM negotiation_threads WHERE negotiation_id=?",
                 (negotiation_id,),
@@ -145,11 +157,11 @@ class VmDealLifecycle:
 
     def watch(self, deal, payment, dispute):
         agreement, raw = self.accepted(deal.negotiation_id)
-        data = PaymentSettlementData.parse(raw)
+        data = PaymentSettlementData.parse(raw) if deal.payment.mechanism == "arkhai.payments.v1" else None
         return DealWatch(
             self.path, negotiation_id=deal.negotiation_id, commitment_ref=deal.commitment_ref,
             payment=payment, dispute=dispute, dispute_binding=deal.dispute_binding,
-            seller_account=data.mandate.to.root,
+            seller_account=data.mandate.to.root if data is not None else "",
             actor=lambda _: Identity.model_validate(agreement["seller"]), clock=self.clock,
         )
 
@@ -213,16 +225,65 @@ class VmDealLifecycle:
                 logger.exception("VM respondent discovery awaits recovery")
         for deal in deals:
             try:
+                await self.end.drive_physical(deal.negotiation_id)
+            except Exception:
+                logger.exception("VM physical end awaits recovery for %s", deal.negotiation_id)
+            try:
                 async for _ in self.seller.watch(deal.negotiation_id):
                     pass
             except Exception:
                 logger.exception("VM lifecycle watch awaits recovery for %s", deal.negotiation_id)
+            try:
+                await self.end.drive_physical(deal.negotiation_id)
+            except Exception:
+                logger.exception("VM observed end awaits recovery for %s", deal.negotiation_id)
         return len(deals)
+
+    def receipt_claim(self, negotiation_id, at):
+        agreement, _ = self.accepted(negotiation_id)
+        terms = decode_terms(agreement["settlement"].get("lifecycle"))
+        if terms is None:
+            return None
+        if terms.adjudication.dispute.interface != INTERFACE:
+            raise ValueError("accepted receipt claim interface is unavailable")
+        # The ingress caller already holds the delivery write transaction;
+        # a read-only connection borrows its immutable accepted snapshot.
+        with sqlite3.connect(self.path) as conn:
+            delivered = EndSession(conn).read(negotiation_id).available_at is not None
+        return sign_claim(
+            agreement=hashlib.sha256(canonical_json(agreement)).hexdigest(),
+            claim=DeliveryEndClaim(kind="delivery_end", ended_at=at, delivered=delivered, cause="payer"),
+            signer=self.signer,
+        ).model_dump(mode="json")
+
+    def verify_site(self, negotiation_id, body, headers):
+        report = SignedLeaseEndedReport.model_validate_json(body)
+        with transaction(self.path) as conn:
+            row = conn.execute(
+                """SELECT t.site_id,d.capacity_reservation_id,h.capacity_reservation_id
+                   FROM negotiation_threads t
+                   LEFT JOIN vm_delivery_records d USING(negotiation_id)
+                   LEFT JOIN capacity_holds h USING(negotiation_id)
+                   WHERE t.negotiation_id=?""", (negotiation_id,),
+            ).fetchone()
+        if row is None or not (row[1] or row[2]):
+            raise ValueError("site report has no durable deal reservation")
+        trust = container.resolved_service_peer_trust
+        if trust is None:
+            raise ValueError("site report trust is unavailable")
+        event = verify_lease_end(
+            report, capacity_reservation_id=row[1] or row[2], site_id=row[0],
+            expected_sites=trust.site_authorities(row[0])(),
+        )
+        return VerifiedSiteEnd(
+            event_id=event.event_id, capacity_reservation_id=event.capacity_reservation_id,
+            ended_at=event.effective_at, actor=event.caller or report.signer, cause=event.cause,
+        )
 
     def routes(self, administrators):
         return LifecycleRouteServices(
             seller=self.seller, binding=self.binding, signer=self.signer,
-            administrators=administrators, peer=self.peer,
+            administrators=administrators, peer=self.peer, ingress=self.ingress, end=self.end,
         )
 
     async def close(self):

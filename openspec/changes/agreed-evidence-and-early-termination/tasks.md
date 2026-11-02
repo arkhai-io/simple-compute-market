@@ -1137,7 +1137,7 @@ provision stages". Files: `domains/vms/storefront/src/market_storefront/`
       VM storefront; enable seller envelope capture in the negotiation controllers. Verify:
       application-integration test that a hosted VM deal appears in `list` and its acceptance
       envelope is stored.
-- [ ] 14.2 Route terminal settlement and refund-driven ends through end service, and order
+- [x] 14.2 Route terminal settlement and refund-driven ends through end service, and order
       delivery start and reconciliation against the earliest final request. Verify:
       application-integration tests through the typed client with kit-owned vector-derived in-process payments and mediation
       contract fakes (no runnable tooling dependency) for "A seller's hardware fails", "A buyer tears down" scenarios in the VM
@@ -1189,6 +1189,43 @@ the first two gain delivery-only end/report stages, not hosted rate-part stop qu
   payments/mediation and end/report scenario extensions is unrun, not waived.
   The full aggregate result is recorded in the evidence packet. Permanent
   promotion remains 16.9; no shared kit or bare-metal source was changed.
+
+### VM physical-end implementation checkpoint (2026-11-02)
+
+- 14.2 connects terminal settlement and confirmed refunds to the shared end
+  journal and VM physical port. Refund completion and its final request share
+  one transaction. Reservation, dispatch, activation and credential checkpoints
+  order admission in their own write transaction; recovery uses the same gates.
+  Due ends deny subsequent disclosure. Undispatched capacity is released and a
+  delivered VM is terminated now, not by a watchdog kick.
+- The mounted end route now has its VM ingress/end ports and owning receipt
+  claim signer. Signing uses read-only accepted/delivery snapshots inside the
+  ingress transaction; a nested writer caused a local first-use lock error and
+  was removed. The first-use fixture now names the real installed mediation
+  interface rather than an unrelated fixture interface. Missing claim kind was
+  caught by that first use and corrected. Physical retry is independent of
+  authority failure; future ends without reservations remain pending.
+- Existing fixture setups now provide committed admission and current lease
+  windows. Kept refund/terminal assertions follow the deliberate behavior:
+  refund during provisioning prevents disclosure, and terminal active leases
+  request immediate termination. No permanent test function was added.
+- Evidence and runnable setup: `docs/attachments/vm-end-admission/index.md`.
+  The 1,690 existing VM unit/application-integration cases, mounted first use,
+  fresh wheels, architecture, packaging, locks, comments and pinned strict
+  validation pass. Full `make test` passes with the shell-local Podman shim;
+  the final checks/first-use/aggregate pipeline completed in 7m42s. The scoped
+  citation check reports only the three known future destinations in #325.
+- The first aggregate reached release tooling and found an inherited
+  bare-metal release-table omission. Separate repair `edd52a728` adds the three
+  declared lifecycle dependencies once; all 1,858 release-tooling cases pass.
+- Remaining: 14.4, the authenticated site-report receiver/pull recovery and
+  callback release progress in 14.5, failure-source classification/correlation,
+  the VM buyer stages/CLI and the VM half of 7.4. Keep 7.4 unchecked. Existing
+  administrator interrupt and failure-policy release paths still need the
+  seller-half/end-service dispatch owned by that continuation. No fresh-stack
+  VM e2e, real local payment/mediation qualification or end/report e2e extension
+  is claimed. No shared package or sibling-domain source was changed.
+  Permanent promotion remains 16.9.
 
 ## 15. Bare-metal wiring
 

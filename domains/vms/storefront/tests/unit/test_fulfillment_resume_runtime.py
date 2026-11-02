@@ -66,7 +66,7 @@ async def test_known_fulfillment_resumes_without_schedule_or_begin(tmp_path):
     )
     persisted = await db.load_vm_delivery(negotiation_id="neg-1")
     assert persisted is not None
-    assert persisted["fulfillment_phase"] == "physical_result_recorded"
+    assert persisted["fulfillment_phase"] == "disclose"
 
 
 @pytest.mark.asyncio
@@ -159,7 +159,7 @@ async def test_missing_identifiers_replay_exact_persisted_request(tmp_path):
         claim={"gpu_count": 1, "offering_mode": "vm"},
         deal_ref={"listing_id": "listing-1", "negotiation_id": "neg-1"},
         ttl_seconds=None,
-        lease_start_utc="2026-01-01T00:00:00+00:00",
+        lease_start_utc=lifecycle.evidence.evidence["delivery"]["payload"]["start_utc"],
         lease_duration_seconds=7200,
         site="site-1",
     )

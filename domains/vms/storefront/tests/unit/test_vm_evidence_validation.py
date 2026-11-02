@@ -9,7 +9,7 @@ from market_storefront.domain_runtime import (
     build_vm_storefront_registry,
 )
 from market_storefront.utils.sqlite_client import SQLiteClient
-from tests.fulfillment_fixtures import vm_delivery_evidence
+from tests.fulfillment_fixtures import vm_delivery_evidence, seed_delivery_admission
 
 
 @pytest.mark.asyncio
@@ -45,4 +45,5 @@ async def test_invalid_verified_evidence_cannot_poison_pending_or_fresh_state(tm
         await db.save_vm_settlement_evidence(valid)
         await db.save_vm_settlement_evidence(valid)
         assert await db.load_vm_settlement_evidence(negotiation_id=valid.negotiation_id) == valid
+        seed_delivery_admission(db)
         assert await db.insert_vm_delivery(negotiation_id=valid.negotiation_id)

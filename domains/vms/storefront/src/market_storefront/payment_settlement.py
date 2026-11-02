@@ -3,9 +3,9 @@
 Refund state lives on the deal's settlement evidence. Delivery start is the
 insert of the deal's delivery record, which requires ``verified`` evidence;
 refund intent moves the evidence from ``verified`` to ``refunding``. Each is one
-serialized write, so exactly one decides whether delivery precedes a refund. A
-refund that wins stops delivery from starting; a delivery that wins completes
-and is recorded beside the refund. The per-negotiation lock only keeps one
+serialized write. Refund completion records the final end in that same write;
+subsequent reservation, dispatch and credential checkpoints lose admission.
+The per-negotiation lock only keeps one
 process's settlement and refund calls from interleaving.
 """
 
@@ -47,6 +47,7 @@ from market_identity import Identity
 from market_arkhai_payments.models import SignedReceipt
 
 from market_storefront.payment_repository import VmSettlementEvidenceConflict
+from market_storefront.delivery_records import DeliveryEnded
 from market_storefront.services.fulfillment_resume_runtime import (
     resume_incomplete_fulfillments_once,
 )
@@ -60,7 +61,7 @@ from market_storefront.utils import config
 
 logger = logging.getLogger(__name__)
 
-_TERMINAL_DELIVERY = ("ready", "failed", "refunded")
+_TERMINAL_DELIVERY = ("ready", "failed", "refunded", "ended")
 _REFUND_STATES = ("refunding", "refunded")
 
 __all__ = [
@@ -237,6 +238,8 @@ class VmPaymentsCoordinator:
                 )
             try:
                 await self.db.insert_vm_delivery(negotiation_id=negotiation_id)
+                if await self.db.load_vm_delivery(negotiation_id=negotiation_id) is None:
+                    return PaymentSettleResult(200, self._neutral(negotiation_id, data, "ended"))
             except ValueError:
                 # Another process recorded refund intent first; delivery must not start.
                 current = await self.db.load_vm_settlement_evidence(negotiation_id=negotiation_id)
@@ -369,6 +372,11 @@ class VmPaymentsCoordinator:
         if not isinstance(outcome, Refunded):
             raise PaymentSettlementError(503, "payments service is unavailable")
         await self.db.complete_vm_refund(negotiation_id=negotiation_id)
+        if self.lifecycle is not None:
+            try:
+                await self.lifecycle.end.drive_physical(negotiation_id)
+            except Exception:
+                logger.exception("VM refund recorded; physical end awaits recovery for %s", negotiation_id)
 
     @staticmethod
     def _refund_payload(negotiation_id: str, data: PaymentSettlementData) -> dict[str, Any]:
@@ -443,8 +451,8 @@ class VmPaymentsCoordinator:
                     delivery=row,
                     connection_json=private.get("connection_details"),
                 )
-            # A refund recorded after delivery started lives on the evidence;
-            # the delivery's own outcome is still recorded here beside it.
+            # The checkpoint and final-request admission share one write, so
+            # a concurrent end cannot disclose the result of an in-flight VM.
             await delivery.update_vm_delivery(
                 negotiation_id=negotiation_id,
                 status="ready" if result.state == "fulfilled" else "failed",
@@ -455,6 +463,9 @@ class VmPaymentsCoordinator:
                 else None,
                 reason=result.failure_reason,
             )
+        except DeliveryEnded:
+            if self.lifecycle is not None:
+                await self.lifecycle.end.drive_physical(negotiation_id)
         except asyncio.CancelledError:
             raise
         except Exception:

@@ -132,6 +132,9 @@ async def _do_provision(
             settlement_resource_id=scheduled.settlement_resource_id,
         )
 
+    await sqlite_client.update_vm_delivery(
+        negotiation_id=negotiation_id, fulfillment_phase="dispatch",
+    )
     accepted = await fulfillment_client.begin_fulfillment(
         FulfillmentRequestBody(
             capacity_reservation_id=capacity_reservation_id,
@@ -166,6 +169,9 @@ async def _do_provision(
             status.failure_message or f"fulfillment {accepted.fulfillment_id} failed"
         )
 
+    await sqlite_client.update_vm_delivery(
+        negotiation_id=negotiation_id, fulfillment_phase="activate",
+    )
     envelope = await fulfillment_client.get_fulfillment_result(
         accepted.fulfillment_id,
         capacity_reservation_id=capacity_reservation_id,
@@ -297,10 +303,8 @@ async def terminate_vm_lease(
     only requests that teardown begin and returns the lease as the site then
     records it.
 
-    It is the storefront's half of a buyer-initiated early termination, in
-    which the buyer asks the storefront and the storefront asks the site; no
-    storefront route exposes that flow, so nothing in the storefront calls
-    it. See `openspec/specs/vm-storefront-fulfillment/spec.md`.
+    End service uses this port for due final requests. Recording the intended
+    end and proving capacity return remain separate observations.
     """
     return await fulfillment_client.terminate_lease(
         capacity_reservation_id, site_id=site_id, reason=reason
