@@ -254,7 +254,7 @@ values and `helm/scripts/test-render.sh`, the buyer and storefront configuration
 (`domains/vms/buyer/src/arkhai_vms_buyer/config_cli.py` and each role's `settings.toml` and
 template writer), and `docs/development/DEPLOYMENT_AND_CONFIG.md`.
 
-- [ ] 3.1 Add typed `[[Dispute]]` entries (identity, `params`, advertisement copy, not-offered
+- [x] 3.1 Add typed `[[Dispute]]` entries (identity, `params`, advertisement copy, not-offered
       and not-accepted marks), `[[DisputeCredential]]` bindings (identity and an
       environment-variable reference) and `use_registry_dispute_authorities` (default true for a storefront, false for a buyer;
       the shipped buyer profiles and fixtures set it explicitly) in
@@ -262,6 +262,12 @@ template writer), and `docs/development/DEPLOYMENT_AND_CONFIG.md`.
       supplied registry recommendation list. Verify: unit tests for ordering, marks, the
       opt-out, credential lookup by identity, and that resolved credentials never appear in a
       rendered option or status model.
+  - Verified: existing lifecycle suite (62 tests), runnable
+    `kit/deal-lifecycle/examples/dispute_configuration.py` (ordering, marks,
+    opt-in, full-identity credential binding and secret isolation), architecture,
+    packaging, comment hygiene and pinned strict OpenSpec validation pass.
+    No new permanent tests added; fresh verification owns acceptance.
+
 - [ ] 3.2 Retire `[Settlement.arkhai_payments].dispute_authority`: validation rejects it with a
       diagnostic naming `[[Dispute]]`, and the VM buyer template loses its commented line.
       Verify: `kit/arkhai-payments/tests/test_settlement_config.py` covers "The retired dispute
