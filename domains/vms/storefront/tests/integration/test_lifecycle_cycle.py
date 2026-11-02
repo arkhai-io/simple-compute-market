@@ -10,6 +10,7 @@ from market_deal_servicing import EndSession
 from market_deal_servicing.evidence import transaction
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_storefront import container
+from market_storefront.deal_lifecycle import VmDealLifecycle
 
 from tests.integration.test_payment_settlement import LISTING, NEGOTIATION, make
 
@@ -37,7 +38,8 @@ async def test_unchanged_cycles_preserve_a_concurrent_admission_revision(make):
 
 
 @pytest.mark.asyncio
-async def test_released_delivery_recovers_a_lost_report_then_stops_polling(make):
+@pytest.mark.parametrize("partial_push", [False, True])
+async def test_released_delivery_recovers_a_lost_report_then_stops_polling(make, partial_push):
     h = await make()
     h.serve()
     await h.settle()
@@ -57,16 +59,31 @@ async def test_released_delivery_recovers_a_lost_report_then_stops_polling(make)
             event_id="recovered-end", capacity_reservation_id=RESERVATION, site_id=SITE_ID,
             effective_at=h.lifecycle.clock(), cause="expiry", source_state="active",
         ), SITE)
+        later = sign_lease_end(LeaseEndedEvent(
+            event_id="later-release-failure", capacity_reservation_id=RESERVATION, site_id=SITE_ID,
+            effective_at=h.lifecycle.clock() + 1, cause="release_failure", source_state="releasing",
+        ), SITE)
+        if partial_push:
+            h.lifecycle.ingress.site_report(NEGOTIATION, body=later.model_dump_json().encode(), headers={})
         get_lease = AsyncMock(return_value=SimpleNamespace(end_reports=[]))
         h.lifecycle.fulfillment = SimpleNamespace(get_lease=get_lease)
         await h.lifecycle.recover_site_reports(NEGOTIATION)
-        get_lease.return_value = SimpleNamespace(end_reports=[report])
+        get_lease.return_value = SimpleNamespace(end_reports=[report, later])
         await h.lifecycle.recover_site_reports(NEGOTIATION)
         await h.lifecycle.recover_site_reports(NEGOTIATION)
         assert get_lease.await_count == 2
         with transaction(h.lifecycle.path) as conn:
             view = EndSession(conn).view(NEGOTIATION)
         assert view.progress == "released"
-        assert len(view.site_reports) == 1
+        assert {item.evidence_id for item in view.site_reports} == {
+            "site-event:recovered-end", "site-event:later-release-failure",
+        }
+        # A new composition must use the durable reconciliation marker too.
+        restarted = VmDealLifecycle(h.db, h.lifecycle.signer, h.lifecycle.payments_coordinator,
+                                    SimpleNamespace(config=h.lifecycle.dispute_config),
+                                    fulfillment=h.lifecycle.fulfillment)
+        await restarted.recover_site_reports(NEGOTIATION)
+        assert get_lease.await_count == 2
+        await restarted.close()
     finally:
         container.resolved_service_peer_trust = old

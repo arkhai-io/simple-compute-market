@@ -675,7 +675,11 @@ VM and bare-metal interpret signed site ends through the compute-family vocabula
 - The VM recovery sweep is a deadline observer, not a fresh delivery admission.
   It delegates missed availability deadlines to end service without invalidating
   admission revisions on unchanged cycles. Released reservations continue report
-  recovery only until their signed end proof is retained.
+  recovery until a successful full report-history reconciliation after proven
+  release. A pushed report alone does not certify history completeness. A durable
+  seller-observation marker retires polling only after all returned reports are
+  ingested; an empty history continues recovery. The marker shares evidence
+  retention, rather than introducing another lifecycle journal.
 
 These decisions preserve D8/D9 and promote with the existing reviewed closeout
 work to the deal-lifecycle and settlement-servicing specifications/architecture,

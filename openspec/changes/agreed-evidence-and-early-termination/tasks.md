@@ -1714,3 +1714,14 @@ or deployed monetary-ruling qualification is claimed by this kit repair.
 - Setup, observations and reproduction:
   `docs/attachments/aeet-fix-a-integration/index.md`. This integrates the parallel
   kit repairs, not the remaining domain work or reviewed closeout promotion.
+
+## Re-review 21/22 disposition — domain
+
+- S-N3 / O-F16: VM recovery retires lease polling only after a successful full
+  report-history read after proven release. A partial push cannot certify
+  completeness; an empty read keeps recovery active. The reconciliation marker
+  is durable seller evidence and follows the Agreement's existing retention.
+  The multi-report/partial-push regression fails before repair (zero lease reads)
+  and all three cycle cases pass after repair, including reconstructed composition
+  and unchanged admission revision. Permanent recovery rationale promotes with
+  section 16 to VM fulfillment architecture; no owner decision changes.

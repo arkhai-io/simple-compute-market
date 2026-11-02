@@ -34,7 +34,7 @@ from market_deal_servicing import (
     SellerSession, SQLiteEvidenceStore, seller_retention,
 )
 from market_deal_servicing.end import EndService
-from market_deal_servicing.evidence import EvidenceSession, transaction
+from market_deal_servicing.evidence import EvidenceSession, in_transaction, transaction
 from market_deal_servicing.ingress import VerifiedSiteEnd
 from market_deal_servicing.journal import atomic
 from market_deal_servicing.watch import WatchSession, create_schema as create_watch_schema
@@ -350,22 +350,34 @@ class VmDealLifecycle:
         return rows[0][0]
 
     async def recover_site_reports(self, negotiation_id):
-        with transaction(self.path) as conn:
-            view = EndSession(conn).view(negotiation_id)
-        # Release may arrive before the end report. Keep recovering that lost
-        # proof, but a released reservation with retained proof needs no polling.
-        if view.progress == "released" and view.site_reports:
-            return
+        view, evidence = await in_transaction(self.path, lambda conn: (
+            EndSession(conn).view(negotiation_id), EvidenceSession(conn).read(negotiation_id),
+        ))
         delivery = await self.db.load_vm_delivery(negotiation_id=negotiation_id)
         hold = await self.db.load_capacity_hold(negotiation_id=negotiation_id)
         reservation = (delivery or {}).get("capacity_reservation_id") or (hold or {}).get("capacity_reservation_id")
         if not reservation:
             return
+        history_ref = "site-history:" + reservation
+        # A push proves only one event. Retire polling only after a complete,
+        # successfully ingested lease read made after proven physical release.
+        if view.progress == "released" and any(item.evidence_id == history_ref for item in evidence.items):
+            return
         thread = await self.db.load_thread_binding(negotiation_id=negotiation_id)
         fulfillment = self.fulfillment or build_fulfillment_client(build_capacity_runtime(lambda: self.db).client())
         lease = await fulfillment.get_lease(reservation, site_id=thread.site_id)
         for report in lease.end_reports:
-            self.ingress.site_report(negotiation_id, body=canonical_json(report), headers={})
+            await asyncio.to_thread(self.ingress.site_report, negotiation_id, body=canonical_json(report), headers={})
+        if view.progress == "released" and lease.end_reports:
+            def reconciled(conn):
+                session = EvidenceSession(conn)
+                if not any(item.evidence_id == history_ref for item in session.read(negotiation_id).items):
+                    session.put(negotiation_id, EvidenceItem(
+                        evidence_id=history_ref, kind="site_history_reconciled",
+                        classification="seller_assertion", recorded_at=self.clock(),
+                        body=base64.b64encode(canonical_json({"capacity_reservation_id": reservation})),
+                    ))
+            await in_transaction(self.path, reconciled)
 
     def capacity_released(self, capacity_reservation_id, site_id):
         try:
