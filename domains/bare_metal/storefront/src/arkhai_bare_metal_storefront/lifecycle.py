@@ -25,6 +25,7 @@ from market_deal_servicing import (
     Classification, DealWatch, DeliveryIngress, EndService, EndSession,
     FinalRequest, LifecycleRouteBinding, LifecycleRouteServices, RespondentPoller,
     PhysicalResult, SellerDeal, SellerServicing, SellerSession, SQLiteEvidenceStore, VerifiedSiteEnd,
+    seller_retention,
 )
 from market_deal_servicing.evidence import EvidenceSession, transaction
 from market_deal_servicing.journal import stable_ref
@@ -140,6 +141,7 @@ class BareMetalLifecycle:
             self.path, negotiation_id=deal.negotiation_id, commitment_ref=deal.commitment_ref,
             payment=payment, dispute=dispute, dispute_binding=deal.dispute_binding,
             seller_account=account, actor=actor, clock=self.clock,
+            observe_retention=seller_retention(self.path, deal.negotiation_id, clock=self.clock),
         )
 
     def admit(self, negotiation_id, phase):

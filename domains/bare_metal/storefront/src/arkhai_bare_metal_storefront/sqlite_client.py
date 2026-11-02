@@ -39,7 +39,8 @@ from market_core import (
 )
 from market_core.schemas import AGREEMENT_SETTLEMENT_SCHEMA_PATH, Agreement
 from market_identity import Identity
-from market_deal_servicing import EndSession
+from market_deal_lifecycle.evidence import CommitmentAttempt
+from market_deal_servicing import EndSession, EvidenceSession
 from market_pool_overrides import pool_override_migrations
 from market_settlement_runtime import settlement_migrations
 from pydantic import BaseModel
@@ -990,6 +991,9 @@ class SQLiteClient(CoreSQLiteClient):
                     else delivery.committed_at or int(conn.execute("SELECT unixepoch()").fetchone()[0])
                 )
                 session.confirm_commitment(evidence.negotiation_id, committed_at=committed_at)
+                EvidenceSession(conn).record_commitment(
+                    evidence.negotiation_id, CommitmentAttempt(commitment_ref=delivery.commitment_ref),
+                )
                 conn.execute(
                     "UPDATE bare_metal_settlement_records SET settlement_ref = ?, status = ?, "
                     "evidence_json = ?, updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') "

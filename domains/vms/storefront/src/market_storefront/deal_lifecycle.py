@@ -32,7 +32,7 @@ from market_deal_lifecycle_contracts.models import (
 from market_deal_servicing import (
     DealWatch, DeliveryIngress, DeliveryRecord, EndSession, LifecycleRouteBinding,
     LifecycleRouteServices, RespondentPoller, SellerDeal, SellerServicing,
-    SellerSession, SQLiteEvidenceStore,
+    SellerSession, SQLiteEvidenceStore, seller_retention,
 )
 from market_deal_servicing.end import EndService
 from market_deal_servicing.evidence import EvidenceSession, transaction
@@ -180,6 +180,7 @@ class VmDealLifecycle:
             payment=payment, dispute=dispute, dispute_binding=deal.dispute_binding,
             seller_account=data.mandate.to.root if data is not None else "",
             actor=actor, clock=self.clock,
+            observe_retention=seller_retention(self.path, deal.negotiation_id, clock=self.clock),
         )
 
     async def interrupt(self, negotiation_id, *, actor, operation_key, reason, dry_run=False):
