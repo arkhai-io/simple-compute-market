@@ -1032,7 +1032,7 @@ the eight step skills' `SKILL.md` under `.agents/skills/` (`change-archive-clean
 `.agents/skills/change-orchestrate/SKILL.md`;
 `openspec/specs/change-workflow/architecture.md`; `docs/agents/change-workflow.md`.
 
-- [ ] 6.1 The design step's proposal-worktree rules (D11, records 07 R1 and 10
+- [x] 6.1 The design step's proposal-worktree rules (D11, records 07 R1 and 10
   R2). **The orchestrating session's edit, made on the owner's word before this
   section's session starts; the session commits it with this section.** In
   `.claude/change-steps.toml`, the design step's worktree rule names `origin/dev`
@@ -1054,6 +1054,22 @@ the eight step skills' `SKILL.md` under `.agents/skills/` (`change-archive-clean
   session changed neither `.claude/change-steps.toml` nor
   `.agents/skills/change-design/SKILL.md`'s section 4 step 2. The owner's local
   run completes and checks it before closeout.
+  *Done in the owner's local run, by the orchestrating session on the owner's
+  word.* The design step's worktree rule names `origin/dev`, and the skill's
+  section 4 step 2 names the same command. The write rules were found by
+  headless sessions run as the wrapper runs a step (`dontAsk`, project settings
+  only, the rules as `--allowedTools`) from this clone, against a scratch
+  worktree `../<name>-proposal` on a branch from `origin/dev`, since removed:
+  a pattern holding `..` never matched, written relative or anchored at the
+  checkout (`//<clone>/../*-proposal/**`); the same pattern without the `..`
+  matched; a Write outside the checkout was allowed only by an Edit rule, never
+  by a Write rule; and a Read rule was needed before the Edit. So the table
+  gives `Read(../*-proposal/**)`, `Edit(../*-proposal/openspec/**)`, and
+  `Edit(../*-proposal/docs/development/ROADMAP.md)`, and names no absolute
+  path; on the owner's choice the wrapper's anchoring resolves the `..`, a fix
+  made on `dev` beside the anchoring itself, so these rules take effect once
+  the merge brings it here. The same run marked the write-steering deny rules
+  in `common` with a "Write-steering" comment (6.3).
 - [x] 6.2 The review wrapper's title (D11, record 18 R3). In
   `scripts/change_workflow/review.py`, take the first line that is a `# <kind>
   review … <change>` title as the review's start, drop anything before it (the

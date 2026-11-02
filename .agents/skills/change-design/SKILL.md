@@ -284,7 +284,7 @@ through dev, never written here:
 1. With the owner, shape the prerequisite: its requirements and an initial
    `proposal.md` only. Its design is its own workflow's, started by the owner.
 2. Write it in a worktree on a new branch from dev, never on this branch:
-   `git worktree add ../<prerequisite>-proposal -b propose-<prerequisite> dev`,
+   `git worktree add ../<prerequisite>-proposal -b propose-<prerequisite> origin/dev`,
    then, in that worktree, its directory under `openspec/changes/` and its
    `ready for design` row in that worktree's `openspec/changes/README.md`. Run
    `make -C ../<prerequisite>-proposal check-change-index`.
