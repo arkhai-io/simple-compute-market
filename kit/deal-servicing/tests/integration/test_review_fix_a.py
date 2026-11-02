@@ -1,6 +1,7 @@
 """Persisted filing, receipt and operator-key regressions at the servicing boundary."""
 
 import asyncio
+from unittest.mock import AsyncMock
 
 import pytest
 import httpx
@@ -198,6 +199,32 @@ def test_rejected_operator_request_does_not_consume_its_key(tmp_path):
         bad = command.model_copy(update={"at": 100})
         assert (await api.submit(bad, actor=SELLER.identity, reason="maintenance")).status == "rejected"
         assert (await api.submit(command, actor=SELLER.identity, reason="maintenance")).status == "accepted"
+    asyncio.run(drive())
+
+
+def test_operator_end_returns_only_its_own_filing_outcome(tmp_path):
+    async def drive():
+        path = tmp_path / "servicing.sqlite"
+        api = service(path, Dispute(rejected=True))
+        first = LifecycleCommand(negotiation_id="deal", kind="delivery_end", operation_key="first")
+        assert (await api.submit(first, actor=SELLER.identity, reason="first failure")).status == "rejected"
+        api.clock = lambda: 130
+        later = first.model_copy(update={"operation_key": "later"})
+        assert (await api.submit(later, actor=SELLER.identity, reason="later end")).status == "accepted"
+        assert (await api.submit(first, actor=SELLER.identity, reason="first failure")).status == "rejected"
+    asyncio.run(drive())
+
+
+def test_repair_reason_has_exactly_one_prefix(tmp_path):
+    async def drive():
+        path = tmp_path / "servicing.sqlite"
+        dispute = Dispute()
+        dispute.submit = AsyncMock(return_value=Rejected(reason="repair required: unsupported revision"))
+        api = service(path, dispute)
+        with transaction(path) as conn:
+            failure(EndSession(conn))
+        await api.dispatch_filings("deal")
+        assert (await api.read("deal")).authority.outcome.reason == "repair required: unsupported revision"
     asyncio.run(drive())
 
 
