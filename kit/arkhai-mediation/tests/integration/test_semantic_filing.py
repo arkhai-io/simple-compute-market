@@ -66,7 +66,7 @@ def test_concurrent_callers_coordinate_before_authority_write():
             first = asyncio.create_task(s.submit("delivery_end", "online", intent))
             await entered.wait()
             second = await asyncio.wait_for(s.submit("delivery_end", "recovery", intent), timeout=1)
-            assert second.status == "rejected" and "repair required" in second.reason
+            assert second.status == "pending" and "resolve" in second.reason
             proceed.set()
             assert (await first).status == "accepted"
             assert (await s.submit("delivery_end", "recovery", intent)).status == "accepted"

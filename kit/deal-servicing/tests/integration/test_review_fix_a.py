@@ -124,7 +124,7 @@ def test_semantic_adoption_coordinates_reconstructed_durable_callers(tmp_path):
             try:
                 await entered.wait()
                 concurrent = await asyncio.wait_for(submit("operator"), timeout=5)
-                assert concurrent.status == "rejected" and "repair required" in concurrent.reason
+                assert concurrent.status == "pending" and "resolve" in concurrent.reason
                 proceed.set()
                 accepted = await first
                 adopted = await submit("operator")
