@@ -60,7 +60,7 @@ from .fulfillment import BareMetalFulfillmentTransport
 from market_arkhai_payments import PaymentApproval
 
 from .arkhai_payments import BareMetalSettlementTransport
-from .settlement_composition import BUYER_STAGES
+from .settlement_composition import BUYER_STAGES, validate_authority
 
 # The commands build their collaborators through the factories below: a Typer
 # command has no constructor to inject through, so these are the seam a test
@@ -419,9 +419,10 @@ def buy_bare_metal(
     try:
         stage = BUYER_STAGES[selected.settlement_schema]
         stage.validate_option(selected)
+        validate_authority(selected, buyer_config)
     except (KeyError, ValueError) as exc:
         raise typer.BadParameter(
-            "buy requires a supported priced settlement option"
+            f"buy requires a supported priced settlement option: {exc}"
         ) from exc
     rate = selected.price_rates[0]
     amount = compute_rate_total(rate, duration_seconds)

@@ -139,15 +139,18 @@ class Provisioning:
 def _option() -> SettlementOption:
     params = {"payee_account": PAYEE, "window": "P7D", "deposit_agreement": False}
     rates = [RateValue(field="amount", per="hour", value=100)]
+    lifecycle = dispute_lifecycle(DISPUTE)
+    lifecycle["adjudication"]["dispute"]["interface"] = "arkhai.mediation.v1"
+    lifecycle["delivery_deadline_seconds"] = 3600
     return SettlementOption(
         option_id=derive_settlement_option_id(
             price={"asset": "USD/2", "rates": rates},
             settlement={"schema": "arkhai.payments.v1", **(params or {})},
-            lifecycle=dispute_lifecycle(DISPUTE),
+            lifecycle=lifecycle,
         ),
         price={"asset": "USD/2", "rates": rates},
         settlement={"schema": "arkhai.payments.v1", **(params or {})},
-        lifecycle=dispute_lifecycle(DISPUTE),
+        lifecycle=lifecycle,
     )
 
 
@@ -607,6 +610,7 @@ async def test_the_buy_command_settles_over_a_run_log_a_later_command_reloads(
     runtime, provisioning = _runtime(tmp_path, payments)
     await _publish(runtime)
     service = SERVICE.identity.model_dump(mode="json")
+    dispute = _option().lifecycle["adjudication"]["dispute"]
     buyer = BuyerCommands(
         monkeypatch,
         tmp_path,
@@ -620,6 +624,15 @@ async def test_the_buy_command_settles_over_a_run_log_a_later_command_reloads(
             f'service_identity = {{scheme = "{service["scheme"]}", '
             f'identifier = "{service["identifier"]}"}}\n'
             "fee_bps = 250\n"
+            "[[Dispute]]\n"
+            f'interface = "{dispute["interface"]}"\n'
+            f'origin = "{dispute["origin"]}"\n'
+            f'account = "{dispute["account"]}"\n'
+            f'record_key = "{dispute["record_key"]}"\n'
+            "params = {}\n"
+            "[Dispute.advertisement]\n"
+            'mechanisms = ["arkhai.payments.v1"]\n'
+            "minimum_dispute_window_seconds = 60\n"
         ),
     )
     buyer.pay_through(payments)

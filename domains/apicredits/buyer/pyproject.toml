@@ -20,6 +20,7 @@ dependencies = [
   "arkhai-kit-config>=0.5.0",
   "arkhai-kit-identity==0.4.0",
   "arkhai-kit-deal-lifecycle>=0.1.0",
+  "arkhai-kit-arkhai-mediation>=0.1.0",
   "arkhai-kit-policy",
   "arkhai-kit-settlement-runtime",
 ]

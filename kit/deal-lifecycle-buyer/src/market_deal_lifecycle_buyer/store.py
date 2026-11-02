@@ -22,6 +22,7 @@ class FileEvidenceStore:
         self.path.touch(mode=0o600, exist_ok=True)
         with self._connection() as db:
             db.execute("CREATE TABLE IF NOT EXISTS evidence (negotiation_id TEXT PRIMARY KEY, record TEXT NOT NULL)")
+            db.execute("CREATE TABLE IF NOT EXISTS operations (negotiation_id TEXT, operation_key TEXT, digest TEXT NOT NULL, PRIMARY KEY (negotiation_id, operation_key))")
             db.execute("CREATE TABLE IF NOT EXISTS requests (request_id TEXT PRIMARY KEY, negotiation_id TEXT NOT NULL)")
             db.execute("CREATE TABLE IF NOT EXISTS commitments (negotiation_id TEXT, commitment_ref TEXT, acceptance_id TEXT NOT NULL, PRIMARY KEY (negotiation_id, commitment_ref))")
 
@@ -63,7 +64,11 @@ class FileEvidenceStore:
         envelope = captured.envelope
         payload = json.loads(captured.body) if captured.body else {}
         negotiation_id = payload.get("negotiation_id") if isinstance(payload, dict) else None
-        if not negotiation_id and envelope.operation == "negotiate_continue":
+        # Peer acknowledgements and empty-body reads identify the deal in the
+        # signed route context, not necessarily in their response payload.
+        if not negotiation_id and envelope.operation in {
+            "negotiate_continue", "lifecycle_peer", "lifecycle_buyer_read",
+        }:
             negotiation_id = envelope.resource
         with self._connection() as db:
             if not negotiation_id:
@@ -88,6 +93,16 @@ class FileEvidenceStore:
             )
             record = self._append(self._read(db, negotiation_id), item)
             self._save(db, record)
+
+    async def check_and_record(self, negotiation_id: str, operation_key: str, digest: str) -> bool:
+        """Persist the command before authority I/O, including across restarts."""
+        with self._connection() as db:
+            row = db.execute("SELECT digest FROM operations WHERE negotiation_id = ? AND operation_key = ?",
+                             (negotiation_id, operation_key)).fetchone()
+            if row is not None:
+                return row[0] == digest
+            db.execute("INSERT INTO operations VALUES (?, ?, ?)", (negotiation_id, operation_key, digest))
+            return True
 
     async def put(self, negotiation_id: str, item: EvidenceItem) -> None:
         with self._connection() as db:

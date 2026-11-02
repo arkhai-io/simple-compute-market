@@ -9,6 +9,9 @@ from typing import Any
 from core_buyer.buyer_config import ResolvedBuyerIdentity
 from core_buyer.registry_config import registry_descriptors, resolve_indexer_urls
 from market_deal_lifecycle.configuration import authorities_by_registry, dispute_config
+from market_deal_lifecycle.selection import AuthoritySelection
+from market_deal_lifecycle.terms import TermContext
+from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from core_buyer.settlement import BuyerSettlementPolicy
 from market_config.config_loader import load_user_config
 from market_alkahest.schemas import EscrowProposal
@@ -118,6 +121,12 @@ def resolve_buyer_settlement_policy(
         config=settlement,
         registry=registry,
         stages=BUYER_STAGES,
+        option_preference=AuthoritySelection(authorities, contexts={
+            "arkhai.payments.v1": TermContext(
+                mechanism="arkhai.payments.v1", has_adapter=True,
+                dispute_interfaces=frozenset({MEDIATION_INTERFACE}),
+            ),
+        }, report=logging.getLogger(__name__).info),
         public_context={
             "dispute_authorities_by_registry": authorities,
         },

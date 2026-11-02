@@ -56,6 +56,67 @@ The composed command accepts `export NEGOTIATION_ID --claim TEXT
 --requested-outcome JSON [--commitment-ref REF]` and emits one JSON bundle with
 base64 bodies, not re-serialized originals.
 
+## Authority selection
+
+The foundation's `market_deal_lifecycle.selection.AuthoritySelection` is a
+resource-free option-preference callback. The composition passes registry-local
+resolved `DisputeEntry` lists and installed `TermContext` capabilities. It checks
+the full authority identity and params, installed interface, advertised payment
+mechanism and lifecycle timing/capability rules before commitment. Unknown
+mechanisms cannot carry lifecycle terms. A missing authority list refuses hosted
+options with the diagnostic naming local entries and registry opt-in.
+
+VM and API-credit policies inject it into `BuyerSettlementPolicy`; bare-metal
+validates its explicit option ID through the same helper. Core receives only a
+callback returning a rank or refusal, not a lifecycle implementation. Mechanism
+and explicit clause priority remain primary; authority preference precedes the
+option-ID tie-break within them, including across listings. Compatibility and
+explanation callers pass the listing so another registry's recommendations never
+broaden admission. Exact params equality is the conservative default; there is no
+interface-specific relaxation.
+
+The VM buyer's committed `examples/authority_selection.py` exercises this path
+without a wallet, registry connection, service credential or deployment.
+
+## Buyer half
+
+`BuyerLifecycle` receives a resolver for immutable `BuyerDeal` projections from
+retained Agreements, payment/dispute adapter tables, an `OperationStore` and a
+signed `BuyerPeer`. `FileEvidenceStore` also implements the atomic operation
+store; reopening it retains the same-key/content guard across process restarts.
+The operation guard is retained even when evidence becomes eligible for pruning.
+The generic kit imports neither a mechanism nor a dispute implementation.
+
+`submit(command)` dispatches payment commands only to the payment adapter and
+`dispute`, `delivery_end` intents and `append` only to the Agreement's dispute
+adapter. The returned outcome is the counterpart's unchanged answer, including
+mixed per-part protection, pending results and unknown lost responses. No local
+clock closes a filing window and no requested remedy is applied locally.
+`append(...)` asks the dispute adapter to package the supplied evidence; callers
+never manufacture interface-specific append JSON. Free-form filing requests are
+built by the owning dispute adapter and carried as an `InterfaceRequest` payload.
+
+After a potentially recorded filing the half sends a stable-key courtesy hint.
+An optional asynchronous `observe_hint(message, outcome)` receives its separate
+acknowledgement; an unavailable storefront never changes the filing's outcome.
+`read(id)` merges the buyer's direct payment events/open extensions with the
+Agreement authority's cases/dispute events and the signed storefront's delivery
+view. It ignores the storefront's financial interpretation. With no payment
+adapter the authority view is explicitly rejected, naming the mechanism, but the
+delivery view remains available. `commit(message)` checks the retained reference
+before sending the peer message. Canonical surrender and outage journaling are
+separate from filing a delivery-end intent.
+
+Reproduce the injected first-use journey after rebuilding wheels:
+
+```sh
+make -C kit/deal-lifecycle-buyer build reinit
+(cd kit/deal-lifecycle-buyer && uv run --find-links ../../.dist python examples/first_use.py)
+```
+
+The example owns and removes a temporary database. It exercises the buyer half,
+not deployed authority or lifecycle-route behavior.
+
 ## First use and validation
 
 From the repository root:

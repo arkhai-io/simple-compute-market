@@ -92,7 +92,8 @@ def test_payment_selection_attaches_buyer_account_without_alkahest_resources() -
     class Policy:
         config = Config()
 
-        def compatible_options(self, advertised):
+        def compatible_options(self, advertised, *, listing):
+            assert listing["settlement_options"] == list(advertised)
             assert tuple(advertised) == ({"option_id": option_id},)
             registration = SimpleNamespace(mechanism_id=ARKHAI_PAYMENTS_MECHANISM)
             option = SimpleNamespace(

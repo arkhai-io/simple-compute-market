@@ -28,6 +28,12 @@ _IDENTITY = ResolvedBuyerIdentity(
     principal=_BUYER.identity, signer=_BUYER, source="primary",
 )
 _PAYER = "11111111-1111-4111-8111-111111111111"
+_DISPUTE = {
+    "interface": "arkhai.mediation.v1", "origin": "https://dispute.example",
+    "account": _PAYER, "record_key": "example-record-key", "params": {},
+    "advertisement": {"mechanisms": ["arkhai.payments.v1"],
+                      "minimum_dispute_window_seconds": 60, "minimum_case_hold_seconds": None},
+}
 _TOKEN = "0x" + "ab" * 20
 _ENTRY = {
     "chain_name": "anvil", "escrow_address": "0x" + "cd" * 20,
@@ -63,6 +69,7 @@ def surface(monkeypatch, tmp_path):
     ):
         monkeypatch.setattr(negotiate_cli, name, getattr(common, name))
     config = {
+        "Dispute": [_DISPUTE],
         "Settlement": {
             "schema_version": 1,
             "priority": ["arkhai.payments.v1", "alkahest.v1"],
@@ -85,14 +92,13 @@ def surface(monkeypatch, tmp_path):
         )
         asset = _TOKEN if mechanism == "alkahest.v1" else "USD"
         rates = [RateValue(field="amount", per="token", value=100)]
-        option = SettlementOption(
-            option_id=derive_settlement_option_id(
-                price={"asset": asset, "rates": rates},
-                settlement={"schema": mechanism, **(params or {})},
-            ),
-            price={"asset": asset, "rates": rates},
-            settlement={"schema": mechanism, **(params or {})},
-        )
+        body = {"price": {"asset": asset, "rates": rates}, "settlement": {"schema": mechanism, **params}}
+        if mechanism == "arkhai.payments.v1":
+            body["lifecycle"] = {"adjudication": {
+                "version": 1, "dispute": {key: _DISPUTE[key] for key in ("interface", "origin", "account", "record_key", "params")},
+                "dispute_window_seconds": 120, "case_hold_max_seconds": None,
+            }}
+        option = SettlementOption(option_id=derive_settlement_option_id(**body), **body)
         listing = {
             "listing_id": "credits-1", "storefront_url": "http://seller",
             "publisher_id": "publisher", "publisher_principals": trust.model_dump(mode="json"),
