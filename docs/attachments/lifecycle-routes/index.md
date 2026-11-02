@@ -73,6 +73,46 @@ expected behavior now follows the available owning contract: preserve the opaque
 claim unchanged. Cryptographic rejection is exercised by the owning mediation
 suite and the shipped mounted-receipt example; no test function was added.
 
+## Canonical buyer ending
+
+The installed-wheel buyer entry point is:
+
+```sh
+uv run --no-project --find-links .dist \
+  --with .dist/arkhai_kit_deal_servicing-0.1.0-py3-none-any.whl \
+  --with .dist/arkhai_kit_deal_lifecycle_client-0.1.0-py3-none-any.whl \
+  --with .dist/arkhai_kit_deal_lifecycle_buyer-0.1.0-py3-none-any.whl \
+  --with .dist/arkhai_kit_arkhai_mediation-0.1.0-py3-none-any.whl \
+  python docs/attachments/lifecycle-routes/end_first_use.py
+```
+
+It mounts the real router/client, uses the owning mediation adapter and its
+vector-derived HTTP peer, and injects payment outcomes (not a rate engine).
+Observed first-use and reopened-journal recovery:
+
+| Condition | Initial payment / delivery / case | Retry |
+| --- | --- | --- |
+| Payment outage | unknown / accepted / accepted | accepted / accepted / accepted |
+| Both authorities down | unknown / accepted / unknown | accepted / accepted / accepted |
+| No storefront acknowledgement | unknown / unknown / accepted, contested observed time | accepted / accepted / accepted; original contested filing unchanged |
+| No adapters | rejected / accepted / rejected | unchanged; no refund or authority call |
+
+Stops precede surrender and retain the same command/derived key on retry.
+Receipt-backed filings carry exact verified concurrence; an unacknowledged
+observed instant remains contested and is never rewritten as signed history.
+The client rejects a supplied instant, verifies response/echo binding and keeps
+both exact envelopes. The buyer verifies the Agreement principals and owning
+claim, retains observation/receipt evidence with export producer/digest context,
+and journals each command before I/O. `FileEvidenceStore.end_journal` shares its
+store file so authorized evidence pruning removes retained end plans too.
+The driver composes this journal and exact Agreement principals into the buyer
+half; neither domain's stage table or CLI is wired here.
+
+The fixture accepts filings but computes no mediation remedies. Mechanical
+rulings, time/replay guards and signed ruling bases remain qualified by the
+existing 40-case mediation suite, including all 14 published producer traces.
+Rate stop/notice execution and hosted qualification are not claimed.
+
 ## Validation
 
 The servicing first-use examples and source typing pass; the existing lifecycle

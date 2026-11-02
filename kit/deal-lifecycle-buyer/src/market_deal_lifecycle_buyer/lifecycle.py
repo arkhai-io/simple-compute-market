@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
@@ -11,18 +12,23 @@ from market_deal_lifecycle.adapters import (
     DisputeAdapterTable, DisputeBinding, PaymentAdapterTable, PaymentBinding,
     submit_dispute, submit_payment,
 )
+from market_deal_lifecycle.evidence import EvidenceStore
 from market_deal_lifecycle.operations import OperationStore
 from market_deal_lifecycle_contracts.models import (
-    Accepted, AuthorityView, CommitMessage, EvidenceItem, HintMessage, LifecycleCommand,
+    Accepted, AuthorityView, CommitMessage, EndDeliveryAcknowledgement, SignedEndDeliveryReceipt, EvidenceItem, HintMessage, LifecycleCommand,
     LifecycleOutcome, LifecycleRead, Rejected, SubmitResponse, Unknown,
 )
-from market_identity import canonical_json
+from market_identity import Identity, canonical_json
+
+from .ending import BuyerEndJournal, EndDeliveryProgress, end_delivery
 
 
 class BuyerPeer(Protocol):
     async def commit(self, message: CommitMessage) -> SubmitResponse: ...
     async def hint(self, message: HintMessage) -> SubmitResponse: ...
     async def read(self, negotiation_id: str) -> LifecycleRead: ...
+    async def end_delivery(self, negotiation_id: str, *, operation_key: str) -> EndDeliveryAcknowledgement: ...
+    def end_receipt(self, negotiation_id: str, operation_key: str) -> SignedEndDeliveryReceipt: ...
 
 
 @dataclass(frozen=True)
@@ -33,6 +39,8 @@ class BuyerDeal:
     commitment_ref: str
     payment: PaymentBinding
     dispute: DisputeBinding | None = None
+    buyer: Identity | None = None
+    seller: Identity | None = None
 
     def __post_init__(self) -> None:
         if not self.negotiation_id or not self.commitment_ref:
@@ -54,6 +62,8 @@ class BuyerLifecycle:
         self, *, deal: Callable[[str], BuyerDeal], payments: PaymentAdapterTable,
         disputes: DisputeAdapterTable, operations: OperationStore, peer: BuyerPeer,
         observe_hint: HintObserver | None = None,
+        end_journal: BuyerEndJournal | None = None, evidence: EvidenceStore | None = None,
+        clock: Callable[[], int] = lambda: int(time.time()),
     ) -> None:
         self._resolve = deal
         self.payments = payments
@@ -61,12 +71,18 @@ class BuyerLifecycle:
         self.operations = operations
         self.peer = peer
         self.observe_hint = observe_hint
+        self.end_journal = end_journal
+        self.evidence = evidence
+        self.clock = clock
 
     def _deal(self, negotiation_id: str) -> BuyerDeal:
         deal = self._resolve(negotiation_id)
         if deal.negotiation_id != negotiation_id:
             raise ValueError("buyer resolver returned another negotiation")
         return deal
+
+    async def end_delivery(self, negotiation_id: str) -> EndDeliveryProgress:
+        return await end_delivery(self, negotiation_id)
 
     async def commit(self, message: CommitMessage) -> LifecycleOutcome:
         deal = self._deal(message.negotiation_id)

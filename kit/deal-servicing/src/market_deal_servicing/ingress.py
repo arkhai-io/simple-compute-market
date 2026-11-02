@@ -131,6 +131,8 @@ class DeliveryIngress:
             ).fetchone()
             if claim_row is None:
                 claim = self.receipt_claim(message.negotiation_id, receipt_at)
+                if deal.dispute is not None and claim is None:
+                    raise ValueError("Agreement dispute authority requires a reusable seller receipt claim")
                 conn.execute(
                     "INSERT INTO servicing_receipt_claims VALUES (?,?,?)",
                     (message.negotiation_id, message.operation_key, canonical_json(claim).decode()),

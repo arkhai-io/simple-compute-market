@@ -619,7 +619,7 @@ and the bare-metal buyer's counterparts.
       domain that a hosted-mechanism deal stage reaches `commit` (with kit-owned vector-derived in-process payments and mediation contract fakes; no runnable tooling dependency)
       and an Alkahest deal stage is unchanged.
 
-- [ ] 7.5 **Round 2, after 12.3 and 13.3:** add canonical client end_delivery(negotiation_id)
+- [x] 7.5 **Round 2, after 12.3 and 13.3:** add canonical client end_delivery(negotiation_id)
       and buyer-half end verification/capture. Round-1 dispatch remains fake-adapter work in 7.2.
       Stop at the payment authority first; on unknown/unreachable payments journal the stop and retry
       it under the same key (billing runs until it lands), send receipt-only surrender, and may also

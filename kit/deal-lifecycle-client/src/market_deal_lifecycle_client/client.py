@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import re
 import time
 import uuid
@@ -9,7 +11,8 @@ from urllib.parse import quote
 
 import httpx
 from market_deal_lifecycle_contracts.models import (
-    CommitMessage, HintMessage, LifecycleRead, SubmitResponse,
+    CommitMessage, EndDeliveryAcknowledgement, EndDeliveryMessage, HintMessage, LifecycleRead,
+    SignedEndDeliveryReceipt, SubmitResponse,
 )
 from market_deal_lifecycle_contracts.routes import lifecycle_route
 from market_identity import (
@@ -44,6 +47,8 @@ class LifecycleClient:
         self._capture = capture
         self._skew = max_timestamp_skew
         self._requests: dict[str, tuple[str, str, str]] = {}
+        self._responses: dict[str, SignedEndDeliveryReceipt] = {}
+        self._end_receipts: dict[tuple[str, str], SignedEndDeliveryReceipt] = {}
         self._client = httpx.AsyncClient(base_url=base_url.rstrip("/"), timeout=timeout, transport=transport)
 
     async def __aenter__(self) -> LifecycleClient:
@@ -64,6 +69,32 @@ class LifecycleClient:
         return SubmitResponse.model_validate(await self._request(
             "lifecycle_peer", message.negotiation_id, message.model_dump(mode="json"), request_id,
         ))
+
+    async def end_delivery(
+        self, negotiation_id: str, *, operation_key: str | None = None, request_id: str | None = None,
+    ) -> EndDeliveryAcknowledgement:
+        """Surrender delivery at the seller receipt, never at a supplied instant."""
+        key = operation_key or hashlib.sha256(canonical_json(["end_delivery", negotiation_id])).hexdigest()
+        message = EndDeliveryMessage(negotiation_id=negotiation_id, operation_key=key)
+        request_id = uuid.uuid4().hex if request_id is None else request_id
+        acknowledgement = EndDeliveryAcknowledgement.model_validate(await self._request(
+            "lifecycle_peer", negotiation_id, message.model_dump(mode="json"), request_id,
+        ))
+        if acknowledgement.negotiation_id != negotiation_id or acknowledgement.operation_key != key:
+            raise LifecycleClientError("end acknowledgement names another request")
+        receipt = self._responses.pop(request_id)
+        prior = self._end_receipts.get((negotiation_id, key))
+        if prior is not None:
+            previous = EndDeliveryAcknowledgement.model_validate_json(prior.response_body)
+            if (previous.receipt_at != acknowledgement.receipt_at
+                    or previous.signed_delivery_end_claim != acknowledgement.signed_delivery_end_claim):
+                raise LifecycleClientError("end retry changes the durable receipt or claim")
+        self._end_receipts[negotiation_id, key] = receipt
+        return acknowledgement
+
+    def end_receipt(self, negotiation_id: str, operation_key: str) -> SignedEndDeliveryReceipt:
+        """Exact envelopes for offline Agreement-bound verification and evidence."""
+        return self._end_receipts[negotiation_id, operation_key]
 
     async def read(self, negotiation_id: str, *, request_id: str | None = None) -> LifecycleRead:
         result = LifecycleRead.model_validate(await self._request(
@@ -107,8 +138,10 @@ class LifecycleClient:
             raise LifecycleClientError("lifecycle transport failed; outcome is unknown") from exc
         try:
             payload = response.json()
-            principal = Identity(scheme=response.headers["X-Market-Identity-Scheme"],
-                                 identifier=response.headers["X-Market-Identity-Identifier"])
+            principal = Identity.model_validate({
+                "scheme": response.headers["X-Market-Identity-Scheme"],
+                "identifier": response.headers["X-Market-Identity-Identifier"],
+            })
             authenticated = AuthenticatedResponse(
                 protocol=response.headers["X-Market-Signature-Version"],
                 role=response.headers["X-Market-Role"], principal=principal,
@@ -130,6 +163,11 @@ class LifecycleClient:
             raise LifecycleClientError(f"lifecycle response authentication failed: {verified.code.value}", status_code=response.status_code)
         capture_envelope(self._capture, envelope=request, raw_body=content or b"", headers=headers,
                          verified_at=int(time.time()), expected_principals=TrustedIdentitySet(identities=(request.principal,)))
+        if operation == "lifecycle_peer" and isinstance(body, dict) and body.get("kind") == "end_delivery" and not response.is_error:
+            self._responses[request_id] = SignedEndDeliveryReceipt(
+                request=request, request_body=base64.b64encode(content or b""),
+                response=authenticated, response_body=base64.b64encode(response.content),
+            )
         if response.is_error:
             raise LifecycleClientError(f"lifecycle HTTP {response.status_code}: {payload}", status_code=response.status_code)
         if not isinstance(payload, dict):

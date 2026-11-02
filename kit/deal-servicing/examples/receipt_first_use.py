@@ -89,14 +89,8 @@ async def main():
                     transport=httpx.ASGITransport(app=app),
                 ) as client:
                     body = {"kind": "end_delivery", "negotiation_id": "example", "operation_key": "end-now"}
-                    # Canonical end_delivery adds the public spelling over this
-                    # same signed transport; no competing receipt is fabricated.
-                    first = EndDeliveryAcknowledgement.model_validate(await client._request(
-                        "lifecycle_peer", "example", body, None,
-                    ))
-                    second = EndDeliveryAcknowledgement.model_validate(await client._request(
-                        "lifecycle_peer", "example", body, None,
-                    ))
+                    first = await client.end_delivery("example", operation_key="end-now")
+                    second = await client.end_delivery("example", operation_key="end-now")
                     assert first.signed_delivery_end_claim == second.signed_delivery_end_claim
                     intent = DeliveryEndIntent(ended_at=first.receipt_at, delivered=True, cause="payer")
                     assert adapter.verify_delivery_end(first.signed_delivery_end_claim, intent)
