@@ -88,9 +88,9 @@ class MediationAdapter:
             "agreement": self._agreement,
         }
         validate("Filing", value)
-        # The published legacy kinds are readable history, not writable lifecycle intents.
+        # Free-form filings name requested effects; delivery-end intents need their mapper.
         if value["request"]["kind"] != "effects":
-            raise ValueError("legacy end requests are not emitted by this adapter")
+            raise ValueError("this adapter only enables free-form effects requests")
         for effect in value["request"]["effects"]:
             if effect["kind"] == "award":
                 raise ValueError("bond awards are reserved")
