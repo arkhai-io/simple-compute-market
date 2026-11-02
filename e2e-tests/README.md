@@ -183,6 +183,42 @@ running; `make e2e-<lane>-down` takes it down. `make test-e2e` runs all three in
 turn, taking each stack down before the next. The compute lanes' provisioning
 services run the mock profile unless `PROVISIONING_MODE=real`.
 
+### Real bare-metal provisioning
+
+`e2e_bare_metal_real_provisioning` runs the canonical complete deal against a
+real bare-metal provisioning service and an operator-prepared relay-backed host.
+It is in no default lane. Configure the existing `BARE_METAL_LANE` client settings
+for that release and its pinned principals, and select the ignored
+`real-provisioning-target` profile with a `domain: bare_metal` host. The target
+must contain the operator-verified OpenSSH host public key and relay identifier;
+it contains no private key, token or signing key.
+
+```bash
+make test-module MODULE=e2e_bare_metal_real_provisioning ACTIVE_PROFILES=local,real-provisioning-target
+```
+
+Before any hold or supply write, the target, real executor and enabled relay with
+a configured token and active grant key are checked. The run reconciles its own
+pool, executor and whole-machine declaration, adopts exactly one open listing
+for its verified machine/shape, and refuses another declaration on that host.
+Reconcile older declarations under paused admission before running it; the
+scenario does not delete or reassign unrelated supply.
+
+The buyer uses a generated key and the pinned machine key at the delivered relay
+port; an unrelated key must be refused. Grant and reclaim jobs must succeed on
+the target, management connectivity must survive, and lease expiry must release
+capacity and close the delivered access while retaining relay quarantine.
+Failure recovery truncates only the run's lease and names unconfirmed cleanup.
+Without a bare-metal target the module skips before mutation. These checks are
+source capabilities; a passing mock pipeline does not qualify real hardware.
+
+The installed buyer scenario `e2e_bare_metal_deal` keeps its separate
+`BARE_METAL` configuration and operator-supplied buyer key and known-hosts file.
+It uses the same SSH helper in strict pinned mode, with one fresh attempt per
+access observation. Only public-key authentication refusal proves revocation; a
+transport or host-key failure fails the observation. It remains outside default
+lanes and skips when its configuration is absent.
+
 ### Real VM provisioning
 
 `e2e_vm_real_provisioning` runs the canonical compute deal against a real KVM
@@ -199,16 +235,20 @@ virtualization; it needs no GPU.
    host, or render that file from your environment's own records:
 
    ```bash
-   cp config/config-real-vm-target.yml.example config/config-real-vm-target.yml
+   cp config/config-real-provisioning-target.yml.example config/config-real-provisioning-target.yml
    ```
 
-   `config-real-vm-target.yml` is ignored and never committed. Its
-   `REAL_VM_TARGET` section names the host's identifier, the address, user,
-   and port the provisioning service connects to, where the service reads its
-   key, the address buyers reach the host's guests at, and the capacity the host
-   sells (`vcpu_count`, `ram_gb`, `disk_gb`): its hardware less what is kept for
-   the host itself. The scenario registers the host and deals on all of that
-   capacity in one VM. A missing or misspelled field fails the run naming it.
+   `config-real-provisioning-target.yml` is ignored and never committed. Its
+   `REAL_PROVISIONING_TARGET` version 2 section holds at most one host per
+   domain. A VM host names its identifier, `connection` (service address, user,
+   port and key path), `access`, sellable `capacity`, and a `listing_shape` that
+   fits twice within capacity. Direct access states `public_host`; relay access
+   states only `relay_id`. Bare-metal hosts additionally state `physical_host_id`
+   and their verified `ssh_host_public_key`, and have no VM listing shape.
+   The lane reads a relay before any mutation and requires it enabled, with
+   a configured token and active grant key; it never creates the relay. The
+   target carries no private key or relay credential. Version 1 is refused
+   with conversion instructions; a missing or misspelled field fails by name.
 2. Forward the stack's services to the ports the `local` profile names
    (`config/config-local.yml`): the storefront, the registry, the provisioning
    service, and the chain. The stack must trust the `local` profile's
@@ -216,14 +256,16 @@ virtualization; it needs no GPU.
 3. Run the module with both profiles:
 
    ```bash
-   make test-module MODULE=e2e_vm_real_provisioning ACTIVE_PROFILES=local,real-vm-target
+   make test-module MODULE=e2e_vm_real_provisioning ACTIVE_PROFILES=local,real-provisioning-target
    ```
 
-Without the `real-vm-target` profile, or with its file missing, every stage
+Without the `real-provisioning-target` profile, or with its file missing, every stage
 skips naming the profile and file, and nothing is written to the stack. A run
-that fails after settlement expires its own deal's lease so the provisioning
-service tears the VM down, and fails naming the fulfillment, jobs, VM, and host
-where it cannot confirm the VM is gone.
+that fails after settlement tries cleanup for both guests through their leases,
+and reports each unconfirmed removal. The first SSH session stays open across the
+second guest's create and teardown, with a maximum five-second observed gap;
+management connectivity is checked around each operation. The two smaller guests
+prove tunnel coexistence and require no GPU.
 
 ---
 

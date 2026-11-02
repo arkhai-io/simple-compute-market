@@ -985,6 +985,21 @@ Rejected: deriving half the capacity (rounding can yield a guest that does not
 boot, and the shape is in no file); a fixed shape in the lane (one shape for every
 environment, held in code).
 
+### D7a. Shared ready-stage listing expectation follows the lane's remaining capacity
+
+Source integration found that the shared ready stage assumed every first deal
+consumed a host's whole capacity and therefore asserted a closed listing. That
+conflicts with D7's explicit two-guest shape and D8's second negotiation on the
+same open listing. The accepted technical correction keeps one shared ready
+stage and adds the explicit driver contract
+`listing_status_after_first_fulfillment`: whole-capacity mock drivers state
+`closed`, and the real VM lane states `open`. The shared stage still checks
+settlement readiness and delivery identically, then checks that stated listing
+status. No fallback or lane-specific replacement stage is added. D8's unchanged
+shared-stage intent means shared ownership and reuse, rather than retaining an
+impossible whole-capacity assertion. Permanent explanation belongs with the
+canonical compute-deal and real-lane documentation at closeout.
+
 ### D8. The VM lane runs a second deal while a session stays open
 
 Between the first deal's access checks and its expiry, real-lane stages:
@@ -1068,6 +1083,22 @@ writes. Nothing pauses or creates a listing, unlike the VM lane's adoption.
 
 Rejected: extending `e2e_bare_metal_deal` (rebuilding it into what the shared stages
 already provide, and losing its payment qualification).
+
+Implementation seam: the public bare-metal listing carries its executor host,
+physical host identity and hardware shape, not the site's opaque Physical Resource
+identifier. The real lane first refuses another declaration for that host through
+the canonical site snapshot, then adopts exactly one open listing matching the
+target's host, physical identity and declared shape. Its settlement preview must
+still name its exact owned Physical Resource before submission. This preserves
+resource ownership without adding an accounting field to the buyer payload.
+
+The two real lanes share
+`e2e-tests/tests/e2e/roles/helpers/real_provisioning.py` for job polling, management continuity and relay holdings. Bare-metal
+commercial/lease behavior is gate-free in its domain driver base; mock gates
+remain only on its mock driver. Publication-close and evidence stages live in
+that domain's `publication_stages.py` and are reused by both lanes. SSH host-key
+parsing belongs to `e2e_harness.ssh_host_key`, so the typed target and SSH session
+share validation without a production harness module importing test code.
 
 ### D11. One SSH helper
 
@@ -1209,3 +1240,13 @@ round 1 session 2 and round 4 as listed.
   wheel before installing it, as `frp-binary` pins frp (D22).
 - **Relay deletion** stays `relay-vm-access-without-a-dashboard`'s decision gate
   1A.7; nothing here forecloses its answers.
+
+
+## Design promotion record
+
+| Accepted decision | Classification | Permanent destination | State |
+|---|---|---|---|
+| D7a explicit ready-stage listing expectation follows remaining capacity, with one shared implementation | Permanent test contract | `openspec/specs/test-compatibility/spec.md#requirement-the-canonical-compute-deals-shared-stages-are-defined-once`; `docs/development/TESTING.md#the-canonical-compute-deal` | Normative/rationale promotion remains closeout; current real-lane operator instructions are reconciled |
+
+The proposal's existing knowledge-to-promote list and section 17 retain every
+other material decision; this additional row does not replace that mapping.
