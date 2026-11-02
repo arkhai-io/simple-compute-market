@@ -33,7 +33,7 @@ class ActivatedDeliveryRef(WireModel):
 
 class ReadyEvidenceRef(WireModel):
     version: Version = 1
-    schema_id: Reference = Field(alias="schema")
+    schema_id: Reference
     resource_ref: Reference
     digest: Digest
 
