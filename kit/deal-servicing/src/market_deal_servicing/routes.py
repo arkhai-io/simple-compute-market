@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import json
@@ -27,8 +28,8 @@ from market_identity import (
 
 from .end import EndService
 from .ingress import DeliveryIngress
-from .evidence import EvidenceSession, transaction
-from .journal import EndSession, atomic
+from .evidence import EvidenceSession, in_transaction
+from .journal import EndSession
 from .seller import SellerServicing
 
 Peer: TypeAlias = CommitMessage | HintMessage
@@ -68,7 +69,7 @@ def create_lifecycle_router(
     router = APIRouter()
 
     async def dispatch(request: Request, operation: str, negotiation_id: str = "") -> Response:
-        svc = services(request)
+        svc = await asyncio.to_thread(services, request)
         route = lifecycle_route(operation)
         resource = negotiation_id
         if operation == "lifecycle_list" and request.query_params:
@@ -86,7 +87,7 @@ def create_lifecycle_router(
                 raise ValueError("a lifecycle write requires a JSON object")
             if request.method == "GET" and raw:
                 raise ValueError("a lifecycle read has no body")
-            binding = svc.binding(negotiation_id) if negotiation_id else None
+            binding = await asyncio.to_thread(svc.binding, negotiation_id) if negotiation_id else None
             if binding is not None and svc.signer.identity != binding.seller:
                 raise RuntimeError("lifecycle signer is not the Agreement seller")
             role = route["roles"][0]
@@ -101,11 +102,12 @@ def create_lifecycle_router(
                 expected_resource=resource, expected_principals=expected,
             )
             assert verified.reservation is not None
-            with transaction(svc.seller.path) as conn, atomic(conn):
+            request_hash = verified.reservation.request_hash
+            def retain_request(conn):
                 if not EndSession(conn).check_and_record(
                     "_lifecycle_transport",
                     hashlib.sha256(canonical_json([envelope.principal.model_dump(mode="json"), envelope.request_id])).hexdigest(),
-                    verified.reservation.request_hash,
+                    request_hash,
                 ):
                     raise RouteRefusal(409, "request ID changes signed content")
                 if negotiation_id and raw:
@@ -117,6 +119,7 @@ def create_lifecycle_router(
                         headers=dict(request.headers),
                         context={"authenticated_request": envelope.model_dump(mode="json")},
                     ))
+            await in_transaction(svc.seller.path, retain_request)
             result: WireModel
             if operation == "lifecycle_list":
                 # Bind the complete page selector into the signed resource.
@@ -137,7 +140,7 @@ def create_lifecycle_router(
                     command, actor=envelope.principal, reason=reason,
                 ))
             elif operation == "lifecycle_buyer_read":
-                result = svc.seller.delivery_read(negotiation_id)
+                result = await asyncio.to_thread(svc.seller.delivery_read, negotiation_id)
             elif operation == "lifecycle_seller_read":
                 result = await svc.seller.read(negotiation_id)
             elif body.get("kind") == "end_delivery":
@@ -150,15 +153,16 @@ def create_lifecycle_router(
                     raise RouteRefusal(503, "delivery servicing is unavailable")
                 if svc.ingress.path.resolve() != svc.seller.path.resolve() or svc.end.path.resolve() != svc.seller.path.resolve():
                     raise RuntimeError("lifecycle delivery services must share persistence")
-                acknowledgement = svc.ingress.end_delivery(envelope, body=raw, headers=dict(request.headers))
+                acknowledgement = await asyncio.to_thread(
+                    svc.ingress.end_delivery, envelope, body=raw, headers=dict(request.headers),
+                )
                 try:
                     await svc.end.drive_physical(negotiation_id)
                 except Exception:
                     # Receipt is durable even if physical I/O fails. The pending
                     # effect keeps its key for the controller to retry.
                     logging.getLogger(__name__).exception("Delivery end awaits physical recovery")
-                with transaction(svc.seller.path) as conn:
-                    delivery = EndSession(conn).view(negotiation_id)
+                delivery = await in_transaction(svc.seller.path, lambda conn: EndSession(conn).view(negotiation_id))
                 result = acknowledgement.model_copy(update={
                     "delivery": delivery, "selected_end": delivery.recorded_end,
                 })
@@ -167,12 +171,13 @@ def create_lifecycle_router(
                                  else HintMessage.model_validate(body))
                 if message.negotiation_id != negotiation_id:
                     raise ValueError("peer message names another negotiation")
-                with transaction(svc.seller.path) as conn, atomic(conn):
+                def retain_peer(conn):
                     if not EndSession(conn).check_and_record(
                         negotiation_id, "lifecycle-peer:" + message.kind + ":" + message.operation_key,
                         hashlib.sha256(canonical_json(message)).hexdigest(),
                     ):
                         raise RouteRefusal(409, "peer operation key changes content")
+                await in_transaction(svc.seller.path, retain_peer)
                 result = await svc.peer(message)
             payload = result.model_dump(mode="json")
         except RouteRefusal as exc:
@@ -195,13 +200,12 @@ def create_lifecycle_router(
                 response_body=base64.b64encode(rendered),
             ), negotiation_id=negotiation_id, buyer=binding.buyer, seller=binding.seller)
         if envelope is not None and negotiation_id:
-            with transaction(svc.seller.path) as conn:
-                EvidenceSession(conn).put(negotiation_id, EvidenceItem(
+            await in_transaction(svc.seller.path, lambda conn: EvidenceSession(conn).put(negotiation_id, EvidenceItem(
                     evidence_id="lifecycle-response:" + hashlib.sha256(canonical_json(signed)).hexdigest(),
                     kind="lifecycle_response", classification="seller_assertion",
                     recorded_at=signed.timestamp, body=base64.b64encode(rendered), headers=headers,
                     context={"authenticated_response": signed.model_dump(mode="json")},
-                ))
+            )))
         return Response(rendered, status_code=status, headers=headers, media_type="application/json")
 
     @router.get("/api/v1/admin/lifecycle")

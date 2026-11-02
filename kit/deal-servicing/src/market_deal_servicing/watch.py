@@ -9,12 +9,13 @@ from typing import Literal
 
 from market_deal_lifecycle.adapters import DisputeAdapter, DisputeBinding, PaymentAdapter
 from market_deal_lifecycle.operations import OperationKeys
+from market_deal_lifecycle.respondent import RespondentAdapter
 from market_deal_lifecycle_contracts.models import (
     Accepted, AuthorityView, DisputeEvent, EvidenceItem, LifecycleCommand, PaymentEvent, Rejected,
 )
-from market_identity import Identity, canonical_json
+from market_identity import Identity, IdentityScheme, canonical_json
 
-from .evidence import EvidenceSession, RetentionObservation, transaction
+from .evidence import EvidenceSession, RetentionObservation, in_transaction, transaction
 from .journal import Classification, EndSession, FinalRequest, atomic, stable_ref
 
 
@@ -35,6 +36,7 @@ def create_schema(conn) -> None:
 class WatchSession:
     def __init__(self, conn):
         self.conn = conn
+        create_schema(conn)
 
     def cursor(self, negotiation_id: str, record_ref: str) -> int:
         row = self.conn.execute(
@@ -112,8 +114,6 @@ class DealWatch:
             or dispute_binding.commitment_ref != commitment_ref
         ):
             raise ValueError("watch binding names another deal")
-        with transaction(self.path) as conn:
-            create_schema(conn)
 
     def _observe(
         self, record_ref: str, view: AuthorityView, *, dispute: bool,
@@ -153,10 +153,18 @@ class DealWatch:
                             if prior.ended_at != effect.at:
                                 raise ValueError("authority effect identity changes its end")
                             continue
+                        if self.binding is None:
+                            raise ValueError("dispute effect requires its accepted authority binding")
+                        scheme, separator, key = self.binding.authority.record_key.partition(":")
+                        authority_actor = Identity(
+                            scheme=IdentityScheme(scheme) if separator else IdentityScheme.ED25519,
+                            identifier=key if separator else scheme,
+                        )
                         request = FinalRequest(
                             negotiation_id=self.negotiation_id, source_ref=source_ref,
                             ended_at=effect.at, observed_at=self.clock(),
-                            actor=self.actor(event.actor), cause="ruling", source=event.record_ref,
+                            actor=authority_actor,
+                            cause="ruling", source=event.record_ref,
                             evidence_refs=[item.evidence_id for item in event.items] or [event.record_ref],
                         )
                         end.record_end(
@@ -164,7 +172,17 @@ class DealWatch:
                                 kind="ruling", evidence_refs=request.evidence_refs,
                             ),
                         )
-                    if event.kind == "filed" and event.actor != self.seller_account:
+                    # Discovery owns the signed answer. Do not advance past an
+                    # unanswered filing: later effects replay once its exact answer
+                    # is journaled, or the authority confirms the case closed.
+                    if (event.kind == "filed" and event.actor != self.seller_account
+                            and isinstance(self.dispute, RespondentAdapter)):
+                        key = stable_ref(self.negotiation_id, "append", event.case_ref)
+                        answered = end.intent(stable_ref(self.negotiation_id, "append", key)) is not None
+                        closed = any(case.case_ref == event.case_ref and case.state == "closed" for case in view.cases)
+                        if not answered and not closed:
+                            break
+                    elif event.kind == "filed" and event.actor != self.seller_account:
                         if self.dispute is None:
                             raise ValueError("counterparty case has no dispute adapter")
                         key = stable_ref(self.negotiation_id, "append", event.case_ref)
@@ -240,10 +258,9 @@ class DealWatch:
             fresh.extend(events)
         await self.replay_appends()
         if views and all(isinstance(view.outcome, Accepted) for view in views):
-            observation = self.observe_retention(views)
+            observation = await asyncio.to_thread(self.observe_retention, views)
             if observation is not None:
-                with transaction(self.path) as conn:
-                    EvidenceSession(conn).observe(self.negotiation_id, observation)
+                await in_transaction(self.path, lambda conn: EvidenceSession(conn).observe(self.negotiation_id, observation))
         return views, fresh
 
     async def watch(self) -> AsyncIterator[AuthorityView | PaymentEvent | DisputeEvent]:
@@ -257,21 +274,19 @@ class DealWatch:
     async def replay_appends(self) -> None:
         if self.dispute is None:
             return
-        with transaction(self.path) as conn:
-            pending = [
-                intent for intent in EndSession(conn).intents(self.negotiation_id, pending_only=True)
-                if intent.kind == "append"
-            ]
+        pending = await in_transaction(self.path, lambda conn: [
+            intent for intent in EndSession(conn).intents(self.negotiation_id, pending_only=True)
+            if intent.kind == "append"
+        ])
         for intent in pending:
             if intent.not_before > self.clock():
                 continue
             command = LifecycleCommand.model_validate(intent.payload)
             # Mark the uncertain I/O boundary before sending. Even if the case is
             # now closed, a replay must first recover any earlier acknowledgement.
-            with transaction(self.path) as conn:
-                EndSession(conn).acknowledge(
-                    intent.intent_ref, {"attempted": True}, state="pending",
-                )
+            await in_transaction(self.path, lambda conn: EndSession(conn).acknowledge(
+                intent.intent_ref, {"attempted": True}, state="pending",
+            ))
             outcome = await self.dispute.submit(
                 command, None, OperationKeys(self.negotiation_id, command.operation_key),
             )
@@ -283,14 +298,12 @@ class DealWatch:
                     for case in view.cases
                 ):
                     state = "skipped"
-            with transaction(self.path) as conn:
-                EndSession(conn).acknowledge(
-                    intent.intent_ref, outcome.model_dump(mode="json"), state=state,
-                )
+            await in_transaction(self.path, lambda conn: EndSession(conn).acknowledge(
+                intent.intent_ref, outcome.model_dump(mode="json"), state=state,
+            ))
 
     async def peer_hint(self, item: EvidenceItem) -> list[AuthorityView]:
         """Authentication and buyer binding are checked at the route boundary."""
-        with transaction(self.path) as conn:
-            EvidenceSession(conn).put(self.negotiation_id, item)
+        await in_transaction(self.path, lambda conn: EvidenceSession(conn).put(self.negotiation_id, item))
         views, _ = await self.poll()
         return views
