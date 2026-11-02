@@ -142,7 +142,7 @@ def test_hosted_commit_delivers_after_a_verified_receipt(
     assert ready.ready and ready.status == "ready", ready
     assert storefront_client.get_settle_status(negotiation_id).tenant_credentials
     lease = DealLease(provisioning_client, site_capacity, negotiation_id=negotiation_id)
-    assert lease.refresh()["status"] == "leased"
+    assert lease.refresh()["status"] == "active"
     purchase = LifecyclePurchase(negotiation_id, status.fulfillment_id, lease.lease_id)
     deal_state.lifecycle_purchase = purchase
     hosted.update(transaction=data.transaction_id, negotiation_id=negotiation_id,
