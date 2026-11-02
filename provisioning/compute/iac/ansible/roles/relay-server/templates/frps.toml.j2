@@ -10,3 +10,9 @@ allowPorts = [
 log.to = "/var/log/frp/frps.log"
 log.level = "info"
 log.maxDays = 30
+
+[[httpPlugins]]
+name = "grant-admission"
+addr = {{ frp_grant_admission_address | to_json }}
+path = "/"
+ops = ["NewProxy"]

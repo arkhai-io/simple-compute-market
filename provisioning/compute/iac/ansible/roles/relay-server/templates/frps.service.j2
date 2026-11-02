@@ -1,7 +1,7 @@
 [Unit]
 Description=Buyer relay server
-After=network-online.target
-Wants=network-online.target
+After=network-online.target frp-grant-admission.service
+Wants=network-online.target frp-grant-admission.service
 
 [Service]
 Type=simple

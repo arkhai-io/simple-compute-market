@@ -1,0 +1,156 @@
+---
+- name: Prepare and check the exact supplied admission artifacts
+  ansible.builtin.import_tasks: plugin-artifacts.yml
+
+- name: Require a dedicated non-root admission account name
+  ansible.builtin.assert:
+    that:
+      - frp_grant_admission_user != 'root'
+      - frp_grant_admission_user is match('^[a-z_][a-z0-9_-]{0,31}$')
+    fail_msg: Admission requires a dedicated non-root service account
+
+- name: Inspect any existing admission account before changing it
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ frp_grant_admission_user }}"
+    fail_key: false
+
+- name: Refuse an existing privileged admission account before changing it
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.getent_passwd[frp_grant_admission_user] is none or ansible_facts.getent_passwd[frp_grant_admission_user][1] | int > 0
+      - ansible_facts.getent_passwd[frp_grant_admission_user] is none or ansible_facts.getent_passwd[frp_grant_admission_user][2] | int > 0
+    fail_msg: Admission may not modify an existing account with a privileged identity
+
+- name: Inspect any existing admission group before changing it
+  ansible.builtin.getent:
+    database: group
+    key: "{{ frp_grant_admission_user }}"
+    fail_key: false
+
+- name: Refuse an existing privileged admission group before changing it
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.getent_group[frp_grant_admission_user] is none or ansible_facts.getent_group[frp_grant_admission_user][1] | int > 0
+    fail_msg: Admission may not modify an existing privileged group
+
+- name: Create the unprivileged admission group
+  ansible.builtin.group:
+    name: "{{ frp_grant_admission_user }}"
+    system: true
+
+- name: Create the unprivileged admission account
+  ansible.builtin.user:
+    name: "{{ frp_grant_admission_user }}"
+    group: "{{ frp_grant_admission_user }}"
+    system: true
+    create_home: false
+    groups: ''
+    append: false
+    shell: /usr/sbin/nologin
+
+- name: Read the admission service account identity
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ frp_grant_admission_user }}"
+
+- name: Refuse a privileged admission account
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.getent_passwd[frp_grant_admission_user][1] | int > 0
+      - ansible_facts.getent_passwd[frp_grant_admission_user][2] | int > 0
+    fail_msg: Admission must run under its own non-root user and group
+
+- name: Create the protected admission configuration directory
+  ansible.builtin.file:
+    path: "{{ frp_grant_admission_config_directory }}"
+    state: directory
+    owner: root
+    group: "{{ frp_grant_admission_user }}"
+    mode: '0750'
+
+- name: Inspect the installed admission configuration
+  ansible.builtin.stat:
+    path: "{{ frp_grant_admission_config_directory }}/config.toml"
+  register: frp_grant_admission_existing_config
+
+- name: Check the previous admission listener before replacement
+  ansible.builtin.command:
+    argv:
+      - "{{ frp_grant_admission_release }}/bin/frp-grant-admission"
+      - check
+      - "{{ frp_grant_admission_config_directory }}/config.toml"
+  register: frp_grant_admission_previous_check
+  when: frp_grant_admission_existing_config.stat.exists
+  changed_when: false
+  no_log: true
+
+- name: Refuse an in-place admission listener relocation
+  ansible.builtin.assert:
+    that:
+      - frp_grant_admission_previous_check.stdout_lines[0] == frp_grant_admission_candidate_check.stdout_lines[0]
+    fail_msg: Admission listener relocation requires separate drained maintenance before preparing the new listener
+  when: frp_grant_admission_existing_config.stat.exists
+
+- name: Publish the checked protected admission configuration
+  ansible.builtin.copy:
+    content: "{{ frp_grant_admission_candidate_config }}"
+    dest: "{{ frp_grant_admission_config_directory }}/config.toml"
+    owner: root
+    group: "{{ frp_grant_admission_user }}"
+    mode: '0640'
+  register: frp_grant_admission_config_result
+  no_log: true
+
+- name: Select the checked admission program
+  ansible.builtin.file:
+    src: "{{ frp_grant_admission_release }}"
+    dest: "{{ frp_grant_admission_root }}/current"
+    state: link
+    owner: root
+    group: root
+  register: frp_grant_admission_program_result
+
+- name: Deploy the unprivileged admission unit
+  ansible.builtin.template:
+    src: frp-grant-admission.service.j2
+    dest: /etc/systemd/system/frp-grant-admission.service
+    owner: root
+    group: root
+    mode: '0644'
+  register: frp_grant_admission_unit_result
+
+- name: Determine whether the admission program or listener changed
+  ansible.builtin.set_fact:
+    frp_grant_admission_restart_required: "{{ frp_grant_admission_program_result.changed or frp_grant_admission_unit_result.changed or not frp_grant_admission_existing_config.stat.exists }}"
+  no_log: true
+
+- name: Inspect whether admission was already running
+  ansible.builtin.command:
+    argv: [systemctl, is-active, --quiet, frp-grant-admission.service]
+  register: frp_grant_admission_running
+  changed_when: false
+  failed_when: frp_grant_admission_running.rc not in [0, 3, 4]
+
+- name: Enable and start the checked admission program
+  ansible.builtin.systemd:
+    name: frp-grant-admission
+    state: "{{ 'restarted' if frp_grant_admission_restart_required else 'started' }}"
+    enabled: true
+    daemon_reload: true
+
+- name: Wait for admission before starting or restarting frps
+  ansible.builtin.wait_for:
+    host: "{{ frp_grant_admission_address.rsplit(':', 1)[0].strip('[]') }}"
+    port: "{{ frp_grant_admission_address.rsplit(':', 1)[1] | int }}"
+    state: started
+    timeout: 30
+
+- name: Reload only the running unchanged program for configuration changes
+  ansible.builtin.systemd:
+    name: frp-grant-admission
+    state: reloaded
+  when:
+    - frp_grant_admission_config_result.changed
+    - not frp_grant_admission_restart_required
+    - frp_grant_admission_running.rc == 0

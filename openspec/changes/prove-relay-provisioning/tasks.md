@@ -1779,7 +1779,7 @@ Files: `provisioning/compute/iac/ansible/roles/relay-server/` and the project's
 `tests/`; `provisioning/compute/tests/unit/` (the vector check);
 `provisioning/compute/iac/tests/` (the pins check).
 
-- [ ] 14.1 `relay-server` installs the plugin as a plain program from inputs it is given
+- [x] 14.1 `relay-server` installs the plugin as a plain program from inputs it is given
       and never builds or fetches — `frp_grant_admission_wheel`,
       `frp_grant_admission_requirements` (hash-pinned, exported from the tool's lock),
       and `frp_grant_admission_config` (the plugin's own TOML, D20): it requires
@@ -1787,33 +1787,94 @@ Files: `provisioning/compute/iac/ansible/roles/relay-server/` and the project's
       `/opt/frp-grant-admission`, installs the requirements with `--require-hashes`
       and then the wheel with `--no-deps`, and runs the plugin as its own unprivileged
       user under a unit templated from the tool's systemd example. (D23)
-- [ ] 14.2 `relay-server` checks the configuration with the plugin's `check` before
+- [x] 14.2 `relay-server` checks the configuration with the plugin's `check` before
       installing it, failing without replacing the running configuration when it does
       not load; writes it root-owned and readable by the plugin's group under
       `no_log`; and reloads the plugin on a change without restarting frps. frps
       gains the `[[httpPlugins]]` entry — `path = "/"`, `ops = ["NewProxy"]`, the
       plugin's loopback address — which restarts frps once. (D23; "A relay prepared
       by the family role runs admission and discloses no secret")
-- [ ] 14.3 The vector check (`provisioning/compute/tests/unit/`): it reads the tool's
+- [x] 14.3 The vector check (`provisioning/compute/tests/unit/`): it reads the tool's
       published vector (its `vector/frp-grant-1.json`) in place; for every signing case
       the family's header-and-claims signer (5.3), given the case's key, header, and
       claims, produces exactly the case's token, and the thumbprint case equals the
       family's key-id derivation (4.1). It runs no verification case. (D18)
-- [ ] 14.4 The pins check (`provisioning/compute/iac/tests/`): `frp-binary`'s version,
+- [x] 14.4 The pins check (`provisioning/compute/iac/tests/`): `frp-binary`'s version,
       URL, and SHA-256 for `linux_amd64` equal the tool's `frp-pins.toml`. (D18, D22)
-- [ ] 14.5 Tests in the family IaC project: the plugin's install refusing a Python
+- [x] 14.5 Tests in the family IaC project: the plugin's install refusing a Python
       older than 3.11, installing with `--require-hashes` then `--no-deps`, its unit as
       an unprivileged user; the configuration checked before it is installed, under
       `no_log`, a change reloading the plugin and not restarting frps; frps naming the
       plugin for `NewProxy` only; both domains' and the relay playbook's
       `--syntax-check`.
-- [ ] 14.6 Verify. `make test-compute-provisioning` (unit), `make -C provisioning/compute/iac test`,
+- [x] 14.6 Verify. `make test-compute-provisioning` (unit), `make -C provisioning/compute/iac test`,
       `make test-provisioning-iac`, `make test-provisioning-iac-native`; `make test`.
       End-to-end: none in the pipeline; the live run's relay is containerised (D23),
       so `relay-server`'s plugin install has its tests and syntax checks only, and
       section 16 proves the image path.
       Owed by validation: `tests.yml`, job `test · test-provisioning-iac` — its log
       shows the family project's tests, the pins check included, run and pass.
+
+### Section 14 handoff
+
+The native relay role takes the operator's wheel, hash-pinned requirements and
+TOML as controller-file inputs. Python 3.11 is required before environment
+creation. Dependencies install with required hashes and binary distributions;
+the supplied wheel installs without dependency resolution. Content fingerprints
+select an immutable release under `/opt/frp-grant-admission/releases/`; they do
+not authenticate the operator's wheel independently. A success receipt follows
+both installs and non-writable program-mode normalization, including restrictive
+umasks without following interpreter symlinks. The candidate program checks a
+private staged configuration; publication uses those exact checked bytes, not a
+second read of the controller file. Invalid candidates leave current selection
+and configuration intact. Old releases are retained.
+
+The dedicated service account is checked for non-root UID/GID before and after
+creation; privileged existing identities are refused before modification. The
+configuration is root-owned and group-readable. The unit follows the tool's
+example with a static dedicated user/group, and frps wants it without coupling a
+plugin restart to existing frps connections. Initial startup and program changes
+start/restart the plugin; ordinary key/range/issuer changes reload the running
+unchanged program. The role waits for its listener before preparing frps. An
+existing listener relocation is refused before publication or program switching:
+HUP does not rebind the tool's socket. D23 records the accepted separate drained
+maintenance limitation and its permanent destinations. Section 15 must describe
+`current`, fixed-listener reload, and the positional `check <path>` CLI.
+
+The consumer test reads the published vector in place, reproducing all three
+signing cases and the thumbprint through the family implementation, without
+running verifier cases. The existing family pin test already compares the full
+amd64 version/URL/digest tuple with the tool's pins; it is reused rather than
+duplicated. `make test-compute-provisioning` passed 458 tests. Final family IaC
+default checks passed 24 tests with 19 native omissions explicitly reported;
+`make test-provisioning-iac` also passed the unchanged VM default suite's 168 tests
+and two subtests, with three native omissions.
+
+Native evidence is composed under the accepted reuse cadence. An earlier complete
+`make test-provisioning-iac-native` passed three VM and 18 family native cases,
+with no skips, and both-domain/shared syntax. After the program-mode and account
+guards, the final packaged image passed all six affected installer cases with no
+skips, plus syntax again. Byte comparisons bind the reused three VM and 13
+unaffected family cases to 122 unchanged source/image assets; no claim is made
+that the whole aggregate was rerun on the final image. The final installer cases
+use real pip, virtual environments, hashes, Ansible and filesystem publication
+with an operator-supplied fixture CLI. Synthetic ownership adaptation isolates the
+fixture; a root-container check then drops to a distinct non-root UID/GID and
+executes the installed program reading a root-owned group-readable configuration.
+Account creation, systemd actions and dependency ordering have structure checks;
+this is not a native systemd host or real admission-traffic qualification.
+
+Initial IaC checks caught an unquoted colon-ended pip option interpreted as a YAML
+mapping; it was quoted and the corrected/final checks passed. `make check-packaging`
+passed on final dependency/installation inputs. Comment hygiene and change checks
+passed; no dependency or lock changed. Per the owner-authorized cadence, full
+repository testing and a combined independent review remain frozen-round gates;
+no extra broad section review or personal owner reading is claimed. The source-only
+assignment does not advance prior formal joins. End-to-end: none of the pipeline
+lanes proves native relay installation; the containerized live path remains
+section 16. Owed by validation: `tests.yml`, job `test · test-provisioning-iac`,
+showing the family tests including the pin check; final candidate packaged native
+and full pipeline evidence remain coordinated validation obligations.
 
 ## 15. Operator documentation
 
@@ -1986,7 +2047,9 @@ implementation. `admit-relay-proxies-by-grant` must be archived first.
         relay's limits, the emergency choice per incident, the host- and relay-side
         steps for a host teardown cannot reach and their limit, one verified frp pin at
         versioned paths, how a relay runs the plugin, and the wheel as the operator's
-        input; the relay-never-calls-SCM principle in
+        input; native immutable program selection, exact checked configuration bytes,
+        protected service identity/modes and separate drained listener relocation;
+        the relay-never-calls-SCM principle in
         `docs/development/ARCHITECTURE.md` "Authority boundaries".
       - D18: the principle that SCM does not own generic infrastructure that is not
         specific to it, and conforms to a standalone component's published interface,

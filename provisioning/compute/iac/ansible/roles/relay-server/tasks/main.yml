@@ -18,6 +18,9 @@
       - item.end | int <= 65535
   loop: "{{ frp_proxy_ports }}"
 
+- name: Install and start checked relay admission
+  ansible.builtin.import_tasks: plugin.yml
+
 - name: Install the pinned relay server binary
   ansible.builtin.include_role:
     name: frp-binary
