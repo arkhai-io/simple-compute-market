@@ -123,7 +123,7 @@ A mechanism adapter MUST translate each deal-level command into the events of th
 
 ### Requirement: Payment adapters send only entitled stops
 
-The payment-adapter protocol MUST send a stop only under a stop entry the mandate states for that account, and a reverse only under the reverse authority. It MUST NOT assume an implicit rule about whose favour an action serves, waive a payer's notice, release held money early, or carry an exceptional-end event kind or field. Unsupported contract capabilities MUST reject before I/O; they MUST NOT invent an entitlement or dispute. The dispute authority MUST act through its own entries.
+The payment-adapter protocol MUST send a stop only under a stop entry the mandate states for that account, and a reverse only under the reverse authority. It MUST NOT assume an implicit rule about whose favour an action serves, waive a payer's notice, release held money early, or carry an exceptional-end event kind or field. Unsupported contract capabilities MUST reject before I/O; they MUST NOT invent an entitlement or dispute. SCM MUST leave case effects to the authority's own entries.
 
 #### Scenario: A stop has no entry
 
@@ -317,7 +317,7 @@ A `dispute` MUST be `accepted` with the case reference and each part's status, `
 
 ### Requirement: A late case moves no paid-out money
 
-A late case MAY be recorded and ruled, and its outcome MAY end delivery. An outcome MUST act only on money still held.
+SCM MUST permit late filings and report the authority's answer without promising recovery of paid-out money. It MUST send a recorded delivery end to end service even when the authority reports no money held; it MUST NOT compute or apply a financial remedy.
 
 #### Scenario: A late case ends delivery
 
@@ -358,7 +358,7 @@ Every derived mandate MUST authorize `extend` and `lift` for the agreement's dis
 
 ### Requirement: Respondent discovery is durable
 
-The mediation adapter MUST expose authenticated GET /respondent?after=<cursor>&limit=n and its cases, next_after and has_more result. The listing MUST contain open cases where the account is respondent and has not appended; any append MUST count as an answer. SCM MUST persist respondent cursor and answer intent before advancing, independently of deal watch. Foreign commitments MUST be skipped without local repair rows; temporarily unresolved local commitments MUST retry fairly without blocking discovery.
+The mediation adapter MUST consume authenticated GET /respondent?after=<cursor>&limit=n and preserve cases, next_after and has_more. SCM MUST journal respondent answers before advancing its discovery cursor, independently of deal watch. Foreign commitments MUST be skipped without local repair rows; temporarily unresolved local commitments MUST retry fairly without blocking discovery.
 
 #### Scenario: A seller restarts before answering
 
@@ -385,7 +385,7 @@ When buyer surrender is the selected end, the storefront end_delivery receipt MU
 
 ### Requirement: Case appends follow interface authorization
 
-A dispute adapter MUST follow its interface's append authorization with operation-derived idempotency keys; mediation MUST accept appends only from mandate.to with items or concurrence. The dispute record MUST show each appended item under the actor that sent it. A case the counterparty filed, surfaced through the seller's `watch`, MUST make the seller's append of its evidence a journaled effect keyed by `case_ref`, which the dispute cursor waits for.
+A dispute adapter MUST follow its interface's append authorization with operation-derived idempotency keys. SCM's mediation respondent MUST send items or concurrence as mandate.to and preserve the record's actor attribution. A counterparty case surfaced through watch MUST journal the seller's answer by case_ref; the dispute cursor MUST wait for that answer or confirmed closure. Authority-side append policy is external context.
 
 #### Scenario: The seller answers a buyer's case
 
@@ -478,7 +478,7 @@ Signing MUST use kit/identity frame_fields(["arkhai.mediation.delivery-end-claim
 
 ### Requirement: Mechanical claims require payee agreement and guards
 
-Mediation MUST rule mechanically only if payee filed or valid concurrence exists, the Agreement maps cleanly, ended_at is at or after Agreement start, and no earlier mechanical delivery_end ruling exists on that Agreement. All other cases MUST enter human triage, with no respondent-silence default. Ruled/closed signed records MUST carry basis payee_filed, payee_signed or operator; concession MUST NOT bypass these rules.
+SCM MUST preserve the signed authority record's ruling basis (payee_filed, payee_signed or operator) and MUST NOT infer a ruling from silence or manufacture a mechanical ruling. Its claims and concurrence MUST bind the exact Agreement and fixed end evidence; unsupported mapping or revision MUST report repair required. The authority's mechanical guards and triage policy are external context.
 
 #### Scenario: A payee-signed buyer claim
 
@@ -497,7 +497,7 @@ Mediation MUST rule mechanically only if payee filed or valid concurrence exists
 
 ### Requirement: Payee-caused ends return held unserved value
 
-For cause=payee, mediation MUST stop rates now returned through its PT0S/chosen entry, reverse held earnings since ended_at and reverse non-setup once parts by unserved time share, then apply the capped premature-stop penalty. The filer MUST NOT compute or apply these effects.
+For cause=payee, SCM MUST file the fixed delivery-end claim and evidence with the Agreement's authority, preserve its signed outcome and forward any delivery end to end service. The filer MUST NOT compute or apply stops, unserved-share reversals or penalties; those remedies belong to the external authority.
 
 #### Scenario: The seller files its failure
 
@@ -506,7 +506,7 @@ For cause=payee, mediation MUST stop rates now returned through its PT0S/chosen 
 
 ### Requirement: Setup returns by delivered for either cause
 
-Mediation MUST identify setup as a once part whose end is at or before Agreement start. It MUST reverse setup in full iff delivered=false and keep it iff true, for either cause. Site activation or elapsed time MUST NOT replace delivered. Setup-bearing presets MUST remain disabled until the delivery_end revision and signature/mapping vectors are vendored.
+SCM MUST encode setup's once end at Agreement start and send delivered from retained availability/end evidence for either cause, not substitute site activation or elapsed time. It MUST leave setup reversal to the authority. Setup-bearing presets MUST remain disabled until the delivery_end revision and signature/mapping vectors are vendored. The authority's delivered-based remedy is external context.
 
 #### Scenario: Undelivered payer-caused end
 
@@ -515,7 +515,7 @@ Mediation MUST identify setup as a once part whose end is at or before Agreement
 
 ### Requirement: Payer-caused ends preserve priced stop terms
 
-For cause=payer, mediation MUST realize each rate's payer stop as received at ended_at, with E=ended_at+notice and its partialPeriod, net of prior effects and accepted/pending stops. Non-setup once parts MUST stay kept and no penalty MUST apply. A missing or chosen payer entry MUST go to an operator; past corrections MUST use present stop plus held-money adjustment, never backdating.
+For cause=payer, SCM MUST retain accepted terms, stop outcomes and the receipt-backed claim so the authority can resolve priced notice and treatment. It MUST NOT waive notice, backdate a payment stop or compute a net remedy. SCM MUST report the authority's result separately from surrender; rate-stop execution belongs to the rate adapter, not the once-only adapter.
 
 #### Scenario: A receipt-backed end preserves notice
 
@@ -524,7 +524,7 @@ For cause=payer, mediation MUST realize each rate's payer stop as received at en
 
 ### Requirement: Premature-stop penalties consume only held earnings
 
-After unearned-money refunds, mediation MUST reverse min(premature_stop_penalty, earned amounts still held) to the payer across parts in mandate order for an unentitled seller end. An entitled notice stop MUST pay none; a spot emergency without notice MUST pay it. A buyer-filed cause=payee claim MUST use the same cap, mechanically when qualified and otherwise through an operator. Bond award MUST remain reserved for hosted bonds.
+SCM MUST carry the accepted premature_stop_penalty and fixed claim to the dispute authority without computing a monetary delta. It MUST preserve the signed aggregate penalty answer rather than invent a per-part decomposition, and MUST NOT promise recovery beyond held money. Bond award MUST remain reserved for hosted bonds. The authority's held-earnings cap and mandate-order allocation are external context.
 
 #### Scenario: Held earnings cap the penalty
 

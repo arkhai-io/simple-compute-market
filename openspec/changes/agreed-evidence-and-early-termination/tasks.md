@@ -1463,7 +1463,7 @@ documentation only; a part needing code returns the change to implementation.
 - [x] 16.2 **Import placement.** Confirm the imports each section added are at module level
       unless a recorded reason keeps one local; one that should move returns the change to
       implementation.
-- [ ] 16.3 **Documentation compliance.** Re-check D1–D15 against the placement rules, in
+- [x] 16.3 **Documentation compliance.** Re-check D1–D15 against the placement rules, in
       particular that the dispute authority's and payments service's behaviour appears only as
       context in `deal-lifecycle/architecture.md` ("External authorities"), not as SCM
       requirements.
@@ -1608,6 +1608,17 @@ documentation only; a part needing code returns the change to implementation.
   Its local rationale is explicit. Other added production imports are at module
   level; implementation review and the full-suite evidence cover execution.
   No import relocation is needed at documentation-only closeout.
+
+- 16.3: D1–D15 placement checked against `openspec/README.md` directly.
+  The lifecycle delta now states SCM's observation, derivation, signing and
+  delegation obligations rather than prescribing external mediation remedies.
+  External hold/ruling policy is contextual material for the lifecycle companion.
+  D1–D4/D12–D14 cross-system boundaries belong in repository architecture;
+  D5–D10 models and limits in lifecycle architecture and owning subsystem deltas;
+  D11 triage is external context; D15 scope/deferrals remain change history plus
+  current limitations. Deployment choices belong in the configuration guide;
+  rollout chronology, rejected alternatives and review rationale remain in design.
+  No external service implementation or SCM code is changed.
 
 ## Design promotion record
 
