@@ -303,6 +303,43 @@ descriptor suites (unit and library integration); the Helm render check; `make t
 End-to-end: `e2e_deal`, `e2e_bare_metal_mock_deal` and `e2e_credits_payment_deal` must keep
 passing (they start roles from rendered configuration); none exercises the new list.
 
+### Sections 3 and 5 implementation checkpoint (2026-11-02)
+
+- Completed 3.1, 3.3 and 5.1. The authority configuration library, explicit buyer
+  profile opt-ins, signed descriptor recommendations, and common query
+  projections are committed. No option wire bytes or IDs change.
+- Remaining: 3.2 retires the payments authority key; 3.4 composes role lists,
+  fetches registry recommendations and reports empty lists; 3.5 documents that
+  role-level configuration. Section 4 is intentionally untouched.
+- 3.2 has a sequencing dependency on 2.5b: the current payments
+  `mandate_policy_for_agreement` and `PaymentApproval` require the configuration
+  authority, while the pre-flip option's lifecycle accessor returns no terms.
+  Removing that input now would break every hosted commitment or require a
+  competing temporary authority wire. Keep the existing path until the
+  Agreement can carry its authority under the designed lifecycle key.
+- For 3.4, current buyer bootstrap reads the signed filter specification, not
+  the descriptor, and storefront registry clients use configured trust pins
+  without fetching it. The role wiring must add descriptor reads and retain
+  per-registry recommendation lists; it cannot reuse an existing fetch.
+- Reproduction and observed readiness are recorded in
+  `docs/attachments/aeet-sections-3-5/index.md`. The library example and selected
+  registry typed-client integration run pass from rebuilt wheel installs
+  (12 registry tests). This is an implementer self-check, not independent
+  acceptance or a deployed end-to-end scenario.
+- The aggregate exposed an isolated API-credit wheel fixture missing the two
+  new lifecycle dependencies. Its wheel list is repaired and all three
+  isolated installation tests pass. The public distribution manifest,
+  publication workflow and release guide also include both lifecycle packages;
+  their 272 contract checks pass.
+- Docker CLI absence reproduces the tracked release-tooling prerequisite
+  failure [#324](https://github.com/arkhai-io/simple-compute-market/issues/324).
+  A temporary Docker 28.3.3 / Compose 2.39.4 tool directory is used only for
+  daemon-free configuration rendering and removed after its command.
+  `make test-deployment-packaging` then passes: 1,838 release-tooling tests and
+  all Helm structural/render assertions. No container daemon, deployment or
+  end-to-end scenario is started. The aggregate was exercised in segments after
+  repairs; there is no single all-green `make test` invocation.
+
 ## 4. Alkahest release models
 
 Delivers `[Settlement.alkahest].release_models` in place of the two exclusive flags, one
@@ -363,7 +400,9 @@ specification and the buyer query client.
   packaging, comment hygiene and strict OpenSpec pass. The first aggregate
   run exposed the introduction profile's intentionally changed exact-vocabulary
   expectation; its kept assertion now includes the common fields and the complete
-  registry rerun passes. A fresh aggregate run is in progress.
+  registry rerun passes. The aggregate subsequently reached API-credit wheel
+  installation and release tooling; their resolved failures and final reruns
+  are recorded in the sections 3/5 checkpoint above.
 
 Verification point: the query DSL and filter unit suites; registry library-integration suite;
 `make test`. End-to-end: none exercises the new fields.
@@ -911,8 +950,8 @@ Planned destinations below; promotion is not performed during this design reconc
 The remaining D1–D15 destinations are listed in proposal.md and task 16.9.
 
 | Accepted decision | Permanent location |
-| Mediation owns installed published schema/models/vectors and marketplace claim framing; its stateless adapter only communicates with the exact Agreement authority, preserving aggregate monetary answers without computing remedies | `openspec/specs/deal-lifecycle/spec.md` and `architecture.md`, and `docs/development/ARCHITECTURE.md` kit areas at closeout (16.9) |
 |---|---|
+| Mediation owns installed published schema/models/vectors and marketplace claim framing; its stateless adapter only communicates with the exact Agreement authority, preserving aggregate monetary answers without computing remedies | `openspec/specs/deal-lifecycle/spec.md` and `architecture.md`, and `docs/development/ARCHITECTURE.md` kit areas at closeout (16.9) |
 | D6 neutral authorization/evidence envelope, sole end-service billing-start intent; D8 cause classification, pre-start timing exception and revised-remedy netting | New `deal-lifecycle` spec/architecture and settlement-servicing spec/architecture at closeout |
 | D8 receipt-embedded SignedDeliveryEndClaim, buyer concurrence/stop retry and both CLI paths | `openspec/specs/buyer-orchestration/spec.md` and `architecture.md` |
 | D5 premature-stop penalty codec and D10 capped held-earnings remedy; D10 one payee-agreed delivery_end rule for either filer, receipt concurrence and durable respondent sign-or-contest; D8 delivery_end filing and stable keys; D9 retained signed evidence; D10 case-carried Agreement and human triage | New `deal-lifecycle` capability's spec and architecture companion (created at archive/closeout) |
@@ -920,3 +959,6 @@ The remaining D1–D15 destinations are listed in proposal.md and task 16.9.
 | D5 coherent hosted contract selection and generated installed resources; one shared clock-injected payments fixture engine | `kit/arkhai-payments/README.md` (current API); settlement-servicing spec/architecture and `docs/development/TESTING.md` at closeout |
 | D8 intended end versus proven release; terminate versus future truncate | `docs/development/ARCHITECTURE.md`, "Site authority", "Fulfillment status and results", "Release"; `openspec/specs/site-capacity/architecture.md` |
 | D8 VM buyer end and second-precision lease effects | `openspec/specs/vm-storefront-fulfillment/spec.md` |
+| Ordered dispute preferences, local identity vetoes, identity-bound credential references and opt-in registry recommendations | `openspec/specs/settlement-configuration/spec.md`, `openspec/specs/registry-discovery/spec.md` and `docs/development/DEPLOYMENT_AND_CONFIG.md` at closeout; role composition remains 3.4 |
+| Codec-owned common lifecycle query projections, absent-value semantics and same-option asset correlation | `openspec/specs/cli-query-language/spec.md` and `openspec/specs/settlement-configuration/spec.md` at closeout |
+| Lifecycle distributions participate in public publication with their declared dependency order | `docs/development/RELEASING.md` and `manifests/published-distributions.json` |
