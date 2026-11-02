@@ -1926,9 +1926,9 @@ Delivers the operator procedures D4, D15b, D16, D17, D19, D20, D22, and D23 call
 against the tool as archived. Replanned against the reviewed design: the procedures the
 reconciliation and 55-design added.
 
-- [ ] 15.1 `docs/development/VALIDATION_RUNBOOK.md` §21–26 for target version 2 and
+- [x] 15.1 `docs/development/VALIDATION_RUNBOOK.md` §21–26 for target version 2 and
       relayed hosts. (D5)
-- [ ] 15.2 A new runbook section for relays, preparing them:
+- [x] 15.2 A new runbook section for relays, preparing them:
       - one relay per operator as the recommended deployment, each with its own token,
         and a shared relay's limits — one token for every client, rotation touching
         every operator's hosts, and ending one operator's sessions restarting the relay
@@ -1955,7 +1955,7 @@ reconciliation and 55-design added.
       - the admission check — an ungranted proxy refused, the plugin's refusal in its
         log — before a relay-backed pool first serves buyers and after any change to
         the relay's plugin configuration (D19).
-- [ ] 15.3 The relay section, operating them:
+- [x] 15.3 The relay section, operating them:
       - key rotation keeping the profile current: generate, put in the profile, point
         the entry's `grant_key_secret_key` at it, stage it, add its public half to the
         plugin, activate; when a retired key may leave the plugin (its
@@ -1979,21 +1979,46 @@ reconciliation and 55-design added.
         relay run for other operators (D16, 55 F1);
       - tracing a plugin log line's `jti`: the holdings read while the tenancy's row
         stands, `GET /contract/leases/{jti}` once it has been reused (D16, 55 F3).
-- [ ] 15.4 `docs/seller-frp-setup.md`: the `frpc-buyers` client, its versioned frp
+- [x] 15.4 `docs/seller-frp-setup.md`: the `frpc-buyers` client, its versioned frp
       binary, and its locked-down admin API; one relay per operator, buyer-only by
       default, management ports on another relay; a shared relay's limits; what a
       relay must run (frps with the admission plugin, an issuer for the relay); the
       operator's management client with its admin API off or authenticated. (D3, D4,
       D19, D20, D22)
-- [ ] 15.5 `docs/bare-metal-seller-quickstart.md`: relay-backed bare-metal pools and host
+- [x] 15.5 `docs/bare-metal-seller-quickstart.md`: relay-backed bare-metal pools and host
       preparation; a tunnel-reached host in a pool with no relay must state a buyer
       route; what reclaim ends. (D1, D15, D15b)
-- [ ] 15.6 `e2e-tests/README.md`: the real VM and bare-metal lanes, their profile, and
+- [x] 15.6 `e2e-tests/README.md`: the real VM and bare-metal lanes, their profile, and
       the target's version 2, in place of "Real VM provisioning". (D5, D10)
-- [ ] 15.7 Verify. `make check-doc-citations CHANGE=prove-relay-provisioning`, its only
+- [x] 15.7 Verify. `make check-doc-citations CHANGE=prove-relay-provisioning`, its only
       remaining matches being files this change has yet to create; every command and
       path the new runbook steps name resolves against this branch. End-to-end: none;
       section 16 runs the runbook's admission check and the lanes.
+
+### Section 15 handoff
+
+Operator procedures now describe the implemented target-v2 VM/bare-metal lanes,
+independent marketplace identities and controlled Anvil wallets, and buyer-only
+relay preparation/admission/rotation/containment. Native content-addressed
+releases, exact checked config publication, dedicated non-root identity and
+fixed-listener drained maintenance are explicit. Container deployment remains
+operator-supplied; its live proof and native installer component checks are
+separate scopes. No deployed admission, hardware qualification, owner reading
+or triage advancement is claimed by this documentation slice.
+
+Verification: scoped documentation citations and local Markdown links/anchors,
+TOML examples and documented command/path/API seams checked against source;
+`make check-change CHANGE=prove-relay-provisioning`, `make check-packaging`,
+and staged public-content checks passed. These are documentation/packaging
+checks, not application or system qualification. Full repository tests and an
+independent review remain assigned to the frozen combined round under the
+accepted cadence override. No runtime or dependency files changed.
+
+End-to-end: no pipeline scenario proves operator instructions. The real markers
+`e2e_vm_real_provisioning` and `e2e_bare_metal_real_provisioning` exercise the
+lane behavior only when configured with real targets. Section 16 still owes the
+deployed ungranted-proxy refusal plus both real lanes and management-client
+observations. No new push-only workflow/job obligation is added.
 
 ## 16. Live verification [log]
 

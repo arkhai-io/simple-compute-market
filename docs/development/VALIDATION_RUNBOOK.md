@@ -858,18 +858,21 @@ The `local` profile addresses each service on `localhost` at those ports, and
 reads Mailpit's API at `http://localhost:8025`. The scenario holds the
 storefront's loops while it runs and resumes them when it finishes.
 
-## 21. Provide A KVM Host
+<a id="21-provide-a-kvm-host"></a>
+
+## 21. Provide Real Compute Hosts
 
 Sections 21 to 26 are the operator procedure around the real-provisioning
-scenario, `e2e_vm_real_provisioning`, which is the proof itself: from the
-operator's machine it registers the host and its capacity through the
+scenarios, `e2e_vm_real_provisioning` and
+`e2e_bare_metal_real_provisioning`. From the operator's machine the VM lane
+registers the host and its capacity through the
 provisioning service's signed admin API, runs the canonical compute deal to an
 active lease, reaches the delivered VM over SSH, expires the lease, and confirms
 the VM is gone from the host and its access has ended.
 [`TESTING.md`](TESTING.md#the-real-provisioning-lane) says what it proves and
 what it does not.
 
-The host needs:
+A VM host needs:
 
 - hardware virtualization its operating system can see: the CPU flags include
   `vmx` or `svm`. Create a cloud instance with nested virtualization enabled.
@@ -882,12 +885,17 @@ The host needs:
   way;
 - SSH as one user with sudo, from the operator's machine to prepare it and from
   the provisioning service with the key the service holds;
-- inbound TCP from the operator's machine to ports 10000–65000, where VM
-  creation forwards each guest's SSH. The scenario connects to the guest
-  through that port.
+- buyer reachability either through direct forwarded guest SSH ports, or
+  through the registered buyer relay's allocation window. Management SSH stays
+  separate from the buyer endpoint.
 
 Decide what the host sells: its vCPUs, memory in GiB, and disk in GiB, less
-what is kept for the host itself. The scenario deals all of it as one VM.
+what is kept for the host itself. The VM listing shape must fit twice within
+that capacity for the two-guest
+coexistence check. A bare-metal target instead offers the whole declared machine,
+needs no KVM, and must provide an operator-verified SSH host public key. Prepare
+it using the [bare-metal seller guide](../bare-metal-seller-quickstart.md#define-the-selected-site).
+Before either relayed lane, complete the deployed admission check in section 28.
 
 ## 22. Prepare The Host
 
@@ -950,12 +958,15 @@ which the umbrella chart's values set to `true`. The stack must also:
   authorized, at a path in the service's filesystem; that path is the target's
   `ssh_key_path`;
 - let the provisioning service reach the host's SSH;
-- run the dev chain and trust the `local` profile's principals
-  (`e2e-tests/config/config-local.yml`), which the scenario signs as. They are
-  well-known development identities: never deploy them on a public network.
+- run the controlled Anvil settlement chain and trust the selected fixture
+  marketplace principals. External profiles may use Ed25519 marketplace signing
+  independently of their Anvil wallet. Configure role credentials and matching
+  trust pins explicitly; see [marketplace and EVM fixture inputs](../../e2e-tests/README.md#marketplace-signing-and-controlled-evm-settlement).
+  The `local` profile contains well-known development identities; never expose
+  them on a public network.
 
 Mock delivery is never reported as real: the scenario's first check reads the
-provisioning service's executors and requires its VM executor reported real,
+provisioning service's executors and requires the selected lane's executor reported real,
 failing with the executors it found before anything is held or registered.
 
 ## 24. Describe The Target
@@ -1003,6 +1014,8 @@ repository root:
 
 ```bash
 make -C e2e-tests test-module MODULE=e2e_vm_real_provisioning ACTIVE_PROFILES=local,real-provisioning-target
+# Run the separate bare-metal lane against its configured BARE_METAL_LANE services:
+make -C e2e-tests test-module MODULE=e2e_bare_metal_real_provisioning ACTIVE_PROFILES=local,real-provisioning-target
 ```
 
 A run takes as long as a real create and teardown; each job is polled for up to
@@ -1036,6 +1049,13 @@ rental.
 A failed run attempts normal lifecycle cleanup for both accepted settlements,
 even if one recovery fails. Unconfirmed cleanup names each escrow, negotiation,
 fulfillment, reservation, job, VM and host that an operator must recover.
+
+The bare-metal lane instead checks the pinned host key, accepted buyer key and
+unrelated-key refusal; expiry must complete reclaim, end delivered access and
+restore capacity. Management connectivity must survive. Unreachable SSH is not
+proof of successful revocation. Its relay port may remain quarantined after
+capacity is released. An absent target skips before mutation; skipped stages
+are not qualification evidence.
 
 ## 26. Restore And Cleanup
 
@@ -1119,3 +1139,269 @@ re-check from fresh read-backs:
 If a condition cannot be met — a reset database, an unpaused successor listing, work
 that cannot be drained, or a deployment without the pause — stop the lane switch at
 that boundary. Take no shortcut.
+
+
+## 28. Prepare And Operate Buyer Relays
+
+Use a buyer-only relay per operator, distinct from any management relay. Buyer
+frps and frpc use the verified **0.61.1** pin. The family installs binaries at
+`/usr/local/lib/frp/0.61.1/{frps,frpc}` after checking the archive SHA-256.
+The default archive is linux_amd64; another platform requires an operator-supplied
+version-specific archive URL and independently verified digest in `frp_archives`,
+with the corresponding `frp_platform`. Never substitute an unchecked download.
+
+A shared relay has one client token, so rotating it affects every operator's
+hosts; restarting frps to end one operator's sessions interrupts everyone.
+Assign each operator a distinct issuer/key and nonoverlapping port range. Keep
+management ports on another relay. Its management client's admin API must be off
+or authenticated. The buyer client is `frpc-buyers`, not a management client;
+its loopback admin API uses a privileged port and a generated per-host password
+in root-only configuration. See [seller relay setup](../seller-frp-setup.md).
+
+### Establish the signing authority
+
+Create a relay definition in the operator's mounted document, before its pools
+reference it. The service's `relay_definitions_path` names the document. The
+following names and address are invented documentation placeholders:
+
+```yaml
+relays:
+  - id: example-buyer-relay
+    relay_addr: relay.example.com
+    relay_port: 7000
+    vm_port_range_start: 6100
+    vm_port_range_count: 100
+    token_secret_key: EXAMPLE_RELAY_TOKEN
+    grant_key_secret_key: EXAMPLE_RELAY_GRANT_KEY
+    enabled: true
+```
+
+Keep both values in the private secrets profile, never in the definition document
+or repository. Generate a distinct token with `openssl rand -base64 32` and an
+Ed25519 private key with the following command, directing its output straight into
+an owner-readable secret file/profile rather than a terminal or log:
+
+```bash
+openssl genpkey -algorithm ed25519 -outform DER | base64 -w0
+```
+
+The profile value is single-line standard base64 PKCS#8 DER. Definitions read it
+only when creating a relay; editing a profile does not rotate an existing key.
+`GET /api/v1/relays/{relay_id}` returns `grant_keys.active.public_key` as standard
+base64 DER SubjectPublicKeyInfo and its `kid`, plus staged/retired key metadata;
+it never returns private keys or tokens. Send administrator operations through
+the signed provisioning client, not unauthenticated curl. A relay created via
+`POST /api/v1/relays/` generates its key inside the service; that private key
+survives only with its database. An operator-retained profile key supports an
+empty-database reinstall without changing the plugin's trusted public key.
+
+Build plugin TOML using the schema in
+[`tools/frp-grant-admission/README.md`](../../tools/frp-grant-admission/README.md#configuration).
+Replace every published example key; those are deterministic RFC test values,
+never deployment keys. Set `listen` to numeric loopback (for example
+`127.0.0.1:7300`). For each relay, configure an issuer whose `audience` equals
+its relay id, whose inclusive `ports` contains the entire allocation window,
+and whose `keys` contains the relay's public key. Issuer ranges cannot overlap
+and must fit inside frps's `allowPorts`. To onboard another site to a shared
+relay, assign its range first and add its public key under its own issuer;
+check the complete file before reload.
+
+Keep the provisioning service and relay clocks synchronized. Their worst skew
+must remain below `relay_port_reuse_margin_seconds`; grant time checks have no
+leeway. Monitor synchronization, rather than treating successful HTTP health as
+clock evidence.
+
+### Native systemd relay
+
+The family `relay-server` role takes a supplied wheel, hash-pinned runtime
+requirements and plugin TOML. Build/export them from the same tool revision:
+
+```bash
+make -C tools/frp-grant-admission build
+(cd tools/frp-grant-admission && uv export --frozen --no-dev --no-emit-project --output-file dist/requirements.txt)
+```
+
+Keep the TOML and inventory outside the repository. Supply controller-local
+absolute paths as `frp_grant_admission_wheel`,
+`frp_grant_admission_requirements` and `frp_grant_admission_config`, together with
+`frp_auth_token`, `frp_proxy_ports` and the relay inventory's `relay_servers`
+group. The controller needs the supported Ansible environment and the
+`community.general` collection (including its `ufw` module). From
+`provisioning/compute/iac`:
+
+```bash
+ANSIBLE_ROLES_PATH="$PWD/ansible/roles" ansible-playbook \
+  -i <operator-inventory> ansible/playbooks/relay-server.yaml \
+  --extra-vars @<owner-readable-relay-vars.yml>
+```
+
+The relay needs Python 3.11 or later with venv/pip support. The role never
+builds or fetches the plugin: it installs exported dependencies with
+`--require-hashes --only-binary=:all:` and the supplied wheel with `--no-deps`.
+The wheel is an operator-trusted input, not independently authenticated by its
+content fingerprint. The program release is
+`/opt/frp-grant-admission/releases/<wheel-sha256>-<requirements-sha256>`;
+`/opt/frp-grant-admission/current` selects the checked release. A success receipt
+allows reuse; old releases are retained. Do not mutate a selected release.
+
+The candidate program checks private staged TOML with
+`frp-grant-admission check <path>`, then publishes those exact bytes to
+`/etc/frp-grant-admission/config.toml` and switches `current`. Invalid TOML
+preserves active configuration and program selection. The program runs as its
+own non-root account/group `frp-grant-admission`, with login disabled, no
+home created and no supplementary groups; the role refuses root or an existing UID/GID 0 identity.
+The config is root-owned, group-readable mode 0640 in a protected 0750 directory.
+
+A changed program/unit restarts the plugin. A config-only issuer/key/range
+change HUP-reloads an already-running unchanged program without restarting
+frps. Initial/program startup does not immediately send HUP. The role waits for
+the listener before preparing frps. frps's first plugin entry requires one
+restart: drain existing leases before introducing it to an active relay.
+
+An ordinary role run refuses an existing listener change before publishing
+configuration or switching `current`. HUP retains the bound socket. To relocate
+the native listener, stop admission and drain all affected leases, stop both
+services, preserve the old protected configuration/program selection, and
+perform an explicit operator-managed reinstallation with the new listener and
+matching frps entry. Verify both services and admission before reopening. This
+is separate maintenance, not an automatic role/API migration. Do not delete
+active configuration simply to bypass the refusal during normal operation.
+
+### Container relay
+
+Use the plugin image built from its Dockerfile and pin the deployment reference
+to the intended revision/immutable digest. Run it as a sidecar in frps's network
+namespace: the same Kubernetes pod, Compose `network_mode: service:frps`, or
+explicit host networking. Mount its configuration directory read-only at `/etc/frp-grant-admission`
+so replacing `config.toml` is visible on reload; do not publish its loopback
+port externally. The image entrypoint is `frp-grant-admission`; its default
+arguments are `serve --config /etc/frp-grant-admission/config.toml`.
+Check candidate TOML with the same image's `frp-grant-admission check <path>`
+before replacing the mounted file and sending the plugin process SIGHUP. A
+file bind mount must actually expose the replacement bytes; verify this rather
+than assuming a host-side rename updates an existing mount.
+
+Use the upstream frps image at version 0.61.1, with matching `allowPorts`, token,
+and this entry in its protected `frps.toml`:
+
+```toml
+[[httpPlugins]]
+name = "grant-admission"
+addr = "127.0.0.1:7300"
+path = "/"
+ops = ["NewProxy"]
+```
+
+There is no repository frps deployment manifest to apply. The operator supplies
+the deployment, namespace and image reference. Wait for the plugin listener,
+then start frps. Changes to frps configuration/version require a drained restart;
+changes to plugin issuer/key/range configuration use HUP. Listener relocation
+requires drained coordinated restart and a matching frps address.
+
+Native installer tests exercise installation/config publication and syntax in
+disposable fixtures. A container campaign proves its actual image/namespace
+path. Neither is proof of the other deployment path, and neither alone proves
+a real buyer's purchase, SSH access and successful reclaim.
+
+### Prove admission before enabling a pool
+
+Before the first buyer, and after each plugin configuration change:
+
+1. Check the configuration, record its issuer ranges and public-key thumbprints,
+   and verify the deployed frps plugin entry addresses the running loopback
+   listener in the same namespace.
+2. Using the pinned frpc and the real relay token in an owner-only temporary
+   configuration, request one TCP proxy on an unused assigned port, with
+   **no** `metadatas.grant`. Use a unique probe name, no load-balancer group,
+   and a harmless loopback destination. Never reuse a tenant's port.
+3. Run that temporary client against the deployed frps. Require a registration
+   refusal carrying `grant_missing` and the matching plugin JSON log entry with
+   `event: refuse` and `reason: grant_missing`. A connection failure or token
+   authentication failure is not admission proof. Confirm no proxy was installed.
+4. Stop the probe, remove its temporary secret-bearing config, and retain only
+   sanitized evidence. If a proxy was admitted, keep buyer admission closed.
+
+A minimal probe configuration has this shape; all names/address below are
+documentation placeholders. Replace the port with an unused assigned port and
+the token with the real token in an owner-only temporary file:
+
+```toml
+serverAddr = "relay.example.com"
+serverPort = 7000
+auth.method = "token"
+auth.token = "<private-relay-token>"
+
+[[proxies]]
+name = "example-ungranted-probe"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 22
+remotePort = 6100
+```
+
+Run the verified `frpc -c <private-probe-config>` in the foreground; terminate it
+after observing the refusal. Do not use a production tenant port.
+
+The tool's `make -C tools/frp-grant-admission test-frp` exercises real binaries
+in its own fixture; it does not perform this deployed-relay check.
+
+### Rotate keys and change admission policy
+
+Generate the next private key into the private profile and point the relay
+entry's `grant_key_secret_key` at that retained value. Send it as `private_key`
+to signed `POST /api/v1/relays/{relay_id}/grant-keys/stage`. Read the staged
+public key, add it alongside the active key in the issuer's TOML, check/reload
+and verify admission, then call signed
+`POST /api/v1/relays/{relay_id}/grant-keys/activate`. If staging omits the
+private key the service generates one, which survives only with its database;
+do not imply that the profile now contains it.
+
+Read retired keys' `grants_valid_until`. Match a key by the thumbprint printed
+by `frp-grant-admission check <path>`; remove it only once that time has passed,
+or is null because no unreleased lease remains. Drain affected grants before
+narrowing a range, removing an issuer/key, or changing an audience. A registered
+proxy is not rechecked until registration/reconnect: HUP is not revocation.
+Adding a key/issuer or widening a range is non-destructive, but still requires
+the deployed refusal check.
+
+For a compromised signing key, choose explicitly: remove it immediately and
+refuse affected tenants at their next reconnect until their leases end, or keep
+it through lease drain while the attacker can sign within that issuer's range
+and audience. Neither choice reissues live grants. A leaked client token has no
+live-rotation shortcut: stop new admission, drain every lease across all
+operators sharing it, rotate the token on frps and every client baseline, then
+verify before reopening. Coordinated live credential reissue is not provided.
+
+### Contain access when teardown cannot reach a host
+
+If the operator can reach the host, `sudo systemctl disable --now frpc-buyers`
+ends all buyer relay access from that host. Recover and reclaim the tenant
+normally; stopping the tunnel alone does not terminate host-local activity.
+If the host is unreachable, the relay operator must block the leased port at
+the relay firewall and end established sockets in frps's network namespace:
+
+```bash
+ss -K state established '( sport = :<leased-port> )'
+```
+
+This needs `NET_ADMIN` in that namespace; on Kubernetes use an appropriately
+privileged ephemeral debug container. Verify both new traffic denial and
+established connection termination. If socket destruction is unavailable,
+restart frps after installing the block; that interrupts every tenant on that
+relay. If only frps configuration is controllable, remove the affected port
+from `allowPorts` and restart frps, again accounting for the shared disruption.
+
+Record the port, lease/reservation identity and grant expiry in private incident
+state. Keep the block until grant expiry has passed **and** the old registration
+has cleared. Port quarantine/expiry alone does not remove an already registered
+proxy. Do not remove a block while it is the only containment. On a managed
+shared relay, the site operator supplies the affected lease/port/expiry and
+requests containment; the relay operator applies and verifies it and reports
+when safe to lift. Relay containment ends only that route: full revocation
+still requires host recovery, activity termination and verified reclaim.
+
+For diagnostics, correlate a verified plugin log line's `jti` (the reservation
+identity) with `GET /api/v1/relays/{relay_id}/leases` while the port row still
+represents that tenancy. After port-row reuse, read
+`GET /api/v1/contract/leases/{jti}` through the signed client. Unverified log
+claims are sender-controlled; do not treat them as authenticated identities.

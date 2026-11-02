@@ -109,6 +109,32 @@ service's own route stays `ansible_host` and `ansible_port`. Every host is store
 an `ssh` connection at version 2; a host stored at version 1 runs nothing until it is
 imported again or updated at version 2.
 
+For a relay-backed pool, set `provider_config.relay_id` to the registered
+buyer relay id. Keep the host's management connection independent of its
+buyer route. The relay must already have its token, active grant key and checked
+admission plugin; follow [seller relay setup](seller-frp-setup.md). Grant creates
+a per-lease proxy through `frpc-buyers`, carrying the signed port grant; the
+result names the relay endpoint rather than the management SSH address.
+
+Prepare a relay-backed host with
+`domains/bare_metal/provisioning/iac/ansible/playbooks/host-kit/host-setup.yaml`
+from `domains/bare_metal/provisioning/iac` with
+`ANSIBLE_CONFIG=ansible/ansible.cfg`, the operator-owned inventory and relay
+connection variables `frp_server_addr`, `frp_server_port` and `frp_auth_token`.
+This prepares `frpc-buyers`; granting a relayed lease also ensures that client
+is prepared. If a bounded working-data policy is selected, supply its separate
+`bare_metal_working_data_policy` during host preparation. Do not put relay
+tokens or grant keys in pool provider extras. A host reached through a management tunnel in a pool without a
+buyer relay must explicitly set a tenant-reachable `public_host` and `public_port`;
+the management tunnel's endpoint is not an implicit buyer route.
+
+Reclaim removes the lease's proxy, terminates tenant processes and sessions,
+checks activity has ended, and applies the configured key/account policy. It does
+not merely remove an SSH key while leaving an established tenant session alive.
+A relay port remains quarantined until its grant expiry plus the reuse margin;
+released capacity does not imply immediate port reuse. Working-data deletion is
+an additional configured policy, not a promise implied by key revocation.
+
 The pool declaration is authoritative. Do not add `vm` merely to make a
 request pass; add it only if the same pool and executor can actually deliver
 that mode.

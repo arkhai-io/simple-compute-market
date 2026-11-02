@@ -211,6 +211,10 @@ capacity and close the delivered access while retaining relay quarantine.
 Failure recovery truncates only the run's lease and names unconfirmed cleanup.
 Without a bare-metal target the module skips before mutation. These checks are
 source capabilities; a passing mock pipeline does not qualify real hardware.
+Use the [operator runbook](../docs/development/VALIDATION_RUNBOOK.md#28-prepare-and-operate-buyer-relays)
+to prove deployed grant admission before either real lane. Container admission
+proof and native installer component tests have different scopes; neither
+substitutes for a completed real purchase, SSH access and reclaim observation.
 
 The installed buyer scenario `e2e_bare_metal_deal` keeps its separate
 `BARE_METAL` configuration and operator-supplied buyer key and known-hosts file.
@@ -242,7 +246,9 @@ private external configuration, never in `REAL_PROVISIONING_TARGET` or committed
 profiles. Existing local/mock profiles retain their current defaults. These are
 test fixture inputs, not changes to the public buyer CLI or service trust.
 
-### Real VM provisioning
+<a id="real-vm-provisioning"></a>
+
+### Real provisioning target and VM lane
 
 `e2e_vm_real_provisioning` runs the canonical compute deal against a real KVM
 host: the create and teardown jobs run the real playbooks, the scenario
@@ -272,7 +278,10 @@ virtualization; it needs no GPU.
    a configured token and active grant key; it never creates the relay. The
    target carries no private key or relay credential. Version 1 is refused
    with conversion instructions; a missing or misspelled field fails by name.
-2. Forward the stack's services to the ports the `local` profile names
+2. Configure marketplace identities and the separate controlled Anvil wallet as
+   described above. External deployments must trust the configured scheme-tagged
+   principals; do not copy local development secrets onto an exposed service.
+   Forward the stack's services to the ports the `local` profile names
    (`config/config-local.yml`): the storefront, the registry, the provisioning
    service, and the chain. The stack must trust the `local` profile's
    principals.
