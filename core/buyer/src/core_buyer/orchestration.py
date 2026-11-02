@@ -284,6 +284,7 @@ def _signed_json(
     request_id: str | None = None,
     timestamp: int | None = None,
     resolve_response_principals: Callable[[], TrustedIdentitySet],
+    capture: EnvelopeCapture | None = None,
 ) -> dict[str, Any]:
     return _authenticated_json(
         url,
@@ -297,6 +298,7 @@ def _signed_json(
         request_id=request_id,
         timestamp=timestamp,
         expected_response_principals=resolve_response_principals(),
+        capture=capture,
     )
 
 
@@ -311,6 +313,7 @@ def signed_storefront_json(
     resource: str,
     timeout: float,
     resolve_response_principals: Callable[[], TrustedIdentitySet],
+    capture: EnvelopeCapture | None = None,
 ) -> dict[str, Any]:
     """Call one signed storefront route and verify its signed JSON response."""
 
@@ -324,6 +327,7 @@ def signed_storefront_json(
         resource=resource,
         timeout=timeout,
         resolve_response_principals=resolve_response_principals,
+        capture=capture,
     )
 
 

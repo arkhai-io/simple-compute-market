@@ -157,6 +157,7 @@ async def test_v2_rejects_body_mutation_and_cross_role_reuse() -> None:
     body = {"buyer_principal": signer.identity.model_dump(mode="json")}
     headers = _signed_headers(signer=signer, body=body)
 
+    envelopes = []
     with pytest.raises(AuthError):
         await authenticate_request(
             headers=headers,
@@ -168,6 +169,8 @@ async def test_v2_rejects_body_mutation_and_cross_role_reuse() -> None:
             expected_principal=signer.identity,
             replay_store=store,
             now=1_000,
+            capture=envelopes.append,
+            raw_body=json.dumps(body).encode(),
         )
     with pytest.raises(AuthError):
         await authenticate_request(
@@ -180,7 +183,10 @@ async def test_v2_rejects_body_mutation_and_cross_role_reuse() -> None:
             expected_principal=signer.identity,
             replay_store=store,
             now=1_000,
+            capture=envelopes.append,
+            raw_body=json.dumps(body).encode(),
         )
+    assert envelopes == []
 
 
 @pytest.mark.asyncio
