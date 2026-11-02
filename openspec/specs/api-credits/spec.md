@@ -44,12 +44,12 @@ An API-credits listing MUST identify a named service and an authoritative quota 
 - **WHEN** the storefront starts against a database holding a listing with no durable binding
 - **THEN** it refuses to start and names the listing and the fresh-database remedy
 
-### Requirement: Quantity-scaled pricing
-API-credits negotiation MUST interpret an advertised escrow rate as a per-credit-unit rate and compute the scalar reference payment as quantity multiplied by that rate in payment base units. Seller policy MUST evaluate offers against the same quantity-scaled reference amount. A hidden-reserve listing MUST have an operator-configured minimum price before it can accept an offer.
+### Requirement: Quantity-aware negotiation
+API-credits negotiation MUST treat the requested quantity as credits to fund. When a settlement option advertises a per-credit rate, a scalar value derived from it MUST scale by quantity. Buyer and seller policies MAY counter, accept, or reject; the accepted Agreement determines the final payment. A hidden-reserve policy requiring a scalar floor MUST have an operator-configured minimum.
 
 #### Scenario: Buyer requests several credits
 - **WHEN** a buyer requests three credits from a listing whose accepted unit rate is 100 base units
-- **THEN** buyer and seller policy use 300 base units as the scalar reference payment
+- **THEN** a policy deriving its scalar reference from that rate uses 300 base units, without requiring the final negotiated payment to equal that reference
 
 ### Requirement: Advisory negotiation checks and authoritative issuance
 Negotiation-time quota and key checks MUST be advisory guards over captured views. The quota check MUST compare a requested quantity with captured availability only for a listing whose backing is bounded by availability, and MUST report itself not applicable otherwise. Existing-key negotiation MUST reject known revoked keys, keys owned by another wallet, and unavailable keys while allowing an active unowned key to receive an open top-up. Issuance MUST recheck key status and ownership at the credits service and MUST commit a live quota hold or atomically reserve fresh quota before granting credits.
@@ -97,12 +97,20 @@ The storefront MUST authorize issuance only after its selected settlement stage 
 - **WHEN** the selected Alkahest stage fails its post-issuance on-chain fulfillment
 - **THEN** its continuation attempts balance compensation and new-key revocation without making common issuance compare mechanism IDs
 
-### Requirement: Online bearer consumption
-An API gate MUST parse bearer credentials as `<key_id>.<secret>`, verify them through the credits service, and consume a configured fixed amount for each admitted request. Missing or invalid credentials MUST return unauthenticated status, revoked credentials MUST return forbidden status, and exhausted credentials MUST return payment-required status with purchase guidance. Service-side consumption MUST be idempotent per key when an idempotency key is supplied. Optional middleware caching or batching MUST remain subordinate to the credits service as balance authority.
+### Requirement: Service-defined credit consumption
+Prepaid credits MUST remain abstract units for the named service. The seller's storefront and service MUST choose which operations consume credits and submit positive debit amounts. The API-credits domain MUST NOT assign operation meaning, debit cadence, or a constant amount. An HTTP gate, when used, MUST verify `<key_id>.<secret>` before protected work. Authority consumption MUST be idempotent per key when given an idempotency key; caches and batches MUST remain subordinate to it.
+
+#### Scenario: A service charges according to its own credit semantics
+- **WHEN** a service-defined operation costs three credits
+- **THEN** its integration submits a debit of three without the credits authority interpreting the operation or requiring the same amount for another operation
+
+#### Scenario: A bearer credential is refused
+- **WHEN** an HTTP gate receives a missing, invalid, revoked, or underfunded credential
+- **THEN** it returns unauthenticated, forbidden, or payment-required status as applicable, with purchase guidance for insufficient balance
 
 #### Scenario: Key balance is exhausted
-- **WHEN** admitted requests consume the final available units and another request arrives
-- **THEN** the next request is rejected as payment required without creating a negative authoritative balance
+- **WHEN** a service attempts a debit larger than the key's available balance
+- **THEN** the operation is rejected as payment required without creating a negative authoritative balance
 
 #### Scenario: Consumption request is retried
 - **WHEN** a middleware repeats consumption for one key with the same idempotency key
