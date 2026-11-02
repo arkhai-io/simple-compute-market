@@ -68,6 +68,47 @@ started and none is left running.
   e2e-harness unit, release-tooling and Helm structural/render checks. The existing
   optional RL/Torch collection skip remains; this is not a deployed e2e rerun.
 
+## Final documentation gates and first use
+
+Promotion writes the lifecycle companion and nine owning companions, repository
+architecture/scope commentary, configuration/testing guidance and capability index.
+The change's design-promotion record maps D1–D15 and review residues to those
+current-state destinations. Delta-covered normative specs are not manually merged;
+16.11 archival and the new capability's normative index link await owner review.
+
+After promotion and citation restoration:
+
+- Scoped `make check-doc-citations CHANGE=agreed-evidence-and-early-termination`:
+  17 documents pass, no exception.
+- Unscoped `make check-doc-citations`: 448 documents pass, no exception or checker
+  edit. Explicitly external commands, generated operator target data and planned
+  harness filenames are distinguished from branch-file citations in `e5497f1c4`.
+- Installed `openspec validate agreed-evidence-and-early-termination --strict`
+  and repository-pinned 1.14.0 strict validation: pass. The newer CLI initially
+  rejected four overlong summaries; `54948d61e` shortens them without dropping
+  obligations. This is a documentation repair, not an acceptance waiver.
+- Final `make check-change` and `make check-architecture-change
+  CHANGE=agreed-evidence-and-early-termination`: pass, including comment hygiene,
+  agent skills, task/index checks and pinned validation; no owned architecture row.
+- Final fresh-wheelhouse `make check-packaging`: pass, including install/lock/Python/
+  layout and all architecture checks. No package or production code changed.
+- `make -C kit/deal-servicing first-use`: pass against the installed wheels and
+  its owned temporary SQLite, deterministic development principals and injected
+  authorities. Opened the documented evidence/end/watch/client/budget/respondent/
+  receipt surfaces; exact signed end retry survives and warning-only budgets keep
+  both cycles running. Both ed25519/eip191 receipts verify. This entry uses no
+  secret, server or live deployment and removes its temporary state.
+
+The design citations temporarily repointed by `0c86746f2` now name the real
+[permanent lifecycle companion](../../../openspec/specs/deal-lifecycle/architecture.md).
+Result posted on [#325](https://github.com/arkhai-io/simple-compute-market/issues/325#issuecomment-6587134575),
+without closing the execution ticket. The required tracker CLI could not select
+the GitHub backend in a vault-less checkout; repository-native `gh` works.
+Unresolved tool friction is filed separately as
+[#329](https://github.com/arkhai-io/simple-compute-market/issues/329).
+The servicing API README's pending-selected-end filing description is corrected
+in separate docs-only `fafa9d1c0` to match the reviewed implementation.
+
 ## Explicitly unrun and accepted limits
 
 No fresh deployed lane, real bare-metal host, public hosted-development mediation

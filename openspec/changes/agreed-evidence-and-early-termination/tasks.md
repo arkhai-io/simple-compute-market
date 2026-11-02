@@ -264,10 +264,10 @@ template writer), and `docs/development/DEPLOYMENT_AND_CONFIG.md`.
     identity-bound credential references and retirement of the payments key.
     Payment/seller/e2e guides and release dependency cells agree. Documented TOML
     snippets parse and resolve their exact credential binding.
-  - The scoped citation command reports only the three pre-existing future
-    lifecycle spec/architecture destinations tracked by #325; no new citation
-    is unresolved. No placeholder spec was created. Normative promotion remains
-    the reviewed closeout work at 16.9.
+  - The section's historical citation check reported only the future lifecycle
+    destinations tracked by #325, not a new broken implementation link. No
+    placeholder was created. Reviewed 16.9 writes the real architecture
+    companion and promotion record; normative deltas synchronize only at 16.11.
 
 Verification point: unit suites of `kit/deal-lifecycle` and `kit/arkhai-payments`; the registry
 descriptor suites (unit and library integration); the Helm render check; `make test`.
@@ -1134,7 +1134,7 @@ documentation only; a part needing code returns the change to implementation.
       to distinguish intended-end reports from the capacity-released callback. Promote D8's
       retained attribution and one delivery instant, and D9's site-report retention, into
       `deal-lifecycle/spec.md` and its architecture companion; no core financial-end record.
-- [ ] 16.10 **Documentation citations.** Run `make check-doc-citations
+- [x] 16.10 **Documentation citations.** Run `make check-doc-citations
       CHANGE=agreed-evidence-and-early-termination` and resolve every match; then
       `openspec validate agreed-evidence-and-early-termination --strict`.
 - [ ] 16.11 **Archival.** `openspec archive agreed-evidence-and-early-termination -y`, merging the
@@ -1218,6 +1218,24 @@ Once-only qualification is not rate/ruling-execution or real-host qualification.
   path/link/heading audit over changed Markdown checks 385 references, all resolve.
   `make check-change` (including repository-pinned strict validation) and the
   installed seller `first-use` entry pass. No production code changes.
+
+- 16.10: restored the design citations temporarily repointed by `0c86746f2` to
+  `openspec/specs/deal-lifecycle/architecture.md` and replaced stale promotion
+  status with the actual destinations. Scoped `make check-doc-citations` passes
+  across 17 documents; unscoped passes across 448, with no exception or checker
+  change. `openspec validate agreed-evidence-and-early-termination --strict`
+  and repository-pinned strict validation pass. Final `make check-change`,
+  architecture-change and fresh-wheelhouse packaging pass. Commented the result
+  on [#325](https://github.com/arkhai-io/simple-compute-market/issues/325#issuecomment-6587134575).
+  Three small documentation repairs were committed separately: `fafa9d1c0`
+  corrects the pending-end filing README; `54948d61e` shortens four overlong
+  requirement summaries without dropping obligations; `e5497f1c4` distinguishes
+  external/generated/planned paths from branch-file citations. The required
+  tracker reader failed before GitHub backend selection; repository-native `gh`
+  succeeds and unresolved tooling friction is filed as
+  [#329](https://github.com/arkhai-io/simple-compute-market/issues/329).
+  16.11 remains unchecked and unperformed for owner review; no push, rebase,
+  merge or execution-ticket closure is performed.
 
 ## Design promotion record
 
@@ -1325,5 +1343,6 @@ Servicing 63 plus typing and focused VM 28 passed. Package/document gates passed
 Full shim-backed tests at `fd85d9873` passed in 7m54s: VM 1196 unit (one optional skip)/524
 integration, kit typing, provisioning/domains, release tooling and Helm checks.
 Setup and sensitivity evidence: `docs/attachments/aeet-fix3/index.md`.
-No hosted deployment was rerun. Pending-source/worker rationale promotes with lifecycle
-and servicing; no authority or remedy policy is added.
+No hosted deployment was rerun. Pending-source/worker rationale is recorded in
+`openspec/specs/deal-lifecycle/architecture.md` and the servicing companion;
+no authority or remedy policy is added.

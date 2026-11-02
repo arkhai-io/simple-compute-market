@@ -697,14 +697,14 @@ This chooses the owner's decisions over the prior review's separate exceptional_
 
 SCM can start now on neutral contracts/protocols, evidence/envelope capture, durable claim/answer journals, respondent matching and signature interfaces. Baseline file/append/read follows 12.1 vendoring the published baseline. Generated claim models, canonical-frame conformance and both signature-scheme vectors are installed at 12.1. Receipt embedding, buyer concurrence filing, respondent HTTP mapping and setup enablement remain their implementation tasks; live delivery_end qualification waits for the hosted service to deploy the published revision.
 
-Foundation owns common claim/journal/verifier; the double consumes its resources, spot owns rate execution, convergence consumes classification hooks and unify supplies available/end facts. Existing wire rollout and activation/unify/deadline archive order remain; no extra payments wire change is introduced. Setup encodes its once end at Agreement start for mediation's setup classification; payments' unchanged clamp gives the later approval instant as effective end when necessary. This distinguishes mandate bytes from payout timing, rather than retaining the earlier review's ambiguous later-of end as a new wire input. Status is in implementation with section gates. Per-task implementation and validation are recorded in tasks.md; no hosted deployment or permanent-behavior promotion is claimed.
+Foundation owns common claim/journal/verifier; the double consumes its resources, spot owns rate execution, convergence consumes classification hooks and unify supplies available/end facts. Existing wire rollout and activation/unify/deadline archive order remain; no extra payments wire change is introduced. Setup encodes its once end at Agreement start for mediation's setup classification; payments' unchanged clamp gives the later approval instant as effective end when necessary. This distinguishes mandate bytes from payout timing, rather than retaining the earlier review's ambiguous later-of end as a new wire input. Implementation and validation are recorded in tasks.md. Documentation closeout writes `openspec/specs/deal-lifecycle/architecture.md` and the other permanent companions; its promotion record names every destination and retained limit. Delta synchronization and archival await owner review. No new hosted deployment qualification is claimed.
 
 ## Owner-revision validation (2026-11-02)
 
 Design/specification work only; no runtime code, new test implementation or deployment. Existing completed tasks are preserved. All requirement bodies in the nine touched changes are below 500 characters; retained detailed obligations remain in acceptance scenarios rather than being dropped.
 
 - Installed OpenSpec 1.15.0: openspec validate <change> --strict passes without warnings for foundation, lane double, terms, spot, renewable deadlines, unify, convergence, activation and the deferred lapse proposal. The lapse proposal declares skip_specs and validates with zero deltas.
-- make check-change CHANGE=<change>: all six checks pass for lane double, terms, renewable deadlines, unify, activation and lapse. Foundation, spot and convergence pass five checks and report only the accepted future deal-lifecycle architecture-companion citation failure.
+- make check-change CHANGE=<change>: all six checks pass for lane double, terms, renewable deadlines, unify, activation and lapse. At that design checkpoint, foundation, spot and convergence passed five checks and reported only the then-future `openspec/specs/deal-lifecycle/architecture.md` citation. Reviewed closeout now writes that destination; no citation exception remains.
 - make check-change-index, make check-comment-hygiene and git diff --check pass. All nine sequence-diagram XML/SVG pairs parse and embed identical editable source; five pairs update claim labels together.
 - Packaging, typing and runtime/e2e suites are unrun: this revision changes design/specification and roadmap/index text only, without claiming implementation readiness of a deployed product.
 
@@ -715,8 +715,10 @@ On 2026-10-29, all nine Goal 8 changes pass both
 `openspec validate <change> --strict`, without warnings. MODIFIED-target informational
 notices for unify/convergence are covered by foundation-first and activation-change-before-
 unify archive order. `make check-change CHANGE=<change>` passes all checks except
-the expressly accepted future deal-lifecycle architecture-companion
-citation in foundation, spot and convergence. The same strict/check-change runs
+the then-future `openspec/specs/deal-lifecycle/architecture.md`
+citation in foundation, spot and convergence. That historical exception is
+resolved by the reviewed companion promotion recorded in the design-promotion
+record in `tasks.md`; current citation checks permit no exception. The same strict/check-change runs
 pass for the narrow hardening and kit-owned sibling edits. `make check-change-index`,
 `make check-comment-hygiene` and `git diff --check` pass. This is design validation,
 not runtime evidence. The ten second-review triage records retain historical
