@@ -14,14 +14,12 @@ from market_deal_lifecycle_contracts.models import (
     Accepted, AuthorityView, LifecycleCommand, LifecycleOutcome, OpenExtension,
     PaymentEvent, Pending, Rejected, Unknown,
 )
-from market_identity import IdentityScheme, SignatureProof, frame_fields, get_identity_verifier
 from pydantic import ValidationError
 
 from .agreement import PaymentSettlementData
-from .canonical import jcs_sha256
 from .errors import PaymentsAPIError, PaymentsError, PaymentsProtocolError, PaymentsTransportError
 from .models import SignedTransactionSnapshot, StoredEvent, TransactionSnapshot
-from .receipts import verify_receipt
+from .receipts import SnapshotVerifier, verify_snapshot
 from .settlement_config import ArkhaiPaymentsConfig, ArkhaiPaymentsConfigurationError
 
 class LifecyclePaymentsClient(Protocol):
@@ -34,35 +32,19 @@ class LifecyclePaymentsClient(Protocol):
 
 
 ClientForAccount = Callable[[str], LifecyclePaymentsClient]
-SnapshotVerifier = Callable[[SignedTransactionSnapshot, int], bool]
 
 
 def pinned_snapshot_verifier(
     agreement: Mapping[str, Any], data: PaymentSettlementData, config: ArkhaiPaymentsConfig,
 ) -> SnapshotVerifier:
-    """Bind a current single-key pin; compositions may inject a rotation-aware verifier."""
+    """Bind the shared snapshot verifier to the configured current service pin."""
 
     def verify(signed: SignedTransactionSnapshot, minimum_sequence: int) -> bool:
         trusted = config.service_identity
-        body = signed.snapshot
-        if (trusted is None or trusted.scheme != IdentityScheme.ED25519
-                or body.issuer.identifier != trusted.identifier
-                or body.livemode is not config.livemode
-                or body.transaction.root != data.transaction_id
-                or body.latestEventSequence is None
-                or body.latestEventSequence < minimum_sequence):
-            return False
-        try:
-            proof = SignatureProof.model_validate(signed.proof.model_dump(mode="json"))
-            valid = get_identity_verifier(trusted.scheme).verify_signature(
-                trusted, frame_fields(("arkhai.payments.snapshot.v1", jcs_sha256(body))), proof.to_bytes(),
-            )
-            return valid and verify_receipt(
-                body.receipt, trusted, mandate=data.mandate,
-                agreement_json=agreement, livemode=config.livemode,
-            )
-        except (ValueError, TypeError, ValidationError):
-            return False
+        return trusted is not None and verify_snapshot(
+            signed, trusted, mandate=data.mandate, agreement_json=agreement,
+            livemode=config.livemode, minimum_sequence=minimum_sequence,
+        )
 
     return verify
 
