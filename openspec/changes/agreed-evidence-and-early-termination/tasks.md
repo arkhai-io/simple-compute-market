@@ -599,7 +599,7 @@ and the bare-metal buyer's counterparts.
 - [x] 7.1 Create `kit/deal-lifecycle-client` for the buyer `commit` and `hint` routes (section
       13 serves them), verifying signed responses. Verify: unit tests against recorded
       responses.
-- [ ] 7.2 Implement the buyer half in `kit/deal-lifecycle-buyer`: payment commands to the payment
+- [x] 7.2 Implement the buyer half in `kit/deal-lifecycle-buyer`: payment commands to the payment
       adapter, `dispute` and `append` to the dispute adapter, outcomes reported as the
       counterpart's own, `read` merging payment events, open extensions and cases, `rejected`
       authority view for a mechanism with no adapter (delivery view remains readable), `hint`
