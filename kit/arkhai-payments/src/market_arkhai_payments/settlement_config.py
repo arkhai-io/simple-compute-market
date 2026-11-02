@@ -11,7 +11,13 @@ from typing import Any
 
 import httpx
 from market_core.query_dsl import ComparisonOperator, FieldDescriptor, QueryValueType
-from market_core.schemas import RateValue, SettlementOption, derive_settlement_option_id
+from market_core.schemas import (
+    RateValue,
+    SettlementOption,
+    derive_settlement_option_id,
+    settlement_option_asset,
+    settlement_option_params,
+)
 from market_identity import Identity, IdentityScheme
 from market_settlement_runtime import (
     MechanismReadiness,
@@ -281,7 +287,7 @@ def _value(source: Any, name: str, default: Any = None) -> Any:
 
 
 def _option_params(option: Any) -> PaymentsOptionParams | None:
-    raw = _value(option, "params", {})
+    raw = settlement_option_params(option)
     if not isinstance(raw, Mapping):
         return None
     try:
@@ -358,7 +364,7 @@ def arkhai_payments_buyer_compatibility(
     if not config.enabled:
         return False
     params = _option_params(option)
-    return params is not None and params.asset == _value(option, "asset")
+    return params is not None and params.asset == settlement_option_asset(option)
 
 
 def _payee_projection(option: Any) -> str | None:
