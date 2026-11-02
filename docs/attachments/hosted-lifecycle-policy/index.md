@@ -101,10 +101,10 @@ loopback, as above.
   nine scenario steps pass.
 - VM storefront: **1,189 unit cases and 501 integration cases pass** (one existing
   unit skip). API-credit storefront: **248 pass**; API-credit buyer: **35 pass**.
-- Bare-metal storefront initially passed 521 cases and exposed one fixture
-  signing snapshots with a different key from its configured receipt signer.
-  The fixture now injects the signer, and that case passes on focused rerun.
-  The aggregate rerun exercises the complete suite.
+- Bare-metal storefront: **522 pass** in the final aggregate. An earlier run
+  exposed a fixture signing snapshots with a different key from its configured
+  receipt signer. The fixture now injects that signer; both its focused rerun
+  and the complete suite pass.
 - API-credit wheel-only installation: **41 pass**, including storefront import
   without a raw source copy. Its explicit fixture wheelhouse now includes the
   newly composed mediation dependency.
@@ -112,22 +112,31 @@ loopback, as above.
   `make check-comment-hygiene` and pinned strict OpenSpec validation pass.
   Changed projects and the e2e consumer were relocked; Helm config schemas were
   regenerated from refreshed wheel environments. The release dependency table
-  is updated without duplicating publication manifest/workflow entries.
+  and publication manifest/workflow include mediation once. Two pre-existing
+  duplicate lifecycle rows were removed from the release guide in a separate
+  small cleanup commit.
 - The first full `make test` reached API-credit wheel installation and exposed
   that fixture's missing mediation wheel. Its focused repair passes. The next
   aggregate passed all package suites and reached release-tooling, which exposed
   the missing mediation distribution in the publication manifest/workflow.
   Dependency closure is now recorded once in those lists and the release table;
-  release-tooling and deployment packaging pass on focused rerun. A fresh full
-  aggregate is in progress; its final disposition is recorded below.
+  release-tooling and deployment packaging pass on focused rerun. The final
+  full aggregate passes as recorded below.
 - The scoped documentation citation check reports only the three known future
   lifecycle destinations tracked in [#325](https://github.com/arkhai-io/simple-compute-market/issues/325).
 
 ## Aggregate result
 
-Pending completion of the final full `make test` invocation with the local
-Docker-compatible Podman shim opted into that shell only. No failed aggregate
-is represented as passing.
+The final full **`make test` passes**, on 2026-11-02 in **7m 2s**, including all
+package unit/application-integration suites, **1,848 release-tooling cases**, and
+Helm render/structural identity assertions. Both all-proxy variables were unset;
+both no-proxy variables contained loopback; the local Docker-compatible Podman
+shim was opted into that shell only. The earlier failed attempts are recorded
+above rather than represented as passing.
+
+The final installed-wheel first-use command, strict OpenSpec validation,
+packaging/architecture/lock checks and comment hygiene also pass. The working
+branch contains only local commits; it was not pushed or rebased.
 
 ## Boundary and cleanup
 

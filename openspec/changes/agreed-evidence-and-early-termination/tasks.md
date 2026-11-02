@@ -733,13 +733,15 @@ resolved list. The installed-wheel first-use entry point is
 `docs/attachments/hosted-lifecycle-policy/first_use.py`.
 Focused results: payments 97, VM storefront 1,189 unit and 501 integration,
 API-credit storefront 248 and buyer 35 pass. Bare-metal storefront has 521 passing
-cases plus the repaired snapshot-signing fixture case passing on focused rerun.
+cases plus the repaired snapshot-signing fixture case passing on focused rerun;
+all 522 pass in the final aggregate.
 All four new mediation dependencies and the e2e consumer were relocked. Mediation
 is included once in the publication manifest/workflow and release table, and the
 API-credit installation fixture builds its wheel. Release-tooling and deployment
 packaging pass after these dependency-closure updates; packaging,
-architecture, locks, hygiene and strict OpenSpec validation pass. Aggregate test
-and final evidence are recorded in the packet below when settled.
+architecture, locks, hygiene and strict OpenSpec validation pass. The final full `make test` passes in 7m 2s with the shell-local Podman shim,
+including 1,848 release-tooling cases and Helm assertions. Final packet:
+`docs/attachments/hosted-lifecycle-policy/index.md`.
 
 Verification point: `kit/arkhai-payments` unit and vector suites; the three storefronts'
 application-integration suites; `make check-packaging` (vendored schema); `make test`.
