@@ -21,12 +21,16 @@ from market_arkhai_payments import (
     PaymentApprovalDeclined,
 )
 from market_config.config_loader import load_user_config
+from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
+from market_arkhai_payments.settlement_config import validate_payment_lifecycle
 from market_core.schemas import Agreement, SettlementOption, SettlementSelection
 from market_settlement_runtime import SettlementConfig
 
 from arkhai_apicredits.settlement import (
     validate_payer_account,
 )
+
+from .disputes import buyer_dispute_authorities
 
 
 def configured_payer_account() -> str:
@@ -162,6 +166,12 @@ def settle_api_credit_payment(
     config = settlement_config.mechanism_config(ARKHAI_PAYMENTS_CONFIG_KEY)
     if config is None or not getattr(config, "enabled", False):
         raise ValueError("buyer Arkhai payments is not enabled")
+    registry = str(listing.get("source_registry_url") or "").rstrip("/")
+    by_registry = buyer_dispute_authorities(load_user_config(), buyer, (registry,) if registry else ())
+    validate_payment_lifecycle(
+        advertised, authorities=by_registry.get(registry, by_registry.get("", ())),
+        dispute_interfaces=frozenset({MEDIATION_INTERFACE}),
+    )
     # The kit re-derives the mandate under this buyer's policy, checks the
     # seller's transaction ID, attaches only under the buyer's own
     # attach_agreement, and verifies every receipt. Acceptance already bound

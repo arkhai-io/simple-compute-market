@@ -545,6 +545,32 @@ missing notice/deadline stays missing, absent entitlement is false and absent
 penalty is integer zero. Published lifecycle-bearing options still require the
 option wire cutover.
 
+### Hosted publication and snapshot consumption integration
+
+Hosted publication input supplies `dispute_window_seconds` separately from the
+existing approval `window`, optional `case_hold_max_seconds` (omission is
+unbounded), and a compute `delivery_deadline_seconds`. These are lifecycle
+fields in the offered option, not mechanism parameters. Shared builders read
+only neutral offered authority/installed-interface projections from domain roots.
+The roots compose mediation's installed interface contract, never the payments
+kit. API-credit admission uses exact registry-specific authority identity and
+params at selection and again at approval.
+
+A stored listing has one option set shared by its registry destinations.
+Publication therefore offers from the ordered intersection of the resolved
+registry lists, or local-only policy when no registry is selected. This is a
+fail-closed projection: a registry recommendation must not become another
+registry's default. Per-registry differentiated listing options would require a
+separate publication/storage design, not an implicit union here.
+
+Payment snapshot consumption uses one payments-kit verifier. Optional configured
+receipt identity history retains bounded retiring keys alongside the current
+key, and the current snapshot may attest a retained historical receipt without
+rewriting it. Consumers supply their durable minimum event sequence; identity
+validity is checked at the snapshot observation or receipt approval instant.
+Durable documentation destinations remain settlement-servicing's snapshot
+verification requirement and the deployment guide's settlement configuration.
+
 ## Alternatives considered
 
 - **Interruption as a core verb, or settle as protocol.** Rejected (D1): neither is required to continue.

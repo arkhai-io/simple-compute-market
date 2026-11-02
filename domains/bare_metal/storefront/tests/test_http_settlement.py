@@ -1129,7 +1129,7 @@ async def test_payment_evidence_gates_replay_and_rechecks_receipt_after_restart(
     buyer = Ed25519Signer(bytes.fromhex("66" * 32))
     seller = Ed25519Signer(bytes.fromhex("77" * 32))
     receipt_signer = Ed25519Signer(bytes.fromhex("55" * 32))
-    payments = FakePaymentsClient()
+    payments = FakePaymentsClient(signer=receipt_signer)
     domain = get_market_domain_contract()
     db = SQLiteClient(str(tmp_path / "payment.db"), domain=domain)
     composition = BareMetalStorefrontSettlementComposition.from_raw_config(

@@ -7,8 +7,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from core_buyer.buyer_config import ResolvedBuyerIdentity
-from core_buyer.registry_config import registry_descriptors, resolve_indexer_urls
-from market_deal_lifecycle.configuration import authorities_by_registry, dispute_config
+from core_buyer.registry_config import resolve_indexer_urls
 from market_deal_lifecycle.selection import AuthoritySelection
 from market_deal_lifecycle.terms import TermContext
 from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
@@ -24,6 +23,7 @@ from market_settlement_runtime import (
 )
 
 from .common import refuse_retired_address_book_keys, resolve_fresh_buyer_identity
+from .disputes import buyer_dispute_authorities
 from .settlement_stages import AlkahestBuyerStage, PaymentBuyerStage
 
 BUYER_STAGES = SettlementStageTable({
@@ -102,20 +102,9 @@ def resolve_buyer_settlement_policy(
         raise ValueError("[Settlement] must be a table")
     registry = buyer_settlement_registry()
     settlement = registry.resolve(raw, role="buyer")
-    disputes = dispute_config(document, role="buyer")
-    descriptors = (
-        registry_descriptors(
-            signer=identity.signer, urls=resolve_indexer_urls(override=registry_urls)
-        )
-        if identity is not None and action_capable and disputes.use_registry_dispute_authorities
-        else {}
-    )
-    authorities = authorities_by_registry(
-        disputes,
-        {url: descriptor.recommended_dispute_authorities or [] if descriptor else []
-         for url, descriptor in descriptors.items()},
-        role="buyer",
-        report=logging.getLogger(__name__).warning if identity is not None else lambda _: None,
+    authorities = buyer_dispute_authorities(
+        document, identity if action_capable else None,
+        resolve_indexer_urls(override=registry_urls) if identity is not None else (),
     )
     return BuyerSettlementPolicy(
         config=settlement,

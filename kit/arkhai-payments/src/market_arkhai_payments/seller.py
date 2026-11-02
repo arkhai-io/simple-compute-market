@@ -15,7 +15,7 @@ from typing import Any
 from market_deal_lifecycle.operations import OperationKeys
 from market_deal_lifecycle_contracts.models import Accepted, LifecycleCommand, Pending, Rejected, Unknown
 
-from market_arkhai_payments.adapter import PaymentAdapter, SnapshotVerifier, pinned_snapshot_verifier
+from market_arkhai_payments.adapter import PaymentAdapter
 from market_arkhai_payments.agreement import (
     PaymentSettlementData,
     agreement_from_bytes,
@@ -30,7 +30,7 @@ from market_arkhai_payments.errors import (
     PaymentsUnavailable,
 )
 from market_arkhai_payments.models import SignedReceipt, StoredEvent
-from market_arkhai_payments.receipts import verify_receipt
+from market_arkhai_payments.receipts import SnapshotVerifier, verify_receipt, verify_snapshot
 from market_arkhai_payments.settlement_config import (
     ArkhaiPaymentsConfig,
     ArkhaiPaymentsConfigurationError,
@@ -183,11 +183,18 @@ class PaymentSellerStage:
                 "payments service URL and receipt identity are required for servicing"
             )
         self.config = config
-        self._snapshot_verifier = snapshot_verifier or (
-            lambda agreement, data: pinned_snapshot_verifier(agreement, data, config)
-        )
+        self._snapshot_verifier = snapshot_verifier or self._verifier_for
         self._client_for_owner: ClientForOwner = client_for_owner or (
             lambda owner: payments_client_for_owner(config, owner)
+        )
+
+    def _verifier_for(
+        self, agreement: Mapping[str, Any], data: PaymentSettlementData,
+    ) -> SnapshotVerifier:
+        return lambda signed, minimum_sequence: verify_snapshot(
+            signed, self.config.receipt_trust, mandate=data.mandate,
+            agreement_json=agreement, livemode=self.config.livemode,
+            minimum_sequence=minimum_sequence,
         )
 
     def settlement_data(self, agreement: Mapping[str, Any]) -> PaymentSettlementData:
@@ -214,7 +221,7 @@ class PaymentSellerStage:
         assert self.config.service_identity is not None
         return verify_receipt(
             receipt,
-            self.config.service_identity,
+            self.config.receipt_trust,
             mandate=data.mandate,
             agreement_json=dict(agreement),
             livemode=self.config.livemode,
@@ -240,10 +247,10 @@ class PaymentSellerStage:
             return ReceiptBlocked(txid, _reason(exc))
         if snapshot.snapshot.transaction.root != txid:
             return ReceiptBlocked(txid, "payments service returned another transaction")
-        receipt = snapshot.snapshot.receipt
-        if not self.receipt_matches(receipt, agreement, data):
-            return ReceiptInvalid(txid, "payments receipt does not prove the accepted Agreement")
-        return ReceiptVerified(txid, receipt)
+        assert self.config.service_identity is not None
+        if not self._snapshot_verifier(agreement, data)(snapshot, 0):
+            return ReceiptInvalid(txid, "payments snapshot does not prove the accepted Agreement")
+        return ReceiptVerified(txid, snapshot.snapshot.receipt)
 
     async def check_receipt(
         self, agreement: Mapping[str, Any], data: PaymentSettlementData

@@ -61,7 +61,7 @@ class IssuanceBoundary:
 @pytest.fixture
 async def payment_context(tmp_path):
     db = SQLiteClient(str(tmp_path / "storefront.db"))
-    payments = FakePaymentsClient()
+    payments = FakePaymentsClient(signer=SERVICE)
     kit_stage = servicing_stage(
         ArkhaiPaymentsConfig(
             enabled=True, service_url="http://127.0.0.1:3180",

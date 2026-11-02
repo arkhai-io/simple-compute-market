@@ -49,10 +49,17 @@ returns a generated `Mandate`. The generated models also carry the contract's
 `rate` parts; the once-only builder does not derive them. Every part carries its
 own authorities and hold-extension cap. A once-only mandate has no start or stop
 permission, and preserves the seller and accepted option's dispute authority as reverse
-authorities. The hold is the time from
-acceptance to start, plus the service duration and the option window. The fixed
-nonce is `arkhai.payments.v1`; repeated derivation for the same inputs gives the
-same transaction ID. Mandate approval expires at `accepted_at + window`.
+authorities. Only the dispute authority can extend or lift a hold. Each once
+part encodes the absolute Agreement term end and holds until that end plus
+`lifecycle.adjudication.dispute_window_seconds`, with the agreed nullable
+`case_hold_max_seconds` cap. Fractional ends round up to the wire's whole second;
+late approval clamps the effective end at the authority without changing the
+mandate. `derive_part_terms` also supplies setup ends and rate permissions: only
+entitlements grant party stops, preserving notice and treatment, while the
+dispute authority receives a zero-notice chosen-treatment entry. Bonds and
+once-only early termination refuse. The fixed nonce is `arkhai.payments.v1`;
+repeated derivation gives the same transaction ID. Mandate approval expires at
+`floor(accepted_at) + window`, independently of the dispute window.
 
 Domains do not assemble mandates themselves. The seller returns
 `PaymentSellerStage.settlement_data(agreement)`, one `{mandate, transaction_id}`
@@ -67,7 +74,6 @@ from market_arkhai_payments import PaymentApproval
 transaction = PaymentApproval(config, payer_account).approve(
     agreement_bytes,
     settlement_data,
-    advertised_option=listing_option,
 )
 ```
 
@@ -83,10 +89,16 @@ publication input, public option construction, and buyer-side option filtering.
 It has no conditional-escrow client, accepted-obligation builder, or settlement
 verifier: Arkhai payments settles from the accepted Agreement alone. The kit's
 `PaymentSellerStage` and `PaymentApproval` carry the mechanism; each domain
-keeps its HTTP binding, delivery, and recovery.
+keeps its HTTP binding, delivery, and recovery. A publication clause supplies
+`dispute_window_seconds`, optional `case_hold_max_seconds` (omission is unbounded),
+and `delivery_deadline_seconds` for compute. Compositions supply their offered
+`dispute_authorities` and installed `dispute_interfaces`; the first authority
+advertising payments is selected, its minima are checked, and adjudication is
+included in the option hash. An empty list builds no hosted option. The payments
+kit names no concrete dispute interface.
 
 `ArkhaiPaymentsConfig` keeps the service origin, pinned Ed25519 receipt identity,
-fee policy, dispute authority, API-key environment-variable name, local
+fee policy, optional receipt identity history, API-key environment-variable name, local
 development-auth switch, and the buyer-only `attach_agreement` setting (off by
 default; a seller configuration that sets it fails preflight) in trusted role
 configuration. The API key value is read

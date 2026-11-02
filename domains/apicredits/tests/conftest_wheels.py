@@ -80,6 +80,10 @@ def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
             REPO / "kit" / "deal-lifecycle-contracts",
             "arkhai_kit_deal_lifecycle_contracts-*.whl",
         ),
+        "arkhai_mediation": (
+            REPO / "kit" / "arkhai-mediation",
+            "arkhai_kit_arkhai_mediation-*.whl",
+        ),
         "arkhai_payments": (
             REPO / "kit" / "arkhai-payments",
             "arkhai_kit_arkhai_payments-*.whl",

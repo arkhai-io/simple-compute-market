@@ -746,7 +746,7 @@ def test_payment_dispatch_and_run_recovery_ignore_stray_escrow(tmp_path, monkeyp
         buyer_account=payer, option=PaymentsOptionParams.model_validate(params),
         accepted_at=agreement.accepted_at, start_utc=agreement.start_utc,
         duration_seconds=agreement.duration_seconds, amount=agreement.amount, asset=agreement.asset,
-        fee_bps=250, dispute_authority=payer,
+        fee_bps=250, lifecycle=option.lifecycle,
     ))
     data = {
         "mandate": mandate.model_dump(mode="json", by_alias=True, exclude_none=True),

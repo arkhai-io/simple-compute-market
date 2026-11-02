@@ -1457,6 +1457,18 @@ current setting, so a payment deal accepted under the old mode never reaches
 delivery or issuance afterwards. Drain open payment deals, or refund them, before
 the change.
 
+For signing-key rotation, `receipt_identities` in `[Settlement.arkhai_payments]`
+may list current and retiring identity pins. Each entry has `identity`,
+`valid_from` (inclusive Unix seconds, default zero), optional `valid_until`
+(exclusive), and `retiring` (default false). A nonempty list must include the
+current `service_identity` as a non-retiring entry. With no list, that identity
+alone remains trusted. Receipt signatures are checked at `approvedAt`; snapshot
+signatures at `observedAt`. A valid current-key snapshot may attest an embedded
+receipt from a configured retiring identity valid at its approval, without
+rewriting the receipt or its proof. Callers pass their durable minimum event
+sequence to the shared snapshot verifier; wrong mode, deal or regressing state
+is refused before authority state is consumed.
+
 Agreement attachment is set on each side. A buyer's `attach_agreement` (default `false`)
 attaches the exact Agreement when it approves a payment; setting it in a seller
 configuration is a publication blocker. A seller that wants the Agreement on file sets

@@ -57,6 +57,7 @@ from tests.integration.credit_negotiation import (
     SELLER_SIGNER,
     QuotaHolds,
     payment_option,
+    payment_authority,
 )
 from tests.loopback import serving
 
@@ -150,13 +151,7 @@ def buyer(storefront, monkeypatch, tmp_path):
             "arkhai_payments": {"enabled": True},
         },
         "apicredits": {"payer_account": PAYER_ACCOUNT},
-        "Dispute": [{
-            **payment_option().lifecycle["adjudication"]["dispute"],
-            "advertisement": {
-                "mechanisms": [ARKHAI_PAYMENTS_MECHANISM],
-                "minimum_dispute_window_seconds": 60,
-            },
-        }],
+        "Dispute": [payment_authority()],
     }
     monkeypatch.setattr(settlement_composition, "load_user_config", lambda: config)
     monkeypatch.setattr(payments, "load_user_config", lambda: config)

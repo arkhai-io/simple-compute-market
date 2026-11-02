@@ -13,6 +13,7 @@ from functools import partial
 from typing import Any
 
 from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
+from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from market_core.schemas import settlement_option_schema
 from arkhai_vms import VmProvisionTerms, normalize_vm_provision_terms
 from core_storefront.domain_lifecycle import (
@@ -150,7 +151,11 @@ class VmSettlementComposition:
     ) -> tuple[
         list[dict[str, Any]], list[dict[str, Any]], tuple[MechanismReadiness, ...]
     ]:
-        merged_resources = {**self.mechanism_resources, **resources}
+        merged_resources = {
+            **self.mechanism_resources, **resources,
+            "dispute_authorities": self.disputes.for_publication(),
+            "dispute_interfaces": frozenset({MEDIATION_INTERFACE}), "compute": True,
+        }
         compiled = (
             [
                 compile_settlement_publication_clause(

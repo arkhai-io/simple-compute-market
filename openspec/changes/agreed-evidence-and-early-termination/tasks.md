@@ -690,7 +690,7 @@ settle by negotiation". Files: `kit/arkhai-payments/schema/`, `src/market_arkhai
       pass; installed-wheel first use, architecture, packaging, comment hygiene and
       strict OpenSpec validation pass. Evidence and aggregate-run disposition:
       `docs/attachments/payments-contract-foundation/index.md`.
-- [ ] 8.2 Derive each part's authorities and holds from the terms: prepaid `once` end at term end,
+- [x] 8.2 Derive each part's authorities and holds from the terms: prepaid `once` end at term end,
       setup `once` end at the later of the Agreement start and approval, hold `{afterStop: dispute_window}`;
       each party's stop notice exactly its entitlement's notice_seconds; derive the dispute
       authority's {account, notice: PT0S, partialPeriod: chosen} entry here, not again in spot;
@@ -702,16 +702,54 @@ settle by negotiation". Files: `kit/arkhai-payments/schema/`, `src/market_arkhai
       `case_hold_max_seconds`. Verify: `test_mandates.py` cases for "A once deal's hold is
       derived", "A bounded case hold is derived", "An unbounded case hold is derived" and "A
       mandate's extend authorities are derived".
-- [ ] 8.3 Extend the buyer's mandate check to the derived authorities, holds and dispute
+      Implemented: absolute once term ends (fractional ends round up), afterStop
+      holds, exact authority-only extensions and nullable caps. `derive_part_terms`
+      supplies the same setup and rate authority/end mapping to later builders;
+      once-only derivation refuses early termination and bonds. Setup once parts
+      in a rate-bearing option ignore its rate entitlements and retain no stops.
+      Payments kit:
+      92 tests, mypy, model/resource drift and producer vectors pass. A temporary
+      diagnostic exercised zero/bounded/unbounded caps, setup end, and payer/payee/
+      dispute rate entries with exact notice/treatment. Promotion remains closeout.
+- [x] 8.3 Extend the buyer's mandate check to the derived authorities, holds and dispute
       authority. Verify:
       `test_buyer.py` cases including the payee-as-stop-authority refusal.
-- [ ] 8.4 Emit `adjudication` from the storefront's first offered authority advertising the
+      Implemented: buyer re-derivation checks the complete per-part lifecycle
+      policy, including option-owned authority identity/account, hold, cap and
+      permissions. The kept buyer-policy assertion now exercises seller stop,
+      shortened hold, cap and reverse/extend substitutions as well as fee changes;
+      all 97 payments tests, typing, vectors and generated-resource checks pass.
+- [x] 8.4 Emit `adjudication` from the storefront's first offered authority advertising the
       option's mechanism (or one option per offered authority), publish nothing hosted with an
       empty list, and refuse incompatible authorities at publication, in the VM, bare-metal and
       API-credit storefronts; the API-credit buyer checks options against its list. Verify:
       application-integration tests per storefront for "An authority does not serve the payment
       mechanism", "A zero case hold is below the minimum", "No authority is available" and "An
       API-credit storefront publishes a hosted option".
+
+Implemented: all three storefront roots supply their offered authority lists and
+installed mediation interface to the shared builder. The first offered authority
+advertising payments supplies adjudication; empty policy emits no hosted option,
+and incompatible interfaces, windows/caps and missing compute deadlines refuse.
+API-credit buy/standalone negotiate filter exact registry-specific authority
+identities/params, and approval rechecks them. Publication clauses explicitly
+supply dispute_window_seconds; omission of case_hold_max_seconds is unbounded.
+Since one listing's option set serves all its destination registries, publication
+uses the ordered intersection of their resolved lists rather than importing one
+registry's defaults into another. A locally configured authority appears in each
+resolved list. The installed-wheel first-use entry point is
+`docs/attachments/hosted-lifecycle-policy/first_use.py`.
+Focused results: payments 97, VM storefront 1,189 unit and 501 integration,
+API-credit storefront 248 and buyer 35 pass. Bare-metal storefront has 521 passing
+cases plus the repaired snapshot-signing fixture case passing on focused rerun;
+all 522 pass in the final aggregate.
+All four new mediation dependencies and the e2e consumer were relocked. Mediation
+is included once in the publication manifest/workflow and release table, and the
+API-credit installation fixture builds its wheel. Release-tooling and deployment
+packaging pass after these dependency-closure updates; packaging,
+architecture, locks, hygiene and strict OpenSpec validation pass. The final full `make test` passes in 7m 2s with the shell-local Podman shim,
+including 1,848 release-tooling cases and Helm assertions. Final packet:
+`docs/attachments/hosted-lifecycle-policy/index.md`.
 
 Verification point: `kit/arkhai-payments` unit and vector suites; the three storefronts'
 application-integration suites; `make check-packaging` (vendored schema); `make test`.
@@ -725,12 +763,30 @@ Implements the design's dependency item "Snapshot-proof verification in SCM" and
 (authority records verified). Files: `kit/arkhai-payments/src/market_arkhai_payments/receipts.py`,
 `test-vectors/`, the receipt-kit fixture.
 
-- [ ] 9.1 Verify snapshot proofs against configured current/retiring receipt identities with validity
+- [x] 9.1 Verify snapshot proofs against configured current/retiring receipt identities with validity
       windows, embedded-receipt attestation and a caller-supplied minimum sequence; refuse
       unverified, cross-deal, mode-changed or regressing snapshots. Current-key snapshots may
       attest an embedded old receipt without discarding its original bytes.
       Verify: unit tests with a new snapshot vector and receipt-kit fixture for a valid,
       tampered and wrongly signed snapshot.
+
+Implemented: the shared snapshot frame/verifier checks configured current and
+bounded retiring identity pins at their validity instants, exact receipt/deal/
+mandate/mode binding and the caller's minimum event sequence. Current snapshots
+can attest an embedded configured historical receipt, retaining its proof.
+Receipt history is operator-configurable as receipt_identities, with explicit
+current service_identity membership. Buyer approval, seller receipt admission and
+fully-reversed classification verify snapshots before consuming their state;
+HTTP snapshot parsing does not coerce signed values. Seller consumers preserve
+an injectable per-agreement snapshot-verifier factory, defaulting to the shared
+rotation-aware verifier, so lifecycle adapters can share the same verification
+policy. Receipt fixtures reuse the
+production frame. Helm config schemas are regenerated. Payments' 97 existing
+cases, typing, resource drift and all producer vectors pass; temporary diagnostics
+cover tampered/wrong-key/mode/cursor and rotation paths, and the committed
+installed-wheel first-use script reproduces those observations. Permanent
+configuration docs describe the identity windows; normative promotion remains
+closeout. Final aggregate results are in the evidence packet.
 
 Verification point: `kit/arkhai-payments` unit and vector suites; `make test`. End-to-end: none.
 
@@ -1213,4 +1269,7 @@ The remaining D1–D15 destinations are listed in proposal.md and task 16.9.
 | D8 VM buyer end and second-precision lease effects | `openspec/specs/vm-storefront-fulfillment/spec.md` |
 | Ordered dispute preferences, local identity vetoes, identity-bound credential references and opt-in registry recommendations | `docs/development/DEPLOYMENT_AND_CONFIG.md#dispute-authority-preferences` and its registry descriptor section; payment kit README, seller quickstart and e2e runner guide. Normative settlement-configuration/registry-discovery spec deltas and lifecycle architecture promotion remain at reviewed closeout (16.9) |
 | Codec-owned common lifecycle query projections, absent-value semantics and same-option asset correlation | `openspec/specs/cli-query-language/spec.md` and `openspec/specs/settlement-configuration/spec.md` at closeout |
+| Per-part absolute ends, stop-relative dispute holds and exact rights-derived authority/cap derivation; setup once permissions remain independent of rate rights | `kit/arkhai-payments/README.md`; settlement-servicing spec/architecture and deal-lifecycle spec/architecture at reviewed closeout |
+| Hosted publication selects compatible offered authority projections; shared registry destinations use their ordered intersection; API-credit selection and approval check full accepted identities | `kit/arkhai-payments/README.md`; storefront-publication, settlement-configuration and buyer-orchestration spec deltas and lifecycle architecture at reviewed closeout |
+| Bounded current/retiring receipt identities and snapshot attestation/cursor verification before state consumption | `docs/development/DEPLOYMENT_AND_CONFIG.md#settlement-consumer-configuration-and-cutover`; settlement-servicing spec/architecture at reviewed closeout |
 | Lifecycle distributions participate in public publication with their declared dependency order | `docs/development/RELEASING.md` and `manifests/published-distributions.json` |

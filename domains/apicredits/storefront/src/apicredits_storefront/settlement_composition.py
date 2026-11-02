@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
+from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from market_core.schemas import settlement_option_schema
 from arkhai_apicredits.settlement import CreditsServiceClient
 from core_storefront.stage_log import stage_event
@@ -202,7 +203,11 @@ class ApiCreditsSettlementComposition:
         no artifact is returned; the readiness returned beside them says why,
         which the caller judges.
         """
-        merged_resources = {**self.mechanism_resources, **resources}
+        merged_resources = {
+            **self.mechanism_resources, **resources,
+            "dispute_authorities": self.disputes.for_publication(),
+            "dispute_interfaces": frozenset({MEDIATION_INTERFACE}),
+        }
         compiled = (
             [
                 compile_settlement_publication_clause(

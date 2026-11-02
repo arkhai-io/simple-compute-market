@@ -343,7 +343,8 @@ def register(credits_app: typer.Typer) -> None:
                     identity=identity, registry_urls=registry_urls,
                 )
                 selected_settlement = settlement_policy.select(
-                    listing_dict, expiration_unix=int(time.time()) + 3600,
+                    listing_dict,
+                    expiration_unix=int(time.time()) + 3600,
                 )
                 if selected_settlement is None:
                     raise ValueError(

@@ -10,6 +10,7 @@ from typing import Any
 from core_storefront.publication_runner import NoSettlementOption, PublicationPayload
 from market_core import SettlementStageTable
 from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
+from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from market_core.schemas import SettlementOption
 from .alkahest_lifecycle import alkahest_servicing
 from .settlement_stages import (
@@ -248,6 +249,8 @@ class BareMetalStorefrontSettlementComposition:
                 role="seller",
                 resources={
                     **self.resources,
+                    "dispute_authorities": self.disputes.for_publication(),
+                    "dispute_interfaces": frozenset({MEDIATION_INTERFACE}), "compute": True,
                     "publication_clause": clause,
                     "candidate": dict(candidate),
                     # The site the listing binding records, so a mechanism
