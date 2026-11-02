@@ -1,7 +1,7 @@
 export UV_PYTHON := $(or $(shell cat ../../.python-version 2>/dev/null),$(error ../../.python-version not found))
 DIST_DIR ?= ../../.dist
 
-.PHONY: build reinit test check-contract check-generated generate-models typecheck
+.PHONY: build reinit test check-contract check-generated generate-models typecheck demo
 build:
 	uv build --wheel --out-dir $(DIST_DIR)
 reinit:
@@ -15,4 +15,6 @@ check-generated:
 generate-models:
 	uv run python scripts/generate_models.py
 typecheck:
-	uv run mypy src --check-untyped-defs
+	uv run mypy src examples --check-untyped-defs
+demo: reinit
+	uv run --find-links $(DIST_DIR) python examples/first_use.py

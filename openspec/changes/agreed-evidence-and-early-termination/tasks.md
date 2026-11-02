@@ -605,13 +605,21 @@ paid-out money" (client side) and "Dispute writes are idempotent". Files: new
 
 - [x] 12.1 Vendor the published arkhai.mediation.v1 delivery_end revision with SOURCE provenance, installed schema/model/vector metadata APIs, shared signing fixtures, and the dispute-kit registration. The exact producer revision is recorded only in `kit/arkhai-mediation/schema/SOURCE.md`. Includes DeliveryEndClaim, SignedDeliveryEndClaim, Filing/Append.concurrence, ruling basis, respondent read models and both ed25519/eip191 canonical-frame vectors. Schema/record/claim vectors round-trip, reproduce signatures and verify from the built wheel; architecture, packaging, typing, model drift, comment hygiene and strict OpenSpec checks pass. Mapping/guard/netting vectors are preserved as producer data; SCM performs no monetary computation. No candidate or live service evidence is claimed. Tasks 12.3–12.5 no longer await publication but remain implementation work.
 
-- [ ] 12.2 Implement the adapter and client: file, append and read at the Agreement's origin with
+- [x] 12.2 Implement the adapter and client: file, append and read at the Agreement's origin with
       credentials bound by identity; build and validate free-form requests; return the authority's answers, per-part
       `held` / `not_held`, errors and `pending` as lifecycle outcomes; verify record entries.
       Verify: library-integration tests against the kit-owned vector-derived in-process mediation contract fake (no runnable tooling dependency) for "Two cases on one
       deal", "Parts differ", "A part was wholly reversed", "Payout wins against the extension",
       "A late case ends delivery" (filing half), "A filing's response is lost", "The case closes
       during the append" and "The claimant adds evidence" (payee claimant under mediation append authorization).
+      Implemented as a stateless async client and injected adapter, with an identity-bound
+      credential reference, signed record verification, stable operation-derived keys and
+      exact response-byte capture. The 12 library-integration cases, producer conformance,
+      model drift and mypy checks pass; the committed `make -C kit/arkhai-mediation demo`
+      exercises lost-response recovery and a payee claimant append. Architecture, packaging,
+      comment hygiene and pinned strict OpenSpec validation pass. No hosted target is used.
+      The typed contract/claim API is available; delivery-end intent mapping (12.3),
+      respondent client/polling (12.4) and receipt embedding (12.5) remain unchecked.
 
 - [ ] 12.3 Map the single delivery_end claim for either party through kit/arkhai-mediation, using 12.1's vendored schema. Sign/verify SignedDeliveryEndClaim against Agreement.seller and mandate.deal using the canonical identity frame and both schemes. Buyer filings carry receipt concurrence; seller filings remain cause=payee with no seller stop/reverse. Verify automatic receipt-backed payer claims, matching later concurrence, signature/digest/claim mismatch, missing/chosen payer entries, pre-start times and repeat mechanical rulings going to operators. Preserve notice/treatment and net accepted/pending/lost-response stops. Qualify cause=payee returned stops, held earnings, unserved non-setup once shares and capped penalty; cause=payer keeps non-setup once and pays no penalty; setup returns iff delivered=false in either cause. Only authority applies effects. Keep semantic filing/adoption identity; prior mechanical rulings force revision to operator, with prior effects resolved/netted before additional remedies.
 - [ ] 12.4 Add the adapter/client respondent read for GET /respondent?after=<cursor>&limit=n, its cases/next_after/has_more result and cursor persistence. In kit/deal-servicing poll each accepted authority with seller credentials: journal an exact SignedDeliveryEndClaim when ended_at/delivered/cause match durable available/end records, otherwise contesting items; append as mandate.to with stable key before advancing cursor. Any append answers the listing; restart must not lose an answer. Dead/non-SCM respondents stay triaged without a silence default. Verify unanswered/restart/append-close races and signed ruling basis values.
@@ -796,6 +804,7 @@ Planned destinations below; promotion is not performed during this design reconc
 The remaining D1–D15 destinations are listed in proposal.md and task 16.9.
 
 | Accepted decision | Permanent location |
+| Mediation owns installed published schema/models/vectors and marketplace claim framing; its stateless adapter only communicates with the exact Agreement authority, preserving aggregate monetary answers without computing remedies | `openspec/specs/deal-lifecycle/spec.md` and `architecture.md`, and `docs/development/ARCHITECTURE.md` kit areas at closeout (16.9) |
 |---|---|
 | D6 neutral authorization/evidence envelope, sole end-service billing-start intent; D8 cause classification, pre-start timing exception and revised-remedy netting | New `deal-lifecycle` spec/architecture and settlement-servicing spec/architecture at closeout |
 | D8 receipt-embedded SignedDeliveryEndClaim, buyer concurrence/stop retry and both CLI paths | `openspec/specs/buyer-orchestration/spec.md` and `architecture.md` |
