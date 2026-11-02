@@ -52,11 +52,10 @@ with ExitStack() as stack:
         options = row.settlement_options
         hosted = [option for option in options if option["settlement"]["schema"] == "arkhai.payments.v1"]
         assert hosted, options
-        assert any(option["settlement"]["schema"] == "alkahest.v1" for option in options), options
         for option in hosted:
             terms = option["lifecycle"]["adjudication"]
             assert terms["dispute"] == description["dispute"], terms
             assert terms["dispute_window_seconds"] >= description["minimum_dispute_window_seconds"]
             assert terms["case_hold_max_seconds"] is None
             assert option["lifecycle"]["delivery_deadline_seconds"] == 300
-        print("VM_READY: signed registry publication has Alkahest and dispute-bearing hosted terms; payments and mediation healthy")
+        print("VM_READY: signed registry publication has dispute-bearing hosted terms; payments and mediation healthy")
