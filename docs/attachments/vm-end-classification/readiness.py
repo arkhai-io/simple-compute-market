@@ -30,8 +30,8 @@ with ExitStack() as stack:
     seller = client(lane.storefront_seller_client)
     registry = client(lane.registry_client)
     provisioning = client(lane.provisioning_client)
-    capacity = client(lane.site_capacity_admin_client)
-    assert admin.get_health()["status"] == "ok"
+    capacity = lane.site_capacity_admin_client.__wrapped__()
+    assert admin.get_health().status == "ok"
     assert provisioning.get_system_status().status == "ok"
     with storefront_loops_held(admin):
         resource_id = "compute-e2e-lifecycle-readiness"
