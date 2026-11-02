@@ -161,16 +161,16 @@ management remained sound. The literal
 `e2e_bare_metal_bounded_cleanup` marker was not run. Frozen runtime review,
 CI, E2E, composed local validation and Helm validation passed on the reviewed
 candidate; this source revision changes workflow and Markdown only and passed
-147 focused tests, packaging/change checks and all 23 CI jobs. Task 4.3 remains
-open to reconcile those exact inputs and scopes with its formal pre-closeout
-and source joins. No identity ledger reset, force release or policy bypass was
+147 focused tests, packaging/change checks and all 23 CI jobs. Delegated
+technical triage now reconciles those exact inputs and scopes under task 4.3;
+independent pre-closeout review remains the next phase. No identity ledger reset, force release or policy bypass was
 used.
 
 
 - [x] 4.1 Complete the accepted equivalent normal-cycle observation: the shipped bare-metal buyer completed a real GPU rental and ordinary bounded reclaim; independent operator observations confirmed the tenant session/process/activity, account/home and covered working data/IPC were absent. The successor received a fresh UID and usable access but could not read predecessor data. The literal `e2e_bare_metal_bounded_cleanup` module was not run; raw host evidence and environment identifiers remain private.
 - [x] 4.2 Complete the accepted equivalent refusal/retry observation: a nonce-scoped foreign descendant caused actual cleanup refusal, held capacity and automatic notification. Repairing only that fixture allowed the same ordinary job to retry once and complete; sentinels, management and final inventory were verified. This is deployed observation, not helper/mock inference or force-release.
-- [ ] 4.3 Reconcile the completed frozen-candidate review and validation evidence with the source and deployed observations before pre-closeout: CI's 23 jobs, all three E2E lanes, composed local validation and Helm validation passed with their recorded scopes; the current workflow/Markdown-only revision passed 147 focused tests and packaging/change checks. The deployed 4.1–4.2 observations use the accepted method and are recorded above. Preserve that evidence binding and obtain the remaining formal pre-closeout/source joins per workflow. Resolve accepted findings and rerun affected checks; freeze a new source round if code changes. Do not describe the composed local results as one successful `make test` invocation or treat helper checks as physical evidence.
-- [x] 4.4 Before pre-closeout review, fix comments/docstrings to describe current invariants and inspect every added/touched local import, moving it to module level unless a verified reason justifies it. Run real affected suites after moves, comment hygiene and packaging. Complete the classification/promotion map in `design.md`; current-state permanent prose is written in closeout only. **Done:** the independent helper and combined integration reviews found no remaining source blocker; helper imports are module-level, and frozen cleanup implementation inputs are unchanged since review. Current `make check-comment-hygiene` passes. The design promotion record maps D1–D8 to the owning specs, architecture, operator documentation, testing guidance and readiness index. No import move or affected-suite rerun was needed. Task 4.3 and formal workflow gates remain open.
+- [x] 4.3 Reconcile the completed frozen-candidate review and validation evidence with the source and deployed observations before pre-closeout: CI's 23 jobs, all three E2E lanes, composed local validation and Helm validation passed with their recorded scopes; the current workflow/Markdown-only revision passed 147 focused tests and packaging/change checks. The deployed 4.1–4.2 observations use the accepted method and are recorded above. Preserve that evidence binding and obtain the remaining formal pre-closeout/source joins per workflow. Resolve accepted findings and rerun affected checks; freeze a new source round if code changes. Do not describe the composed local results as one successful `make test` invocation or treat helper checks as physical evidence. **Done:** the component implementation reviews, current-candidate validation bindings and separate deployed observations are now reconciled by delegated technical triage. Component commits and historical failures remain distinct; the current candidate passed all 23 CI jobs. Independent pre-closeout review remains the required next phase and is not claimed complete by this record.
+- [x] 4.4 Before pre-closeout review, fix comments/docstrings to describe current invariants and inspect every added/touched local import, moving it to module level unless a verified reason justifies it. Run real affected suites after moves, comment hygiene and packaging. Complete the classification/promotion map in `design.md`; current-state permanent prose is written in closeout only. **Done:** the independent helper and combined integration reviews found no remaining source blocker; helper imports are module-level, and frozen cleanup implementation inputs are unchanged since review. Current `make check-comment-hygiene` passes. The design promotion record maps D1–D8 to the owning specs, architecture, operator documentation, testing guidance and readiness index. No import move or affected-suite rerun was needed. The implementation evidence join is complete; independent pre-closeout review and closeout remain.
 
 ### Section 4 source preparation
 
@@ -197,8 +197,8 @@ seed-observed state flag. Baseline
 real-lane execution without it remains a single lifecycle. At the source handoff,
 source checks were distinct from deployed qualification. The accepted equivalent
 deployed observations now complete 4.1 and 4.2; the literal marker remains unrun.
-Frozen runtime review and validation passed, as recorded in 4.3; formal workflow
-joins remain open there.
+Frozen runtime review and validation passed, and the delegated implementation
+join is recorded in 4.3. Pre-closeout review and promotion remain separate.
 
 ### Section 4 source handoff
 
@@ -265,7 +265,8 @@ broad section review, personal owner reading or formal join is claimed.
 At this earlier source handoff, tasks 4.1–4.3 were unchecked; the mock and
 component evidence alone did not qualify a physical target. Since then, the
 accepted method completed deployed observations 4.1–4.2, while the dedicated
-marker remains unrun and 4.3 remains open for formal source/pre-closeout joins.
+marker remains unrun; subsequent delegated source/validation reconciliation is
+recorded in 4.3, with independent pre-closeout review still required.
 Owed by validation: `tests.yml`'s `test · test-e2e-unit` job must run the harness
 unit suite; pipeline and physical evidence remain separately scoped. Permanent
 policy/qualification promotion remains closeout work.
