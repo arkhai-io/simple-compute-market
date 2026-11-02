@@ -86,8 +86,14 @@ class LifecycleClient:
         prior = self._end_receipts.get((negotiation_id, key))
         if prior is not None:
             previous = EndDeliveryAcknowledgement.model_validate_json(prior.response_body)
+            claim_withdrawn = (
+                acknowledgement.signed_delivery_end_claim is None
+                and acknowledgement.selected_end != previous.selected_end
+                and acknowledgement.selected_end.ended_at <= previous.selected_end.ended_at
+            )
             if (previous.receipt_at != acknowledgement.receipt_at
-                    or previous.signed_delivery_end_claim != acknowledgement.signed_delivery_end_claim):
+                    or (previous.signed_delivery_end_claim != acknowledgement.signed_delivery_end_claim
+                        and not claim_withdrawn)):
                 raise LifecycleClientError("end retry changes the durable receipt or claim")
         self._end_receipts[negotiation_id, key] = receipt
         return acknowledgement
