@@ -157,14 +157,14 @@ def settlement_clause_matches(
         descriptor = descriptors[comparison.field]
         actual: Any
         if comparison.field == "mechanism":
-            actual = option.mechanism
+            actual = option.settlement_schema
         elif comparison.field == "asset":
-            actual = option.asset
+            actual = option.price_asset
         elif comparison.field == "option_id":
             actual = option.option_id
         else:
             binding = contributed[comparison.field]
-            if option.mechanism != binding.mechanism_id:
+            if option.settlement_schema != binding.mechanism_id:
                 return False
             actual = binding.field.projector(option)
             if actual is None or (
@@ -197,7 +197,7 @@ def select_settlement_candidates(
     decoded = tuple(SettlementOption.model_validate(option) for option in advertised)
     by_mechanism: dict[str, list[SettlementOption]] = {}
     for option in decoded:
-        by_mechanism.setdefault(option.mechanism, []).append(option)
+        by_mechanism.setdefault(option.settlement_schema, []).append(option)
 
     candidates: list[SettlementCandidate] = []
     for registration in registry.ordered_registrations(config, role="buyer"):

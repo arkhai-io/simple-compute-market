@@ -119,7 +119,7 @@ def _with_agreement(
     if acceptance.accepted_at is None or acceptance.agreement.start_utc is None:
         raise NegotiationStateError("accepted Agreement lacks fixed acceptance timestamps")
     plan = artifacts.get("settlement_plan")
-    asset = settlement.asset if settlement is not None else None
+    asset = settlement.price_asset if settlement is not None else None
     if asset is None and isinstance(plan, Mapping):
         obligations = plan.get("obligations")
         if isinstance(obligations, list) and obligations and isinstance(obligations[0], Mapping):
@@ -157,8 +157,8 @@ def _with_agreement(
     agreement_bytes = agreement.model_dump_json(exclude_none=True).encode("utf-8")
     artifacts["agreement"] = agreement
     artifacts["agreement_bytes"] = base64.b64encode(agreement_bytes).decode("ascii")
-    if settlement is not None and settlement.mechanism in data_dispatch:
-        data = data_dispatch[settlement.mechanism](json.loads(agreement_bytes))
+    if settlement is not None and settlement.settlement_schema in data_dispatch:
+        data = data_dispatch[settlement.settlement_schema](json.loads(agreement_bytes))
         if data is not None:
             artifacts["settlement_data"] = dict(data)
     return artifacts
@@ -599,7 +599,7 @@ def build_bare_metal_negotiation_runtime(
                 option
                 for option in options
                 if option.option_id == selection.option_id
-                and option.mechanism == selection.mechanism
+                and option.settlement_schema == selection.mechanism
             ),
             None,
         )
@@ -676,8 +676,8 @@ def build_bare_metal_negotiation_runtime(
             if built is not None and built.amount is not None
             else proposed_amount
             if proposed_amount is not None
-            else compute_rate_total(selected_option.rates[0], message.duration_seconds)
-            if selected_option.rates and selected_option.rates[0].per in {"hour"}
+            else compute_rate_total(selected_option.price_rates[0], message.duration_seconds)
+            if selected_option.price_rates and selected_option.price_rates[0].per in {"hour"}
             else 0
         )
         accepted_proposal = {

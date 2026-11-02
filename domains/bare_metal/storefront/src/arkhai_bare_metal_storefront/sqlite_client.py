@@ -37,7 +37,7 @@ from market_core import (
     SettlementEvidence,
     validate_domain_contract,
 )
-from market_core.schemas import Agreement
+from market_core.schemas import AGREEMENT_SETTLEMENT_SCHEMA_PATH, Agreement
 from market_identity import Identity
 from market_pool_overrides import pool_override_migrations
 from market_settlement_runtime import settlement_migrations
@@ -123,13 +123,13 @@ class SQLiteClient(CoreSQLiteClient):
                     WHERE t.terminal_state = 'success'
                       AND t.agreement_bytes IS NOT NULL
                       AND CASE WHEN json_valid(CAST(t.agreement_bytes AS TEXT))
-                          THEN json_extract(CAST(t.agreement_bytes AS TEXT), '$.settlement.mechanism')
+                          THEN json_extract(CAST(t.agreement_bytes AS TEXT), ?)
                           END = ?
                       AND (r.status IN ('accepted', 'refunding') OR (r.status = 'settlement_verified' AND l.negotiation_id IS NULL))
                     ORDER BY t.created_at ASC, t.negotiation_id ASC
                     LIMIT ?
                     """,
-                    (mechanism, limit),
+                    (AGREEMENT_SETTLEMENT_SCHEMA_PATH, mechanism, limit),
                 ).fetchall()
             return [str(row[0]) for row in rows]
 
@@ -851,7 +851,7 @@ class SQLiteClient(CoreSQLiteClient):
         agreement = Agreement.model_validate_json(agreement_bytes)
         if agreement.settlement is None:
             raise ValueError("accepted Agreement has no selected settlement")
-        mechanism = agreement.settlement.mechanism
+        mechanism = agreement.settlement.settlement_schema
         agreement_sha256 = hashlib.sha256(agreement_bytes).hexdigest()
         evidence_json = EvidencePayload(
             agreement_sha256=agreement_sha256

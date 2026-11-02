@@ -369,7 +369,7 @@ def _accepted_selection_artifacts(
         raise OfferUnfulfillableError("selected_settlement_option_not_exact") from exc
     if (
         accepted.option_id != advertised_option.option_id
-        or accepted.mechanism != advertised_option.mechanism
+        or accepted.mechanism != advertised_option.settlement_schema
     ):
         raise OfferUnfulfillableError("settlement_selection_not_exact")
     if accepted.mechanism not in dispatch:
@@ -529,7 +529,7 @@ def _with_agreement(
         else None
     )
     plan = artifacts.get("settlement_plan")
-    asset = settlement.asset if settlement is not None else None
+    asset = settlement.price_asset if settlement is not None else None
     if asset is None and isinstance(plan, Mapping):
         obligations = plan.get("obligations")
         if isinstance(obligations, list) and obligations and isinstance(obligations[0], Mapping):
@@ -607,7 +607,7 @@ def _build_response_artifacts(
         if agreement.settlement is None:
             raise OfferUnfulfillableError("accepted_settlement_unavailable")
         try:
-            stage = domain.settlement.seller_stages[agreement.settlement.mechanism]
+            stage = domain.settlement.seller_stages[agreement.settlement.settlement_schema]
             data = stage.accepted_data(agreement, payments_stage, artifacts=artifacts)
         except (KeyError, ValueError) as exc:
             raise OfferUnfulfillableError(str(exc)) from exc

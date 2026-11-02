@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 
 [[package]]
@@ -142,6 +142,7 @@ name = "arkhai-kit-policy"
 version = "0.6.0"
 source = { registry = "../../.dist" }
 dependencies = [
+    { name = "arkhai-core" },
     { name = "arkhai-kit-identity" },
     { name = "pydantic" },
     { name = "typer" },

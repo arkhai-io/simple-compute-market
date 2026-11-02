@@ -28,6 +28,7 @@ from __future__ import annotations
 import logging
 import re
 
+from market_core.schemas import settlement_option_schema
 from market_identity import Identity, IdentityScheme
 from market_alkahest.schemas import (
     EscrowProposal,
@@ -149,7 +150,7 @@ def api_credits_round_zero_guard(
                 for option in options
                 if isinstance(option, dict)
                 and option.get("option_id") == option_id
-                and option.get("mechanism") == mechanism
+                and settlement_option_schema(option) == mechanism
             ]
             if len(matches) != 1:
                 raise ValueError("selection does not exact-match one listing option")

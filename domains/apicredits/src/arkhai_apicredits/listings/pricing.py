@@ -17,7 +17,11 @@ from fractions import Fraction
 from typing import Any
 
 from arkhai_apicredits.listings.models import resource_is_api_credits
-from market_core.schemas import SettlementOption, SettlementSelection
+from market_core.schemas import (
+    SettlementOption,
+    SettlementSelection,
+    settlement_option_rates,
+)
 from market_policy.scalar_policies import selected_settlement_artifact
 
 _MAX_BASE_UNIT_AMOUNT = 2**256 - 1
@@ -61,11 +65,11 @@ def selected_unit_price(
         option
         for option in _settlement_options(order)
         if option.option_id == selection.option_id
-        and option.mechanism == selection.mechanism
+        and option.settlement_schema == selection.mechanism
     ]
     if len(matches) != 1:
         raise ValueError("settlement selection does not exact-match one listing option")
-    amount_rates = [rate for rate in matches[0].rates if rate.field == "amount"]
+    amount_rates = [rate for rate in matches[0].price_rates if rate.field == "amount"]
     if len(amount_rates) != 1:
         raise ValueError("selected API-credit option requires one amount rate")
     rate = amount_rates[0]
@@ -75,7 +79,7 @@ def selected_unit_price(
 
 
 def _primary_rate_value(entry: dict[str, Any]) -> int | None:
-    rates = entry.get("rates")
+    rates = settlement_option_rates(entry) if "option_id" in entry else entry.get("rates")
     if not isinstance(rates, list) or not rates:
         return None
     first = rates[0]
@@ -92,7 +96,7 @@ def _primary_rate_value(entry: dict[str, Any]) -> int | None:
 def _selected_option_rate(option: Mapping[str, Any]) -> int | None:
     """A selected settlement option's per-credit amount, or None if it has none."""
     parsed = SettlementOption.model_validate(option)
-    amount_rates = [rate for rate in parsed.rates if rate.field == "amount"]
+    amount_rates = [rate for rate in parsed.price_rates if rate.field == "amount"]
     if not amount_rates:
         return None
     if len(amount_rates) != 1:

@@ -87,7 +87,7 @@ def settlement_evidence(
         "listing_id": agreement.listing_id,
     }
     evidence = SettlementEvidence(
-        agreement.negotiation_id, agreement.settlement.mechanism, reference, status,
+        agreement.negotiation_id, agreement.settlement.settlement_schema, reference, status,
         {"kind": "api_credits.settlement-evidence.v1", "schema_version": 1,
          "agreement_digest": hashlib.sha256(raw).hexdigest(),
          "source": dict(source), "delivery": delivery},
@@ -230,7 +230,7 @@ def build_api_credit_accepted_artifacts(
         )
         artifacts["_agreement_settlement_option"] = option.model_dump(mode="json")
         artifacts["settlement_selection"] = SettlementSelection(
-            mechanism=option.mechanism, option_id=option.option_id,
+            mechanism=option.settlement_schema, option_id=option.option_id,
             expiration_unix=accepted.get("expiration_unix"),
         ).model_dump(mode="json", exclude_none=True)
     return artifacts
@@ -649,7 +649,7 @@ class AlkahestSellerStage:
             thread = await db.load_negotiation_thread_row(negotiation_id=params.negotiation_id)
             agreement, raw = accepted_agreement(thread)
             evidence.validate_identity(
-                negotiation_id=prepared.agreement_ref, mechanism=agreement.settlement.mechanism,
+                negotiation_id=prepared.agreement_ref, mechanism=agreement.settlement.settlement_schema,
                 settlement_ref=prepared.mechanism_ref,
             )
             if evidence.evidence["agreement_digest"] != hashlib.sha256(raw).hexdigest():

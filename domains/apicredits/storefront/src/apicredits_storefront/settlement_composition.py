@@ -7,6 +7,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from market_core.schemas import settlement_option_schema
 from arkhai_apicredits.settlement import CreditsServiceClient
 from core_storefront.stage_log import stage_event
 from market_alkahest import (
@@ -94,7 +95,7 @@ class ApiCreditsSettlementComposition:
     seller_wallet_address: str = ""
 
     def accepted_settlement_artifacts(self, agreement: Mapping[str, Any]) -> dict[str, Any]:
-        mechanism = agreement["settlement"]["mechanism"]
+        mechanism = settlement_option_schema(agreement["settlement"])
         return SELLER_STAGES[mechanism].agreement_artifacts(agreement, self)
 
     def payment_service(self, db: Any) -> Any:

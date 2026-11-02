@@ -238,7 +238,7 @@ def listing_list(
             accepted_display
             if "\n" in accepted_display
             else shorten(accepted_display, 120),
-            f"{selected.mechanism} {selected.asset}",
+            f"{selected.settlement_schema} {selected.price_asset}",
             demands_display
             if "\n" in demands_display
             else shorten(demands_display, 120),

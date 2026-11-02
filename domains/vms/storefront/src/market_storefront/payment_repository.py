@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from market_core import SettlementEvidence
+from market_core.schemas import AGREEMENT_SETTLEMENT_SCHEMA_PATH
 
 from market_storefront.services.vm_fulfillment_planner import (
     VERIFIED_EVIDENCE_STATUSES,
@@ -95,7 +96,7 @@ class VmSettlementRepository:
                     WHERE t.terminal_state = 'success'
                       AND t.agreement_bytes IS NOT NULL
                       AND CASE WHEN json_valid(CAST(t.agreement_bytes AS TEXT))
-                          THEN json_extract(CAST(t.agreement_bytes AS TEXT), '$.settlement.mechanism')
+                          THEN json_extract(CAST(t.agreement_bytes AS TEXT), ?)
                           END = ?
                       AND (
                         e.status = 'refunding'
@@ -107,7 +108,7 @@ class VmSettlementRepository:
                     ORDER BY t.created_at ASC, t.negotiation_id ASC
                     LIMIT ?
                     """,
-                    (mechanism, limit),
+                    (AGREEMENT_SETTLEMENT_SCHEMA_PATH, mechanism, limit),
                 ).fetchall()
             return [str(row[0]) for row in rows]
 

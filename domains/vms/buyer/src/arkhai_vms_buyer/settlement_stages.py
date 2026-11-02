@@ -134,7 +134,7 @@ class AlkahestBuyerStage:
         return validate
 
     def accepted_entry(self, selected):
-        value = selected.option.params.get("accepted_escrow")
+        value = selected.option.settlement_params.get("accepted_escrow")
         if not isinstance(value, Mapping):
             raise ValueError("selected Alkahest option has no accepted escrow payload")
         return dict(value)

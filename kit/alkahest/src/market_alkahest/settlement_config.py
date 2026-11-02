@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from market_core.schemas import settlement_option_schema, settlement_option_params
 from market_settlement_runtime import (
     ComparisonOperator,
     FieldDescriptor,
@@ -859,9 +860,9 @@ def alkahest_buyer_compatibility(
     public_context: Mapping[str, Any],
 ) -> bool:
     config = AlkahestSettlementConfig.model_validate(section)
-    if not config.enabled or _value(option, "mechanism") != ALKAHEST_MECHANISM_ID:
+    if not config.enabled or settlement_option_schema(option) != ALKAHEST_MECHANISM_ID:
         return False
-    params = _value(option, "params", {})
+    params = settlement_option_params(option)
     escrow = params.get("accepted_escrow", {}) if isinstance(params, Mapping) else {}
     chain_name = _value(escrow, "chain_name") or _value(escrow, "chain")
     allowed = public_context.get("chains")
@@ -871,7 +872,7 @@ def alkahest_buyer_compatibility(
 
 
 def _alkahest_escrow(option: Any) -> Mapping[str, Any] | None:
-    params = _value(option, "params", {})
+    params = settlement_option_params(option)
     if not isinstance(params, Mapping):
         return None
     escrow = params.get("accepted_escrow")

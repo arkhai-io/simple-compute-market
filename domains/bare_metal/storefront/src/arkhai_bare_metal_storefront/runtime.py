@@ -399,7 +399,7 @@ class BareMetalStorefrontRuntime:
         agreement = Agreement.model_validate_json(thread["agreement_bytes"])
         if agreement.settlement is None:
             raise RuntimeError("accepted Agreement has no settlement selection")
-        mechanism = agreement.settlement.mechanism
+        mechanism = agreement.settlement.settlement_schema
         if record.obligation.get("mechanism") != mechanism:
             raise RuntimeError(
                 "serviced obligation names another mechanism than its Agreement"
@@ -441,7 +441,7 @@ class BareMetalStorefrontRuntime:
             accepted = Agreement.model_validate_json(thread["agreement_bytes"])
             if accepted.settlement is None:
                 raise ValueError("accepted Agreement has no settlement selection")
-            self.domain.settlement.seller_stages[accepted.settlement.mechanism]
+            self.domain.settlement.seller_stages[accepted.settlement.settlement_schema]
             plan = SettlementPlan.model_validate(thread.get("settlement_plan"))
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError(
@@ -455,7 +455,7 @@ class BareMetalStorefrontRuntime:
             or buyer != Identity.model_validate(thread.get("buyer_principal"))
             or seller != Identity.model_validate(thread.get("seller_principal"))
             or len(plan.obligations) != 1
-            or plan.obligations[0].mechanism != accepted.settlement.mechanism
+            or plan.obligations[0].mechanism != accepted.settlement.settlement_schema
             or Identity.model_validate(plan.obligations[0].payer_principal) != buyer
             or Identity.model_validate(plan.obligations[0].claimant_principal) != seller
         ):

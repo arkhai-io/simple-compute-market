@@ -39,6 +39,7 @@ from market_policy.scalar_policies import (  # noqa: F401 — re-exports
     _peer_proposal,
     _proposal_requires_exact_amount,
     _set_proposal_amount,
+    _settlement_option_for_selection,
     format_wire_amount,
     parse_wire_amount,
     accept_exact_listing_middleware,
@@ -134,17 +135,7 @@ def round_zero_opening_guard(
                 or expiration_unix <= 0
             ):
                 raise ValueError("selection expiration is invalid")
-            options = _loads_json_list(listing.get("settlement_options"))
-            matched = next(
-                (
-                    option
-                    for option in options
-                    if isinstance(option, dict)
-                    and option.get("option_id") == option_id
-                    and option.get("mechanism") == mechanism
-                ),
-                None,
-            )
+            matched = _settlement_option_for_selection(listing, proposal)
             if matched is None:
                 raise ValueError("selection does not exact-match a listing option")
             context.intermediate["accepted_settlement_selection"] = dict(selection)

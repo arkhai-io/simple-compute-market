@@ -44,7 +44,7 @@ def _accepted_stage(thread: Any) -> tuple[Any, Any]:
         agreement, _raw = accepted_agreement(thread or {})
     except (KeyError, TypeError, ValueError) as exc:
         raise HTTPException(409, "accepted Agreement is unavailable or invalid") from exc
-    stage = SELLER_STAGES.get(agreement.settlement.mechanism)
+    stage = SELLER_STAGES.get(agreement.settlement.settlement_schema)
     if stage is None:
         raise HTTPException(400, "unsupported accepted settlement mechanism")
     return agreement, stage
@@ -68,7 +68,7 @@ class SettleController:
         agreement, stage = _accepted_stage(thread)
         if Identity.model_validate(agreement.buyer) != body.buyer_principal or Identity.model_validate(agreement.seller) != signer.identity:
             raise HTTPException(403, "settlement parties differ from accepted Agreement")
-        if body.settlement_mechanism is not None and body.settlement_mechanism != agreement.settlement.mechanism:
+        if body.settlement_mechanism is not None and body.settlement_mechanism != agreement.settlement.settlement_schema:
             raise HTTPException(400, "settlement mechanism conflicts with accepted Agreement")
         return stage, {
             "db": self._db, "composition": composition, "coordinator": self._settlement_coordinator,

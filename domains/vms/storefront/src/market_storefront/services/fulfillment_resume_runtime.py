@@ -22,6 +22,7 @@ from compute_provisioning_contracts import (
     FulfillmentRequestBody,
     FulfillmentScheduleRequest,
 )
+from market_core.schemas import settlement_option_schema
 from market_capacity_publication import CapacityEffects, PublicationBinding
 from market_core import SettlementEvidence, VersionedEnvelope
 from market_fulfillment import (
@@ -603,7 +604,7 @@ async def resume_incomplete_fulfillments_once(
             ):
                 continue
             agreement = json.loads(thread["agreement_bytes"])
-            stage = composition.seller_stages[agreement["settlement"]["mechanism"]]
+            stage = composition.seller_stages[settlement_option_schema(agreement["settlement"])]
             await stage.recover_evidence(
                 evidence=evidence, thread=thread, composition=composition, db=db
             )

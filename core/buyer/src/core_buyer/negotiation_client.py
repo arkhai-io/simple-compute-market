@@ -407,12 +407,12 @@ def _validate_agreement_acceptance(
         selected = agreement.settlement
         if selected is None or (
             selected.option_id != expected_selection.option_id
-            or selected.mechanism != expected_selection.mechanism
+            or selected.settlement_schema != expected_selection.mechanism
         ):
             raise RuntimeError("seller Agreement differs from selected settlement option")
         if advertised_option is not None and selected != advertised_option:
             raise RuntimeError("seller Agreement changed the advertised settlement option")
-        if agreement.asset != selected.asset:
+        if agreement.asset != selected.price_asset:
             raise RuntimeError("seller Agreement asset differs from its selected option")
 
 def _validate_selection_echo(
@@ -461,7 +461,7 @@ def _option_bargains_amount(option: SettlementOption) -> bool:
     ``nativeAmount``, say), or with none, is take-it-or-leave-it, so its
     acceptance carries no negotiated amount.
     """
-    return any(rate.field == "amount" for rate in option.rates)
+    return any(rate.field == "amount" for rate in option.price_rates)
 
 
 def _validate_settlement_acceptance(
@@ -592,26 +592,26 @@ def _validate_settlement_acceptance(
     assert advertised_option is not None
     if (
         advertised_option.option_id != expected_selection.option_id
-        or advertised_option.mechanism != expected_selection.mechanism
+        or advertised_option.settlement_schema != expected_selection.mechanism
     ):
         raise RuntimeError(
             "buyer settlement selection does not identify the advertised option"
         )
-    if obligation.asset != advertised_option.asset:
+    if obligation.asset != advertised_option.price_asset:
         raise RuntimeError(
             "seller settlement_plan asset differs from the advertised option"
         )
     if validate_advertised_plan is not None:
         validate_advertised_plan(plan)
         return
-    expected_params = dict(advertised_option.params)
+    expected_params = dict(advertised_option.settlement_params)
     expected_params["payer_principal"] = buyer_principal.model_dump(mode="json")
     expected_params["claimant_principal"] = reply_seller.model_dump(mode="json")
     if obligation.params != expected_params:
         raise RuntimeError(
             "seller settlement_plan params differ from the advertised option"
         )
-    condition = advertised_option.params.get("condition")
+    condition = advertised_option.settlement_params.get("condition")
     expected_conditions = [dict(condition)] if isinstance(condition, Mapping) else []
     # service_terms are deliberately not compared against the advertised
     # option: they carry seller service context established during the
@@ -1009,7 +1009,7 @@ def negotiate_with_seller(
     if advertised_option is not None and expected_selection is not None:
         if (
             advertised_option.option_id != expected_selection.option_id
-            or advertised_option.mechanism != expected_selection.mechanism
+            or advertised_option.settlement_schema != expected_selection.mechanism
         ):
             raise RuntimeError(
                 "buyer settlement selection does not identify the advertised option"

@@ -12,6 +12,7 @@ from typing import Any
 
 from apicredits_storefront.settlement_composition import SELLER_STAGES
 from apicredits_storefront.settlement_stages import build_api_credit_accepted_artifacts
+from market_core.schemas import settlement_option_schema
 from market_alkahest.proposals import (
     ReleaseConditionError,
     SettlementPlanMaterializationError,
@@ -275,7 +276,7 @@ def _selected_policy_state(
             continue
         if (
             raw_option.get("option_id") == selection.option_id
-            and raw_option.get("mechanism") == selection.mechanism
+            and settlement_option_schema(raw_option) == selection.mechanism
         ):
             try:
                 matches.append(SettlementOption.model_validate(raw_option))
@@ -410,7 +411,7 @@ def _accepted_selection_artifacts(
     advertised = SettlementOption.model_validate(option)
     if (
         accepted.option_id != advertised.option_id
-        or accepted.mechanism != advertised.mechanism
+        or accepted.mechanism != advertised.settlement_schema
     ):
         raise OfferUnfulfillableError("settlement_selection_not_exact")
     stage = SELLER_STAGES.get(accepted.mechanism)
@@ -508,7 +509,7 @@ def _with_agreement(
         else None
     )
     plan = artifacts.get("settlement_plan")
-    asset = settlement.asset if settlement is not None else None
+    asset = settlement.price_asset if settlement is not None else None
     if asset is None and isinstance(plan, Mapping):
         obligations = plan.get("obligations")
         if (
@@ -557,7 +558,7 @@ def _with_agreement(
     if settlement is not None:
         builder = settlement_artifacts_builder
         if builder is None:
-            stage = SELLER_STAGES[settlement.mechanism]
+            stage = SELLER_STAGES[settlement.settlement_schema]
             builder = lambda accepted: stage.agreement_artifacts(accepted, None)
         data = builder(agreement.model_dump(mode="json", exclude_none=True))
         if data:

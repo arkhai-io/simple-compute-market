@@ -31,7 +31,7 @@ def buyer_stage(agreement: Any) -> Any:
     if accepted.settlement is None:
         raise ValueError("accepted Agreement has no settlement option")
     try:
-        return BUYER_STAGES[accepted.settlement.mechanism]
+        return BUYER_STAGES[accepted.settlement.settlement_schema]
     except KeyError as exc:
         raise ValueError("unsupported accepted API-credit settlement mechanism") from exc
 

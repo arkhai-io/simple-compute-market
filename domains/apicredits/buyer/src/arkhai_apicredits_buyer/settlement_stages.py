@@ -105,7 +105,7 @@ class AlkahestBuyerStage:
         options = [
             option for _registration, option in settlement_policy.compatible_options(
                 listing.get("settlement_options") or (),
-            ) if option.mechanism == selected.selection.mechanism
+            ) if option.settlement_schema == selected.selection.mechanism
         ]
         constrained = dict(listing)
         constrained["accepted_escrows"] = [self.accepted_entry(
@@ -126,13 +126,13 @@ class AlkahestBuyerStage:
             if token_contract:
                 message += f" with token {token_contract}"
             raise ValueError(message + ".")
-        option = next(option for option in options if option.params["accepted_escrow"] == entry)
+        option = next(option for option in options if option.settlement_params["accepted_escrow"] == entry)
         return replace(selected, option=option, selection=selected.selection.model_copy(
             update={"option_id": option.option_id},
         ))
 
     def accepted_entry(self, selected: Any) -> dict[str, Any]:
-        entry = selected.option.params.get("accepted_escrow")
+        entry = selected.option.settlement_params.get("accepted_escrow")
         if not isinstance(entry, Mapping):
             raise ValueError("selected Alkahest option has no accepted escrow payload")
         return dict(entry)

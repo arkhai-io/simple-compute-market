@@ -809,7 +809,7 @@ def make_settle_hook(
             raise ValueError("accepted work has no Agreement settlement option")
         if agreement.negotiation_id != outcome.negotiation_id:
             raise ValueError("accepted Agreement changed negotiation identity")
-        mechanism = agreement.settlement.mechanism
+        mechanism = agreement.settlement.settlement_schema
         try:
             stage = stages[mechanism]
         except KeyError as exc:
