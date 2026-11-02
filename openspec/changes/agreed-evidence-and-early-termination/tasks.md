@@ -1100,7 +1100,7 @@ documentation only; a part needing code returns the change to implementation.
       and the campaign graph (`spot-deals-through-arkhai-payments`, `move-settle-out-of-core`,
       `automate-seller-spot` build on it), including the folded buyer-end/report boundary and
       its delivery/deadline dependents; run `make check-change-index`.
-- [ ] 16.7 **Packaging.** Run `make check-packaging` and `make
+- [x] 16.7 **Packaging.** Run `make check-packaging` and `make
       check-architecture-change CHANGE=agreed-evidence-and-early-termination` and resolve every
       failure; no architecture exception row may remain owned by this change.
 - [ ] 16.8 **End-to-end pipeline.** Record the pipeline run, its result, and that `e2e_deal`,
@@ -1197,6 +1197,11 @@ Once-only qualification is not rate/ruling-execution or real-host qualification.
   buyer-end/report boundary, delivery/deadline consumers, settle extraction and
   seller automation. Dependency columns remain intact until archive cleanup.
   `make check-change-index` passes.
+
+- 16.7: fresh-wheelhouse `make check-packaging` passes (lock/install/Python/
+  layout and layer/scope/dependency/kind checks); `make check-architecture-change
+  CHANGE=agreed-evidence-and-early-termination` confirms no owned exception or
+  override. `make check-agent-skills` also passes. No package or code edit required.
 
 ## Design promotion record
 
