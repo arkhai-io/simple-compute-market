@@ -155,7 +155,9 @@ if the existing tests cannot express the document boundary cleanly.
   `make -C domains/bare_metal/storefront test`. Record unit versus application
   integration evidence accurately and confirm no test-only production hooks or
   sleeps were introduced. End-to-end: `e2e_bare_metal_mock_deal`, including
-  publication, authenticated evidence resolution, and subsequent collection;
+  publication and authenticated typed evidence resolution; collection regression
+  coverage belongs separately to the local application integration test in
+  `domains/bare_metal/storefront/tests/test_alkahest_lifecycle.py`;
   update its attribute reads only if needed for the reviewed facade, without
   changing its hold/step discipline. Pipeline execution is validation evidence,
   not a local test claimed here.
@@ -217,7 +219,7 @@ if the existing tests cannot express the document boundary cleanly.
   persistence test. OpenSpec notes and ignored build/run outputs are excluded.
   No production source changed after the final component suites started.
 - End-to-end remains `e2e_bare_metal_mock_deal`: publication, authenticated
-  evidence resolution and subsequent collection, with its existing field reads
+  typed evidence resolution, with its existing field reads
   and hold/step discipline unchanged. No local suite is claimed as deployed or
   real-purchase qualification. Owed by validation: none beyond ordinary local,
   Helm, supported CI and pipeline validation; no extra workflow-only job.
@@ -372,7 +374,8 @@ these enforce the settled strict-v1 grammar and deterministic test ordering.
   this final installed check; their prior unchanged behavioral executions remain
   baseline evidence rather than fresh corrected-wheel full-suite claims.
 - End-to-end remains `e2e_bare_metal_mock_deal` (publication, authenticated
-  resolution and collection); pipeline, supported CI and Helm deployment
+  typed resolution; collection remains local application integration coverage);
+  pipeline, supported CI and Helm deployment
   validation remain unrun here and are required against committed source by
   ordinary pre-review validation. No live purchase or real-host qualification is
   claimed. Independent review/addenda remain a separate pending workflow step.
@@ -407,6 +410,8 @@ endpoints are **deferred**, not implemented. Hidden Pydantic snapshots, a new wi
 wrapper, and a new artifact kind remain **rejected** alternatives from the settled
 design. Pipeline, supported CI and Helm deployment results remain ordinary
 pre-review validation evidence; this round makes no live-purchase claim.
+
+**Evidence attribution correction (closeout review F2).** Earlier handoff notes attributed collection to the deployed mock-deal scenario. That scenario proves publication and authenticated typed resolution; collection regression coverage is local application integration evidence in `domains/bare_metal/storefront/tests/test_alkahest_lifecycle.py`. The descriptions below are corrected without claiming a new deployed test or changing the recorded failures, skips or validation scope.
 
 ## 4. Closeout
 
@@ -447,7 +452,9 @@ section changes documentation only; a needed code fix returns to implementation.
   unnecessary unless implementation actually touched agent instructions.
 - [x] 4.8 **End-to-end pipeline:** confirm and record the exact committed-source
   validation run/result and the bare-metal `e2e_bare_metal_mock_deal` evidence for
-  evidence publication, resolution, and collection. Preserve explicit blocked or
+  evidence publication and authenticated typed resolution. Attribute collection
+  regression coverage separately to the local application integration test in
+  `domains/bare_metal/storefront/tests/test_alkahest_lifecycle.py`. Preserve explicit blocked or
   unrun status for unavailable evidence; passing unrelated lanes is not a
   substitute. Confirm the normal local/Helm/CI validation record too.
 - [x] 4.9 **Promotion:** complete the design-promotion record. Promote D1–D4 to
