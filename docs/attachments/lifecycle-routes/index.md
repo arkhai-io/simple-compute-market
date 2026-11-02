@@ -40,6 +40,23 @@ principal. Delivery reads use kept state, not authority I/O. The existing ingres
 example also exercises surrender before fulfillment. Physical I/O failure leaves
 its journaled effect pending without discarding the durable acknowledgement.
 
+## Respondent discovery and answers
+
+`examples/respondent_first_use.py` uses the vendored in-process mediation peer
+and separate payer/payee credentials. Discovery is bound to verified signed
+filing records. Matching durable end/available facts produce canonical payee
+concurrence; a different instant produces explicit contesting evidence. The
+example loses an append response, closes the case, reopens the poller, and
+recovers the original acknowledgement/key before advancing its cursor. Exactly
+two appends remain, one concurrence and one contest, both under mandate.to.
+
+`RespondentPoller` persists the page independently of deal watch so an answer
+removed from discovery by an uncertain append cannot disappear on restart. The
+composition supplies one poller per accepted authority/account with seller
+credentials and an exact Agreement resolver. Run it before deal watch: both
+adopt one case-keyed append journal, and watch never replaces a prepared answer.
+Missing local Agreements remain pending for repair/triage, not silent agreement.
+
 ## Validation
 
 The servicing first-use examples and source typing pass; the existing lifecycle

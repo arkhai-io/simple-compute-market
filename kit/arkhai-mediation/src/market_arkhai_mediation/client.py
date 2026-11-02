@@ -14,7 +14,7 @@ from market_deal_lifecycle.terms import DisputeAuthority
 from pydantic import BaseModel, ValidationError
 
 from .contract import validate, wire
-from .models import Append, AppendAnswer, CaseAnswer, Filing, FilingAnswer, ReadAfter, RecordPage, SignedRecordEntry
+from .models import Append, AppendAnswer, CaseAnswer, Filing, FilingAnswer, ReadAfter, RecordPage, RespondentAfter, RespondentPage, SignedRecordEntry
 from .records import verify_record
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
@@ -133,6 +133,20 @@ class MediationClient:
             )
         if page.next_after != expected or page.has_more and not page.entries:
             raise MediationProtocolError("record cursor is not contiguous or makes no progress")
+        return page
+
+    async def respondent(self, request: RespondentAfter) -> RespondentPage:
+        page = await self._request(
+            RespondentPage, "RespondentPage", "GET", "/respondent",
+            params=_validated("RespondentAfter", request),
+        )
+        if len(page.cases) > (request.limit or 100):
+            raise MediationProtocolError("respondent page exceeds the requested bound")
+        refs = [case.case_ref.root for case in page.cases]
+        if len(refs) != len(set(refs)):
+            raise MediationProtocolError("respondent page repeats a case")
+        if page.has_more and (not page.cases or page.next_after == request.after):
+            raise MediationProtocolError("respondent cursor makes no progress")
         return page
 
     async def _request(

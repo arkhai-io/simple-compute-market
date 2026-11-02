@@ -8,6 +8,7 @@ import time
 
 from jsonschema.exceptions import ValidationError as SchemaValidationError
 from market_deal_lifecycle.adapters import DeliveryEndIntent, DisputeBinding, InterfaceRequest
+from market_deal_lifecycle.respondent import RespondentCase, RespondentPage
 from market_deal_lifecycle.operations import OperationKeys
 from market_deal_lifecycle.terms import DisputeAuthority
 from market_deal_lifecycle_contracts.models import (
@@ -15,17 +16,17 @@ from market_deal_lifecycle_contracts.models import (
     Effect as LifecycleEffect, FilingAnswer as LifecycleFilingAnswer, LifecycleCommand, LifecycleOutcome,
     PartEffect, PartHold, Pending, Rejected, Unknown,
 )
-from market_identity import Identity, canonical_json
+from market_identity import Identity, Signer, canonical_json
 from pydantic import JsonValue, ValidationError
 
 from .client import (
     MediationAPIError, MediationClient, MediationError, MediationProtocolError,
     MediationTransportError,
 )
-from .claims import verify_claim
+from .claims import sign_claim, verify_claim
 from .contract import INTERFACE, validate, wire
 from .models import (
-    Append, DeliveryEndClaim, Effect, Filing, ReadAfter, SignedDeliveryEndClaim, SignedRecordEntry,
+    Append, DeliveryEndClaim, Effect, Filing, ReadAfter, RespondentAfter, SignedDeliveryEndClaim, SignedRecordEntry,
 )
 from .records import RecordVerificationError
 
@@ -117,6 +118,50 @@ class MediationAdapter:
             return validate("Append", value)
         except (ValueError, ValidationError, SchemaValidationError):
             return Rejected(reason="case append requires valid evidence")
+
+    async def respondent(self, after: str = "", limit: int = 100) -> RespondentPage:
+        page = await self.client.respondent(RespondentAfter(after=after, limit=limit))
+        cases = []
+        for pending in page.cases:
+            value = wire(pending)
+            # Listing is discovery, not signed evidence. Bind it to the filed
+            # entry from that Agreement before a seller signs any concurrence.
+            cursor = 0
+            filed = None
+            while True:
+                records = await self.client.read_record(ReadAfter.model_validate({
+                    "agreement": value["agreement"], "after": cursor, "limit": 1000,
+                }), transaction=value["transaction"])
+                filed = next((wire(entry)["entry"] for entry in records.entries
+                              if wire(entry)["entry"]["record_ref"] == value["filed_record_ref"]), None)
+                if filed is not None or not records.has_more:
+                    break
+                cursor = records.next_after
+            if (filed is None or filed["kind"] != "filed" or filed["case_ref"] != value["case_ref"]
+                    or filed["filing"]["request"] != value["request"] or filed["at"] != value["filed_at"]):
+                raise MediationProtocolError("respondent case differs from its signed filed record")
+            intent = (DeliveryEndIntent.model_validate(value["request"])
+                      if value["request"]["kind"] == "delivery_end" else None)
+            cases.append(RespondentCase(
+                case_ref=value["case_ref"], agreement_ref=value["agreement"],
+                commitment_ref=value["transaction"], filed_at=value["filed_at"],
+                filed_record_ref=value["filed_record_ref"], intent=intent,
+            ))
+        return RespondentPage(cases=cases, next_after=page.next_after, has_more=page.has_more)
+
+    def build_answer(
+        self, case: RespondentCase, *, matching: bool, items: list[EvidenceItem], signer: Signer,
+    ) -> dict[str, JsonValue] | Rejected:
+        if (case.agreement_ref != self.agreement_digest or case.commitment_ref != self.binding.commitment_ref
+                or signer.identity != Identity.model_validate(self._agreement["seller"])):
+            return Rejected(reason="respondent answer differs from the exact Agreement or seller")
+        if not matching or case.intent is None:
+            return self.build_append(case.case_ref, items)
+        signed = sign_claim(
+            agreement=self.agreement_digest, signer=signer,
+            claim=DeliveryEndClaim.model_validate(case.intent.model_dump(mode="json")),
+        )
+        return validate("Append", {"case_ref": case.case_ref, "concurrence": wire(signed)})
 
     def validate_request(self, request: InterfaceRequest) -> Rejected | None:
         try:

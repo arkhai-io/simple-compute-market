@@ -64,6 +64,27 @@ class MediationContractFake:
                 self.lose_next_response = False
                 raise httpx.ReadError("injected loss after authority acknowledgement", request=request)
             return httpx.Response(200, json=answer)
+        if path == "/respondent":
+            after = int(request.url.params.get("after") or "0")
+            limit = int(request.url.params.get("limit", "100"))
+            pending = []
+            for position, respondent_case in enumerate(self.cases.values(), 1):
+                records = [entry["entry"] for entry in self.entries if entry["entry"]["case_ref"] == respondent_case["case_ref"]]
+                filed = records[0]
+                if (position <= after or respondent_case["state"] == "closed" or filed["actor"] == actor
+                        or any(entry["kind"] == "appended" and entry["actor"] == actor for entry in records)):
+                    continue
+                pending.append((position, {
+                    **{key: respondent_case[key] for key in ("case_ref", "transaction", "agreement", "parts")},
+                    "filed_at": filed["at"], "filer": "payer" if filed["actor"] == self.payer else "payee",
+                    "request": filed["filing"]["request"], "filed_record_ref": filed["record_ref"],
+                }))
+            selected_cases = pending[:limit]
+            return httpx.Response(200, json={
+                "cases": [value for _, value in selected_cases],
+                "next_after": str(selected_cases[-1][0]) if selected_cases else str(after),
+                "has_more": len(pending) > limit,
+            })
         if path == "/record":
             agreement = request.url.params["agreement"]
             after = int(request.url.params["after"])

@@ -148,6 +148,13 @@ class DealWatch:
                     if event.kind == "filed" and event.actor != self.seller_account:
                         if self.dispute is None:
                             raise ValueError("counterparty case has no dispute adapter")
+                        key = stable_ref(self.negotiation_id, "append", event.case_ref)
+                        # Respondent discovery may already have journaled signed
+                        # concurrence. Never replace its exact answer on watch replay.
+                        if end.intent(stable_ref(self.negotiation_id, "append", key)) is not None:
+                            cursor = event.sequence
+                            fresh.append(event)
+                            continue
                         items = EvidenceSession(conn).read(self.negotiation_id).items
                         payload = self.dispute.build_append(event.case_ref, items)
                         if isinstance(payload, Rejected):
