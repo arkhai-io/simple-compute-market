@@ -26,6 +26,24 @@ async def test_typed_client_reads_authority_authenticated_descriptor(
     assert descriptor.authority.principals[0].identifier == (
         registry_authority.identity.identifier
     )
+    assert "recommendedDisputeAuthorities" not in descriptor.to_wire()
+    recommendation = {
+        "interface": "example.dispute.v1",
+        "origin": "https://dispute.example",
+        "account": "acct_example",
+        "record_key": "example-public-key",
+        "params": {},
+        "advertisement": {
+            "mechanisms": ["example.payment.v1"],
+            "minimum_dispute_window_seconds": 60,
+            "minimum_case_hold_seconds": None,
+        },
+    }
+    app.state.registry_descriptor = RegistryDescriptor.model_validate(
+        descriptor.to_wire() | {"recommendedDisputeAuthorities": [recommendation]}
+    )
+    recommended = await registry_client.get_registry_descriptor()
+    assert recommended.recommended_dispute_authorities == [recommendation]
 
 
 async def test_client_bootstraps_trust_from_descriptor_possession_proof(

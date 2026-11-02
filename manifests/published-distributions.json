@@ -27,6 +27,16 @@
       "dist": "arkhai-core"
     },
     {
+      "key": "kit-deal-lifecycle-contracts",
+      "path": "kit/deal-lifecycle-contracts",
+      "dist": "arkhai-kit-deal-lifecycle-contracts"
+    },
+    {
+      "key": "kit-deal-lifecycle",
+      "path": "kit/deal-lifecycle",
+      "dist": "arkhai-kit-deal-lifecycle"
+    },
+    {
       "key": "kit-settlement-runtime",
       "path": "kit/settlement-runtime",
       "dist": "arkhai-kit-settlement-runtime"

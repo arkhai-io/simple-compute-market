@@ -509,6 +509,29 @@ Qualify D10's both causes/delivered values, setup identification, payer notice/t
 - The dispute authority as a per-part `stop` authority on rate parts.
 - Rate parts' `{afterStop: dispute_window}` holds.
 
+## Configuration and query implementation choices
+
+Local dispute entries win by full authority identity before offer/accept marks
+are applied. This prevents a registry recommendation from undoing a local veto
+or replacing locally accepted interface parameters. Credential bindings are
+resolved separately and return a secret wrapper; public authority projections
+contain neither references nor resolved credentials. Advertisement copies retain
+interface-owned JSON policy while typing the mechanism list and minimum windows.
+
+The registry descriptor's optional public list is named
+`recommendedDisputeAuthorities`, matching the descriptor's existing camel-case
+wire convention; an unconfigured or empty list is omitted. Core carries the
+interface-owned copy without interpreting it, and the registry validates its
+operator configuration with the foundation's entry model.
+
+Common query projections live in the lifecycle codec. The generic core parser
+needs no lifecycle vocabulary: settlement-runtime composes descriptors and the
+registry advertises them through its filter specification. Penalty comparisons
+require an asset predicate and all lifecycle/option predicates match one option;
+missing notice/deadline stays missing, absent entitlement is false and absent
+penalty is integer zero. Published lifecycle-bearing options still require the
+option wire cutover.
+
 ## Alternatives considered
 
 - **Interruption as a core verb, or settle as protocol.** Rejected (D1): neither is required to continue.

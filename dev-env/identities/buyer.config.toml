@@ -11,6 +11,9 @@
 # in e2e-tests/config/hosted-buyer.toml pins ed25519 identities instead, which
 # is why that file cannot be reused here.
 
+# Explicitly trust this development registry's dispute recommendations.
+use_registry_dispute_authorities = true
+
 [BuyerProfile]
 store_path = "/var/lib/arkhai-buyer/arkhai/buyer/profiles.json"
 

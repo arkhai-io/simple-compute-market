@@ -34,14 +34,16 @@ the one its `pyproject.toml` declares.
 | `arkhai-kit-deal-lifecycle-buyer` | `kit/deal-lifecycle-buyer/` | `arkhai-kit-deal-lifecycle`, `arkhai-kit-deal-lifecycle-contracts`, `arkhai-kit-identity` |
 | `arkhai-kit-arkhai-payments` | `kit/arkhai-payments/` | `arkhai-core`, `arkhai-kit-identity`, `arkhai-kit-settlement-runtime` |
 | `arkhai-kit-policy` | `kit/policy/` | `arkhai-core`, `arkhai-kit-identity` |
-| `arkhai-kit-settlement-runtime` | `kit/settlement-runtime/` | `arkhai-core`, `arkhai-kit-identity` |
+| `arkhai-kit-deal-lifecycle-contracts` | `kit/deal-lifecycle-contracts/` | `arkhai-kit-identity` |
+| `arkhai-kit-deal-lifecycle` | `kit/deal-lifecycle/` | `arkhai-kit-deal-lifecycle-contracts`, `arkhai-kit-identity` |
+| `arkhai-kit-settlement-runtime` | `kit/settlement-runtime/` | `arkhai-core`, `arkhai-kit-deal-lifecycle`, `arkhai-kit-identity` |
 | `arkhai-kit-negotiation-runtime` | `kit/negotiation-runtime/` | `arkhai-kit-identity`, `arkhai-kit-policy` |
 | `arkhai-core` | `core/` | none |
 | `arkhai-core-buyer` | `core/buyer/` | `arkhai-core`, `arkhai-core-registry-client`, `arkhai-kit-config`, `arkhai-kit-delivery`, `arkhai-kit-identity`, `arkhai-kit-policy`, `arkhai-kit-settlement-runtime` |
 | `arkhai-core-storefront` | `core/storefront/` | `arkhai-core`, `arkhai-core-registry-client`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-resource-pools-contracts` |
 | `arkhai-core-storefront-client` | `core/storefront-client/` | `arkhai-kit-identity` |
 | `arkhai-core-registry-client` | `core/registry-client/` | `arkhai-core`, `arkhai-kit-identity` |
-| `arkhai-core-registry` | `core/registry/` | `arkhai-core`, `arkhai-kit-identity` |
+| `arkhai-core-registry` | `core/registry/` | `arkhai-core`, `arkhai-kit-deal-lifecycle`, `arkhai-kit-identity` |
 | `arkhai-kit-site` | `kit/site/` | `arkhai-kit-identity`, `arkhai-kit-resource-pools`, `arkhai-kit-resource-pools-contracts` |
 | `arkhai-kit-site-client` | `kit/site-client/` | `arkhai-kit-identity`, `arkhai-kit-resource-pools-contracts` |
 | `arkhai-kit-capability-shape` | `kit/capability-shape/` | none |
