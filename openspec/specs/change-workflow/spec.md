@@ -1319,7 +1319,16 @@ the orchestrating session, as a tracked change, or granted by the owner for one
 run, fresh or resumed. A grant MUST be passed on that run's command line — for a
 fresh run through its step's make target — recorded as `granted` on the run's log
 line, and never added to the table, so the step's next run is held to its table
-again. Interactive runs MUST NOT be restricted by the table.
+again. A file-tool rule's relative path, in the table or in a grant, MUST name a
+path from the root of the checkout the run starts in, whatever directory the run
+has since moved to. Interactive runs MUST NOT be restricted by the table.
+
+#### Scenario: A step changes directory before writing a file its table allows
+
+- **WHEN** an unattended run changes its working directory into a subdirectory
+  and then writes a file its step's relative file rule names from the checkout's
+  root
+- **THEN** the write is allowed, as it would be from the checkout's root
 
 #### Scenario: Validation attempts to relock
 
