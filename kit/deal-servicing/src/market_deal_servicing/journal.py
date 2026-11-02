@@ -318,15 +318,7 @@ class EndSession:
                     self._filing(request, filing_intent)
                 return record
             if request.controlling_source_ref is not None:
-                controlling = self.conn.execute(
-                    """SELECT classification FROM servicing_final_requests
-                       WHERE negotiation_id=? AND source_ref=?""",
-                    (request.negotiation_id, request.controlling_source_ref),
-                ).fetchone()
-                if controlling is None or controlling[0] is None:
-                    raise ValueError("correlated end requires its verified controlling request")
-                if classification is None or Classification.model_validate_json(controlling[0]).kind != classification.kind:
-                    raise ValueError("correlated report must preserve its controlling classification")
+                self._validate_controlling(request, classification, request.controlling_source_ref)
                 if filing_intent is not None:
                     raise ValueError("correlated report adopts its controlling filing")
             # A never-delivered correction covers the entire accepted term.
@@ -346,6 +338,26 @@ class EndSession:
             self.schedule_physical(request.negotiation_id, now=now)
             return record
 
+    def _validate_controlling(
+        self, request: FinalRequest, classification: Classification | None, source_ref: str,
+    ) -> None:
+        row = self.conn.execute(
+            """SELECT request,classification FROM servicing_final_requests
+               WHERE negotiation_id=? AND source_ref=?""", (request.negotiation_id, source_ref),
+        ).fetchone()
+        if row is None or row[1] is None or source_ref == request.source_ref:
+            raise ValueError("correlated end requires its verified controlling request")
+        controlling = FinalRequest.model_validate_json(row[0])
+        if (classification is None or Classification.model_validate_json(row[1]).kind != classification.kind
+                or controlling.ended_at > request.ended_at):
+            raise ValueError("correlated report must preserve its controlling classification and end")
+        if not classification.lawful:
+            key = stable_ref(request.negotiation_id, "filing", source_ref)
+            filing = self.intent(stable_ref(request.negotiation_id, "filing", key))
+            selected = self.selected_end(request.negotiation_id)
+            if filing is None and (selected is None or selected.source_ref == source_ref):
+                raise ValueError("controlling seller failure requires its journaled filing")
+
     def _filing(self, request: FinalRequest, filing: FilingIntent) -> None:
         command = filing.command
         if command.negotiation_id != request.negotiation_id or command.kind != "delivery_end":
@@ -363,6 +375,11 @@ class EndSession:
             raise ValueError("never-delivered correction must preserve its fixed basis")
         if filing.not_before < claim.ended_at:
             raise ValueError("a filing cannot be future-dated")
+        # A later source is evidence of an already ended deal, not a revision
+        # of its financial claim. A genuinely earlier source still needs filing.
+        selected = self.selected_end(request.negotiation_id)
+        if selected is None or selected.source_ref != request.source_ref:
+            return
         self.journal(
             request.negotiation_id, "filing", command.operation_key,
             command.model_dump(mode="json"), not_before=filing.not_before,
@@ -371,6 +388,7 @@ class EndSession:
     def resolve_correction(
         self, negotiation_id: str, source_ref: str, expected_revision: int, *,
         evidence: list[str], classification: Classification, filing_intent: FilingIntent | None = None,
+        controlling_source_ref: str | None = None,
     ) -> Admission:
         with atomic(self.conn):
             record = self.read(negotiation_id)
@@ -384,6 +402,12 @@ class EndSession:
             ).fetchone()
             if row is None:
                 raise KeyError(source_ref)
+            request = FinalRequest.model_validate_json(row[0])
+            controlling = controlling_source_ref or request.controlling_source_ref
+            if controlling is not None:
+                self._validate_controlling(request, classification, controlling)
+                if filing_intent is not None:
+                    raise ValueError("correlated report adopts its controlling filing")
             if row[1] is not None:
                 if Classification.model_validate_json(row[1]) != classification:
                     raise ValueError("resolved classification cannot change")
@@ -391,10 +415,10 @@ class EndSession:
             if classification.lawful:
                 if filing_intent is not None:
                     raise ValueError("lawful classification discharges correction")
-            elif filing_intent is None:
+            elif filing_intent is None and controlling is None:
                 raise ValueError("seller failure requires a filing in the same transaction")
             if filing_intent is not None:
-                self._filing(FinalRequest.model_validate_json(row[0]), filing_intent)
+                self._filing(request, filing_intent)
             self.conn.execute(
                 """UPDATE servicing_final_requests SET classification=?
                    WHERE negotiation_id=? AND source_ref=?""",

@@ -61,7 +61,7 @@ class RespondentPoller:
         return await self._database(lambda conn: [
             {"case": RespondentCase.model_validate_json(row[0]), "reason": row[1]}
             for row in conn.execute(
-                "SELECT case_json,reason FROM servicing_respondent_repairs WHERE record=? ORDER BY case_ref LIMIT ?",
+                "SELECT case_json,reason FROM servicing_respondent_repairs WHERE record=? ORDER BY rowid LIMIT ?",
                 (self.record, limit),
             ).fetchall()
         ])
@@ -84,6 +84,7 @@ class RespondentPoller:
                 intent is not None and record.available_at <= intent.ended_at
             )
             matching = False
+            selected = end.selected_end(negotiation_id)
             if intent is not None and intent.delivered == delivered:
                 if intent.cause == "payer":
                     for request in end.requests(negotiation_id):
@@ -92,7 +93,7 @@ class RespondentPoller:
                             (negotiation_id, request.source_ref),
                         ).fetchone()
                         classification = Classification.model_validate_json(row[0]) if row and row[0] else None
-                        if (request.ended_at == intent.ended_at and request.actor == deal.buyer
+                        if (request == selected and request.ended_at == intent.ended_at and request.actor == deal.buyer
                                 and classification is not None
                                 and classification.kind in {"buyer_surrender", "entitled_stop"}):
                             matching = True
@@ -145,14 +146,27 @@ class RespondentPoller:
             try:
                 resolved = await asyncio.to_thread(self.resolve, case)
                 if resolved is None:
-                    raise ValueError("accepted Agreement is not held by this storefront")
+                    local = await self._database(lambda conn: conn.execute(
+                        """SELECT 1 FROM servicing_seller_deals
+                           WHERE json_extract(deal, '$.commitment_ref')=? LIMIT 1""",
+                        (case.commitment_ref,),
+                    ).fetchone())
+                    if local is None:
+                        # Account discovery spans storefronts. Only a locally
+                        # registered commitment can owe a repair on this worker.
+                        await in_transaction(self.path, lambda conn: conn.execute(
+                            "DELETE FROM servicing_respondent_repairs WHERE record=? AND case_ref=?",
+                            (self.record, case.case_ref),
+                        ).rowcount)
+                        skipped += 1
+                        continue
+                    raise ValueError("accepted local Agreement is temporarily unavailable")
                 negotiation_id, adapter = resolved
                 intent = await asyncio.to_thread(self.prepare, negotiation_id, adapter, case)
             except (KeyError, ValueError) as exc:
                 reason = str(exc)
                 await in_transaction(self.path, lambda conn: conn.execute(
-                    """INSERT INTO servicing_respondent_repairs VALUES (?,?,?,?,?)
-                       ON CONFLICT(record,case_ref) DO UPDATE SET reason=excluded.reason""",
+                    "INSERT OR REPLACE INTO servicing_respondent_repairs VALUES (?,?,?,?,?)",
                     (self.record, case.case_ref, case.commitment_ref, case.model_dump_json(), reason),
                 ).rowcount)
                 skipped += 1

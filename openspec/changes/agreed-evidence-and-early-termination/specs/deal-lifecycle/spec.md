@@ -358,7 +358,7 @@ Every derived mandate MUST authorize `extend` and `lift` for the agreement's dis
 
 ### Requirement: Respondent discovery is durable
 
-The mediation adapter MUST expose authenticated GET /respondent?after=<cursor>&limit=n and its cases, next_after and has_more result. The listing MUST contain open cases where the account is respondent and has not appended; any append MUST count as an answer. SCM MUST persist respondent cursor and answer intent before advancing, independently of deal watch.
+The mediation adapter MUST expose authenticated GET /respondent?after=<cursor>&limit=n and its cases, next_after and has_more result. The listing MUST contain open cases where the account is respondent and has not appended; any append MUST count as an answer. SCM MUST persist respondent cursor and answer intent before advancing, independently of deal watch. Foreign commitments MUST be skipped without local repair rows; temporarily unresolved local commitments MUST retry fairly without blocking discovery.
 
 #### Scenario: A seller restarts before answering
 
@@ -367,7 +367,7 @@ The mediation adapter MUST expose authenticated GET /respondent?after=<cursor>&l
 
 ### Requirement: SCM signs matching claims or contests them
 
-The storefront MUST compare ended_at, delivered and cause with durable available/end records. It MUST append SignedDeliveryEndClaim concurrence for a match, and contesting items otherwise, as payee account mandate.to. An append MUST contain items or concurrence. Dead or non-SCM respondents MUST remain triage cases, never a safety dependency.
+The storefront MUST compare ended_at, delivered and cause with durable available/end records. A payer claim MUST match the selected buyer end, not a superseded request. It MUST append SignedDeliveryEndClaim concurrence for a match, and contesting items otherwise, as payee account mandate.to. An append MUST contain items or concurrence. Dead or non-SCM respondents MUST remain triage cases, never a safety dependency.
 
 #### Scenario: A cooperative seller agrees
 
@@ -542,7 +542,7 @@ The codec MUST include early_termination.premature_stop_penalty in Agreement byt
 
 ### Requirement: The seller files ends its terms do not entitle
 
-For an unentitled site withdrawal or failed/never-started delivery, end service MUST journal `delivery_end(cause=payee)` for filing through the dispute adapter at the actual end. Never-delivered timing MUST follow "Never-delivered correction has a fixed non-future basis". A correlated lawful end MUST NOT create a second seller fault; an established earlier failure MUST remain correctable.
+For an unentitled site withdrawal or failed/never-started delivery, end service MUST journal `delivery_end(cause=payee)` for filing through the dispute adapter at the actual end. Never-delivered timing MUST follow "Never-delivered correction has a fixed non-future basis". A correlated end MUST adopt its controlling source's classification and filing without a second seller fault. A later superseded source MUST remain evidence without a new filing; an established earlier failure MUST remain correctable.
 
 #### Scenario: A withdrawal is reported late
 
@@ -599,7 +599,7 @@ End service MUST classify verified evidence as lawful, seller failure or pending
 
 ### Requirement: Pending correction resolves in the same journal
 
-record_end MUST atomically retain any pending-classification slot beside the end. resolve_correction(source_ref, expected_revision, evidence, classification, filing_intent?) MUST atomically discharge it or journal the fixed-basis filing in that journal. Stale revisions MUST retry without a synthetic end or second journal. Physical work MUST NOT await classification.
+record_end MUST atomically retain any pending-classification slot beside the end. resolve_correction(source_ref, expected_revision, evidence, classification, filing_intent?, controlling_source_ref?) MUST atomically discharge it, adopt a verified controlling source's filing, or journal the fixed-basis filing in that journal, without changing the original request. Stale revisions MUST retry without a synthetic end or second journal. Physical work MUST NOT await classification.
 
 #### Scenario: Evidence arrives after a pending end
 
@@ -613,7 +613,7 @@ The dispute adapter MUST bind the semantic filing identity to commitment, Agreem
 #### Scenario: The full policy is enforced
 
 - **WHEN** the owning component validates or applies this contract
-- **THEN** The dispute adapter MUST bind the semantic filing identity to commitment, Agreement authority, cause/end revision and fixed request. It MUST resolve/adopt the equivalent case without a concurrent-writer duplicate. A prior mechanical delivery_end ruling MUST route revision to an operator. Revised or linked cases MUST carry prior ruling/effect references and net prior authority effects after unknown originals resolve. Unsupported identity/revision mapping MUST report repair required, not allocate another key or use append as amendment.
+- **THEN** The dispute adapter MUST bind the semantic filing identity to commitment, Agreement authority, cause/end revision and fixed request. It MUST resolve/adopt the equivalent case without a concurrent-writer duplicate. An unresolved original writer MUST remain retryable rather than become a terminal rejection. A prior mechanical delivery_end ruling MUST route revision to an operator. Revised or linked cases MUST carry prior ruling/effect references and net prior authority effects after unknown originals resolve. Unsupported identity/revision mapping MUST report repair required, not allocate another key or use append as amendment.
 
 #### Scenario: An operator and online replay submit one intent
 

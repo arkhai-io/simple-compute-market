@@ -577,7 +577,7 @@ buyer CLI; none checks the stored envelopes.
 - The production HTTP negotiation integration reopens the store in the pre-payment acceptance callback. Retention covers running deals, recovery, every payout, open/closed cases, uncommitted expiry, missing terms/adapters, unavailable reads and concurrent capture. Export drives both composed commands and preserves superseded Agreements and binary evidence.
 - Focused checks: buyer evidence 18 passed; core buyer 159 passed; storefront client 68 passed; core storefront 225 passed; VM buyer 213 passed; bare-metal buyer 16 passed. `make check-architecture`, `make check-packaging`, `make check-comment-hygiene` and strict OpenSpec validation pass. Full-suite and end-to-end results are recorded separately; no live hosted or deployment-qualified end-to-end evidence is claimed here.
 - Publication metadata includes the buyer evidence distribution and its lifecycle/contracts dependencies in dependency order, with workflow filters and release-guide rows. The full `make test` run reached release tooling: six publication-metadata failures were repaired; the remaining compose-isolation check cannot run because this host has no Docker executable. The release-tooling suite excluding that Docker-dependent file and the Helm render suite pass, as do the focused publication matrix and required architecture, packaging, comment-hygiene and strict OpenSpec checks. No Docker-backed end-to-end result is claimed.
-- Durable behavior and rationale are scheduled for `openspec/specs/deal-lifecycle/spec.md` and its architecture companion, with buyer composition details in `openspec/specs/buyer-orchestration/architecture.md`, at 16.9. `kit/deal-lifecycle-buyer/README.md` documents the installed API and reproducible first use now.
+- Durable behavior and rationale are scheduled for the new deal-lifecycle specification and architecture companion (current source: `openspec/changes/agreed-evidence-and-early-termination/specs/deal-lifecycle/spec.md` and `design.md`), with buyer composition details in `openspec/specs/buyer-orchestration/architecture.md`, at 16.9. `kit/deal-lifecycle-buyer/README.md` documents the installed API and reproducible first use now.
 
 ## 7. Lifecycle client and the buyer half
 
@@ -641,7 +641,7 @@ lifecycle deal.
 - 7.3 composes exact authority admission in VM, bare-metal and API-credit fresh selection. The neutral core buyer receives only an option-preference callback; it does not bind a lifecycle kit. Registry-specific policy is preserved through compatibility/explain paths, explicit bare-metal option IDs cannot bypass admission, and preference precedes option-ID ordering within the selected mechanism and clause.
 - Client and buyer first-use examples pass, as does the production VM authority-selection example. Existing suites pass: lifecycle 62, buyer evidence 18, core buyer 159, storefront client 68, VM buyer 213, bare-metal buyer 16 and API-credit buyer 35. Existing negotiation fixtures now supply accepted lifecycle authorities; no permanent test function was added or assertion weakened.
 - Fresh wheel builds, dependency-closure relocks, architecture, packaging, lock currency, comment hygiene, configured core typing and pinned strict OpenSpec validation pass. The complete `make test` aggregate passes in 7m20s with the prescribed proxy settings and Podman shim, after supplying accepted authority setup to existing bare-metal/API-credit CLI integration fixtures without weakening assertions. Signed peer acknowledgements without payload negotiation IDs are retained by their signed resource. Committed first-use setup, aggregate evidence and deployment limitations are recorded in `docs/attachments/lifecycle-buyer-foundation/index.md`.
-- 7.4–7.5 remain deferred pending section 13: no compute lifecycle-stage handoff, canonical end-delivery verb, stop/outage journal or live lifecycle authority is claimed. Permanent contract/rationale promotion remains 16.9, to `openspec/specs/deal-lifecycle/spec.md`, its architecture companion and the buyer-orchestration documents.
+- 7.4–7.5 remain deferred pending section 13: no compute lifecycle-stage handoff, canonical end-delivery verb, stop/outage journal or live lifecycle authority is claimed. Permanent contract/rationale promotion remains 16.9, from the deal-lifecycle delta and design into the new capability's specification/architecture companion and the buyer-orchestration documents.
 
 ## 8. Hosted mandates, buyer mandate check and hosted option builders
 
@@ -1425,7 +1425,7 @@ must keep passing.
 - This is a checkpoint, not completion of 15.1 or 15.2; both boxes remain unchecked. Before finishing 15.1, complete durable bounded cycle pagination and non-payment physical recovery scheduling, correlate/classify site ends, prove pre-dispatch and create-in-flight admission, and recheck actual commitment timing versus acceptance timing in the delivery record. Before finishing 15.2, mount authenticated accepted-site report receipt/pull recovery, update the release callback's neutral progress, retire the unbegun teardown refusal and move the buyer command to the buyer half/canonical client. The bare-metal half of 7.4 remains unimplemented and its checkbox is untouched.
 - No VM production code changed. Mechanical consumer lock refreshes cover `domains/vms/storefront/uv.lock` and `e2e-tests/uv.lock`; the VM worker must retain the joined dependency closure during integration. No configuration model, schema, published distribution row or wire codec was added.
 - Full aggregate and fresh-stack domain e2e qualification remain unrun at this checkpoint. Next qualification must build the mock-provisioned lane from the branch, supply ready local payments and mediation with dispute-bearing options, run the domain scenarios, extend the existing end/report stages without adding permanent test functions, and distinguish intended end from proven capacity release. No real-host target exists. No service, container, browser, tunnel or deployment was started.
-- Permanent promotion remains reviewed closeout: `openspec/specs/deal-lifecycle/spec.md` and its architecture companion; buyer composition in the buyer-orchestration documents; site report/release semantics in the physical-provisioning and site-capacity documents. Detailed checkpoint evidence is in `docs/attachments/bare-metal-lifecycle/index.md`.
+- Permanent promotion remains reviewed closeout: the deal-lifecycle delta and design become the new capability's specification and architecture companion; buyer composition in the buyer-orchestration documents; site report/release semantics in the physical-provisioning and site-capacity documents. Detailed checkpoint evidence is in `docs/attachments/bare-metal-lifecycle/index.md`.
 
 ### Bare-metal recovery continuation checkpoint (2026-11-02)
 
@@ -1491,8 +1491,8 @@ documentation only; a part needing code returns the change to implementation.
       `docs/development/ARCHITECTURE.md` ("Composition from above and below", "Authority
       boundaries" with D4's independent per-deal authority and D6's counterpart table, "Kit
       areas", "Registry self-description", major flows); `docs/development/ARCHITECTURE.toml`;
-      new `openspec/specs/deal-lifecycle/architecture.md` (D5–D10 rationale, "External
-      authorities") and its `openspec/specs/README.md` index entries; companions
+      new capability companion `deal-lifecycle/architecture.md` under `openspec/specs/`
+      (D5–D10 rationale, "External authorities", from this change's `design.md`) and its `openspec/specs/README.md` index entries; companions
       `settlement-servicing/architecture.md` ("Capacity coupling", "Current limits",
       "Charge-first payment settlement"), `storefront-publication/architecture.md` ("Arkhai
       payment options"), `deployment-state/architecture.md`, `test-compatibility/architecture.md`,
@@ -1602,7 +1602,7 @@ The remaining D1–D15 destinations are listed in proposal.md and task 16.9.
 | Accepted decision | Permanent location |
 |---|---|
 | Initial missing mediation history permits the first filing only, not a verified empty ordinary read or unproved case acknowledgement | `kit/arkhai-mediation/README.md` now; existing deal-lifecycle spec/architecture ownership at reviewed closeout (16.9) |
-| Mediation owns installed published schema/models/vectors and marketplace claim framing; its stateless adapter only communicates with the exact Agreement authority, preserving aggregate monetary answers without computing remedies | `openspec/specs/deal-lifecycle/spec.md` and `architecture.md`, and `docs/development/ARCHITECTURE.md` kit areas at closeout (16.9) |
+| Mediation owns installed published schema/models/vectors and marketplace claim framing; its stateless adapter only communicates with the exact Agreement authority, preserving aggregate monetary answers without computing remedies | Deal-lifecycle delta and design, promoted to the new capability's spec/architecture in 16.9; `docs/development/ARCHITECTURE.md` kit areas |
 | D5 Alkahest release-model list, option-owned release conditions, undeliverable-model startup refusal and atomic legacy-flag migration | `docs/development/DEPLOYMENT_AND_CONFIG.md#alkahest-release-models` and `docs/development/ARCHITECTURE.md` readiness boundary; settlement-configuration delta promoted at 16.9 |
 | D5 price/settlement/lifecycle option envelope, canonical identity, selection mirror and forward-only registry paths | Settlement-configuration and negotiation-protocol spec deltas; lifecycle ownership in deal-lifecycle spec/architecture, promoted at reviewed closeout (16.9) |
 | D6 neutral authorization/evidence envelope, sole end-service billing-start intent; D8 cause classification, pre-start timing exception and revised-remedy netting | New `deal-lifecycle` spec/architecture and settlement-servicing spec/architecture at closeout |
@@ -1617,8 +1617,8 @@ The remaining D1–D15 destinations are listed in proposal.md and task 16.9.
 | Per-part absolute ends, stop-relative dispute holds and exact rights-derived authority/cap derivation; setup once permissions remain independent of rate rights | `kit/arkhai-payments/README.md`; settlement-servicing spec/architecture and deal-lifecycle spec/architecture at reviewed closeout |
 | Hosted publication selects compatible offered authority projections; shared registry destinations use their ordered intersection; API-credit selection and approval check full accepted identities | `kit/arkhai-payments/README.md`; storefront-publication, settlement-configuration and buyer-orchestration spec deltas and lifecycle architecture at reviewed closeout |
 | Bounded current/retiring receipt identities and snapshot attestation/cursor verification before state consumption | `docs/development/DEPLOYMENT_AND_CONFIG.md#settlement-consumer-configuration-and-cutover`; settlement-servicing spec/architecture at reviewed closeout |
-| Accepted delivery metadata does not establish commitment: the verified-evidence transaction fixes the payment authority's approval instant once, preserves earlier ends and gates seller committed-deal pages; bounded recovery runs independently of payment publication | `openspec/specs/deal-lifecycle/spec.md` and its architecture companion at reviewed closeout |
-| D6 VM administrator dispatch follows accepted payee rights; exceptional ends retain administrator/reason and drive physical teardown independently of the journaled authority filing | `openspec/specs/deal-lifecycle/spec.md` and its architecture companion, with VM fulfillment ownership at reviewed closeout |
+| Accepted delivery metadata does not establish commitment: the verified-evidence transaction fixes the payment authority's approval instant once, preserves earlier ends and gates seller committed-deal pages; bounded recovery runs independently of payment publication | Deal-lifecycle delta and design, promoted to the new capability's spec/architecture at reviewed closeout |
+| D6 VM administrator dispatch follows accepted payee rights; exceptional ends retain administrator/reason and drive physical teardown independently of the journaled authority filing | Deal-lifecycle delta and design, promoted to the new capability's spec/architecture, with VM fulfillment ownership at reviewed closeout |
 | Lifecycle distributions participate in public publication with their declared dependency order | `docs/development/RELEASING.md` and `manifests/published-distributions.json` |
 
 ## Implementation review 19/20 disposition — servicing
@@ -1692,6 +1692,30 @@ check-locks`, `make check-comment-hygiene`, strict OpenSpec validation and full
 shim). The preceding complete chain also passed. No hosted mediation deployment
 or deployed monetary-ruling qualification is claimed by this kit repair.
 
+## Re-review 21/22 disposition — buyer and servicing kit
+
+Implementation evidence and clean-checkout replay:
+`docs/attachments/aeet-fix2-kit-buyer/index.md`. These refinements retain the
+existing closeout promotion destinations; no authority or financial policy
+changes are introduced. Validation: servicing 61 passed plus mypy (11 files),
+buyer lifecycle 20 passed, signed client 2 passed, both real buyer-port checks
+passed, semantic-filing checks passed, and first-use examples passed. Architecture,
+packaging, locks, comment hygiene and pinned strict OpenSpec validation passed.
+Full `make test` passed in 7m59s with the prescribed proxy environment and Podman
+shim. No hosted deployment or independent acceptance verdict is claimed.
+The optional documentation-citation check found premature current-path references
+to the new capability's closeout outputs. References now name the existing delta
+and design as sources, while 16.9 still names the new companion's destination;
+no unreviewed permanent lifecycle document is synthesized to satisfy the check.
+
+- **E-N7:** Operator end returns only its own filing result (or accepted local recording if superseded), repair reasons have one prefix, and buyer filing uses only the acknowledged receipt without unreachable observed-time fallbacks or a redundant contested flag. Kept journal plans still decode the obsolete field. Regressions cover unrelated terminal filings, exact diagnostics, receipt-backed recovery, and retained-plan replay.
+- **E-N5:** Respondent discovery drops cases with no local registered commitment, including inherited foreign repair rows; a locally registered but temporarily unresolved Agreement remains repairable. The bounded repair queue uses insertion order and moves a failed attempt to the back. Regressions cover shared-account foreign/local cases across reconstruction and fair local retry rotation.
+- **E-N3 / O-F6 respondent:** Payer concurrence now requires the matching buyer request to be the selected end. The real signed respondent regression records an earlier seller failure, then proves the explicit payer claim receives contesting end evidence rather than concurrence. Receipt and automatic buyer suppression remain unchanged.
+- **E-N1:** An unresolved semantic writer now returns `Pending`, not terminal rejection; authority refusals and unsupported revisions remain terminal. The real seller/mediation regression loses the original write before receipt, reconstructs dispatch, and proves both required same-basis callers adopt one signed case with no permanent repair state. Existing concurrency expectations now distinguish retryable ownership from terminal refusal.
+- **S-N2 / E-N6:** `resolve_correction` accepts a verified controlling source, validates its classification/end and existing filing, and adopts it without rewriting the original request. Both domain correction callers pass the one new optional keyword; no other domain behavior changes. SQLite regressions cover delayed lawful/nonlawful sources, delivered/undelivered state, reconstruction, replay, and invalid controllers.
+- **E-N2:** Only a selected source journals a seller filing. Later superseded requests remain immutable evidence; a genuinely earlier late source still journals a revision. Regression proves both orderings and same-key replay. The terminal-refusal fixture now uses two successively selected failures rather than manufacturing an unnecessary later filing.
+- **S-N1:** Both lazy buyer mediation ports forward `case` without eager credential resolution. Each buyer package now drives lost-filing-response recovery through its real port and reconstructed evidence store, asserting one signed authority case. Before the repair both tests failed at the missing `case` operation.
+
 ### Parallel repair integration checkpoint
 
 - `7fb2dae69` merges the lifecycle repair into `8b1a5cfb5`, preserving the
@@ -1742,7 +1766,8 @@ or deployed monetary-ruling qualification is claimed by this kit repair.
   regression is red before extraction (missing exported helpers); compute tests
   and the domain correlation/actor/retention re-drive pass (VM 12, bare metal 8).
   The shared correction result preserves controlling source and evidence; its
-  nonlawful adoption still relies on the parallel S-N2 journal repair. Existing
+  nonlawful adoption uses the parallel S-N2 journal repair merged from `49219d221`,
+  with `controlling_source_ref` preserved in both domain adapters. Existing
   section 16 compute/lifecycle architecture promotion owns this factoring.
 - S-N4 / O-F1 producer remainder: task 10.6 now has permanent site integration
   checks for atomic transition/event/borrowed-outbox rollback and deduplication,
@@ -1766,3 +1791,10 @@ or deployed monetary-ruling qualification is claimed by this kit repair.
   separate fixture repair uses public OpenAPI paths and invalidates schema cache
   only when mounting. This is repaired and re-driven (all 458 service integration
   tests pass), not accepted as unrelated.
+- Whole-domain validation before the parallel merge: architecture, fresh-wheelhouse
+  packaging, locks, comment hygiene, strict pinned OpenSpec and full shim-backed
+  `make test` pass in 7m53s. The requested parent merge from `49219d221` preserves
+  both correction keywords and the shared classifier; focused merged re-drive
+  passes 7 kit correction-adoption, 15 VM and 10 bare-metal cases. The final
+  combined-head aggregate is re-run rather than inferring success from either
+  branch's previous result.

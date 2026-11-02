@@ -54,6 +54,9 @@ class _MediationPort:
     async def file(self, *args, **kwargs):
         return await self._call("file", *args, **kwargs)
 
+    async def case(self, *args, **kwargs):
+        return await self._call("case", *args, **kwargs)
+
     async def append(self, *args, **kwargs):
         return await self._call("append", *args, **kwargs)
 

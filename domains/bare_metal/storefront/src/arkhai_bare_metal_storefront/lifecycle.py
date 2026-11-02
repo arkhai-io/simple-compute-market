@@ -308,6 +308,7 @@ class BareMetalLifecycle:
             session.resolve_correction(
                 negotiation_id, request.source_ref, record.revision,
                 evidence=result.evidence_refs, classification=classification,
+                controlling_source_ref=result.controlling_source_ref,
                 filing_intent=None if classification.lawful or result.controlling_source_ref else session.failure_filing(
                     request, now=now, delivered=record.available_at is not None,
                 ),

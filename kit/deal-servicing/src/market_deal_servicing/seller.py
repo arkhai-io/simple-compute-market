@@ -23,7 +23,7 @@ from pydantic import Field, JsonValue
 
 from .end import SQLiteOperationStore
 from .evidence import EvidenceSession, in_transaction, transaction
-from .journal import Classification, EndSession, FinalRequest, JournalIntent, atomic, create_schema
+from .journal import Classification, EndSession, FinalRequest, JournalIntent, atomic, create_schema, stable_ref
 from .watch import DealWatch, WatchSession
 
 
@@ -156,7 +156,7 @@ class SellerServicing:
         elif repair:
             outcome = Rejected(reason="repair required: respondent case: " + repair[0])
         elif rejected is not None:
-            outcome = Rejected(reason="repair required: " + rejected.reason)
+            outcome = Rejected(reason="repair required: " + rejected.reason.removeprefix("repair required: "))
         elif watch.payment is None:
             outcome = Rejected(reason=f"{deal.payment.mechanism} has no lifecycle adapter")
         else:
@@ -263,8 +263,9 @@ class SellerServicing:
         if prepared is not None:
             return prepared
         results = await self.dispatch_filings(command.negotiation_id)
-        priority = {"accepted": 0, "pending": 1, "unknown": 2, "rejected": 3}
-        return max((item.outcome for item in results), key=lambda item: priority[item.status], default=Accepted())
+        key = stable_ref(command.negotiation_id, "filing", "operator:" + command.operation_key)
+        ref = stable_ref(command.negotiation_id, "filing", key)
+        return next((item.outcome for item in results if item.intent_ref == ref), Accepted())
 
     async def record_operator_end(
         self, command: LifecycleCommand, *, actor: Identity, reason: str,

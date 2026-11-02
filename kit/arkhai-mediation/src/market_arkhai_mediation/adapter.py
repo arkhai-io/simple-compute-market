@@ -275,7 +275,7 @@ class MediationAdapter:
                 if keys.store is None or not await keys.store.check_and_record(
                     command.negotiation_id, "mediation-delivery-end:" + identity, owner,
                 ):
-                    return Rejected(reason="repair required: original delivery-end filing must resolve before adoption or revision")
+                    return Pending(reason="original delivery-end filing must resolve before adoption or revision")
                 filing_key = hashlib.sha256(canonical_json([identity, wire(filing)["request"]])).hexdigest()
             sent = True
             answer = wire(await self.client.file(filing, idempotency_key=filing_key))

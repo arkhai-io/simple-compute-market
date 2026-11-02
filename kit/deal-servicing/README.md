@@ -35,9 +35,13 @@ already-missed delivery deadline.
 
 `record_end` retains every source and deterministic equal-time attribution. It
 atomically journals either the required filing or a pending-classification slot.
-`resolve_correction` discharges that slot or records the required filing under
-the same revision and fixed basis. `failure_filing` fixes never-delivered claims
-at the Agreement start/failure basis and defers future-start filing until start.
+`resolve_correction` discharges that slot, records the required filing, or adopts
+an explicitly named verified controlling source under the same revision and fixed
+basis without rewriting the original request. Both paths preserve the controlling
+classification and reuse its filing. Only a selected end creates a new filing;
+later superseded sources remain evidence, not financial revisions.
+`failure_filing` fixes never-delivered claims at the Agreement start/failure basis
+and defers future-start filing until start.
 It never computes a monetary remedy. The seller half dispatches these intents.
 
 `EndService.drive_physical` calls an injected domain port with stable operation
@@ -105,9 +109,13 @@ installation belongs to the writer, not the receipt-signing callback.
 both records and returns physical progress even without a payment adapter. A
 missing dispute credential or unresolved local respondent case marks repair
 required. `RespondentPoller.repairs()` exposes bounded skipped-case diagnostics;
-unresolvable Agreements do not block later account-wide cases and retry
-independently of the listing cursor. Once-only commitments remain
-running until their delivery end, independently of rate-start events.
+temporarily unresolvable local Agreements do not block later account-wide cases
+and retry independently of the listing cursor in a rotating arrival-order queue.
+Cases with no local registered commitment are skipped rather than retained as
+repair rows. A payer claim matches only when its buyer request is the selected
+end; a superseded surrender receives contesting end evidence. Once-only
+commitments remain running until their delivery end, independently of rate-start
+events.
 
 `submit` routes explicit financial commands through the payment adapter and cases
 through the dispute adapter. An operator `delivery_end` has no payload or `at`;
@@ -117,8 +125,11 @@ atomically records the end and the payee filing before any I/O. Drain
 and reuses the original key after lost responses. It returns each intent's outcome,
 not just the last one. An authority rejection is terminal and retained as repair
 required in `read` and `list`, whose `filings` carry the original refusal. Only
-pending/unknown attempts are retried. Filing acknowledgement is not a ruling;
-physical end work never waits for it and sends no payment stop or reverse.
+pending/unknown attempts are retried, including a semantic owner that must resolve
+its original write before another caller can adopt it. Operator submit returns
+only that operation's filing outcome, not unrelated filings' outcomes. Filing
+acknowledgement is not a ruling; physical end work never waits for it and sends
+no payment stop or reverse.
 
 ## Delivery ingress
 

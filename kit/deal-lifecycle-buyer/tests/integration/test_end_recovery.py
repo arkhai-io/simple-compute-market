@@ -2,6 +2,8 @@
 
 import asyncio
 import base64
+import json
+import sqlite3
 
 from market_deal_lifecycle.adapters import (
     DisputeAdapterTable, DisputeBinding, InterfaceRequest, PaymentAdapterTable, PaymentBinding, PaymentSelector,
@@ -110,11 +112,19 @@ def test_lost_surrender_response_restarts_before_fixing_a_contested_claim(tmp_pa
         assert first.case.status == "pending" and dispute.commands == []
         recovered = await half(tmp_path, peer, dispute).end_delivery("deal")
         assert recovered.delivery.status == recovered.case.status == "accepted"
-        assert not recovered.contested
+        assert "contested" not in recovered.model_dump()
         assert peer.keys[0] == peer.keys[1]
         command = dispute.commands[0]
         assert command.payload["payload"]["request"]["ended_at"] == 102
         assert command.payload["payload"]["concurrence"] is not None
+        # Kept progress may contain the redundant flag; replay derives evidence
+        # from the acknowledgement and immutable command instead.
+        with sqlite3.connect(tmp_path / "evidence.sqlite3") as db:
+            plan = json.loads(db.execute("SELECT plan FROM buyer_delivery_ends").fetchone()[0])
+            plan["progress"]["contested"] = False
+            db.execute("UPDATE buyer_delivery_ends SET plan=?", (json.dumps(plan),))
+        replayed = await half(tmp_path, peer, dispute).end_delivery("deal")
+        assert replayed == recovered
     asyncio.run(drive())
 
 

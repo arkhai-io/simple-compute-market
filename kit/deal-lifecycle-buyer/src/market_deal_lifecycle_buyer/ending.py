@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 from pathlib import Path
 import sqlite3
 from typing import TYPE_CHECKING
@@ -28,7 +29,6 @@ class EndDeliveryProgress(WireModel):
     delivery: LifecycleOutcome = Pending(reason="surrender not yet attempted")
     case: LifecycleOutcome = Pending(reason="filing not yet attempted")
     acknowledgement: EndDeliveryAcknowledgement | None = None
-    contested: bool = True
 
 
 class EndPlan(WireModel):
@@ -53,13 +53,19 @@ class BuyerEndJournal:
                 negotiation_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, plan TEXT NOT NULL
             )""")
 
+    @staticmethod
+    def _decode_plan(raw: str) -> EndPlan:
+        data = json.loads(raw)
+        data["progress"].pop("contested", None)
+        return EndPlan.model_validate(data)
+
     def begin(self, proposed: EndPlan) -> EndPlan:
         negotiation_id = proposed.progress.negotiation_id
         with sqlite3.connect(self.path, timeout=30) as db:
             db.execute("INSERT OR IGNORE INTO buyer_delivery_ends VALUES (?,?,?)",
                        (negotiation_id, 0, proposed.model_dump_json()))
             row = db.execute("SELECT plan FROM buyer_delivery_ends WHERE negotiation_id=?", (negotiation_id,)).fetchone()
-        plan = EndPlan.model_validate_json(row[0])
+        plan = self._decode_plan(row[0])
         if plan.commitment_ref != proposed.commitment_ref or plan.operation_key != proposed.operation_key:
             raise ValueError("buyer end journal names a different committed deal")
         return plan
@@ -73,7 +79,7 @@ class BuyerEndJournal:
                 (updated.revision, updated.model_dump_json(), negotiation_id, previous.revision),
             )
             row = db.execute("SELECT plan FROM buyer_delivery_ends WHERE negotiation_id=?", (negotiation_id,)).fetchone()
-        return EndPlan.model_validate_json(row[0])
+        return self._decode_plan(row[0])
 
 
 async def end_delivery(lifecycle: BuyerLifecycle, negotiation_id: str) -> EndDeliveryProgress:
@@ -160,21 +166,21 @@ async def end_delivery(lifecycle: BuyerLifecycle, negotiation_id: str) -> EndDel
                     "case": Rejected(reason="selected end is not buyer surrender; no automatic payer filing"),
                 })).progress
             intent = DeliveryEndIntent(
-                ended_at=kept_acknowledgement.receipt_at if kept_acknowledgement else plan.progress.observed_at,
+                ended_at=kept_acknowledgement.receipt_at,
                 delivered=True, cause="payer",
             )
-            signed = kept_acknowledgement.signed_delivery_end_claim if kept_acknowledgement else None
+            signed = kept_acknowledgement.signed_delivery_end_claim
             request = (adapter.concurrent_request(intent, signed) if isinstance(adapter, DeliveryEndClaims)
                        else adapter.build_request(intent))
             if isinstance(request, Rejected):
                 plan = journal.save(plan, progress=plan.progress.model_copy(update={"case": request}))
             else:
-                # Persist the exact mapped request before I/O. A later receipt
-                # cannot rewrite an already attempted contested claim/backdate.
+                # Persist the exact receipt-backed request before authority I/O;
+                # retries cannot change its evidence basis.
                 plan = journal.save(plan, filing=LifecycleCommand(
                     negotiation_id=negotiation_id, kind="dispute", operation_key=key + ":case",
                     payload=request.model_dump(mode="json"),
-                ), progress=plan.progress.model_copy(update={"contested": signed is None}))
+                ))
     if plan.filing is not None and not isinstance(plan.progress.case, (Accepted, Rejected)):
         try:
             outcome = await lifecycle.submit(plan.filing)

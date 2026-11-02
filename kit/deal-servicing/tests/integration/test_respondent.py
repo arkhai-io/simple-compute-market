@@ -103,6 +103,28 @@ async def test_watch_before_respondent_cannot_preempt_signed_concurrence(respond
     assert json.loads(base64.urlsafe_b64decode(exported + "=" * (-len(exported) % 4)))["kind"] == "respondent_contest"
 
 
+async def test_respondent_contests_a_surrender_superseded_by_an_earlier_seller_end(respondent, rig):
+    env = respondent
+    with transaction(rig["path"]) as conn:
+        end = EndSession(conn)
+        earlier = FinalRequest(
+            negotiation_id="deal", source_ref="operator:earlier", actor=env["seller"].identity,
+            ended_at=env["now"] - 10, observed_at=env["now"], cause="operator_end",
+            source="administrator", evidence_refs=["operator:earlier"],
+        )
+        end.record_end(
+            earlier, now=env["now"],
+            classification=Classification(kind="unentitled_withdrawal", evidence_refs=earlier.evidence_refs),
+            filing_intent=end.failure_filing(earlier, now=env["now"], delivered=True),
+        )
+    assert (await env["poller"]().poll())["answered"] == 2
+    appended = [r["entry"] for r in env["peer"].entries if r["entry"]["kind"] == "appended"]
+    assert len(appended) == 2 and all("concurrence" not in entry for entry in appended)
+    exported = appended[0]["items"][-1]["bytes"]
+    contest = json.loads(base64.urlsafe_b64decode(exported + "=" * (-len(exported) % 4)))
+    assert "operator:earlier" in base64.b64decode(contest["body"]).decode()
+
+
 async def test_lost_append_replays_exact_answer_after_restart_and_close(respondent):
     env = respondent
     env["peer"].lose_next_response = True

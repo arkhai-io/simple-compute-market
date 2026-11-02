@@ -64,13 +64,14 @@ reservation rather than claiming an unrelated production fix.
 
 ## Integration seam
 
-Both domains continue to call the servicing journal's `resolve_correction` with
-classification/evidence and no new filing when a site echo has a controlling
-source. The shared compute result retains that source and its evidence. Adoption
-of a **nonlawful** controlling filing belongs to the parallel S-N2 journal repair;
-this branch changes neither that journal's API nor its schema. Re-drive deferred
-nonlawful correlation after integration of that repair. This extraction does not
-promote a new servicing policy.
+At the parent's request this branch merges implementation head `49219d221`,
+including the parallel S-N2 journal repair. Both domain correction adapters pass
+`controlling_source_ref` from the shared compute result into `resolve_correction`,
+without creating a new filing for that echo. The VM merge conflict preserves the
+shared classifier and the new keyword; the bare-metal keyword merges directly.
+The family module still owns no journal API or schema. The merged kit's permanent
+correction-adoption tests and both domains' correlation tests are the seam re-drive.
+This extraction introduces no new servicing policy.
 
 ## Encountered fixture repair
 
