@@ -59,7 +59,7 @@ async def test_release_event_uses_service_signer_site_and_storefront_pin(
     event_id = "capacity_released:alloc-7:2026-07-13T12:00:00+00:00"
     request_id = "capacity-release-" + hashlib.sha256(event_id.encode()).hexdigest()
 
-    with patch("storefront_client.StorefrontClient", return_value=storefront) as client:
+    with patch("compute_provisioning_service.services.deal_event_sink.StorefrontClient", return_value=storefront) as client:
         delivered = await notify_storefront_capacity_released(
             SimpleNamespace(storefront_url="https://configured.example/"),
             reservation,
@@ -114,7 +114,7 @@ async def test_the_sink_sends_nothing_for_an_event_other_than_capacity_release(e
         occurred_at=datetime.now(timezone.utc),
     )
 
-    with patch("storefront_client.StorefrontClient") as client:
+    with patch("compute_provisioning_service.services.deal_event_sink.StorefrontClient") as client:
         assert await sink.deliver(event) is False
 
     client.assert_not_called()
@@ -145,7 +145,7 @@ async def test_uncertain_ack_retry_reuses_the_same_client_and_request_identity()
         "released_at": "2026-07-13T12:00:00+00:00",
     }
 
-    with patch("storefront_client.StorefrontClient", return_value=storefront) as client:
+    with patch("compute_provisioning_service.services.deal_event_sink.StorefrontClient", return_value=storefront) as client:
         assert await notify_storefront_capacity_released(
             SimpleNamespace(storefront_url="ignored"), reservation, sink=sink
         ) is False

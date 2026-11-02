@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
+from collections.abc import Callable
 
 from compute_provisioning_contracts import (
     LeaseForceRelease,
@@ -29,6 +30,7 @@ from compute_provisioning_contracts import (
     LeaseState,
     LeaseTermination,
     LeaseView,
+    SignedLeaseEndedReport,
     lease_state_for_reservation_state,
 )
 
@@ -86,13 +88,19 @@ class LeaseRouteService:
         self,
         leases: ExecutorLeaseService,
         lifecycle: LeaseLifecycleService,
+        reports: Callable[[str], list[SignedLeaseEndedReport]] = lambda _: [],
     ) -> None:
         self._leases = leases
         self._lifecycle = lifecycle
+        self._reports = reports
+
+    def _view(self, reservation: dict[str, Any]) -> LeaseView:
+        view = lease_view(reservation)
+        return view.model_copy(update={"end_reports": self._reports(view.capacity_reservation_id)})
 
     def get(self, capacity_reservation_id: str) -> LeaseView:
         try:
-            return lease_view(self._leases.get_lease(capacity_reservation_id))
+            return self._view(self._leases.get_lease(capacity_reservation_id))
         except LeaseNotFoundError as exc:
             raise _refusal(exc) from exc
 
@@ -105,18 +113,18 @@ class LeaseRouteService:
         """Every lease at the site, filtered by lease status and offering mode."""
         views = [
             view
-            for view in (lease_view(reservation) for reservation in self._leases.list_leases())
+            for view in (self._view(reservation) for reservation in self._leases.list_leases())
             if (status is None or view.status == status)
             and (offering_mode is None or view.offering_mode == offering_mode)
         ]
         return LeaseListResponse(leases=views, total=len(views))
 
     async def terminate(
-        self, capacity_reservation_id: str, body: LeaseTermination
+        self, capacity_reservation_id: str, body: LeaseTermination, *, caller: dict | None = None
     ) -> LeaseView:
         try:
-            return lease_view(
-                await self._lifecycle.terminate_lease(capacity_reservation_id, body)
+            return self._view(
+                await self._lifecycle.terminate_lease(capacity_reservation_id, body, caller=caller)
             )
         except (LeaseNotFoundError, InvalidLeaseStateError) as exc:
             raise _refusal(exc) from exc
@@ -125,7 +133,7 @@ class LeaseRouteService:
         self, capacity_reservation_id: str, body: LeaseReleaseOversight
     ) -> LeaseView:
         try:
-            return lease_view(
+            return self._view(
                 self._lifecycle.release_oversight(capacity_reservation_id, body)
             )
         except (LeaseNotFoundError, InvalidLeaseStateError) as exc:
@@ -135,18 +143,18 @@ class LeaseRouteService:
         self, capacity_reservation_id: str, body: LeaseRetryRelease
     ) -> LeaseView:
         try:
-            return lease_view(
+            return self._view(
                 await self._lifecycle.retry_release(capacity_reservation_id, body)
             )
         except (LeaseNotFoundError, InvalidLeaseStateError) as exc:
             raise _refusal(exc) from exc
 
     async def force_release(
-        self, capacity_reservation_id: str, body: LeaseForceRelease
+        self, capacity_reservation_id: str, body: LeaseForceRelease, *, caller: dict | None = None
     ) -> LeaseView:
         try:
-            return lease_view(
-                await self._lifecycle.force_release(capacity_reservation_id, body)
+            return self._view(
+                await self._lifecycle.force_release(capacity_reservation_id, body, caller=caller)
             )
         except (LeaseNotFoundError, InvalidLeaseStateError) as exc:
             raise _refusal(exc) from exc

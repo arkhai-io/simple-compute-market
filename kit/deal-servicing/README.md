@@ -78,6 +78,45 @@ which supplies pause, serialization and operator-step semantics rather than a
 second timer in this library. Drain physical intents separately through end
 service. Domain registration of that step belongs to the domain composition.
 
+## Seller half
+
+`SellerSession.register` records the immutable committed projection beside delivery
+registration in the caller's transaction. Supply metadata from the selected
+Agreement through its accessors. `SellerServicing` resolves adapters using those
+pinned bindings, not the currently offered authorities. Its credential hook checks
+the complete authority identity, independently of publication preferences.
+
+`list` returns bounded keyset pages from durable watched views. `read` refreshes
+both records and returns physical progress even without a payment adapter. A
+missing dispute credential marks repair required. Once-only commitments remain
+running until their delivery end, independently of rate-start events.
+
+`submit` routes explicit financial commands through the payment adapter and cases
+through the dispute adapter. An operator `delivery_end` has no payload or `at`;
+it requires an administrator and reason, fixes the local receipt instant, and
+atomically records the end and the payee filing before any I/O. Drain
+`dispatch_filings` in the controller-owned watch step. It respects deferred starts
+and reuses the original key after lost responses. Filing acknowledgement is not a
+ruling; physical end work never waits for it and sends no payment stop or reverse.
+
+## Delivery ingress
+
+`DeliveryIngress.end_delivery` verifies the accepted buyer's market envelope and
+rejects any supplied instant. Receipt and final request commit together before
+returning an acknowledgement for the route to sign; a retry retains the receipt.
+No payment or dispute read is needed, so surrender works during authority outages.
+The route owns the seller response signature and contract-owned claim embedding.
+
+`site_report` accepts exact bytes only through an injected domain verifier that
+checks the reservation's configured site identity and event binding. The same
+method handles push and authenticated pull recovery. Its classification hook
+uses verified entitlement evidence; without it, the correction stays pending.
+An unentitled classification journals the fixed-basis filing in the end
+transaction, including pre-start failure deferred until the Agreement start.
+Duplicate events preserve their original observation and bytes. Neither ingress
+path claims physical recovery or sends financial commands. Source/effect evidence
+is pruned only under the Agreement's evidence-retention rule, not a fixed timer.
+
 ## First use
 
 From a clean repository checkout:

@@ -405,7 +405,7 @@ class _StorefrontClientBase:
                 capture=self._capture,
             )
         except StorefrontAuthenticationError as exc:
-            raise StorefrontClientError(str(exc)) from exc
+            raise StorefrontClientError(str(exc), status_code=response.status_code) from exc
 
     def _authenticated_payload(
         self,
@@ -419,7 +419,7 @@ class _StorefrontClientBase:
             payload = resp.json()
         except ValueError as exc:
             raise StorefrontClientError(
-                f"{method} {url} returned non-JSON response authentication body"
+                f"{method} {url} returned non-JSON response authentication body", status_code=resp.status_code,
             ) from exc
         self._verify_response(resp, signed, payload)
         self._raise_for_status(method, url, resp.status_code, resp.text)

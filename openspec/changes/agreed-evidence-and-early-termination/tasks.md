@@ -707,14 +707,23 @@ market-composition's "Marketplace roles hold no payment ledger". Files: new `kit
       (62), mediation (40, including contract/generated/typing checks) and storefront
       (131) regressions pass. Shared storefront composition exposes controller-owned
       watch registration; domain composition remains in sections 14 and 15.
-- [ ] 10.4 Implement the seller half's `submit`, `read` and `list` (bounded pages, lifecycle
+- [x] 10.4 Implement the seller half's `submit`, `read` and `list` (bounded pages, lifecycle
       states, open extensions and cases, repair required for a missing authority credential) and
       the delivery_end filing, journaled with an immediate attributed end and dispatched
       to the dispute adapter, with no stop or reverse of its own and no wait for a ruling. Verify:
       unit and library-integration tests for "A seller lists its deals", "An authority's
       credential is missing", "A seller stops offering an authority", "An administrator ends a once-only deal" and "A filing is not ruled".
+      Immutable committed metadata, bounded keyset pages and merged watched views
+      resolve pinned authority credentials independently of offered preferences.
+      Operator ends retain actor/reason and atomically journal an immediate end
+      plus the fixed-basis filing; dispatch replays unknown responses by key without
+      payment commands or a ruling wait. The committed seller first-use example
+      exercises empty/bounded pages, once-only running, credential repair, lost
+      filing acknowledgement and restart with one case/physical effect. Foundation
+      and mediation regressions, source typing, architecture, packaging, locks,
+      hygiene and strict change validation pass. Domain route binding remains in 13–15.
 
-- [ ] 10.5 Persist final-request identities, actors, causes, instants and evidence references,
+- [x] 10.5 Persist final-request identities, actors, causes, instants and evidence references,
       including superseded requests and administrator identity/reason for operator ends,
       and expose earliest-end attribution and current physical
       progress through `read`. Accept verified site reports as final requests; journal required
@@ -733,7 +742,19 @@ market-composition's "Marketplace roles hold no payment ledger". Files: new `kit
       duplicate report delivery, pre-start failure/deferred filing across restart, and crash between
       end recording and filing intent; assert no
       repeated physical work and no storefront-owned financial end.
-- [ ] 10.6 Implement the site report's independent acceptance boundary first: immutable event
+      Delivery ingress verifies the accepted buyer's envelope and atomically
+      retains receipt time, exact request evidence and lawful surrender before
+      returning, without authority I/O. Site ingress requires an injected domain
+      verifier of the configured reservation/site binding, retains exact report
+      bytes and journals a classified filing or pending slot in the same transaction.
+      Existing journal attribution, fixed-basis/deferred filing, correlation and
+      D9 pruning are reused. The committed ingress example exercises duplicate
+      site delivery, exact-byte readback, restart-stable surrender, pre-start failure
+      and one physical effect per deal. All first-use examples, source typing,
+      architecture/packaging/locks, hygiene and strict change validation pass.
+      Compute's concrete report codec/sender is 10.6; response signing/claim
+      embedding and authenticated HTTP binding remain in 13–15.
+- [x] 10.6 Implement the site report's independent acceptance boundary first: immutable event
       recording in the lease-ending transaction and a separate event-keyed outbox; signing,
       retry and authenticated lease-read recovery of the stored report. Park push on
       404/unsupported receiver while retaining pull; transient failures retry. Verify the
@@ -750,41 +771,55 @@ market-composition's "Marketplace roles hold no payment ledger". Files: new `kit
       signed push/pull byte preservation, direct release, failure and force-release. Exercise
       the existing lease lifecycle, lease API and capacity-release outbox suites; no sleeps or
       teardown-complete claim from an intent report.
+      Implementation records site events and signed, event-keyed outbox entries in
+      the same transaction. The configured site/reservation verifier consumes
+      original signed payload bytes; authenticated lease views retain those reports
+      independently of capacity-release acknowledgements. The committed service
+      example covers all five causes, lost acknowledgement/restart, exact push/pull,
+      caller attribution, unsupported-peer parking and held capacity after failure.
+      Temporary diagnostics also cover production DI, atomic rollback, real-codec
+      ingress, earlier late reports, unsigned 404 parking and cross-reservation refusal.
+      Existing site/compute/client/service suites and full `make test` pass with the
+      prescribed proxy environment and Podman shim. No new permanent tests were
+      added; existing fixtures and mock targets follow the composed signer, expanded ports and new migration without weaker
+      assertions. Domain receiver binding and deployed coordinated acceptance remain
+      in 13–15, not a legacy fallback.
 
 Verification point: unit and library-integration suites of `kit/deal-servicing`; `make
 check-architecture`; `make test`. End-to-end: none; no storefront composes the kit yet.
 
 ### Section 10 implementation checkpoint (2026-11-02)
 
-- Whole tasks 10.1–10.3 are implemented and checked above. Reproduce library first
+- Whole tasks 10.1–10.6 are implemented and checked above. Reproduce library first
   use from committed setup with `make dist-ci && make -C kit/deal-servicing first-use`.
   Each example owns a temporary SQLite database and public deterministic fixture
   principals; no deployment, credentials, seed files or resident service are required.
-- Remaining: 10.4's seller submit/read/list and durable filing dispatcher; 10.5's
-  authenticated site-report ingestion, receipt-time buyer surrender and combined
-  lifecycle views; all of 10.6's site/provisioning contract, transactional event,
-  separate signed outbox and authenticated lease-read recovery. The journal already
-  provides their admission, attribution, pending-classification and fixed-basis filing
-  primitives, but a journaled filing is not yet sent by the seller half. No site or
-  provisioning sender/receiver changes have been made.
+- Seller submit/read/list, pinned-authority credential repair, durable filing replay,
+  authenticated site ingress and receipt-time buyer surrender are implemented.
+  `make -C provisioning/compute/service first-use-lease-end` exercises the concrete
+  site report, transactional outbox and authenticated lease-read projection with
+  temporary state; its setup is documented beside the example. No resident server
+  or private configuration is required.
 - Adapter integration: the neutral dispute protocol now exposes build_append; the
   mediation kit owns its evidence packaging. Domain compositions must still bind
   verified payment-stop classification, complete retention observations, exact client
   response capture and the shared storefront watch-step registration. These hooks
   fail conservatively when absent; no payment ledger or mechanism-specific parsing
   was added to the servicing kit. No public option bytes or IDs changed.
-- Focused regressions pass: foundation 62, contracts 37, mediation 40 and storefront
-  131. The servicing kit's source typing check also passes. Existing acceptance
-  tests were not added/edited under the worker's testing
-  boundary; first-use examples and temporary diagnostics exercised the new library.
-  Architecture, packaging, comment hygiene and pinned strict OpenSpec validation pass.
-- Full `make test` was attempted with the prescribed proxy environment and stopped
-  after 9m46s at release-tooling's Docker Compose prerequisite: `docker` is absent,
-  so test_storefront_authorities_are_isolated raises FileNotFoundError. That target
-  reported 1 failed, 1809 passed and 18 skipped. Aggregate completion remains unproven;
-  evidence was added to existing [#324](https://github.com/arkhai-io/simple-compute-market/issues/324#issuecomment-6570225578),
-  not treated as a product regression or silently skipped. No browser/end-to-end
-  run was attempted because no domain composes this kit yet.
+- Focused regressions pass: foundation 62, contracts 37, mediation 40, storefront
+  131, site 304, compute contracts 111, compute 244, storefront client 68 and
+  compute service 607 unit/454 integration. The servicing examples and source
+  typing pass. No permanent tests were added; existing setups were adapted for
+  the new composition without removing or weakening assertions. Architecture,
+  packaging, locks, comment hygiene and pinned strict OpenSpec validation pass.
+- The earlier 10.1–10.3 aggregate attempt stopped at the Docker prerequisite,
+  recorded in [#324](https://github.com/arkhai-io/simple-compute-market/issues/324#issuecomment-6570225578).
+  The prescribed Podman shim now runs that check. The subsequent aggregate reached
+  release tooling and found duplicate lifecycle publication entries; their separate
+  repair passes all 1847 release-tooling tests. A fresh complete `make test` passes
+  (7m11s), including Helm structural/render checks, with the prescribed proxy
+  environment and Podman shim. No browser/deployed end-to-end run is claimed:
+  domain composition is still owned by 13–15.
 
 ## 11. Hosted payment adapter for once parts
 
@@ -1049,7 +1084,7 @@ The remaining D1–D15 destinations are listed in proposal.md and task 16.9.
 | D6 neutral authorization/evidence envelope, sole end-service billing-start intent; D8 cause classification, pre-start timing exception and revised-remedy netting | New `deal-lifecycle` spec/architecture and settlement-servicing spec/architecture at closeout |
 | D8 receipt-embedded SignedDeliveryEndClaim, buyer concurrence/stop retry and both CLI paths | `openspec/specs/buyer-orchestration/spec.md` and `architecture.md` |
 | D5 premature-stop penalty codec and D10 capped held-earnings remedy; D10 one payee-agreed delivery_end rule for either filer, receipt concurrence and durable respondent sign-or-contest; D8 delivery_end filing and stable keys; D9 retained signed evidence; D10 case-carried Agreement and human triage | New `deal-lifecycle` capability's spec and architecture companion (created at archive/closeout) |
-| D8 site-signed intended-end report, transactional event/outbox and recovery | `openspec/specs/site-capacity/spec.md`, `openspec/specs/physical-provisioning/spec.md` and their architecture companions |
+| D8 site-signed intended-end report, transactional event/outbox and recovery; canonical payload framed under `arkhai.site.lease-ended.v1`, stored proof preserved across retries/pull, per-peer unsupported parking and explicit resumption | `openspec/specs/site-capacity/spec.md`, `openspec/specs/physical-provisioning/spec.md` and their architecture companions |
 | D5 coherent hosted contract selection and generated installed resources; one shared clock-injected payments fixture engine | `kit/arkhai-payments/README.md` (current API); settlement-servicing spec/architecture and `docs/development/TESTING.md` at closeout |
 | D8 intended end versus proven release; terminate versus future truncate | `docs/development/ARCHITECTURE.md`, "Site authority", "Fulfillment status and results", "Release"; `openspec/specs/site-capacity/architecture.md` |
 | D8 VM buyer end and second-precision lease effects | `openspec/specs/vm-storefront-fulfillment/spec.md` |

@@ -44,7 +44,7 @@ class FakeLifecycle:
     def __init__(self, refuse: Exception | None = None) -> None:
         self.refuse = refuse
 
-    async def terminate_lease(self, lease_id, body):
+    async def terminate_lease(self, lease_id, body, *, caller=None):
         if self.refuse is not None:
             raise self.refuse
         return {**_reservation(lease_id, "vm", "releasing"), "release_job_id": "f-1"}

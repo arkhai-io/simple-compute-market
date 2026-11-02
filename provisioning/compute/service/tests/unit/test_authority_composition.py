@@ -12,6 +12,8 @@ from __future__ import annotations
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from market_identity import Ed25519Signer
+from compute_provisioning_service.identity import ProvisioningIdentityContext
 
 from compute_provisioning.release import (
     FulfillmentReleaseExecutor,
@@ -29,6 +31,13 @@ def _container() -> Container:
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
     container.session_factory.override(sessionmaker(bind=engine))
+    # Public deterministic development principals; never use on a public network.
+    container.identity_context.override(ProvisioningIdentityContext(
+        signer=Ed25519Signer(bytes([1]) * 32),
+        storefront_principal=Ed25519Signer(bytes([2]) * 32).identity,
+        admin_principal=Ed25519Signer(bytes([3]) * 32).identity,
+        storefront_site_id="fixture-site",
+    ))
     return container
 
 
