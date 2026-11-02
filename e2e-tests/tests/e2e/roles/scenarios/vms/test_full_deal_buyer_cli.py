@@ -123,6 +123,17 @@ from tests.e2e.roles.scenarios.vms.conftest import (
     signed_listing_read_headers,
 )
 
+from tests.e2e.roles.scenarios.vms.lifecycle_deal import (
+    CliLifecycleBuyer, Stage12a_SecondDealActive, Stage12b_BuyerSurrendersTwice,
+    Stage12c_CapacityReleasedOnce,
+)
+
+
+@pytest.fixture(scope="module")
+def vm_lifecycle_buyer(buyer_cli, storefront_client, site_capacity):
+    return CliLifecycleBuyer(buyer_cli, storefront_client, site_capacity)
+
+
 log = logging.getLogger(__name__)
 
 pytestmark = [
@@ -1545,3 +1556,15 @@ class TestStage11b_TeardownCompletion:
             site_id=capacity_site_id(),
         )
         deal_state.lease_status = "released"
+
+
+class TestStage12a_SecondDealActive(Stage12a_SecondDealActive):
+    pass
+
+
+class TestStage12b_BuyerSurrendersTwice(Stage12b_BuyerSurrendersTwice):
+    pass
+
+
+class TestStage12c_CapacityReleasedOnce(Stage12c_CapacityReleasedOnce):
+    pass

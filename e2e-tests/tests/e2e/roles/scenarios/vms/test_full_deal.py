@@ -151,6 +151,19 @@ from tests.e2e.roles.scenarios.vms.conftest import (
     step_listing_reconciliation,
 )
 
+from tests.e2e.roles.scenarios.vms.lifecycle_deal import (
+    TypedLifecycleBuyer, Stage12a_SecondDealActive, Stage12b_BuyerSurrendersTwice,
+    Stage12c_CapacityReleasedOnce,
+)
+
+
+@pytest.fixture(scope="module")
+def vm_lifecycle_buyer(storefront_client, storefront_admin_client, registry_client,
+                       deal_driver, buyer_config, seller_wallet, site_capacity):
+    return TypedLifecycleBuyer(storefront_client, storefront_admin_client, registry_client,
+                               deal_driver, buyer_config, seller_wallet, site_capacity)
+
+
 log = logging.getLogger(__name__)
 
 pytestmark = [
@@ -559,4 +572,17 @@ class TestStage11a2_ReleaseTeardownGateAndDrain(Stage11a2_ReleaseTeardownGateAnd
 
 
 class TestStage11b_TeardownCompletion(Stage11b_TeardownCompletion):
+    pass
+
+
+# A second deal keeps receipt-time buyer surrender separate from lease expiry.
+class TestStage12a_SecondDealActive(Stage12a_SecondDealActive):
+    pass
+
+
+class TestStage12b_BuyerSurrendersTwice(Stage12b_BuyerSurrendersTwice):
+    pass
+
+
+class TestStage12c_CapacityReleasedOnce(Stage12c_CapacityReleasedOnce):
     pass
