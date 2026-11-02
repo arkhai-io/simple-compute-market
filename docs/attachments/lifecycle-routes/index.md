@@ -26,6 +26,11 @@ wrong-owner refusal and refusal to relay buyer payment commands. The injected
 peer callback is the domain seam for its existing authority-verifying settlement
 handler and hint read; this packet does not claim domain wiring.
 
+`examples/budget_first_use.py` observes recommendations for a 300-second reserve
+against a 350-second configured budget, then a 450-second runtime budget. Zero
+payer notice also warns. Both measured servicing cycles run and return unchanged;
+no codec, publication rule or buyer guarantee is changed.
+
 ## Validation
 
 The servicing first-use examples and source typing pass; the existing lifecycle

@@ -1095,7 +1095,7 @@ seller's budget". Files: `kit/deal-servicing` (router factory),
       the Agreement's seller principal; consume 2.4's neutral binding/verifier, never host a
       verifier buyer/dispute kits must import from servicing. Verify application-integration
       through the typed client for authentication, signature binding and relay refusal.
-- [ ] 13.2 Emit seller diagnostics when reserve-ahead or payer notice does not cover the configured
+- [x] 13.2 Emit seller diagnostics when reserve-ahead or payer notice does not cover the configured
       polling/watchdog/teardown budget; these are recommendations, not codec/publication refusals.
       Warn on runtime shortfall and never stop lifecycle loops. Verify the budget diagnostic
       and continued-loop scenarios.
