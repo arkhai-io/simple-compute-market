@@ -25,7 +25,7 @@ from market_arkhai_payments import (
     PaymentApproval,
     PaymentSellerStage,
 )
-from market_arkhai_payments.fixtures import FakePaymentsClient
+from market_arkhai_payments.fixtures import FakePaymentsClient, dispute_lifecycle
 from market_core import ImmutableFulfillmentCapability
 from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
 from market_identity import (
@@ -62,7 +62,6 @@ async def main():
         service_url="http://127.0.0.1",
         service_identity=service.identity,
         fee_bps=250,
-        dispute_authority=PAYER,
         development_auth=True,
     )
 
@@ -94,6 +93,7 @@ async def main():
     option_body = {
         "price": {"asset": "USD/2", "rates": []},
         "settlement": {"schema": "arkhai.payments.v1", **(params or {})},
+        "lifecycle": dispute_lifecycle(PAYER),
     }
     option = SettlementOption(
         option_id=derive_settlement_option_id(**option_body), **option_body

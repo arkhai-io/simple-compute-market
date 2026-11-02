@@ -240,6 +240,7 @@ def register(app: typer.Typer) -> None:
                 settlement_policy = resolve_buyer_settlement_policy(
                     identity=identity,
                     action_capable=True,
+                    registry_urls=registry_urls,
                 )
             except ValueError as exc:
                 raise typer.BadParameter(str(exc)) from exc

@@ -57,7 +57,8 @@ trusted_oracle_addresses = []
 enabled = false
 api_key_env = "ARKHAI_PAYMENTS_API_KEY"
 # Enabling payments also requires service_url, Ed25519 service_identity,
-# fee_bps, dispute_authority, the mechanism in `priority`, and an explicit
+# fee_bps, root [[Dispute]] preferences (or registry recommendations), the
+# mechanism in `priority`, and an explicit
 # payment publication clause containing payee_account and asset. Never store
 # the WorkOS key here.
 

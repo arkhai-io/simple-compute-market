@@ -1,29 +1,32 @@
-# Authority preferences and lifecycle-query implementation checkpoint
+# Authority preferences and role integration — implementation evidence
 
-This packet records an implementer self-check, not independent acceptance.
-Sections 3 and 5 of `agreed-evidence-and-early-termination` are **partially
-implemented**: tasks 3.1, 3.3 and 5.1 are complete; 3.2, 3.4 and 3.5 remain open.
-Section 4 is outside this assignment.
+This packet is an implementer self-check, not independent acceptance. Section 3
+(configuration and registry recommendations) and task 5.1 (query projection) are
+implemented. Hosted option construction and exact authority admission belong to
+section 8; no deployed hosted lifecycle is claimed by this packet.
 
-## Revision and target
+## Revision and owned target
 
-- Tested code: `5c3f17b47` on branch `s3-5`, based on `ad4792f13`.
-- Required environment: library and real-registry application integration for
-  these tasks; the change also requires compute end-to-end coverage at closeout.
-- Actually prepared target: checkout-owned Python environments populated from
-  the repository's `.dist` wheelhouse, Python 3.13; no shared deployment.
-- Persona/authentication: a configuration author using the library; registry
-  integration uses deterministic fixture signers and the authority-pinned typed
-  client against the in-process registry app. No external accounts or secrets.
-- State: library example data and fixture-owned temporary SQLite databases.
-  No inherited deployment selector, destructive shared seed, or resident server.
-- Readiness observed: package reinitialization succeeded, the example completed,
-  and 12 selected registry integration tests passed on 2026-11-02.
+- Tested runtime revision: `61b39625f`, including role composition `f9c2b3039`,
+  TOML unbounded-hold support `78659d4e4`, and startup fixture completion
+  `56de14400`. Documentation follows in the same branch's next commit.
+- Target: checkout-owned Python 3.13 environments populated from `.dist` wheels;
+  real registry application integration against fixture-owned SQLite databases.
+  No shared deployment, inherited selector or external seed is used.
+- Persona/authentication: a configuration author, plus fixture buyer/seller
+  identities through the signed, authority-pinned typed clients. The payment
+  smoke uses deterministic development signers and the kit's fake payments
+  client; none is for use on a public network. No external account, service
+  credential or secret is needed.
+- State: temporary databases created by the existing suites and smoke example.
+  Every run owns its state; the smoke deletes its temporary directory on exit.
+- Readiness: rebuilt wheels, role reinitialization, configuration example,
+  signed registry application integration and the payment smoke all completed.
 
-## First-use reproduction
+## Reproduce first use
 
-Run from the checkout root. The build and reinitialization use the project's
-existing tooling and do not depend on ignored state copied from this worktree.
+Run from the checkout root. These entry points were personally run; they use
+committed files rather than copied ignored state:
 
 ```sh
 unset ALL_PROXY all_proxy
@@ -32,84 +35,87 @@ make dist
 make -C kit/deal-lifecycle reinit
 (cd kit/deal-lifecycle && uv run --find-links ../../.dist python examples/dispute_configuration.py)
 make -C core/registry reinit
-(cd core/registry && uv run pytest tests/integration/test_registry_descriptor.py tests/integration/test_asking_rate_filter.py -q)
+(cd core/registry && uv run --find-links ../../.dist pytest tests/integration/test_registry_descriptor.py -q)
+make -C domains/vms/storefront reinit
+(cd domains/vms/storefront && uv run --find-links ../../../.dist python examples/payment_smoke.py)
 ```
 
-No secret environment variable is needed for this example. It injects an
-obviously public example value for `EXAMPLE_DISPUTE_API_KEY` into its credential
-resolver. A real role would supply the identity-bound environment reference;
-role integration is not yet implemented.
+The [configuration example](../../../kit/deal-lifecycle/examples/dispute_configuration.py)
+prints successful per-registry resolution and empty-list diagnostics, buyer
+opt-in, seller defaults, local vetoes, exact credential identity and secret
+isolation. Its resolver injects an obviously public example secret; it does not
+read a real environment credential. Omitting the advertisement's minimum case
+hold expresses an unbounded minimum in TOML, which has no null literal.
+
+The [payment smoke](../../../domains/vms/storefront/examples/payment_smoke.py)
+uses a selected lifecycle-bearing fixture option with no retired config key.
+Observed output: before approval, pending with zero deliveries; after approval,
+provisioning; retry, ready with one delivery; zero payment escrow rows. Payment
+HTTP and VM delivery are controlled at their existing seams, not live services.
 
 ## Claims and observations
 
-| Claim | Action and observation | Limit |
+| Claim | Observed evidence | Limit |
 |---|---|---|
-| A role can resolve ordered preferences and registry recommendations | The public [configuration example](../../../kit/deal-lifecycle/examples/dispute_configuration.py) reports the buyer's empty default, seller registry default, buyer opt-in and local veto. | Library surface only; running roles do not yet fetch or compose these lists. |
-| Credentials bind to the full authority identity without disclosure | The example resolves the exact identity, refuses a different record key, and checks secret isolation from public serialization and printable wrappers. | No live dispute authority was contacted. |
-| An operator's descriptor can recommend authorities | Existing descriptor unit/integration checks pass for omission and configured data through the signed typed client; Helm renders both configurations. | Recommendations are available but not consumed at role startup. |
-| Queries project common lifecycle fields with option-correlated assets | Existing settlement clause and registry filter checks pass for requested rights, absent defaults, asset-required penalties and no cross-option currency match. | Positive lifecycle cases seed the query boundary directly. Public lifecycle-bearing option publication waits on 2.5b. |
-| Shipped buyer configurations explicitly consent without shipping an authority | Existing VM template checks pass (2 tests); three committed development profiles parse with explicit opt-in and no `Dispute` entry. | Other role wiring remains task 3.4. |
+| Roles obtain registry-specific recommendations without sharing trust or defaults | Buyer bootstrap and all three storefront startups use signed, URL-pinned descriptor clients; the existing registry application test resolves a returned recommendation with buyer opt-in and refuses it under the buyer default. The example keeps two registries independent. | No live registry or dispute authority was contacted. |
+| Local policy wins by full identity | Configuration example resolves local entries before registry copies and preserves local vetoes and parameters. | Interface-owned acceptance and hosted option ordering remain section 8. |
+| Empty policy is visible | Registry application integration and the example observe the diagnostic naming both root `[[Dispute]]` and `use_registry_dispute_authorities`. Role composition logs it for an empty resolved list. | An empty-list message is not end-to-end hosted admission evidence. |
+| Credentials stay out of public projections | The example checks full-identity lookup, a changed key mismatch and secret wrappers. Buyer public context contains resolved authority entries only. | Credential-consuming lifecycle adapters are outside this assignment. |
+| The payments config key is retired | Existing payments configuration assertions reject a set value and explicit null with a `[[Dispute]]` diagnostic. Mandate derivation reads the selected lifecycle authority; stored mandates remain bound to that authority and acceptance-time fees. | Missing lifecycle terms fail closed; no legacy accepted-work fallback is supplied. |
+| Templates ship no authority | Existing VM template assertions check explicit recommendation consent, no `[[Dispute]]`, no retired key and no record key. Role settings and Helm fixture carry no authority. | No new template writer or permanent test function was added. |
+| Configuration is usable from documentation | The three TOML snippets under the deployment guide's dispute-preference heading parse and compose a preference plus its exact credential binding. | Example identities and origins are reserved demonstration values. |
 
-No option wire bytes or option-ID inputs were changed. The generic core query
-parser remains unchanged; the lifecycle codec owns the projection vocabulary.
-The registry's optional descriptor field is `recommendedDisputeAuthorities` and
-is omitted when unconfigured or empty.
+The registry's optional public descriptor key remains
+`recommendedDisputeAuthorities`; absent/empty configuration omits it. The option
+envelope and option-ID algorithm are unchanged by this section. Fixture options
+now carry their authority in the designed lifecycle slot. Query projections
+remain codec-owned and asset-correlated; the generic core query parser is
+unchanged.
 
 ## Validation
 
-Focused existing suites passed: lifecycle-contracts (37), lifecycle (62),
-settlement-runtime (175), core query DSL (24), registry unit (129), registry
-integration (128), and payments (92, plus typing/generated-contract checks).
-The first-use rerun above passed 12 selected registry integration tests. Core
-typing, `make check-architecture`, `make check-packaging`,
-`make check-comment-hygiene`, and pinned strict OpenSpec validation passed.
-Existing test bodies and fixtures were updated; no permanent test functions were
-added. Fresh verification still owns acceptance.
+Focused existing suites pass: lifecycle (62), storefront kit (131), core buyer
+(159), core storefront (225), registry unit/integration (129 + 128), payments
+(92, including typing and generated-contract checks), VM/API-credit/bare-metal
+buyers (213 + 35 + 16), VM storefront unit/integration (1,189 + 501, one unit
+skip), bare-metal storefront (522), API-credit storefront (248), and e2e unit
+(315). Both storefront schema suites pass (33 + 11), and the full Helm rendering
+and structural identity assertions pass. Existing fixtures/assertions were
+adapted without weakening assertions or adding test functions.
 
-The full `make test` attempt was not one all-green run. Repairs and reruns:
+`make lock` regenerated the affected dependency records. `make check-locks`,
+`make check-packaging`, `make check-architecture`, `make check-comment-hygiene`
+and pinned strict OpenSpec validation pass. The payments fixture uses neutral
+example dispute vocabulary so the mechanism kit does not depend on a particular
+dispute interface.
 
-1. The introduction profile's exact field-name assertion rejected the deliberately
-   expanded common query vocabulary. Updating its expected set preserved the
-   assertion; both complete registry suites then passed.
-2. API-credit isolated installation failed because its temporary wheel set omitted
-   the newly transitive lifecycle packages. Commit `f91f1166e` adds them; all
-   three isolated distribution-install tests pass. The remaining API-credit and
-   e2e-unit aggregate targets then passed before release tooling.
-3. Release-tooling dependency checks rejected omitted lifecycle distributions in
-   the publication manifest/workflow/guide. Commit `5c3f17b47` repairs these
-   records; the focused publication suite passed 272 tests.
-4. The host lacks Docker CLI, reproducing tracked
-   [issue #324](https://github.com/arkhai-io/simple-compute-market/issues/324).
-   A temporary Docker 28.3.3 / Compose 2.39.4 tool directory enabled daemon-free
-   `make test-deployment-packaging`: 1,838 script tests and all Helm
-   structural/render assertions passed. The directory was removed after use;
-   no daemon or container was started. Without that prerequisite the same
-   aggregate target will still fail on this host.
+The final full `make test` invocation passed on 2026-11-02 in 7m 2s, including
+all unit/application-integration suites, 1,843 release-tooling tests, and Helm
+rendering/structural assertions. The shell unset both proxy variables, set both
+no-proxy variables to loopback, and opted into a local Docker-compatible Podman
+shim for the deployment-packaging tools. A normal reproduction needs the Docker
+CLI and Compose prerequisites documented by the repository.
 
-The lifecycle packages' declared Python range was aligned to their identity
-provider and settlement-runtime consumer (3.10 through 3.13); otherwise uv could
-not resolve the new dependency for settlement-runtime's supported range.
-Regenerated downstream locks are necessary transitive dependency records.
-Only Python 3.13 was exercised here; 3.10–3.12 behavior is not established by
-this run.
+Earlier attempts identified stale generated payment configuration schemas, a
+startup fixture missing the registry auth default, and five release-guide cells
+missing the new direct lifecycle dependency. All were repaired, their focused
+suites rerun, and the complete aggregate then passed in one invocation. The
+publication manifest and workflow were not duplicated or changed.
 
-## Remaining work
+`make check-doc-citations CHANGE=agreed-evidence-and-early-termination` reports
+only the three already-tracked future lifecycle spec/architecture destinations
+in [#325](https://github.com/arkhai-io/simple-compute-market/issues/325).
+No placeholder permanent spec or weakened checker was introduced. The new role
+configuration documentation adds no unresolved citation. Normative spec and
+architecture promotion remain reviewed closeout work.
 
-- **3.2:** reject the retired payments authority key and remove its template line.
-  This depends on the option wire flip (2.5b): current mandate construction and
-  `PaymentApproval` still require that authority input, while the pre-flip
-  accessor exposes no lifecycle terms. Removing it now would break existing
-  hosted commitments or invent a competing temporary wire format.
-- **3.4:** add signed descriptor reads and per-registry recommendation lists to
-  buyer/bootstrap and storefront/publication; compose role preferences and
-  report when the resolved list is empty. These paths currently read filter
-  specs or configured trust pins, not descriptors as the task assumed.
-- **3.5:** document the role-integrated configuration once it works, including
-  the retired key. Durable spec promotion remains the change's closeout work;
-  destinations are recorded in its tasks/design.
-- **Unobserved:** independent fresh-user acceptance, compute end-to-end
-  scenarios, and hosted lifecycle-bearing option publication. No browser or
-  container deployment was prepared for this library checkpoint.
+## Limits and cleanup
 
-No servers, tunnels, browser pages, containers or remote resources were left
-running by this work.
+- Independent fresh-user acceptance and the deployed `e2e_deal`,
+  `e2e_bare_metal_mock_deal` and `e2e_credits_payment_deal` scenarios are unrun by
+  this worker. The aggregate is unit/application integration, not those lanes.
+- Hosted lifecycle-bearing publication, buyer exact-interface admission and
+  preference ordering remain section 8, which consumes the resolved role lists.
+- Only Python 3.13 was exercised; this run establishes no 3.10–3.12 result.
+- No resident servers, tunnels, containers, browser pages or remote resources
+  were created or left running. No canonical checkout or shared state was changed.

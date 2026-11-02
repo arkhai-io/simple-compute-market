@@ -12,7 +12,7 @@ from market_arkhai_payments import (
     ArkhaiPaymentsConfig,
     servicing_stage,
 )
-from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt
+from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt, dispute_lifecycle
 from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
 from market_identity import Ed25519Signer
 
@@ -66,7 +66,7 @@ async def payment_context(tmp_path):
         ArkhaiPaymentsConfig(
             enabled=True, service_url="http://127.0.0.1:3180",
             service_identity=SERVICE.identity, fee_bps=0,
-            dispute_authority=DISPUTE, development_auth=True,
+            development_auth=True,
         ),
         client_for_owner=payments,
     )
@@ -93,9 +93,11 @@ async def payment_context(tmp_path):
         option_id=derive_settlement_option_id(
             price={"asset": "USD/2", "rates": []},
             settlement={"schema": ARKHAI_PAYMENTS_MECHANISM, **(params or {})},
+            lifecycle=dispute_lifecycle(DISPUTE),
         ),
         price={"asset": "USD/2", "rates": []},
         settlement={"schema": ARKHAI_PAYMENTS_MECHANISM, **(params or {})},
+        lifecycle=dispute_lifecycle(DISPUTE),
     )
     terms = make_api_credits_provision_terms(quantity=3, key_mode="new")
     agreement = Agreement(

@@ -28,7 +28,7 @@ from market_arkhai_payments import (
     PaymentSettlementData,
     servicing_stage,
 )
-from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt
+from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt, dispute_lifecycle
 from market_core import ImmutableFulfillmentCapability
 from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
 from market_identity import Ed25519Signer, TrustedIdentitySet
@@ -107,7 +107,6 @@ def _config(**overrides) -> ArkhaiPaymentsConfig:
         "service_url": "http://127.0.0.1:9",
         "service_identity": SERVICE.identity,
         "fee_bps": 250,
-        "dispute_authority": DISPUTE,
         "development_auth": True,
     }
     values.update(overrides)
@@ -119,6 +118,7 @@ def _option(*, deposit: bool) -> SettlementOption:
     body = {
         "price": {"asset": "USD/2", "rates": []},
         "settlement": {"schema": "arkhai.payments.v1", **(params or {})},
+        "lifecycle": dispute_lifecycle(DISPUTE),
     }
     return SettlementOption(option_id=derive_settlement_option_id(**body), **body)
 
@@ -480,7 +480,7 @@ def _replace_stage(h, config: ArkhaiPaymentsConfig) -> None:
 @pytest.mark.asyncio
 async def test_an_accepted_deal_settles_after_fee_and_dispute_policy_change(make):
     h = await make()
-    _replace_stage(h, _config(fee_bps=0, dispute_authority=PAYER))
+    _replace_stage(h, _config(fee_bps=0))
     h.serve()
     started = await h.settle()
     assert started.settlement_ref == h.data.transaction_id

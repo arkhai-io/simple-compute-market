@@ -339,7 +339,9 @@ def register(credits_app: typer.Typer) -> None:
         picked_entry = None
         if listing_dict is not None:
             try:
-                settlement_policy = resolve_buyer_settlement_policy(identity=identity)
+                settlement_policy = resolve_buyer_settlement_policy(
+                    identity=identity, registry_urls=registry_urls,
+                )
                 selected_settlement = settlement_policy.select(
                     listing_dict, expiration_unix=int(time.time()) + 3600,
                 )

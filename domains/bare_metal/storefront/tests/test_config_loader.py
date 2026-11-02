@@ -39,7 +39,6 @@ def _payments_section() -> dict:
         "service_url": "http://127.0.0.1:9",
         "service_identity": PAYMENTS_SERVICE.identity.model_dump(mode="json"),
         "fee_bps": 250,
-        "dispute_authority": DISPUTE_ACCOUNT,
         "development_auth": True,
     }
 

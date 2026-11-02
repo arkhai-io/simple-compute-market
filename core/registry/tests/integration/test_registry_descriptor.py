@@ -7,6 +7,7 @@ import httpx
 import pytest
 from market_core import RegistryDescriptor
 from market_identity import Ed25519Signer
+from market_deal_lifecycle.configuration import authorities_by_registry, dispute_config
 
 from registry_client import RegistryClient, RegistryClientError, SyncRegistryClient
 from core_registry.db.models import PublisherReplayReservation
@@ -44,6 +45,27 @@ async def test_typed_client_reads_authority_authenticated_descriptor(
     )
     recommended = await registry_client.get_registry_descriptor()
     assert recommended.recommended_dispute_authorities == [recommendation]
+    reports = []
+    recommendations = {"http://test": recommended.recommended_dispute_authorities}
+    opted_in = authorities_by_registry(
+        dispute_config({"use_registry_dispute_authorities": True}, role="buyer"),
+        recommendations, role="buyer", report=reports.append,
+    )
+    assert opted_in["http://test"][0].authority.account == "acct_example"
+    assert reports == []
+    refused = authorities_by_registry(
+        dispute_config({}, role="buyer"), recommendations,
+        role="buyer", report=reports.append,
+    )
+    assert refused["http://test"] == ()
+    assert "[[Dispute]]" in reports[-1]
+    assert "use_registry_dispute_authorities = true" in reports[-1]
+    seller = authorities_by_registry(
+        dispute_config({}, role="seller"), {"http://test": []},
+        role="seller", report=reports.append,
+    )
+    assert seller["http://test"] == ()
+    assert "No dispute authority is available" in reports[-1]
 
 
 async def test_client_bootstraps_trust_from_descriptor_possession_proof(

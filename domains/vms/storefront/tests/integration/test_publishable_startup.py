@@ -44,6 +44,7 @@ _PUBLISHABLE: dict[str, Any] = {
     "registry": {
         "urls": [_REGISTRY_URL],
         "discovery_timeout": 5.0,
+        "auth": {},
         "authorities": {
             _REGISTRY_URL: {
                 "authority": "registry",

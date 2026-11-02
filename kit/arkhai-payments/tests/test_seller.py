@@ -40,7 +40,7 @@ def test_stage_needs_only_servicing_configuration():
     for missing in ("service_url", "service_identity"):
         with pytest.raises(ArkhaiPaymentsConfigurationError):
             PaymentSellerStage(config(**{missing: None}))
-    stage = PaymentSellerStage(config(fee_bps=None, dispute_authority=None))
+    stage = PaymentSellerStage(config(fee_bps=None))
     with pytest.raises(MandatePolicyError):
         stage.settlement_data(agreement())
 

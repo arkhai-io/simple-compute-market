@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, SecretStr
@@ -36,7 +36,7 @@ class AuthorityAdvertisement(BaseModel):
 
     mechanisms: list[Annotated[str, Field(min_length=1)]] = Field(min_length=1)
     minimum_dispute_window_seconds: NonnegativeSeconds
-    minimum_case_hold_seconds: NonnegativeSeconds | None
+    minimum_case_hold_seconds: NonnegativeSeconds | None = None
 
 
 class DisputeEntry(DisputeAuthority):
@@ -122,6 +122,28 @@ def dispute_config(document: Mapping, *, role: Literal["buyer", "seller"]) -> Di
             "use_registry_dispute_authorities", role == "seller"
         ),
     })
+
+
+def authorities_by_registry(
+    config: DisputeConfig,
+    recommendations: Mapping[str, Iterable[DisputeEntry | Mapping]],
+    *,
+    role: Literal["buyer", "seller"],
+    report: Callable[[str], None],
+) -> dict[str, tuple[DisputeEntry, ...]]:
+    """Compose each registry independently; local preferences always win.
+
+    The empty key holds local-only policy for work with no source registry.
+    Credentials are resolved separately, never in this public projection.
+    """
+    resolved = {"": config.authorities(role=role)}
+    for url, entries in recommendations.items():
+        resolved[url.rstrip("/")] = config.authorities(entries, role=role)
+    targets = recommendations or {"": ()}
+    for url in targets:
+        if not resolved[url.rstrip("/")]:
+            report(f"{url}: {NO_DISPUTE_AUTHORITIES}" if url else NO_DISPUTE_AUTHORITIES)
+    return resolved
 
 
 NO_DISPUTE_AUTHORITIES = (

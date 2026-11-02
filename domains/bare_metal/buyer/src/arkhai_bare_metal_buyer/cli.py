@@ -5,7 +5,10 @@ from __future__ import annotations
 from .evidence import evidence_store
 
 import json
+import logging
 import os
+
+from market_deal_lifecycle.configuration import authorities_by_registry
 import time
 import webbrowser
 from collections.abc import Callable
@@ -385,6 +388,23 @@ def buy_bare_metal(
         )
     identity = fresh_identity()
     with registry_client(buyer_config, identity) as client:
+        recommendations = []
+        if buyer_config.disputes.use_registry_dispute_authorities:
+            try:
+                descriptor = client.get_registry_descriptor()
+                recommendations = descriptor.recommended_dispute_authorities or []
+            except Exception as exc:
+                logging.getLogger(__name__).warning(
+                    "registry descriptor unavailable (%s)", type(exc).__name__
+                )
+        buyer_config = buyer_config.model_copy(update={
+            "dispute_authorities_by_registry": authorities_by_registry(
+                buyer_config.disputes,
+                {buyer_config.registry_url: recommendations},
+                role="buyer",
+                report=logging.getLogger(__name__).warning,
+            ),
+        })
         listing = client.get_listing(listing_id)
     seller_principals = listing.publisher_principals
     if not listing.storefront_url or seller_principals is None:

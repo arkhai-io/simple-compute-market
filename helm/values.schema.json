@@ -1555,16 +1555,6 @@
                     }
                   ]
                 },
-                "^[dD][iI][sS][pP][uU][tT][eE]_[aA][uU][tT][hH][oO][rR][iI][tT][yY]$": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
                 "^[aA][pP][iI]_[kK][eE][yY]_[eE][nN][vV]$": {
                   "anyOf": [
                     {

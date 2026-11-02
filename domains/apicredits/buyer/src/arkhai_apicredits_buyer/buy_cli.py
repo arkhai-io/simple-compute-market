@@ -319,7 +319,9 @@ def register(credits_app: typer.Typer) -> None:
         )
         signer = identity.signer
         principal = identity.principal
-        buyer_settlement = resolve_buyer_settlement_policy(identity=identity)
+        buyer_settlement = resolve_buyer_settlement_policy(
+            identity=identity, registry_urls=registry_urls,
+        )
         alkahest_config = buyer_settlement.config.mechanism_config("alkahest")
         alkahest_enabled = bool(
             alkahest_config is not None and getattr(alkahest_config, "enabled", False)

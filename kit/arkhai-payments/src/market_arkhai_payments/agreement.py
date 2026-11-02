@@ -15,9 +15,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from market_core.schemas import (
     settlement_option_asset,
+    settlement_option_lifecycle,
     settlement_option_params,
     settlement_option_schema,
 )
+
+from market_deal_lifecycle.terms import LifecycleTerms
 
 from market_arkhai_payments.errors import MandatePolicyError
 from market_arkhai_payments.mandates import MandatePolicy, PaymentsOptionParams, derive_mandate
@@ -76,12 +79,11 @@ def mandate_policy_for_agreement(
 ) -> MandatePolicy:
     """Build the exact mandate policy an accepted Agreement and trusted policy imply."""
 
-    if config.fee_bps is None or config.dispute_authority is None:
-        raise MandatePolicyError("payments fee policy and dispute authority are required")
+    if config.fee_bps is None:
+        raise MandatePolicyError("payments fee policy is required")
     return _policy(
         agreement,
         fee_bps=config.fee_bps,
-        dispute_authority=config.dispute_authority,
         expected_payer=expected_payer,
     )
 
@@ -90,12 +92,21 @@ def _policy(
     agreement: Mapping[str, Any],
     *,
     fee_bps: int,
-    dispute_authority: str,
     expected_payer: str | None = None,
 ) -> MandatePolicy:
     payer = agreement_payer_account(agreement)
     if expected_payer is not None and payer != expected_payer:
         raise MandatePolicyError("Agreement names a different payer account")
+    try:
+        lifecycle = LifecycleTerms.model_validate(
+            settlement_option_lifecycle(agreement.get("settlement"))
+        )
+        authority = AccountId.model_validate(lifecycle.adjudication.dispute.account).root
+    except ValidationError as exc:
+        raise MandatePolicyError(
+            "selected payments option requires lifecycle.adjudication.dispute "
+            "with a valid payments account"
+        ) from exc
     try:
         return MandatePolicy(
             buyer_account=payer,
@@ -106,7 +117,7 @@ def _policy(
             amount=agreement["amount"],
             asset=agreement["asset"],
             fee_bps=fee_bps,
-            dispute_authority=dispute_authority,
+            dispute_authority=authority,
         )
     except (KeyError, ValidationError) as exc:
         raise MandatePolicyError("Agreement lacks the terms a payments mandate needs") from exc
@@ -149,26 +160,19 @@ class PaymentSettlementData(BaseModel):
     def require_bound_to(self, agreement: Mapping[str, Any]) -> None:
         """Refuse stored data that the accepted Agreement does not bind exactly.
 
-        The fee and dispute authority are read from the stored mandate, because
-        they were the trusted policy at acceptance and later configuration must
-        not reinterpret an accepted transaction. Everything the Agreement fixes
-        (deal hash, payer, payee, amount, asset, hold, expiry) is re-derived and
+        The fee is read from the stored mandate because it was trusted policy
+        at acceptance; later configuration must not reinterpret an accepted
+        transaction. The dispute authority comes from the accepted option's
+        lifecycle terms, never from current configuration. Everything the
+        Agreement fixes (deal hash, payer, payee, amount, asset, hold, expiry) is re-derived and
         compared exactly; the transaction ID already hashes the whole mandate.
         """
 
         wire = self.to_wire()["mandate"]
-        payee = selected_payment_option(agreement).payee_account
-        others = list(dict.fromkeys(
-            account for part in wire["parts"]
-            for account in part["authorities"]["reverse"] if account != payee
-        ))
-        if len(others) > 1:
-            raise MandatePolicyError("stored payment mandate names extra reverse authorities")
         try:
             policy = _policy(
                 agreement,
                 fee_bps=int(wire["fee"]["bps"]),
-                dispute_authority=others[0] if others else payee,
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise MandatePolicyError("stored payment mandate is malformed") from exc

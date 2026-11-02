@@ -300,11 +300,22 @@ template writer), and `docs/development/DEPLOYMENT_AND_CONFIG.md`.
     e2e buyer writer explicitly opt into registry recommendations. Existing VM
     template tests (2) and parsing of the three committed profiles pass.
 
-- [ ] 3.2 Retire `[Settlement.arkhai_payments].dispute_authority`: validation rejects it with a
+- [x] 3.2 Retire `[Settlement.arkhai_payments].dispute_authority`: validation rejects it with a
       diagnostic naming `[[Dispute]]`, and the VM buyer template loses its commented line.
       Verify: `kit/arkhai-payments/tests/test_settlement_config.py` covers "The retired dispute
       authority key is set"; a template-writer test per role asserts no `[[Dispute]]` entry and
       no authority account, origin or key ("A template is written").
+  - Retired-key validation names root preferences, including an explicit null.
+    Mandate policy and stored-data binding read the selected lifecycle authority;
+    only acceptance-time fee policy is recovered from stored mandates. No legacy
+    authority fallback remains. Role fixtures, shared e2e policy serialization,
+    the VM template and generated Helm schemas use the new configuration.
+  - Verified: payments suite (92, including typing/generated-contract checks),
+    all buyer suites, e2e unit suite (315), VM payment first-use smoke, both
+    storefront schema suites (33 + 11), Helm rendering, locks, packaging,
+    architecture, comment hygiene and strict OpenSpec validation pass. No new
+    test functions or weakened assertions. The final aggregate result is recorded
+    in the section checkpoint and evidence packet.
 - [x] 3.3 Add the optional recommended-authorities list to the registry descriptor carrier and
       its operator configuration, built from configuration only, with Helm values and render
       checks. Verify: the descriptor unit and integration suites named in
@@ -317,15 +328,35 @@ template writer), and `docs/development/DEPLOYMENT_AND_CONFIG.md`.
     when unconfigured; Helm render checks with and without recommendations;
     architecture, packaging, comment hygiene and strict OpenSpec pass.
 
-- [ ] 3.4 Fetch a registry's recommendations where roles already read its descriptor (buyer
+- [x] 3.4 Fetch a registry's recommendations where roles already read its descriptor (buyer
       bootstrap and storefront publication), and report at startup when a role's list is empty.
       Verify: application-integration tests through the typed client: "A buyer uses its
       registry's recommendation", "A buyer has configured no authority" and the startup
       report of "No authority is available".
-- [ ] 3.5 Document `[[Dispute]]`, `[[DisputeCredential]]`, `use_registry_dispute_authorities`,
+  - Buyer bootstrap and storefront startup now read signed, URL-pinned descriptors,
+    retain independently resolved per-registry lists, and report empty lists.
+    Local preferences/vetoes win by full identity; public buyer context contains
+    authority projections only, not credential bindings. Publication resources
+    expose the seller policy for the hosted builders in section 8.
+  - Verified: lifecycle example/suite, storefront kit, core buyer/storefront,
+    registry unit/integration, all three buyer suites, VM storefront unit and
+    bare-metal/API-credit storefront suites; packaging, locks, architecture,
+    comment hygiene and strict OpenSpec validation pass. Existing fixture bodies
+    were adapted, with no assertions weakened and no test functions added.
+    Full aggregate and end-to-end validation are recorded with the final checkpoint.
+- [x] 3.5 Document `[[Dispute]]`, `[[DisputeCredential]]`, `use_registry_dispute_authorities`,
       the descriptor list and the retired key in `docs/development/DEPLOYMENT_AND_CONFIG.md`.
       Verify: `make check-doc-citations CHANGE=agreed-evidence-and-early-termination` reports
       nothing for the section.
+  - The deployment guide now owns role defaults, full-identity ordering/vetoes,
+    per-registry signed reads, empty-list diagnostics, advertisement minima,
+    identity-bound credential references and retirement of the payments key.
+    Payment/seller/e2e guides and release dependency cells agree. Documented TOML
+    snippets parse and resolve their exact credential binding.
+  - The scoped citation command reports only the three pre-existing future
+    lifecycle spec/architecture destinations tracked by #325; no new citation
+    is unresolved. No placeholder spec was created. Normative promotion remains
+    the reviewed closeout work at 16.9.
 
 Verification point: unit suites of `kit/deal-lifecycle` and `kit/arkhai-payments`; the registry
 descriptor suites (unit and library integration); the Helm render check; `make test`.
@@ -368,6 +399,26 @@ passing (they start roles from rendered configuration); none exercises the new l
   all Helm structural/render assertions. No container daemon, deployment or
   end-to-end scenario is started. The aggregate was exercised in segments after
   repairs; there is no single all-green `make test` invocation.
+
+### Role integration checkpoint (2026-11-02)
+
+- Supersedes the remaining-work list in the earlier sections 3/5 checkpoint:
+  3.2, 3.4 and 3.5 are implemented; 3.1, 3.3 and 5.1 remain complete.
+- Reproducible owned-target setup, first-use observations and exact limitations
+  are in `docs/attachments/aeet-sections-3-5/index.md`. The configuration example,
+  signed registry application integration and local VM payment smoke pass.
+- Existing test fixtures were adapted, without weakening assertions or adding
+  permanent test functions. Generated storefront/umbrella schemas and release
+  dependency documentation reflect the changed configuration and imports.
+- Final full `make test` passes in one invocation (2026-11-02, 7m 2s), with
+  the per-shell Podman shim and #323's proxy environment. This includes 1,843
+  release-tooling tests and Helm render/structural checks. Locks, packaging,
+  architecture, comment hygiene, strict OpenSpec validation and focused role
+  suites also pass.
+- The scoped citation check has only #325's three future lifecycle-document
+  matches. End-to-end lanes and independent acceptance are unrun by this worker;
+  hosted option construction and exact authority admission remain section 8.
+  No shared deployment or resident external resource was created.
 
 ## 4. Alkahest release models
 
@@ -1131,6 +1182,6 @@ The remaining D1–D15 destinations are listed in proposal.md and task 16.9.
 | D5 coherent hosted contract selection and generated installed resources; one shared clock-injected payments fixture engine | `kit/arkhai-payments/README.md` (current API); settlement-servicing spec/architecture and `docs/development/TESTING.md` at closeout |
 | D8 intended end versus proven release; terminate versus future truncate | `docs/development/ARCHITECTURE.md`, "Site authority", "Fulfillment status and results", "Release"; `openspec/specs/site-capacity/architecture.md` |
 | D8 VM buyer end and second-precision lease effects | `openspec/specs/vm-storefront-fulfillment/spec.md` |
-| Ordered dispute preferences, local identity vetoes, identity-bound credential references and opt-in registry recommendations | `openspec/specs/settlement-configuration/spec.md`, `openspec/specs/registry-discovery/spec.md` and `docs/development/DEPLOYMENT_AND_CONFIG.md` at closeout; role composition remains 3.4 |
+| Ordered dispute preferences, local identity vetoes, identity-bound credential references and opt-in registry recommendations | `docs/development/DEPLOYMENT_AND_CONFIG.md#dispute-authority-preferences` and its registry descriptor section; payment kit README, seller quickstart and e2e runner guide. Normative settlement-configuration/registry-discovery spec deltas and lifecycle architecture promotion remain at reviewed closeout (16.9) |
 | Codec-owned common lifecycle query projections, absent-value semantics and same-option asset correlation | `openspec/specs/cli-query-language/spec.md` and `openspec/specs/settlement-configuration/spec.md` at closeout |
 | Lifecycle distributions participate in public publication with their declared dependency order | `docs/development/RELEASING.md` and `manifests/published-distributions.json` |

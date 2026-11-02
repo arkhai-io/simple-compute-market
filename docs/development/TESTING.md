@@ -1115,7 +1115,7 @@ The API-credit payment scenario reads its payments policy through
 may reuse. A blank PAYMENTS.SERVICE_URL means no payments target is configured,
 and the scenario reports a blocked skip, never an Alkahest fallback: that is
 what the pipeline runs. With SERVICE_URL set, SERVICE_IDENTITY,
-DISPUTE_AUTHORITY, BUYER_ACCOUNT, BUYER_MARKETPLACE_CREDENTIAL and
+BUYER_ACCOUNT, BUYER_MARKETPLACE_CREDENTIAL and
 SELLER_MARKETPLACE_CREDENTIAL are required, and a missing one fails the
 scenario by name before the target's `/health` is checked (timeout 5 seconds,
 environment proxies disabled); an unready target is again a blocked skip.

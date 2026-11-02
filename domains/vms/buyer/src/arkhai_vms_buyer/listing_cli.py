@@ -160,7 +160,9 @@ def listing_list(
         discovery_timeout=discovery_timeout,
     )
     try:
-        settlement_policy = resolve_buyer_settlement_policy(identity=identity)
+        settlement_policy = resolve_buyer_settlement_policy(
+            identity=identity, registry_urls=registry_urls,
+        )
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     if limit < 1 or limit > 200:

@@ -23,6 +23,7 @@ from market_core.schemas import (
     derive_settlement_option_id,
 )
 from market_identity import Ed25519Signer
+from market_arkhai_payments.fixtures import dispute_lifecycle
 from tests._settings_overrides import replaced_setting
 from tests.listing_bindings import upsert_bound_listing
 
@@ -71,9 +72,11 @@ def payment_option(rate: int = 100) -> SettlementOption:
         option_id=derive_settlement_option_id(
             price={"asset": "USD/2", "rates": rates},
             settlement={"schema": "arkhai.payments.v1", **(params or {})},
+            lifecycle=dispute_lifecycle(DISPUTE_ACCOUNT),
         ),
         price={"asset": "USD/2", "rates": rates},
         settlement={"schema": "arkhai.payments.v1", **(params or {})},
+        lifecycle=dispute_lifecycle(DISPUTE_ACCOUNT),
     )
 
 

@@ -10,7 +10,7 @@ import uuid
 import copy
 
 from market_core.schemas import RateValue, SettlementOption, derive_settlement_option_id
-from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt
+from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt, dispute_lifecycle
 from arkhai_bare_metal_storefront.models import BareMetalSettleRequest
 from arkhai_bare_metal_storefront.fulfillment_service import BareMetalFulfillmentError
 from market_identity import Ed25519Signer
@@ -1141,7 +1141,6 @@ async def test_payment_evidence_gates_replay_and_rechecks_receipt_after_restart(
                 "development_auth": True,
                 "service_identity": receipt_signer.identity.model_dump(mode="json"),
                 "fee_bps": 0,
-                "dispute_authority": "00000000-0000-4000-8000-000000000013",
             },
         },
         payments_client_for_owner=payments,
@@ -1152,9 +1151,11 @@ async def test_payment_evidence_gates_replay_and_rechecks_receipt_after_restart(
         option_id=derive_settlement_option_id(
             price={"asset": "USD/2", "rates": rates},
             settlement={"schema": "arkhai.payments.v1", **(params or {})},
+            lifecycle=dispute_lifecycle("00000000-0000-4000-8000-000000000013"),
         ),
         price={"asset": "USD/2", "rates": rates},
         settlement={"schema": "arkhai.payments.v1", **(params or {})},
+        lifecycle=dispute_lifecycle("00000000-0000-4000-8000-000000000013"),
     )
     await db.upsert_bare_metal_listing(
         listing_id="listing-payment",

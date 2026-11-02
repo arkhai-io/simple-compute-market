@@ -4,6 +4,7 @@ from market_deal_lifecycle.configuration import (
     DisputeCredential,
     DisputeEntry,
     dispute_config,
+    authorities_by_registry,
 )
 
 # Reserved example origin and public fixture identities, never production trust.
@@ -20,6 +21,12 @@ authority = {
     },
 }
 entry = DisputeEntry.model_validate(authority)
+# TOML has no null literal; omission expresses an unbounded case hold.
+toml_authority = authority | {
+    "advertisement": {key: value for key, value in authority["advertisement"].items()
+                      if key != "minimum_case_hold_seconds"}
+}
+assert DisputeEntry.model_validate(toml_authority).advertisement.minimum_case_hold_seconds is None
 buyer = dispute_config({}, role="buyer")
 seller = dispute_config({}, role="seller")
 assert buyer.authorities([entry], role="buyer") == ()
@@ -41,6 +48,15 @@ assert resolved.get_secret_value() == "example-only-secret"
 assert "example-only-secret" not in bound.model_dump_json()
 assert "example-only-secret" not in entry.authority.model_dump_json()
 assert "example-only-secret" not in str(resolved)
+reports = []
+registries = authorities_by_registry(
+    opted_in, {"https://registry.example": [entry], "https://other.example": []},
+    role="buyer", report=reports.append,
+)
+assert registries["https://registry.example"] == (entry,)
+assert registries["https://other.example"] == ()
+assert "[[Dispute]]" in reports[0] and "use_registry_dispute_authorities" in reports[0]
+print("per-registry resolution and empty-list diagnostics: OK")
 print("buyer default: no authorities; seller default: registry recommendation")
 print("buyer opt-in, local veto, exact credential identity, and secret isolation: OK")
 print(entry.authority.model_dump_json())
