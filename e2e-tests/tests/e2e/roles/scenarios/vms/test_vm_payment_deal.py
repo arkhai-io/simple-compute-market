@@ -32,7 +32,7 @@ from tests.e2e.roles.scenarios.vms.test_full_deal import OFFER_RESOURCE
 
 pytestmark = [
     pytest.mark.usefixtures(
-        "storefront_loops_held", "fulfillment_convergence_held", "lease_watchdog_held",
+        "payments_config", "storefront_loops_held", "fulfillment_convergence_held", "lease_watchdog_held",
         "ensure_storefront_resumed", "reap_buyer_settle_subprocess", "release_reserved_resources",
     ),
     pytest.mark.e2e_vm_payment_deal,
