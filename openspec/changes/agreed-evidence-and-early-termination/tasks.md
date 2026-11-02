@@ -407,11 +407,35 @@ bare-metal storefronts' publication and migration modules
     Bare-metal sellers now have a thin CLI over the same migration engine;
     first use covers preview, write, restrictive backup, repeat and conflict
     refusal. Fixture: docs/attachments/alkahest-release-models/legacy-recipient.toml.
-- [ ] 4.4 Document `release_models` in `DEPLOYMENT_AND_CONFIG.md`. Verify: doc citations check.
+- [x] 4.4 Document `release_models` in `DEPLOYMENT_AND_CONFIG.md`. Verify: doc citations check.
+  - Configuration and readiness documentation describes the ordered model list,
+    per-option demand, domain startup refusal and atomic migration. Citations in
+    both changed permanent documents and the first-use packet resolve. The full
+    change-scoped citation command still reports three planned closeout targets
+    in the active design/tasks, tracked by GitHub issue 325; no placeholder
+    permanent document was created. Reproduction and evidence:
+    docs/attachments/alkahest-release-models/index.md.
 
 Verification point: `kit/alkahest` unit suites; both storefronts' integration suites; `make test`.
 End-to-end: `e2e_deal`, `e2e_non_erc20_settlement` and `e2e_bare_metal_deal` exercise Alkahest
 publication and settlement and must keep passing.
+
+### Section 4 verification checkpoint (2026-11-02)
+
+- All four implementation tasks are committed. Full `make test` passes with the
+  local Podman shim and proxy exclusions; architecture, packaging, locks,
+  comment hygiene and strict OpenSpec validation pass.
+- The VM container lane passes 37 stages covering ERC20, native-token and ERC1155
+  settlement. The bare-metal mock lane passes 39 stages. Its selected real-host
+  scenario skips: `BARE_METAL.REGISTRY_URL is not configured`; no real whole host
+  or role-scoped SSH credential is available, so that qualification remains
+  unobserved, not passed.
+- Full change-scoped citations retain the already recorded pre-closeout failure
+  (GitHub issue 325); changed permanent-document citations resolve. No check or
+  acceptance boundary was weakened. The packet above carries reproducible
+  first-use setup, observations and the two small fixture repairs.
+- The roadmap and campaign remain in implementation; this section changes no
+  dependency or campaign status. Subsystem-spec promotion remains at 16.9.
 
 ## 5. Common query fields
 
@@ -1063,6 +1087,7 @@ The remaining D1–D15 destinations are listed in proposal.md and task 16.9.
 | Accepted decision | Permanent location |
 |---|---|
 | Mediation owns installed published schema/models/vectors and marketplace claim framing; its stateless adapter only communicates with the exact Agreement authority, preserving aggregate monetary answers without computing remedies | `openspec/specs/deal-lifecycle/spec.md` and `architecture.md`, and `docs/development/ARCHITECTURE.md` kit areas at closeout (16.9) |
+| D5 Alkahest release-model list, option-owned release conditions, undeliverable-model startup refusal and atomic legacy-flag migration | `docs/development/DEPLOYMENT_AND_CONFIG.md#alkahest-release-models` and `docs/development/ARCHITECTURE.md` readiness boundary; settlement-configuration delta promoted at 16.9 |
 | D5 price/settlement/lifecycle option envelope, canonical identity, selection mirror and forward-only registry paths | Settlement-configuration and negotiation-protocol spec deltas; lifecycle ownership in deal-lifecycle spec/architecture, promoted at reviewed closeout (16.9) |
 | D6 neutral authorization/evidence envelope, sole end-service billing-start intent; D8 cause classification, pre-start timing exception and revised-remedy netting | New `deal-lifecycle` spec/architecture and settlement-servicing spec/architecture at closeout |
 | D8 receipt-embedded SignedDeliveryEndClaim, buyer concurrence/stop retry and both CLI paths | `openspec/specs/buyer-orchestration/spec.md` and `architecture.md` |
