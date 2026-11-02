@@ -39,6 +39,17 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-core"
+version = "0.5.0"
+source = { registry = "../../.dist" }
+dependencies = [
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_core-0.5.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-kit-arkhai-mediation"
 version = "0.1.0"
 source = { editable = "." }
@@ -53,6 +64,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "arkhai-kit-arkhai-payments" },
     { name = "datamodel-code-generator" },
     { name = "mypy" },
     { name = "pytest" },
@@ -71,10 +83,27 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "arkhai-kit-arkhai-payments", specifier = ">=0.1.0" },
     { name = "datamodel-code-generator", specifier = "==0.83.0" },
     { name = "mypy", specifier = ">=1.15,<2" },
     { name = "pytest", specifier = ">=8.3.4,<9" },
     { name = "types-jsonschema", specifier = ">=4" },
+]
+
+[[package]]
+name = "arkhai-kit-arkhai-payments"
+version = "0.3.0"
+source = { registry = "../../.dist" }
+dependencies = [
+    { name = "arkhai-core" },
+    { name = "arkhai-kit-identity" },
+    { name = "arkhai-kit-settlement-runtime" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "rfc8785" },
+]
+wheels = [
+    { path = "arkhai_kit_arkhai_payments-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -115,6 +144,19 @@ dependencies = [
 ]
 wheels = [
     { path = "arkhai_kit_identity-0.4.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-kit-settlement-runtime"
+version = "0.6.0"
+source = { registry = "../../.dist" }
+dependencies = [
+    { name = "arkhai-core" },
+    { name = "arkhai-kit-identity" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_kit_settlement_runtime-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]

@@ -15,25 +15,29 @@ from market_deal_lifecycle_contracts.models import (
     Effect as LifecycleEffect, FilingAnswer as LifecycleFilingAnswer, LifecycleCommand, LifecycleOutcome,
     PartEffect, PartHold, Pending, Rejected, Unknown,
 )
-from market_identity import canonical_json
-from pydantic import ValidationError
+from market_identity import Identity, canonical_json
+from pydantic import JsonValue, ValidationError
 
 from .client import (
     MediationAPIError, MediationClient, MediationError, MediationProtocolError,
     MediationTransportError,
 )
+from .claims import verify_claim
 from .contract import INTERFACE, validate, wire
-from .models import Append, Effect, Filing, ReadAfter, SignedRecordEntry
+from .models import (
+    Append, DeliveryEndClaim, Effect, Filing, ReadAfter, SignedDeliveryEndClaim, SignedRecordEntry,
+)
 from .records import RecordVerificationError
 
 
 class MediationAdapter:
-    supported_commands = frozenset({"dispute", "append"})
-    supported_intents: frozenset[str] = frozenset()
+    supported_commands = frozenset({"dispute", "delivery_end", "append"})
+    supported_intents = frozenset({"delivery_end"})
 
     def __init__(
         self, binding: DisputeBinding, agreement: dict, client: MediationClient, *,
         clock: Callable[[], int] = lambda: int(time.time()),
+        concurrence: SignedDeliveryEndClaim | None = None,
     ):
         if client.authority != binding.authority:
             raise ValueError("client does not address the Agreement's authority")
@@ -51,9 +55,28 @@ class MediationAdapter:
         self.agreement_digest = hashlib.sha256(canonical_json(agreement)).hexdigest()
         self.client = client
         self.clock = clock
+        self._concurrence = concurrence.model_copy(deep=True) if concurrence is not None else None
 
-    def build_request(self, intent: DeliveryEndIntent) -> Rejected:
-        return Rejected(reason="delivery_end lifecycle mapping is not enabled")
+    def build_request(self, intent: DeliveryEndIntent) -> InterfaceRequest | Rejected:
+        return self.delivery_end_request(intent, concurrence=self._concurrence)
+
+    def delivery_end_request(
+        self, intent: DeliveryEndIntent, *, concurrence: SignedDeliveryEndClaim | None = None,
+        claim: str = "End delivery under the Agreement.", items: Sequence[dict] = (),
+    ) -> InterfaceRequest | Rejected:
+        """Attach a verified receipt claim without selecting or computing remedies."""
+        value = intent.model_dump(mode="json")
+        payload: dict[str, JsonValue] = {"request": value, "claim": claim, "items": list(items)}
+        if concurrence is not None:
+            if not verify_claim(
+                concurrence, agreement=self.agreement_digest,
+                seller=Identity.model_validate(self._agreement["seller"]),
+                claim=DeliveryEndClaim.model_validate(value),
+            ):
+                return Rejected(reason="concurrence does not bind the Agreement seller and exact claim")
+            payload["concurrence"] = wire(concurrence)
+        request = InterfaceRequest(interface=INTERFACE, payload=payload)
+        return self.validate_request(request) or request
 
     def effects_request(
         self, effects: Sequence[Effect | dict], *, claim: str, items: Sequence[dict] = (),
@@ -88,10 +111,10 @@ class MediationAdapter:
             "agreement": self._agreement,
         }
         validate("Filing", value)
-        # Free-form filings name requested effects; delivery-end intents need their mapper.
-        if value["request"]["kind"] != "effects":
-            raise ValueError("this adapter only enables free-form effects requests")
-        for effect in value["request"]["effects"]:
+        if value["request"]["kind"] == "delivery_end":
+            if value["request"]["ended_at"] > self.clock():
+                raise ValueError("delivery end cannot be in the future")
+        for effect in value["request"].get("effects", []):
             if effect["kind"] == "award":
                 raise ValueError("bond awards are reserved")
             if effect["kind"] == "end_delivery" and effect["at"] > self.clock():

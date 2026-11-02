@@ -1,7 +1,9 @@
 # Published mediation baseline
 
 - Producer: https://github.com/arkhai-io/arkhai-payments
-- Revision: `da93a544ab106be19d4d52a866f1887d8dee3447` (main); paired payments baseline `3be127e4`.
+- Revision: `06ead90cc5c49d6d2a465a2da50379f329ff1438` (main); paired payments baseline `3be127e4`.
+  The schema is byte-identical to `da93a544ab106be19d4d52a866f1887d8dee3447`;
+  vectors include 14 producer-generated automatic-ruling and operator-recovery traces.
 - Upstream files: `schema/mediation.schema.json` and `test-vectors/mediation.json`.
 - Exact copies and SHA-256 metadata ship inside `market_arkhai_mediation/contract_data/`.
   `contract.resource_bytes`, `schema`, `vectors`, `publication`, and `validate` work from installed wheels.

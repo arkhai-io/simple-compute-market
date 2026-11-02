@@ -21,4 +21,4 @@ build-backend = "hatchling.build"
 packages = ["src/market_arkhai_mediation"]
 
 [dependency-groups]
-dev = ["datamodel-code-generator==0.83.0", "pytest>=8.3.4,<9", "mypy>=1.15,<2", "types-jsonschema>=4"]
+dev = ["arkhai-kit-arkhai-payments>=0.1.0", "datamodel-code-generator==0.83.0", "pytest>=8.3.4,<9", "mypy>=1.15,<2", "types-jsonschema>=4"]

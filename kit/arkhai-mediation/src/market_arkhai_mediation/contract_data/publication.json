@@ -8,7 +8,7 @@
     },
     "mediation.vectors.json": {
       "source": "test-vectors/mediation.json",
-      "sha256": "2dce1a1f554edffcb002edd748d6f83a2ce81d90ab06da0ca6b39031ccdf4188"
+      "sha256": "c334a57732c31d6bbfaaf356ea40df5e409e5348f74fcd345f2b91af75edbace"
     }
   },
   "capabilities": [
