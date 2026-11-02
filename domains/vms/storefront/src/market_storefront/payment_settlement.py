@@ -44,6 +44,7 @@ from market_arkhai_payments import (
     reconcile_accepted_payments,
 )
 from market_identity import Identity
+from market_arkhai_payments.models import SignedReceipt
 
 from market_storefront.payment_repository import VmSettlementEvidenceConflict
 from market_storefront.services.fulfillment_resume_runtime import (
@@ -77,6 +78,7 @@ class VmPaymentsCoordinator:
         self.tasks: dict[str, asyncio.Task] = {}
         self.locks: dict[str, asyncio.Lock] = {}
         self.owner = f"payments:{uuid.uuid4()}"
+        self.lifecycle = None
         # The mechanisms this coordinator settles are the seller-table entries
         # that settle through it, so reconciliation selects deals by the table.
         self.mechanisms = tuple(
@@ -162,6 +164,8 @@ class VmPaymentsCoordinator:
             raw=raw, order=listing, receipt=receipt, data=data
         )
         await self._save(record)
+        if self.lifecycle is not None:
+            self.lifecycle.register(agreement, data, receipt)
         return record
 
     async def start(self, negotiation_id: str, thread: dict[str, Any]) -> PaymentSettleResult:
@@ -174,6 +178,10 @@ class VmPaymentsCoordinator:
             if record is not None and record.status == "verified":
                 try:
                     entry.revalidate(evidence=record, thread=thread, verifier=self.stage)
+                    if self.lifecycle is not None:
+                        self.lifecycle.register(agreement, data, SignedReceipt.model_validate(
+                            record.evidence["source"]["receipt"]
+                        ))
                 except ValueError as exc:
                     logger.error("stored payment receipt for %s no longer verifies", negotiation_id)
                     raise PaymentSettlementError(

@@ -19,7 +19,8 @@ The delivery double receives only verified settlement evidence; the planner read
 its accepted VM facts without interpreting the mechanism or loading an escrow.
 The observed sequence is `pending` with zero deliveries before approval,
 `provisioning` after approval, and `ready` with one delivery on retry. The final
-SQLite inspection observes zero `escrows` rows. This is a
+SQLite inspection observes zero `escrows` rows. The signed administrator lifecycle
+list contains the verified payment deal and its exact transaction reference. This is a
 local diagnostic, not a live ledger or VM acceptance run. For the real payments
 service setup see [`kit/arkhai-payments/README.md`](../../../../kit/arkhai-payments/README.md#local-first-use).
 

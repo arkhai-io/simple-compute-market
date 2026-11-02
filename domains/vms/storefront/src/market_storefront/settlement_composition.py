@@ -7,7 +7,7 @@ import logging
 import re
 import uuid
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from functools import partial
 from typing import Any
@@ -54,6 +54,7 @@ from market_settlement_runtime import (
     derive_obligation_ref,
 )
 
+from market_storefront.deal_lifecycle import VmDealLifecycle
 from market_storefront.payment_settlement import VmPaymentsCoordinator
 from market_storefront.settlement_registry import build_storefront_settlement_registry
 from market_storefront.services.capacity_client import (
@@ -95,6 +96,7 @@ class VmSettlementComposition:
     mechanism_resources: Mapping[str, Any] = field(repr=False)
     arkhai_payments_stage: PaymentSellerStage | None = None
     payments_coordinator: VmPaymentsCoordinator | None = None
+    lifecycle: VmDealLifecycle | None = None
     disputes: RegistryDisputePolicy = field(default_factory=lambda: RegistryDisputePolicy.from_document({}), repr=False)
 
     @property
@@ -1031,4 +1033,7 @@ def build_vm_settlement_composition(
         if payments_stage is not None
         else None,
     )
-    return composition
+    lifecycle = VmDealLifecycle(sqlite_client, marketplace_signer, composition.payments_coordinator, disputes)
+    if composition.payments_coordinator is not None:
+        composition.payments_coordinator.lifecycle = lifecycle
+    return replace(composition, lifecycle=lifecycle)

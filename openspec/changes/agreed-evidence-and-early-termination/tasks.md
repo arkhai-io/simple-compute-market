@@ -1133,7 +1133,7 @@ provision stages". Files: `domains/vms/storefront/src/market_storefront/`
 `services/fulfillment_service.py`, `payment_settlement.py`, `controllers/admin_controller.py`,
 `startup.py`), `domains/vms/domain` lease models.
 
-- [ ] 14.1 Compose the servicing kit, the hosted payment adapter and the mediation adapter in the
+- [x] 14.1 Compose the servicing kit, the hosted payment adapter and the mediation adapter in the
       VM storefront; enable seller envelope capture in the negotiation controllers. Verify:
       application-integration test that a hosted VM deal appears in `list` and its acceptance
       envelope is stored.
@@ -1164,6 +1164,31 @@ provision stages". Files: `domains/vms/storefront/src/market_storefront/`
 Verification point: the VM storefront's unit and application-integration suites; `make test`.
 End-to-end: `e2e_deal`, `e2e_deal_buyer_cli` and `e2e_vm_introduction` must keep passing;
 the first two gain delivery-only end/report stages, not hosted rate-part stop qualification.
+
+### VM implementation checkpoint (2026-11-02)
+
+- 14.1 composes the VM seller half, evidence store, once-payment and mediation
+  adapters, signed lifecycle list/read/commit/hint routes, and respondent-before-
+  watch servicing. Verified commitments register from their original receipts,
+  including revalidated recovery. Negotiation responses retain both exact
+  envelopes and proof context. The physical end/ingress ports remain 14.2/14.5.
+- 14.3 preserves seconds in administrator and terminal-settlement lease ends;
+  historical minute-format inputs remain readable. Commit: `e3a142381`.
+- Verification: 28 precision cases, 57 existing payment/negotiation integration
+  cases, the committed payment first-use example, architecture, packaging,
+  locks, comment hygiene and pinned strict validation pass. No permanent test
+  function was added. Setup/evidence and first-use boundaries:
+  `docs/attachments/vm-lifecycle-wiring/index.md`.
+- Early verification exposed optional composition stubs without lifecycle,
+  a static pause-route collision with the new dynamic route, and diagnostic
+  assumptions about JSON formatting/header casing; all are repaired. A separate
+  publication fix (`90de651de`) replaces the duplicate mediation entries with
+  the missing servicing kit and documents dependency closure once.
+- Remaining: 14.2, 14.4, 14.5 and the VM half of 7.4. No buyer stage or CLI has
+  been changed; keep 7.4 unchecked. Domain end-to-end setup with real local
+  payments/mediation and end/report scenario extensions is unrun, not waived.
+  The full aggregate result is recorded in the evidence packet. Permanent
+  promotion remains 16.9; no shared kit or bare-metal source was changed.
 
 ## 15. Bare-metal wiring
 

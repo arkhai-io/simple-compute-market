@@ -28,7 +28,12 @@ from market_arkhai_payments import (
 from market_arkhai_payments.fixtures import FakePaymentsClient, dispute_lifecycle
 from market_core import ImmutableFulfillmentCapability
 from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
+from market_deal_servicing import create_lifecycle_router
+from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
+from market_storefront.deal_lifecycle import VmDealLifecycle
+from storefront_client import StorefrontClient
 from market_identity import (
+    TrustedIdentitySet,
     REQUEST_PROTOCOL,
     Ed25519Signer,
     RequestEnvelope,
@@ -179,6 +184,8 @@ async def main():
             negotiation_id="payment-demo", terminal_state="success"
         )
         coordinator = VmPaymentsCoordinator(domain=domain, db=db, stage=stage)
+        lifecycle = VmDealLifecycle(db, seller, coordinator, RegistryDisputePolicy.from_document({}))
+        coordinator.lifecycle = lifecycle
         container.resolved_sqlite_client = db
         container.resolved_marketplace_signer = seller
         container.resolved_settlement_composition = SimpleNamespace(
@@ -186,9 +193,13 @@ async def main():
             seller_stages=domain.settlement.seller_stages,
             local_principal=seller.identity,
             arkhai_payments_stage=stage,
+            lifecycle=lifecycle,
         )
         app = FastAPI()
         app.include_router(router)
+        app.include_router(create_lifecycle_router(lambda _: lifecycle.routes(
+            TrustedIdentitySet(identities=(seller.identity,))
+        )))
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app), base_url="http://storefront.local"
         ) as http:
@@ -244,6 +255,18 @@ async def main():
                 print("payment escrow rows:", escrow_count)
                 assert escrow_count == 0
             assert deliveries == ["payment-demo"]
+            async with StorefrontClient(
+                "http://storefront.local", signer=seller, caller_role="admin",
+                expected_publishers=TrustedIdentitySet(identities=(seller.identity,)),
+                transport=httpx.ASGITransport(app),
+            ) as administrator:
+                page = await administrator.authenticated_request(
+                    "GET", "/api/v1/admin/lifecycle", role="admin",
+                    operation="lifecycle_list", resource="",
+                )
+                assert [deal["negotiation_id"] for deal in page["deals"]] == ["payment-demo"]
+                print("lifecycle list:", page["deals"][0]["mechanism"])
+        await lifecycle.close()
         await coordinator.stop()
         container.clear_lifespan_state(registry=registry)
 
