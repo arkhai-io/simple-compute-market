@@ -18,7 +18,9 @@ From a clean checkout at repository root:
 env -u ALL_PROXY -u all_proxy NO_PROXY=localhost,127.0.0.1 \
   no_proxy=localhost,127.0.0.1 make dist
 env -u ALL_PROXY -u all_proxy NO_PROXY=localhost,127.0.0.1 \
-  no_proxy=localhost,127.0.0.1 make -C kit/arkhai-payments first-use
+  no_proxy=localhost,127.0.0.1 uv run --no-project --no-cache --find-links .dist \
+  --with .dist/arkhai_kit_arkhai_payments-0.3.0-py3-none-any.whl \
+  python kit/arkhai-payments/examples/lifecycle.py
 ```
 
 Readiness observed: selected generated models load, the wheelhouse resolves,
@@ -50,11 +52,25 @@ and the initial receipt and signed snapshot verify before a reverse is sent.
   import and its consumers; make check-locks passes.
 - make check-architecture, make check-packaging, make check-comment-hygiene and
   pinned OpenSpec 1.14.0 strict validation pass.
-- Full aggregate and seller-refund verification are recorded below when run.
+- Seller refunds now use per-part voluntary lifecycle commands. The first-use
+  reconciliation encounters RefundUnavailable after a deliberately lost answer,
+  then Refunded twice across retry/crash replay. There are exactly two voluntary
+  reverses total: the original discount and the remaining-balance refund.
+- A temporary diagnostic read the legacy whole-part reverse (which omits its
+  amount), recovered the 10000-unit movement from signed cumulative state, and
+  rejected a subsequently tampered snapshot.
+- The isolated installed-wheel first-use command above passes. The editable
+  convenience target make -C kit/arkhai-payments first-use also passes.
+- Full make test passes (7m03s), including release-tooling and Helm checks, with
+  the prescribed proxy environment and shell-local Podman shim. The release guide
+  lists the new direct lifecycle-contracts dependency without duplicate entries.
 - No permanent acceptance tests were added. No hosted or real-HTTP payment
   qualification is claimed; no outside resource is left running.
 
 ## Documentation destination
+
+The adapter is introduced by d82242908; seller refund routing, reconciliation
+and final aggregate evidence are committed with the 11.2 checkbox on this branch.
 
 Reviewed closeout promotes payment translation, verified unknown recovery,
 per-ref extension observation and voluntary seller refunds into the active

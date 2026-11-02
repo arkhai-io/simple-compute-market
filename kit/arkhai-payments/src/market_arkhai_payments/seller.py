@@ -12,6 +12,10 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from market_deal_lifecycle.operations import OperationKeys
+from market_deal_lifecycle_contracts.models import Accepted, LifecycleCommand, Pending, Rejected, Unknown
+
+from market_arkhai_payments.adapter import PaymentAdapter, SnapshotVerifier, pinned_snapshot_verifier
 from market_arkhai_payments.agreement import (
     PaymentSettlementData,
     agreement_from_bytes,
@@ -172,12 +176,16 @@ class PaymentSellerStage:
         config: ArkhaiPaymentsConfig,
         *,
         client_for_owner: ClientForOwner | None = None,
+        snapshot_verifier: Callable[[Mapping[str, Any], PaymentSettlementData], SnapshotVerifier] | None = None,
     ) -> None:
         if config.service_url is None or config.service_identity is None:
             raise ArkhaiPaymentsConfigurationError(
                 "payments service URL and receipt identity are required for servicing"
             )
         self.config = config
+        self._snapshot_verifier = snapshot_verifier or (
+            lambda agreement, data: pinned_snapshot_verifier(agreement, data, config)
+        )
         self._client_for_owner: ClientForOwner = client_for_owner or (
             lambda owner: payments_client_for_owner(config, owner)
         )
@@ -265,15 +273,25 @@ class PaymentSellerStage:
     ) -> None:
         await asyncio.to_thread(self.deposit_now, agreement, data)
 
-    def reverse_now(
-        self, agreement: Mapping[str, Any], data: PaymentSettlementData
-    ) -> RefundOutcome:
-        """Reverse every still-held part, after re-checking that a verified payment exists.
+    def payment_adapter(
+        self, agreement: Mapping[str, Any], data: PaymentSettlementData, *, minimum_sequence: int = 0,
+    ) -> PaymentAdapter:
+        """Bind the payee's lifecycle port without taking ownership of its watch cursor."""
 
-        Repeating a reversal is safe: the service call carries a fixed
-        transaction-scoped idempotency key, and when the service reports nothing
-        left to reverse because an earlier call already reversed every part,
-        the outcome is still ``Refunded``.
+        return PaymentAdapter(
+            agreement, data, account=selected_payment_option(agreement).payee_account,
+            client_for_owner=self._client_for_owner,
+            verify_snapshot=self._snapshot_verifier(agreement, data), minimum_sequence=minimum_sequence,
+        )
+
+    def reverse_now(
+        self, agreement: Mapping[str, Any], data: PaymentSettlementData,
+    ) -> RefundOutcome:
+        """Refund through voluntary per-part lifecycle reverses and verified reads.
+
+        A lost answer leaves no local assertion that funds moved. The next call
+        reads the authority, recovers the stable operation and finishes any
+        remaining parts. Reconciliation uses the same accepted-deal path.
         """
 
         txid = data.transaction_id
@@ -286,33 +304,52 @@ class PaymentSellerStage:
             return RefundUnavailable(txid, current.reason)
         if isinstance(current, ReceiptBlocked):
             return RefundBlocked(txid, current.reason)
-        owner = selected_payment_option(agreement).payee_account
+        adapter = self.payment_adapter(agreement, data)
         try:
-            with self._client_for_owner(owner) as client:
-                event = client.reverse(txid)
-        except PaymentsAPIError as exc:
-            if exc.code == "transaction_not_found":
-                return NotPaid(txid, "no approved payment exists for this deal")
-            if exc.code in _NOTHING_TO_REVERSE:
-                if self._fully_reversed(owner, txid):
-                    return Refunded(txid, None)
-                return NothingToReverse(txid, _reason(exc))
-            if _transient(exc):
-                return RefundUnavailable(txid, _reason(exc))
-            return RefundBlocked(txid, _reason(exc))
+            before = adapter.snapshot_now().snapshot
+            if all(part.status.value == "reversed" for part in before.parts):
+                return Refunded(txid, None)
+            event = None
+            for part in before.parts:
+                if int(part.held.root) == 0:
+                    continue
+                operation_key = f"refund-{txid}-{part.part}"
+                keys = OperationKeys(adapter.negotiation_id, operation_key)
+                request_id = keys.part_event(str(part.part), "reverse")
+                prior = next((entry.root for entry in before.events
+                              if isinstance(entry.root, StoredEvent)
+                              and entry.root.account.root == adapter.account
+                              and entry.root.requestId.root == request_id), None)
+                amount = prior.event.amount.root if prior is not None and prior.event.amount else part.held.root
+                command = LifecycleCommand(
+                    negotiation_id=adapter.negotiation_id, kind="reverse", operation_key=operation_key,
+                    payload={"part": str(part.part), "amount": amount},
+                )
+                outcome = adapter.submit_now(command, keys)
+                if isinstance(outcome, Unknown):
+                    return RefundUnavailable(txid, outcome.reason)
+                if isinstance(outcome, Pending):
+                    return NotPaid(txid, outcome.reason)
+                if isinstance(outcome, Rejected):
+                    if any(code in outcome.reason for code in _NOTHING_TO_REVERSE):
+                        return NothingToReverse(txid, outcome.reason)
+                    if any(code in outcome.reason for code in _TRANSIENT_CODES):
+                        return RefundUnavailable(txid, outcome.reason)
+                    return RefundBlocked(txid, outcome.reason)
+                assert isinstance(outcome, Accepted)
+                after = adapter.snapshot_now().snapshot
+                event = next((entry.root for entry in after.events
+                              if isinstance(entry.root, StoredEvent)
+                              and entry.root.account.root == adapter.account
+                              and entry.root.requestId.root == request_id), event)
+            final = adapter.snapshot_now().snapshot
+            if all(part.status.value == "reversed" for part in final.parts):
+                return Refunded(txid, event)
+            return NothingToReverse(txid, "not every payment part remains fully reversible")
         except (PaymentsError, ArkhaiPaymentsConfigurationError) as exc:
             if _transient(exc):
                 return RefundUnavailable(txid, _reason(exc))
             return RefundBlocked(txid, _reason(exc))
-        return Refunded(txid, event)
-
-    def _fully_reversed(self, owner: str, txid: str) -> bool:
-        try:
-            with self._client_for_owner(owner) as client:
-                parts = client.get_transaction(txid).snapshot.parts
-        except (PaymentsError, ArkhaiPaymentsConfigurationError):
-            return False
-        return bool(parts) and all(part.status.value == "reversed" for part in parts)
 
     async def reverse(
         self, agreement: Mapping[str, Any], data: PaymentSettlementData

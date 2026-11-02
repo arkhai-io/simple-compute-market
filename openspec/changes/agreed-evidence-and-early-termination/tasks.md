@@ -931,7 +931,7 @@ authority's; this change's suites claim neither). Files: `kit/arkhai-payments/sr
       (section 9), open extensions per ref. Verify: library-integration tests for "A reverse's
       response is lost", "A ruling discounts a deal" (observation side), "Two outcomes reverse
       the same part" (observation side) and "A held part shows its extension".
-- [ ] 11.2 Route seller refunds through reverse and reconcile unreported commitments.
+- [x] 11.2 Route seller refunds through reverse and reconcile unreported commitments.
       The payment adapter sends no exceptional-end events: the seller's exit is the dispute
       filing, and the adapter sends only voluntary `reverse {part, amount}` with stable per-part
       keys and verified unknown-result recovery. Spot adds rate commands, not a seller
@@ -952,8 +952,15 @@ evidence where a payments target is reachable.
   architecture, packaging, locks, comment hygiene and strict OpenSpec validation pass.
   Runnable first use and observation-side case effects are recorded in
   `docs/attachments/once-payment-adapter/index.md`. No new acceptance test was added.
-- 11.2 seller refund/reconciliation and the full aggregate remain pending here.
-  Permanent documentation promotion remains at reviewed closeout in deal-lifecycle
+- 11.2 routes seller refunds through verified per-part voluntary reverse commands.
+  Reconciliation recovers the authority's recorded amounts after a lost answer and
+  crash replay; the first-use fixture records exactly one refund per part. Legacy
+  whole-part reversals are projected from signed cumulative state, not guessed.
+- Full `make test` passes (7m03s) with the prescribed proxy environment and shell-local
+  Podman shim, including release-tooling and Helm checks. The payments kit, editable
+  first-use target and isolated installed-wheel replay pass. No external resource is
+  left running. No hosted or real-HTTP payment qualification is claimed.
+- Permanent documentation promotion remains at reviewed closeout in deal-lifecycle
   and settlement-servicing; no rate or exceptional-end payment command was added.
 
 ## 12. Arkhai mediation dispute kit

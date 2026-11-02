@@ -106,12 +106,12 @@ class PaymentAdapter:
         if set(command.payload) != {"part", "amount"}:
             return Rejected(reason="reverse requires exactly part and amount")
         part, amount = command.payload["part"], command.payload["amount"]
-        if not isinstance(part, str) or not part.isascii() or not part.isdecimal():
+        if not isinstance(part, str) or len(part) > 2 or not part.isascii() or not part.isdecimal():
             return Rejected(reason="part must be a canonical decimal part reference")
         index = int(part)
         if str(index) != part or index >= len(self.data.mandate.parts):
             return Rejected(reason="unknown payment part")
-        if (not isinstance(amount, str) or not amount.isascii() or not amount.isdecimal()
+        if (not isinstance(amount, str) or len(amount) > 38 or not amount.isascii() or not amount.isdecimal()
                 or not 0 < int(amount) < 10**38 or str(int(amount)) != amount):
             return Rejected(reason="reverse amount must be positive minor-unit decimal text")
         authorities = self.data.mandate.parts[index].root.authorities.reverse
@@ -133,13 +133,15 @@ class PaymentAdapter:
         if sorted(part.part for part in snapshot.parts) != list(range(len(self.data.mandate.parts))):
             raise PaymentsProtocolError("payments snapshot has a different part population")
         sequences = [event.root.sequence for event in snapshot.events]
-        if sequences != list(range(1, snapshot.latestEventSequence + 1)):
+        if (len(sequences) != snapshot.latestEventSequence
+                or any(sequence != index for index, sequence in enumerate(sequences, 1))):
             raise PaymentsProtocolError("payments snapshot has incomplete or unordered events")
         return signed
 
     def events(self, snapshot: TransactionSnapshot) -> list[PaymentEvent]:
         """Project verified events without interpreting dispute remedies or delivery ends."""
         result = []
+        reversed_so_far = {part.part: 0 for part in snapshot.parts}
         for wrapped in snapshot.events:
             stored = wrapped.root
             event = stored.event
@@ -157,6 +159,15 @@ class PaymentAdapter:
                 if kind not in {"reverse", "extend", "lift", "stop"}:
                     raise PaymentsProtocolError("unsupported once payment event")
                 amount = stored.event.amount.root if isinstance(stored, StoredEvent) and stored.event.amount else None
+                if kind == "reverse":
+                    # A legacy whole-part reverse omits its amount. Once parts
+                    # cannot earn again, so the signed cumulative reversal is
+                    # the remaining movement after earlier recorded reverses.
+                    if amount is None:
+                        amount = str(int(part.reversed.root) - reversed_so_far[part.part])
+                        if amount == "0":
+                            continue
+                    reversed_so_far[part.part] += int(amount)
                 extension = None
                 if kind == "extend":
                     extension = str(sequence)

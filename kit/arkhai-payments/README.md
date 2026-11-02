@@ -134,15 +134,25 @@ else:
 
 The verifier checks the pinned Ed25519 service identity, the
 `arkhai.payments.receipt.v1` framing via `market_identity`, and the mandate's
-transaction ID and Agreement deal hash. `get_transaction` reads the signed
-current snapshot; sellers trust only the independently signed receipt inside
-it, not the snapshot's own proof.
+transaction ID and Agreement deal hash. Receipt-only checks trust the
+independently signed receipt inside `get_transaction`. Lifecycle observations
+and refunds additionally require verification of the snapshot's own proof
+before consuming its balances, event history or extensions.
 
 The normal deal flow never refunds. `stage.reverse(agreement, data)` serves
-seller-initiated refunds only: it re-checks the receipt first and reports
-`Refunded`, `NotPaid`, `NothingToReverse`, or `RefundUnavailable`. `reverse`
-uses a deterministic transaction-scoped idempotency key, so an exact retry
-cannot create a second reverse event.
+seller-initiated refunds only: it re-checks the receipt and signed authority
+state, then translates each remaining held part into a voluntary lifecycle
+`reverse {part, amount}` with its own stable operation key. It reports `Refunded`,
+`NotPaid`, `NothingToReverse`, `RefundUnavailable` or `RefundBlocked`. A lost
+response is recovered by verified read and same-key retry. It does not send an
+exceptional-end claim or compute a dispute remedy. `stage.payment_adapter`
+exposes the same payee adapter for lifecycle composition; its verifier factory
+can be injected for key rotation.
+
+`reconcile_accepted_payments` still advances every domain-supplied accepted
+candidate, including a buyer that approved and never sent commit. The domain's
+idempotent settle callback decides whether to serve or refund; a crash or one
+candidate failure does not discard the remaining candidates.
 
 ## Once payment lifecycle
 

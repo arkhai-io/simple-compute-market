@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+import logging
+from typing import cast
 
 from market_arkhai_payments.adapter import PaymentAdapter, pinned_snapshot_verifier
 from market_arkhai_payments.agreement import PaymentSettlementData
@@ -9,6 +11,8 @@ from market_core.schemas import Agreement, derive_settlement_option_id
 from market_arkhai_payments.errors import PaymentsTransportError
 from market_arkhai_payments.fixtures import FakePaymentsClient, dispute_lifecycle, sign_snapshot
 from market_arkhai_payments.settlement_config import ArkhaiPaymentsConfig
+from market_arkhai_payments.seller import ClientForOwner, PaymentSellerStage, Refunded, RefundUnavailable
+from market_arkhai_payments.reconciliation import reconcile_accepted_payments
 from market_deal_lifecycle.operations import OperationKeys
 from market_deal_lifecycle_contracts.models import Accepted, LifecycleCommand, Unknown
 from market_identity import Ed25519Signer
@@ -107,10 +111,29 @@ async def main() -> None:
     assert [e.amount for e in observed.events if e.case_ref and e.kind == "reverse"] == ["2500", "1000"]
     assert len(observed.extensions) == 1 and observed.extensions[0].case_ref == "case-B"
     assert observed.extensions[0].extension_ref == "4" and observed.deadline is None
+    seller = PaymentSellerStage(config, client_for_owner=cast(ClientForOwner, fake))
+    fake.lose = True
+    refunds = []
+
+    async def settle_unreported(negotiation_id):
+        assert negotiation_id == agreement["negotiation_id"]
+        answer = await seller.reverse(agreement, data)
+        refunds.append(type(answer).__name__)
+        if isinstance(answer, RefundUnavailable):
+            raise RuntimeError(answer.reason)
+        assert isinstance(answer, Refunded)
+
+    logger = logging.getLogger("once-lifecycle-example")
+    first = await reconcile_accepted_payments([command.negotiation_id], settle_unreported, logger=logger)
+    retry = await reconcile_accepted_payments([command.negotiation_id], settle_unreported, logger=logger)
+    crash_replay = await reconcile_accepted_payments([command.negotiation_id], settle_unreported, logger=logger)
+    assert (first.failed, retry.failed, crash_replay.failed) == (1, 0, 0)
+    assert len(fake.engine.snapshot(data.transaction_id).snapshot.events) == 2
     print(json.dumps({
         "initial": initial.status, "read": recovered.model_dump(mode="json"),
         "replay": replay.status, "recorded_reverses": len(recovered.events),
         "changed_retry": "rejected", "observed_case_effects": observed.model_dump(mode="json"),
+        "unreported_refund_reconciliation": refunds, "total_voluntary_reverses": 2,
     }, indent=2))
 
 
