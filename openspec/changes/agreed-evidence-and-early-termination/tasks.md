@@ -1,11 +1,9 @@
 # Tasks — agreed evidence and early termination
 
-Reconciled design-stage plan, updated 2026-10-29 after triage of reviews 17 and 18; amended 2026-11-02 for one payee-agreed delivery_end claim and the published mediation revision.
-No implementation is implied by unchecked tasks. Depends on no open
-change for design or planning. Implementation depends on two external contracts (design.md,
-"Dependencies on the hosted payments service"): the published payments partialPeriod contract revision, ready to vendor at 8.1
-(hold extensions, per-part start/stop and authorities with notice
-durations, per-part `end` and `afterStop` holds, one re-vendor) gates section 8, and the arkhai.mediation.v1 delivery_end revision (claim/signature/concurrence/respondent listing) is now published and vendored at 12.1. Receipt embedding, buyer concurrence, respondent HTTP polling and setup-bearing presets still require their implementation tasks; the hosted service remains on the older contract and live qualification is pending.
+Implementation tasks 1–15 are complete, including review 19–23 repairs.
+Closeout 16.1–16.10 promotes the verified current system; 16.11 archival awaits
+owner review. Published contracts are vendored; deployed qualification and its
+limits are recorded below. Hosted development mediation remains on an older revision.
 
 Sections follow the design's implementation cadence. Sections 1–7 are round 1 (foundation,
 wire and buyer side), except 7.5's explicitly round-2 end verification; section 8 joins round 1 once its schema and vectors are vendored
@@ -163,106 +161,19 @@ Verification point: unit tests in both kits; `make check-packaging`; `make check
 `make test`. End-to-end: `e2e_deal`, `e2e_bare_metal_mock_deal` and `e2e_credits_payment_deal`
 on the republished listings of 2.5; nothing composes the kits yet.
 
-### Settlement-option accessor checkpoint (2026-11-02)
+### Sections 1–2 result
 
-- At the 2.5a checkpoint, Payments Agreement and public-carrier readers used
-  core accessors while serialized options and IDs stayed unchanged. Mandate
-  derivation consumes typed mechanism parameters, not the public carrier.
-- The producer gate is satisfied by the published `option-envelope-projection`
-  revision, recorded only in `kit/arkhai-mediation/schema/SOURCE.md`. Its schema,
-  mapping and regenerated vectors support the D5 option without rewriting the
-  Agreement. Models are regenerated and contract, drift, typing and all 40
-  mediation integration/trace cases pass; no gate xfail or skip remains.
-- 2.5b and the cleanup portion of 2.5c use optional `price`, required `settlement`
-  with flat `schema`-tagged parameters, and optional `lifecycle`. Selection mirrors
-  the settlement envelope with buyer-owned parameters; registry filters and
-  persisted Agreement queries read the new paths. Lifecycle identity coverage
-  hashes its own key. Alkahest has no lifecycle terms; introductions have no
-  price. All listings must be republished because their option IDs change.
-- The earlier no-runtime blocker (#324) was overcome with the verified Podman
-  shim for owned end-to-end lane runs. Current results are recorded below.
-  The active plan's future lifecycle architecture citation is tracked in #325.
-
-### Settlement-option wire cutover verification (2026-11-02)
-
-- 2.5b and 2.5c's wire/cleanup work are implemented. The producer projection
-  gate is satisfied, with no compatibility projection and no gate-related
-  xfail or skip. The exact producer revision is recorded only in the mediation
-  kit's `schema/SOURCE.md`; generated-model drift, contract, typing and all
-  40 mediation cases, including 12.3's 14 ruling-trace replays, pass.
-- Required proxy settings: unset `ALL_PROXY` and `all_proxy`; set `NO_PROXY`
-  and `no_proxy` to `localhost,127.0.0.1`. `make check-architecture`,
-  `make check-packaging`, `make check-comment-hygiene`, full `make test`,
-  core typing and pinned OpenSpec strict validation pass. Aggregate tooling
-  tests used a standalone Docker Compose binary for config rendering, not
-  a daemon or a replacement payment service.
-- Fresh branch-built lane stacks republished their listings. `e2e_deal`:
-  **35 passed**. `e2e_bare_metal_mock_deal`: **39 passed**.
-  `e2e_credits_payment_deal`: the first run blocked/skipped all 3 cases because
-  `PAYMENTS.SERVICE_URL` was absent. The follow-up at SCM revision
-  `9e4fe5aff3b001a187576ac24cf9364eac55664d` configured a real local Arkhai
-  payments service with Formance/Postgres and republished the API-credit listings:
-  **3 passed, 0 skipped**, in 5.14 seconds. Baseline/held/replayed/refunded HTTP
-  balance observations confirm the 3,000,000 USD/6 debit, unchanged replay and
-  full seller reversal; buyer funds are restored and `feePaid=0`. Host, buyer
-  and seller payment readiness passed before pytest. **2.5 is complete**.
-  Operator-side readiness tooling needed the new `settlement.schema` path;
-  its disposable adaptation and follow-up #327 are recorded in the packet.
-  No SCM code or scenario assertion changed for this qualification.
-- Every owned lane container, volume and network was removed, and native Anvil
-  children left by scenarios were stopped. No external resource is left running.
-- The payment smoke example reaches provisioning and ready delivery under the
-  new envelope; it is an injected in-process self-check, not a live payment run.
-  Existing test assertions were migrated without dropping acceptance cases;
-  no new acceptance tests were added. Optional section 4 is not included.
-- Evidence and runnable setup: `docs/attachments/settlement-option-envelope/index.md`.
-  Reviewed-closeout promotion remains in the active settlement-configuration
-  and negotiation-protocol deltas, with lifecycle ownership in deal-lifecycle.
-
-### Implementation checkpoint (2026-11-02)
-
-- Implemented and committed 1.1–2.4 in order. The contracts and foundation wheels
-  are in the kit build/test aggregates. No service composes these kits yet, and
-  existing settlement-option wire bytes remain unchanged.
-- Remaining in the sections 1–2 assignment: all of 2.5, including every option
-  builder/consumer, the selection mirror and registry carrier, republishing, and
-  the three named end-to-end suites. No partial wire cutover has been made.
-- Focused verification passes: architecture fixture trees (73 tests), lifecycle
-  contracts (37 tests), lifecycle foundation (62 tests). `make check-architecture`,
-  `make check-packaging`, `make check-comment-hygiene` and pinned OpenSpec 1.14.0
-  strict validation pass. `make test` has been run repeatedly but has not passed
-  end-to-end in this environment; the unresolved setup boundary is tracked in
-  [#323](https://github.com/arkhai-io/simple-compute-market/issues/323).
-- The first full-suite attempt inherited a SOCKS proxy without `socksio`; removing
-  proxy variables exposed a malformed IPv6 entry in inherited `NO_PROXY`.
-  Both stopped at the same provisioning-client tests. A proxy-free rerun passed
-  those 607 unit tests and the provisioning integration tests, but was stopped
-  while storefront dependency resolution made no progress. The located fixture
-  defect is fixed separately: the sign-only test now injects an HTTP mock
-  transport, so it neither initializes ambient proxy transports nor performs I/O.
-  Its six tests pass under the original environment with assertions preserved.
-  The same ambient-proxy defect also affected the VM degraded-startup scenario;
-  its existing loop-registry fixture now removes proxy variables so its loopback
-  refusal boundary stays real and deterministic (two tests pass). Both fixture
-  repairs preserve all kept assertions. A subsequent full rerun retained the normal
-  dependency-download environment and passed VM storefront integration
-  (501 tests) but stopped at 55 bare-metal storefront setup failures with the same
-  missing SOCKS transport. A further run preserving HTTP/HTTPS proxies, removing
-  ALL_PROXY and limiting NO_PROXY to loopback passed 607 provisioning unit tests
-  but stopped at `test_storefront_checks_reflect_configured_url` (453 other
-  provisioning integration tests passed). Later aggregate targets were not reached.
-  No end-to-end suite was run: the 2.5 wire cutover and republish are still pending.
-- Choices: instants in the neutral wire are Unix seconds; disputed signed bodies
-  remain base64-carried exact bytes. The delivery-end intent is neutral and has
-  either cause. The acknowledgement's signed-claim slot currently accepts only
-  omission/null; concrete mediation claims and signatures fail closed until 12.1.
-  Capability support comes from injected installed-contract declarations, empty
-  by default. The term-identity test uses the existing option-ID helper with
-  encoded terms as opaque parameters; 2.5 must move it to the new lifecycle key.
-- Reproduce the library surface from a clean checkout with `make dist`, then
-  `make -C kit/deal-lifecycle-contracts test` and `make -C kit/deal-lifecycle test`.
-  This is library-only setup, with deterministic test principals and injected
-  adapters, no deployed target, seed, external credentials or resident server.
+Neutral contracts, terms, adapter protocols and exact-byte evidence interfaces are implemented.
+The option/selection wire cutover has no old-key readers and hashes lifecycle separately.
+The published mediation projection gate is satisfied without Agreement rewriting;
+provenance stays in `kit/arkhai-mediation/schema/SOURCE.md`. Every listing is republished.
+Fresh lanes passed: VM 35 stages, bare-metal mock 39, API-credit hosted payments 3
+(zero skips, real local authority). Full tests, typing, architecture, packaging, locks,
+hygiene and strict validation passed. Earlier proxy/Docker prerequisites (#323/#324)
+were resolved by the prescribed environment and Podman shim. Setup, balance/reversal
+observations and readiness-tooling friction (#327):
+`docs/attachments/settlement-option-envelope/index.md`. All owned resources were removed.
+Promotion: settlement-configuration/negotiation-protocol deltas and lifecycle architecture.
 
 ## 3. Dispute authority configuration and registry recommendations
 
@@ -363,62 +274,15 @@ descriptor suites (unit and library integration); the Helm render check; `make t
 End-to-end: `e2e_deal`, `e2e_bare_metal_mock_deal` and `e2e_credits_payment_deal` must keep
 passing (they start roles from rendered configuration); none exercises the new list.
 
-### Sections 3 and 5 implementation checkpoint (2026-11-02)
+### Sections 3 and 5 result
 
-- Completed 3.1, 3.3 and 5.1. The authority configuration library, explicit buyer
-  profile opt-ins, signed descriptor recommendations, and common query
-  projections are committed. No option wire bytes or IDs change.
-- Remaining: 3.2 retires the payments authority key; 3.4 composes role lists,
-  fetches registry recommendations and reports empty lists; 3.5 documents that
-  role-level configuration. Section 4 is intentionally untouched.
-- 3.2 has a sequencing dependency on 2.5b: the current payments
-  `mandate_policy_for_agreement` and `PaymentApproval` require the configuration
-  authority, while the pre-flip option's lifecycle accessor returns no terms.
-  Removing that input now would break every hosted commitment or require a
-  competing temporary authority wire. Keep the existing path until the
-  Agreement can carry its authority under the designed lifecycle key.
-- For 3.4, current buyer bootstrap reads the signed filter specification, not
-  the descriptor, and storefront registry clients use configured trust pins
-  without fetching it. The role wiring must add descriptor reads and retain
-  per-registry recommendation lists; it cannot reuse an existing fetch.
-- Reproduction and observed readiness are recorded in
-  `docs/attachments/aeet-sections-3-5/index.md`. The library example and selected
-  registry typed-client integration run pass from rebuilt wheel installs
-  (12 registry tests). This is an implementer self-check, not independent
-  acceptance or a deployed end-to-end scenario.
-- The aggregate exposed an isolated API-credit wheel fixture missing the two
-  new lifecycle dependencies. Its wheel list is repaired and all three
-  isolated installation tests pass. The public distribution manifest,
-  publication workflow and release guide also include both lifecycle packages;
-  their 272 contract checks pass.
-- Docker CLI absence reproduces the tracked release-tooling prerequisite
-  failure [#324](https://github.com/arkhai-io/simple-compute-market/issues/324).
-  A temporary Docker 28.3.3 / Compose 2.39.4 tool directory is used only for
-  daemon-free configuration rendering and removed after its command.
-  `make test-deployment-packaging` then passes: 1,838 release-tooling tests and
-  all Helm structural/render assertions. No container daemon, deployment or
-  end-to-end scenario is started. The aggregate was exercised in segments after
-  repairs; there is no single all-green `make test` invocation.
-
-### Role integration checkpoint (2026-11-02)
-
-- Supersedes the remaining-work list in the earlier sections 3/5 checkpoint:
-  3.2, 3.4 and 3.5 are implemented; 3.1, 3.3 and 5.1 remain complete.
-- Reproducible owned-target setup, first-use observations and exact limitations
-  are in `docs/attachments/aeet-sections-3-5/index.md`. The configuration example,
-  signed registry application integration and local VM payment smoke pass.
-- Existing test fixtures were adapted, without weakening assertions or adding
-  permanent test functions. Generated storefront/umbrella schemas and release
-  dependency documentation reflect the changed configuration and imports.
-- Final full `make test` passes in one invocation (2026-11-02, 7m 2s), with
-  the per-shell Podman shim and #323's proxy environment. This includes 1,843
-  release-tooling tests and Helm render/structural checks. Locks, packaging,
-  architecture, comment hygiene, strict OpenSpec validation and focused role
-  suites also pass.
-- The scoped citation check has only #325's three future lifecycle-document
-  matches. End-to-end lanes and independent acceptance are unrun by this worker;
-  hosted option construction and exact authority admission remain section 8.
-  No shared deployment or resident external resource was created.
+Authority entries, signed per-registry recommendations, local identity vetoes,
+identity-bound credentials, explicit buyer opt-in, empty-list diagnostics and common
+same-option query projections are wired across roles. Generated schemas, isolated
+wheels and publication metadata agree. Full tests passed in 7m02s, including release
+tooling/Helm, and packaging/architecture/locks/hygiene/strict validation passed.
+Library/registry setup: `docs/attachments/aeet-sections-3-5/index.md`.
+Configuration guide owns setup; normative deltas promote at archive.
 
 ## 4. Alkahest release models
 
@@ -471,22 +335,14 @@ Verification point: `kit/alkahest` unit suites; both storefronts' integration su
 End-to-end: `e2e_deal`, `e2e_non_erc20_settlement` and `e2e_bare_metal_deal` exercise Alkahest
 publication and settlement and must keep passing.
 
-### Section 4 verification checkpoint (2026-11-02)
+### Section 4 result
 
-- All four implementation tasks are committed. Full `make test` passes with the
-  local Podman shim and proxy exclusions; architecture, packaging, locks,
-  comment hygiene and strict OpenSpec validation pass.
-- The VM container lane passes 37 stages covering ERC20, native-token and ERC1155
-  settlement. The bare-metal mock lane passes 39 stages. Its selected real-host
-  scenario skips: `BARE_METAL.REGISTRY_URL is not configured`; no real whole host
-  or role-scoped SSH credential is available, so that qualification remains
-  unobserved, not passed.
-- Full change-scoped citations retain the already recorded pre-closeout failure
-  (GitHub issue 325); changed permanent-document citations resolve. No check or
-  acceptance boundary was weakened. The packet above carries reproducible
-  first-use setup, observations and the two small fixture repairs.
-- The roadmap and campaign remain in implementation; this section changes no
-  dependency or campaign status. Subsystem-spec promotion remains at 16.9.
+Release-model publication, startup refusal and atomic migration are complete.
+VM ERC20/native/ERC1155 lane: 37 passed; bare-metal mock: 39 passed.
+Real-host scenario was readiness-gated (`BARE_METAL.REGISTRY_URL` absent), not qualified.
+Full tests and package/document gates passed. Setup and fixture repairs:
+`docs/attachments/alkahest-release-models/index.md`. Promotion: settlement-configuration
+and the configuration guide; no Alkahest lifecycle adapter is claimed.
 
 ## 5. Common query fields
 
@@ -570,14 +426,14 @@ storefront-client and identity unit suites; `make check-architecture` (buyer-sid
 `make test`. End-to-end: `e2e_deal_buyer_cli` must keep passing with capture enabled in the
 buyer CLI; none checks the stored envelopes.
 
-### Buyer evidence implementation checkpoint (2026-11-02)
+### Section 6 result
 
-- `kit/deal-lifecycle-buyer` provides a transactional file store, a synchronous capture sink, superseded commitment/acceptance bindings, complete-observation retention, composable prune/export commands and exact-byte case export. VM and bare-metal CLI negotiation paths pass the profile-adjacent store; payment and VM escrow paths record references once known.
-- The command factory accepts an injected fresh reader and an exact-Agreement-to-terms projection. The projection belongs to the buyer composition and uses the option accessor; the buyer-side kit imports neither core buyer nor the core Agreement carrier. Domain lifecycle command registration and live authority-reader composition remain in 7.4.
-- The production HTTP negotiation integration reopens the store in the pre-payment acceptance callback. Retention covers running deals, recovery, every payout, open/closed cases, uncommitted expiry, missing terms/adapters, unavailable reads and concurrent capture. Export drives both composed commands and preserves superseded Agreements and binary evidence.
-- Focused checks: buyer evidence 18 passed; core buyer 159 passed; storefront client 68 passed; core storefront 225 passed; VM buyer 213 passed; bare-metal buyer 16 passed. `make check-architecture`, `make check-packaging`, `make check-comment-hygiene` and strict OpenSpec validation pass. Full-suite and end-to-end results are recorded separately; no live hosted or deployment-qualified end-to-end evidence is claimed here.
-- Publication metadata includes the buyer evidence distribution and its lifecycle/contracts dependencies in dependency order, with workflow filters and release-guide rows. The full `make test` run reached release tooling: six publication-metadata failures were repaired; the remaining compose-isolation check cannot run because this host has no Docker executable. The release-tooling suite excluding that Docker-dependent file and the Helm render suite pass, as do the focused publication matrix and required architecture, packaging, comment-hygiene and strict OpenSpec checks. No Docker-backed end-to-end result is claimed.
-- Durable behavior and rationale are scheduled for the new deal-lifecycle specification and architecture companion (current source: `openspec/changes/agreed-evidence-and-early-termination/specs/deal-lifecycle/spec.md` and `design.md`), with buyer composition details in `openspec/specs/buyer-orchestration/architecture.md`, at 16.9. `kit/deal-lifecycle-buyer/README.md` documents the installed API and reproducible first use now.
+Transactional profile-adjacent evidence captures exact envelopes before approval,
+retains superseded commitments, prunes only after complete fresh observations and
+exports cases. Compositions inject Agreement projections/readers; the kit imports no
+core buyer. Buyer/core/client suites and package gates passed; later full aggregates
+supersede early Docker failures. Current API/setup: `kit/deal-lifecycle-buyer/README.md`.
+Promotion: lifecycle and buyer-orchestration companions.
 
 ## 7. Lifecycle client and the buyer half
 
@@ -635,13 +491,13 @@ bare-metal buyer application-integration suites; `make test`. End-to-end: `e2e_d
 `e2e_deal_buyer_cli` and `e2e_bare_metal_mock_deal` must keep passing; none exercises a hosted
 lifecycle deal.
 
-### Lifecycle buyer foundation checkpoint (2026-11-02)
+### Section 7 result
 
-- 7.1 provides the signed, publisher-pinned async lifecycle client for commit, hint and delivery reads, using the shared route declarations and exact-envelope capture. 7.2 provides injected buyer payment/dispute dispatch, durable same-key/content guards, interface-owned append packaging, separate hint observation and merged direct-authority/delivery reads. No payment remedy is applied by the buyer half.
-- 7.3 composes exact authority admission in VM, bare-metal and API-credit fresh selection. The neutral core buyer receives only an option-preference callback; it does not bind a lifecycle kit. Registry-specific policy is preserved through compatibility/explain paths, explicit bare-metal option IDs cannot bypass admission, and preference precedes option-ID ordering within the selected mechanism and clause.
-- Client and buyer first-use examples pass, as does the production VM authority-selection example. Existing suites pass: lifecycle 62, buyer evidence 18, core buyer 159, storefront client 68, VM buyer 213, bare-metal buyer 16 and API-credit buyer 35. Existing negotiation fixtures now supply accepted lifecycle authorities; no permanent test function was added or assertion weakened.
-- Fresh wheel builds, dependency-closure relocks, architecture, packaging, lock currency, comment hygiene, configured core typing and pinned strict OpenSpec validation pass. The complete `make test` aggregate passes in 7m20s with the prescribed proxy settings and Podman shim, after supplying accepted authority setup to existing bare-metal/API-credit CLI integration fixtures without weakening assertions. Signed peer acknowledgements without payload negotiation IDs are retained by their signed resource. Committed first-use setup, aggregate evidence and deployment limitations are recorded in `docs/attachments/lifecycle-buyer-foundation/index.md`.
-- 7.4–7.5 remain deferred pending section 13: no compute lifecycle-stage handoff, canonical end-delivery verb, stop/outage journal or live lifecycle authority is claimed. Permanent contract/rationale promotion remains 16.9, from the deal-lifecycle delta and design into the new capability's specification/architecture companion and the buyer-orchestration documents.
+Signed client, injected dispatch, stable keys, direct-authority/delivery reads and exact
+authority selection are implemented. Both compute stages compose them (7.4/14.5/15.2).
+First use, focused suites and full tests (7m20s) passed; package/typing gates passed.
+Setup: `docs/attachments/lifecycle-buyer-foundation/index.md`.
+Rate execution remains deferred; promotion: lifecycle and buyer-orchestration.
 
 ## 8. Hosted mandates, buyer mandate check and hosted option builders
 
@@ -946,38 +802,15 @@ market-composition's "Marketplace roles hold no payment ledger". Files: new `kit
 Verification point: unit and library-integration suites of `kit/deal-servicing`; `make
 check-architecture`; `make test`. End-to-end: none; no storefront composes the kit yet.
 
-### Section 10 implementation checkpoint (2026-11-02)
+### Section 10 result
 
-- Whole tasks 10.1–10.6 are implemented and checked above. Reproduce library first
-  use from committed setup with `make dist-ci && make -C kit/deal-servicing first-use`.
-  Each example owns a temporary SQLite database and public deterministic fixture
-  principals; no deployment, credentials, seed files or resident service are required.
-- Seller submit/read/list, pinned-authority credential repair, durable filing replay,
-  authenticated site ingress and receipt-time buyer surrender are implemented.
-  `make -C provisioning/compute/service first-use-lease-end` exercises the concrete
-  site report, transactional outbox and authenticated lease-read projection with
-  temporary state; its setup is documented beside the example. No resident server
-  or private configuration is required.
-- Adapter integration: the neutral dispute protocol now exposes build_append; the
-  mediation kit owns its evidence packaging. Domain compositions must still bind
-  verified payment-stop classification, complete retention observations, exact client
-  response capture and the shared storefront watch-step registration. These hooks
-  fail conservatively when absent; no payment ledger or mechanism-specific parsing
-  was added to the servicing kit. No public option bytes or IDs changed.
-- Focused regressions pass: foundation 62, contracts 37, mediation 40, storefront
-  131, site 304, compute contracts 111, compute 244, storefront client 68 and
-  compute service 607 unit/454 integration. The servicing examples and source
-  typing pass. No permanent tests were added; existing setups were adapted for
-  the new composition without removing or weakening assertions. Architecture,
-  packaging, locks, comment hygiene and pinned strict OpenSpec validation pass.
-- The earlier 10.1–10.3 aggregate attempt stopped at the Docker prerequisite,
-  recorded in [#324](https://github.com/arkhai-io/simple-compute-market/issues/324#issuecomment-6570225578).
-  The prescribed Podman shim now runs that check. The subsequent aggregate reached
-  release tooling and found duplicate lifecycle publication entries; their separate
-  repair passes all 1847 release-tooling tests. A fresh complete `make test` passes
-  (7m11s), including Helm structural/render checks, with the prescribed proxy
-  environment and Podman shim. No browser/deployed end-to-end run is claimed:
-  domain composition is still owned by 13–15.
+Caller-session end/admission CAS, atomic correction/filing intents, independent cursors,
+seller views, evidence and signed site event/outbox are implemented. Review-added
+permanent suites run under ordinary CI discovery. Clean first use:
+`make dist-ci && make -C kit/deal-servicing first-use`; producer:
+`make -C provisioning/compute/service first-use-lease-end`. Both own temporary fixture
+state. Full tests (7m11s), typing and package/document gates passed.
+Promotion: lifecycle, site-capacity and physical-provisioning; deployed evidence follows.
 
 ## 11. Hosted payment adapter for once parts
 
@@ -1007,26 +840,14 @@ Verification point: `kit/arkhai-payments` unit and library-integration suites ag
 kit-owned in-process payments contract fake; `make test`. End-to-end: `e2e_credits_payment_deal`'s seller refund is
 evidence where a payments target is reachable.
 
-### Section 11 adapter checkpoint (2026-11-02)
+### Section 11 result
 
-- 11.1 supplies the once-only payment adapter, stable per-part reverse keys,
-  required injected snapshot verification and cursor floor, signed-read recovery,
-  and per-ref/case extension observation. The current-pin helper is available;
-  rotation-aware verification is composed through the same required port.
-- Existing payments suites: 92 pass; typing, generated resources, producer vectors,
-  architecture, packaging, locks, comment hygiene and strict OpenSpec validation pass.
-  Runnable first use and observation-side case effects are recorded in
-  `docs/attachments/once-payment-adapter/index.md`. No new acceptance test was added.
-- 11.2 routes seller refunds through verified per-part voluntary reverse commands.
-  Reconciliation recovers the authority's recorded amounts after a lost answer and
-  crash replay; the first-use fixture records exactly one refund per part. Legacy
-  whole-part reversals are projected from signed cumulative state, not guessed.
-- Full `make test` passes (7m03s) with the prescribed proxy environment and shell-local
-  Podman shim, including release-tooling and Helm checks. The payments kit, editable
-  first-use target and isolated installed-wheel replay pass. No external resource is
-  left running. No hosted or real-HTTP payment qualification is claimed.
-- Permanent documentation promotion remains at reviewed closeout in deal-lifecycle
-  and settlement-servicing; no rate or exceptional-end payment command was added.
+The once-only adapter verifies snapshots/cursor floors, observes extensions and performs
+voluntary per-part reverses with same-key signed-read recovery. Reconciliation recovers
+unreported commitments; it does not apply exceptional-end remedies. Payments suites,
+typing, vectors, installed-wheel first use and full tests (7m03s) passed.
+Setup: `docs/attachments/once-payment-adapter/index.md`.
+Promotion: lifecycle/settlement-servicing; no rate or deployed HTTP result is claimed here.
 
 ## 12. Arkhai mediation dispute kit
 
@@ -1114,12 +935,16 @@ seller's budget". Files: `kit/deal-servicing` (router factory),
 
 Verification point: application-integration suites; `make test`. End-to-end: none.
 
-### Lifecycle route and cooperative ending checkpoint (2026-11-02)
+### Sections 12–13 result
 
-- 13.1–13.3 provide the mountable, signed role-authenticated router, non-gating seller budget diagnostics, receipt-time surrender and owner-only exact site-report reads. The composition injects the accepted Agreement binding, its seller signer, the administrator trust set and its existing authority-verifying commit/hint implementation. No domain mounting is included.
-- 12.4 provides bounded respondent discovery bound to signed filing records, persisted pages/cursors, exact journaled sign-or-contest answers and lost-append recovery. Compose one poller per accepted authority/account with payee credentials before deal watch; both adopt the same case-keyed append journal.
-- 12.5 stores the owning adapter's reusable SignedDeliveryEndClaim atomically with receipt/end recording. 7.5 adds canonical client end_delivery and buyer stop/surrender/filing progress with durable same-key retries, offline Agreement-bound receipt verification, exact concurrence and contested observed-time fallback. Compose FileEvidenceStore.end_journal and the exact Agreement principals into the buyer half; authorized pruning clears its retained plans.
-- Focused suites, source typing, built-wheel first-use examples, architecture, packaging, locks, comment hygiene and pinned strict validation pass. The old null-only claim test now preserves the available interface-owned claim; no permanent test was added. The full `make test` aggregate also passes in 7m54s with the prescribed proxy settings and shell-local Podman shim, including release tooling and Helm render/structural checks. Citation checking reports only the three known #325 destinations. First-use setup and boundaries: `docs/attachments/lifecycle-routes/index.md`. Sections 7.4, 14 and 15 still own domain stages/CLI/wiring; rate execution and live authority qualification remain their owning changes. Permanent promotion remains 16.9 to the lifecycle, buyer-orchestration and market-composition specifications and architecture companions.
+Signed role-authenticated routes, non-gating diagnostics, receipt-time surrender and exact
+owner-only report reads are implemented. Respondent discovery precedes watch and
+journals sign-or-contest answers. Receipts embed adapter-owned claims; buyer recovery
+resolves uncertain surrender before fixing a filing and separates authority/delivery
+progress. Full tests (7m54s), typing and package/document gates passed.
+Setup: `docs/attachments/lifecycle-routes/index.md` and
+`docs/attachments/agreed-evidence-mediation/index.md`.
+Promotion: lifecycle/buyer-orchestration; rate execution is deferred.
 
 ## 14. VM wiring
 
@@ -1185,208 +1010,28 @@ Verification point: the VM storefront's unit and application-integration suites;
 End-to-end: `e2e_deal`, `e2e_deal_buyer_cli` and `e2e_vm_introduction` must keep passing;
 the first two gain delivery-only end/report stages, not hosted rate-part stop qualification.
 
-### VM implementation checkpoint (2026-11-02)
+### Section 14 result and qualification
 
-- 14.1 composes the VM seller half, evidence store, once-payment and mediation
-  adapters, signed lifecycle list/read/commit/hint routes, and respondent-before-
-  watch servicing. Verified commitments register from their original receipts,
-  including revalidated recovery. Negotiation responses retain both exact
-  envelopes and proof context. The physical end/ingress ports remain 14.2/14.5.
-- 14.3 preserves seconds in administrator and terminal-settlement lease ends;
-  historical minute-format inputs remain readable. Commit: `e3a142381`.
-- Verification: 28 precision cases, 57 existing payment/negotiation integration
-  cases, the committed payment first-use example, architecture, packaging,
-  locks, comment hygiene and pinned strict validation pass. No permanent test
-  function was added. Setup/evidence and first-use boundaries:
-  `docs/attachments/vm-lifecycle-wiring/index.md`.
-- Early verification exposed optional composition stubs without lifecycle,
-  a static pause-route collision with the new dynamic route, and diagnostic
-  assumptions about JSON formatting/header casing; all are repaired. A separate
-  publication fix (`90de651de`) replaces the duplicate mediation entries with
-  the missing servicing kit and documents dependency closure once.
-- Remaining: 14.2, 14.4, 14.5 and the VM half of 7.4. No buyer stage or CLI has
-  been changed; keep 7.4 unchecked. Domain end-to-end setup with real local
-  payments/mediation and end/report scenario extensions is unrun, not waived.
-  The full aggregate result is recorded in the evidence packet. Permanent
-  promotion remains 16.9; no shared kit or bare-metal source was changed.
+VM composition binds acceptance evidence, verified commitments, adapters and authenticated
+routes. Admission gates reserve/dispatch/activation/disclosure; terminal/refund/failure
+ends share the journal and terminate now. Administrator dispatch follows accepted rights,
+otherwise records its attributed end before independent teardown/filing. Site push/pull
+retains proof; only capacity-return proof reports released. `market end --from <run>`
+keeps receipt/current-delivery and payment/case progress distinct. Seconds are preserved.
+Setup and focused evidence:
+- `docs/attachments/vm-lifecycle-wiring/index.md`
+- `docs/attachments/vm-end-admission/index.md`
+- `docs/attachments/vm-admin-interrupt/index.md`
+- `docs/attachments/vm-site-report/index.md`
+- `docs/attachments/vm-end-classification/index.md`
 
-### VM physical-end implementation checkpoint (2026-11-02)
-
-- 14.2 connects terminal settlement and confirmed refunds to the shared end
-  journal and VM physical port. Refund completion and its final request share
-  one transaction. Reservation, dispatch, activation and credential checkpoints
-  order admission in their own write transaction; recovery uses the same gates.
-  Due ends deny subsequent disclosure. Undispatched capacity is released and a
-  delivered VM is terminated now, not by a watchdog kick.
-- The mounted end route now has its VM ingress/end ports and owning receipt
-  claim signer. Signing uses read-only accepted/delivery snapshots inside the
-  ingress transaction; a nested writer caused a local first-use lock error and
-  was removed. The first-use fixture now names the real installed mediation
-  interface rather than an unrelated fixture interface. Missing claim kind was
-  caught by that first use and corrected. Physical retry is independent of
-  authority failure; future ends without reservations remain pending.
-- Existing fixture setups now provide committed admission and current lease
-  windows. Kept refund/terminal assertions follow the deliberate behavior:
-  refund during provisioning prevents disclosure, and terminal active leases
-  request immediate termination. No permanent test function was added.
-- Evidence and runnable setup: `docs/attachments/vm-end-admission/index.md`.
-  The 1,690 existing VM unit/application-integration cases, mounted first use,
-  fresh wheels, architecture, packaging, locks, comments and pinned strict
-  validation pass. Full `make test` passes with the shell-local Podman shim;
-  the final checks/first-use/aggregate pipeline completed in 7m42s. The scoped
-  citation check reports only the three known future destinations in #325.
-- The first aggregate reached release tooling and found an inherited
-  bare-metal release-table omission. Separate repair `edd52a728` adds the three
-  declared lifecycle dependencies once; all 1,858 release-tooling cases pass.
-- Remaining: 14.4, the authenticated site-report receiver/pull recovery and
-  callback release progress in 14.5, failure-source classification/correlation,
-  the VM buyer stages/CLI and the VM half of 7.4. Keep 7.4 unchecked. Existing
-  administrator interrupt and failure-policy release paths still need the
-  seller-half/end-service dispatch owned by that continuation. No fresh-stack
-  VM e2e, real local payment/mediation qualification or end/report e2e extension
-  is claimed. No shared package or sibling-domain source was changed.
-  Permanent promotion remains 16.9.
-
-### VM administrator dispatch continuation checkpoint (2026-11-02)
-
-- 14.4 routes hosted negotiation interrupts through the seller half. Accepted
-  payee rights select a notice stop; otherwise the attributed receipt-time end
-  and payee filing are journaled atomically, with physical drive concurrent with
-  the filing so authority loss does not delay teardown. Administrator and reason
-  are retained for both branches. Stable keys reject changed attribution;
-  hosted requests reject supplied times and payout amounts. The existing
-  Alkahest splitter-backed escrow path is unchanged.
-- First use mounts the real administrator router, identity middleware, SQLite
-  and signed client. The vector-derived mediation peer records one case before
-  deliberately losing its response; same-key recovery returns that case. An
-  injected future payment adapter demonstrates no local end before the effective
-  authority stop and no self-penalty. This is dispatch/order evidence, not rate
-  mandate or live-rate qualification. The existing payment example also shows
-  physical drive with a missing mediation credential and durable filing repair.
-- Evidence and clean-checkout entry points:
-  `docs/attachments/vm-admin-interrupt/index.md`. The 72 existing focused cases,
-  architecture, packaging, locks, comments and pinned strict validation pass.
-  Full `make test` passes in 8m10s with the shell-local Podman shim and proxy
-  exclusions, including release tooling and Helm checks. Citation checking
-  reports only the three known future destinations in #325.
-  No new permanent test function or weakened assertion; the payment fixture
-  now supplies the installed mediation interface's vector-derived authority.
-- First-use attempts caught a response lookup using the thread row's absent
-  listing_id; the route now uses the accepted Agreement. The initial temporary
-  diagnostic also lacked the explicit storefront-domain environment supplied by
-  test setup; the committed entry point includes it. Neither failure is carried.
-- Remaining 14.5: authenticated site-report receiver/pull recovery and callback
-  release progress; failure-source classification/correlation and the direct
-  failure-policy release path; VM buyer stages/CLI and the VM half of 7.4.
-  Keep 7.4 unchecked. No fresh-stack e2e, real local payments/mediation journey
-  or end/report stage extension is claimed. Shared-kit/client and provisioning
-  sources are unchanged; no sibling-domain work was touched. Promotion remains
-  16.9 to the lifecycle spec/architecture and VM fulfillment documents.
-
-### VM site/buyer application-wiring checkpoint (2026-11-02)
-
-- 14.5a mounts the compute callback contract under site-bound service-peer
-  authentication, verifies the inner site proof against the durable reservation
-  and accepted site, and preserves immutable site payloads through push and
-  signed typed lease-read recovery. Capacity-return callbacks alone advance a
-  delivered deal to released; intended ends stay distinct from proven return.
-- 14.5b composes the VM buyer half with the canonical lifecycle client, profile-
-  local evidence/end journal and Agreement-bound payment/mediation adapters.
-  Hosted approval now hands off with commit; Alkahest settlement is unchanged.
-  `market end --from <run>` has no supplied instant, retries stable commands,
-  preserves receipt time and reports payment/case/delivery/capacity separately.
-  Signed site reports are retained without pretending independent site trust.
-  Removed financial configuration cannot prevent receipt-only surrender.
-- Application first-use and runnable setup: `docs/attachments/vm-site-report/index.md`.
-  It uses signed HTTP, SQLite, vector-derived payments, controlled physical work
-  and the actual buyer CLI/stage with injected recovered run context. Missing
-  mediation authentication remains explicitly unknown, not accepted mediation.
-  The 213 existing buyer cases and 74 focused callback/payment cases pass after
-  their peer setup follows commit; no new permanent test or weakened assertion.
-  Fresh wheels, architecture, packaging, locks and comments pass. Full
-  `make test` passes in 7m15s with the shell-local Podman shim; the final
-  application/packaging re-drive passes after recovery-policy hardening too.
-  Dependency closure was relocked for buyer/storefront/e2e and the existing release row updated.
-  Pinned strict validation passes; scoped citations report only the three known
-  future lifecycle spec/architecture references in #325.
-- Preparation failures were corrected: rebuild/reinit supplied the new client
-  dependency; acceptance artifacts use their wire codec, not alias-free model
-  output; the updated HTTP fixture replaces rather than duplicates transport.
-  Parent integration supplied the shared report-retry fix, so no overlapping
-  kit change was kept. This continuation changes no sibling-domain source.
-- Remaining: 14.5c end/report e2e stages and fresh-stack real-authority
-  qualification; verified failure-source classification/correlation, pending-
-  slot resolution and direct failure-policy release dispatch. Site reports
-  currently retain pending classification without blocking physical work.
-  Keep 14.5 and 7.4 unchecked. Permanent promotion remains 16.9, to the lifecycle
-  spec/architecture, VM fulfillment and buyer-orchestration documents.
-
-### VM failure-source continuation checkpoint (2026-11-02)
-
-- 14.5d connects verified site evidence to accepted deadline/availability facts
-  and recorded physical intent keys. Known lawful ends retain both sources;
-  unentitled withdrawal and provisioning failure journal their corrections.
-  Pending site slots are revisited after authority observation without replacing
-  their immutable requests or fixed basis. The lifecycle cycle establishes missed
-  delivery deadlines even without a further fulfillment attempt.
-- Committed-deal failure-policy release now uses end service. Undispatched
-  guarded releases echo their operation key; delivered leases always use lease
-  termination and await the separate capacity-return callback, never direct release.
-  Capacity held outside committed delivery keeps its existing guarded path.
-- Evidence and clean-checkout first use: `docs/attachments/vm-end-classification/index.md`.
-  Three in-process encounters cover delayed lawful classification, signed site
-  withdrawal and direct failure-policy release through the actual physical port
-  with injected site transport. No permanent acceptance test was added.
-  The kept release assertion now expects the correlation key, not the former
-  generic reason; no release or no-truncation assertion was weakened.
-- VM unit/application regressions and both first-use entry points pass. Fresh
-  wheels, architecture, packaging, locks, comment hygiene and strict validation
-  pass. Full `make test` passes in 7m41s on the final source with the prescribed
-  proxy exclusions and shell-local Podman shim, including release tooling and
-  Helm checks. An earlier aggregate was stopped before the final physical guard
-  and is not counted as passing. Scoped citations report only the three known
-  future lifecycle destinations in #325. Initial
-  self-check preparation supplied missing public SLA/region fields to the reused
-  payment fixture; production listing validation remains unchanged.
-- Remaining: 14.5c end/report stages in both VM e2e modules, then fresh branch-built
-  qualification through the Podman shim with real local payments and mediation,
-  hosted dispute terms, and a real CLI subprocess. No deployed lifecycle scenario
-  has run here; 14.5 and parent-owned 7.4 remain unchecked. Unknown site causes
-  without controlling evidence remain pending by design; renewable/funding-timer
-  and rate execution stay outside this foundation. No external resource is left up.
-  Permanent documentation promotion remains 16.9 at reviewed closeout.
-
-### VM fresh-stack qualification (2026-11-02)
-
-- Supersedes the remaining 14.5c boundary above: both existing VM journeys now
-  preserve lease-expiry qualification and add a second deal, repeated canonical
-  surrender, exact signed site-report verification before provider completion,
-  one teardown handle and callback-only capacity release. The CLI journey uses
-  real `market negotiate`, `market settle` and `market end` subprocesses; bounded
-  end wait/read mode observes current delivery separately from the durable receipt.
-- At `5874088d1`, fresh branch-built VM images and isolated empty volumes passed
-  Compose and real local payments/mediation readiness. An authenticated registry
-  read proved hosted adjudication terms, a 300-second delivery deadline, a
-  1,296,000-second dispute window and unbounded case hold. `e2e_deal` passed
-  **38/38 stages in 17.18s** and `e2e_deal_buyer_cli` **30/30 in 26.07s**,
-  with zero skips. The journeys retain their canonical Alkahest settlement;
-  this is delivery-only qualification, not hosted rate-stop or ruling execution.
-- Live qualification found that enabling payments broke unrelated Alkahest
-  publication when no payment clause was selected. Repair `d2c71b365` returns
-  no payment option in that case, with the existing builder regression extended;
-  all 97 payments-kit tests, typing, vectors and generated-model checks pass.
-  Harness preparation corrections preserve all previous assertions: explicitly
-  advance republication, await this deal's dispatch, use typed settlement wait,
-  observe release by reservation identity and request the CLI's current view.
-- Full `make test` passes in **7m19s** with the Podman shim and prescribed proxy
-  exclusions. Harness regression: **316 passed**. Architecture, packaging,
-  locks, comment hygiene and pinned strict OpenSpec validation pass. Citation
-  checking reports only the three known destinations in #325. Evidence and
-  committed readiness entry point: `docs/attachments/vm-end-classification/index.md`.
-- Every attempted deployment was removed, with final owned container, volume
-  and network inventories empty; external service source is unchanged. No
-  resident service remains. 14.5 and 14.5c are checked; **7.4 remains untouched**
-  for the parent. Permanent promotion remains reviewed closeout under 16.9.
+Fresh images at `5874088d1`, empty owned volumes and real local payments/mediation
+passed readiness. VM deal 38/38 and CLI deal 30/30 passed with zero skips; both retain
+lease-expiry checks and add repeated surrender, signed report before teardown completion
+and callback-only capacity return. These Alkahest journeys qualify delivery, not rate or
+ruling execution. Full tests passed in 7m19s; harness 316 and package/document gates
+passed. All owned deployments were removed. 14.5 and 7.4 are complete.
+Promotion: lifecycle, VM fulfillment and buyer orchestration.
 
 ## 15. Bare-metal wiring
 
@@ -1417,41 +1062,20 @@ Verification point: the bare-metal storefront's unit and application-integration
 `make test`. End-to-end: `e2e_bare_metal_deal` and `e2e_bare_metal_mock_deal` (teardown path)
 must keep passing.
 
-### Bare-metal implementation checkpoint (2026-11-02)
+### Section 15 result and qualification
 
-- In-progress storefront composition registers accepted bindings and request evidence in the acceptance transaction, mounts the shared lifecycle router, and connects hosted payment/mediation adapters, seller views, respondent discovery before watch, and the end journal. Admission checks precede reserve, commit, dispatch and disclosure. Terminal settlement and seller refunds enter end service; in-flight create/reserve work retains pending physical effects for adoption/re-drive. Lease windows use the accepted Agreement horizon.
-- The committed first-use entry point is `domains/bare_metal/storefront/examples/lifecycle_first_use.py`, run from that package with `PYTHONPATH=tests uv run --find-links ../../../.dist python examples/lifecycle_first_use.py` after `make reinit`. It drives hosted commit/list/evidence, repeated signed surrender and wrong-buyer refusal through the mounted typed client, using the existing regression setup and deterministic public development identities. The setup is in-process and self-cleaning, not a domain deployment.
-- Existing bare-metal storefront regression: 522 passed. Fresh wheel builds, targeted generated locks, architecture, packaging, lock currency, comment hygiene and pinned strict OpenSpec validation pass. An earlier run exposed missing transaction begin and future fixture readiness timestamps; registration now borrows an explicitly active acceptance transaction and records the seller's own observation time. Waiting for an in-flight create's lock during termination could deadlock the caller controlling that create; end effects now stay pending until the create adopts its result and re-drives them. The mounted first use also caught a missing required claim kind, now supplied by the owning contract.
-- This is a checkpoint, not completion of 15.1 or 15.2; both boxes remain unchecked. Before finishing 15.1, complete durable bounded cycle pagination and non-payment physical recovery scheduling, correlate/classify site ends, prove pre-dispatch and create-in-flight admission, and recheck actual commitment timing versus acceptance timing in the delivery record. Before finishing 15.2, mount authenticated accepted-site report receipt/pull recovery, update the release callback's neutral progress, retire the unbegun teardown refusal and move the buyer command to the buyer half/canonical client. The bare-metal half of 7.4 remains unimplemented and its checkbox is untouched.
-- No VM production code changed. Mechanical consumer lock refreshes cover `domains/vms/storefront/uv.lock` and `e2e-tests/uv.lock`; the VM worker must retain the joined dependency closure during integration. No configuration model, schema, published distribution row or wire codec was added.
-- Full aggregate and fresh-stack domain e2e qualification remain unrun at this checkpoint. Next qualification must build the mock-provisioned lane from the branch, supply ready local payments and mediation with dispute-bearing options, run the domain scenarios, extend the existing end/report stages without adding permanent test functions, and distinguish intended end from proven capacity release. No real-host target exists. No service, container, browser, tunnel or deployment was started.
-- Permanent promotion remains reviewed closeout: the deal-lifecycle delta and design become the new capability's specification and architecture companion; buyer composition in the buyer-orchestration documents; site report/release semantics in the physical-provisioning and site-capacity documents. Detailed checkpoint evidence is in `docs/attachments/bare-metal-lifecycle/index.md`.
-
-### Bare-metal recovery continuation checkpoint (2026-11-02)
-
-- Supersedes the 15.1 remaining-work list above: 15.1 is implemented. Recovery rotates durable bounded pages and runs through the independent controllable `delivery-recovery` loop even without hosted publication. Physical effects remain pending while reserve/create owns its gate, then re-drive once the returned identity is adopted. Final credential authorization rechecks admission after the live access read. Site reports with the verified seller's exact termination source preserve their controlling lawful request; unentitled withdrawal and non-delivery use the existing filing journal.
-- Accepted delivery records no longer mistake negotiation acceptance for payment commitment. A small shared `kit/deal-servicing` seam permits absent `committed_at`, confirms it once from verified evidence without losing earlier ends, excludes uncommitted deals from public seller pages, and gates billing/authorization. Bare-metal verified-evidence persistence binds hosted `approvedAt` in the same transaction. Shared changes are limited to `journal.py`, `seller.py` and `end.py`; no VM source changed, and no dependency/configuration/wire model was added.
-- The committed first-use entry point now accepts `before-dispatch` and `create-in-flight`. Both return a durable surrender without waiting for the held operation; the former sends no create and releases its hold, the latter adopts and terminates once. Existing regression remains **522 passed**. Temporary diagnostics prove persisted continuation across a recreated composition and lawful site-end correlation. A diagnostic exposed a shadowed reservation lookup while correlating a report; that is repaired and re-driven. The initial regression's five loop-list failures were updated to include the deliberately added recovery loop, with every previous assertion retained and no new test function.
-- Shared servicing-kit typing and all its existing first-use examples pass. Fresh distributions, architecture, packaging, locks, comment hygiene and pinned strict OpenSpec validation pass. Full **`make test` passes in 6m59s**, using the prescribed proxy exclusions and shell-local Podman shim, including **1,858 release-tooling cases** and Helm structural/render checks. The earlier aggregate passed all package suites but exposed missing servicing publication/dependency rows. Separate repair `542b04638` adds the servicing kit once, removes the duplicate mediation entry from the manifest/workflow and records the bare-metal storefront's declared dependencies; its focused release-tooling rerun also passes.
-- **Remaining:** 15.2 and the bare-metal half of 7.4 are untouched: authenticated accepted-site callback/pull receipt and proven-release progress, canonical buyer teardown through `BuyerLifecycle` with durable evidence/end journal, hosted buyer commit and existing scenario end/report stages. Leave 7.4's checkbox for the parent. Then build a fresh mock-provisioned stack from the branch, readiness-gate real local payments/mediation and dispute-bearing options, and run `e2e_bare_metal_mock_deal`. That live qualification is unrun; the real-host lane has no operator target. No external runtime, container, server, browser or tunnel was started or remains.
-- Evidence and reproducible checkout-owned setup: `docs/attachments/bare-metal-lifecycle/index.md`. Permanent promotion remains reviewed closeout in the destinations above and the design-promotion record; this checkpoint is not independent acceptance.
-
-### Canonical bare-metal buyer and site ingress checkpoint (2026-11-02)
-
-- The buyer stage now approves then sends canonical `commit` through `BuyerLifecycle`, rather than the domain settlement transport. `teardown --run-id` uses the same half with the file evidence store and durable end journal; `delivery --run-id` returns independent delivery/authority views. The domain teardown HTTP route and old settlement transport are removed. Alkahest settlement and contact introduction are unchanged. Exact accepted Agreement bytes/data remain recoverable from canonical negotiation and run-end records.
-- The selected site's authenticated callback verifies the service principal and signed report against the owned reservation/site. Recovery reads the original report from that site's authenticated lease read, even after release, because routing bindings are retained. Intended-end reports do not claim release; the release callback or authenticated released lease advances neutral physical progress. Undispatched hold release is completed directly and dispatched work retains teardown progress.
-- Existing mounted first use covers commit/surrender replay, wrong buyer/site, report push retries, pull recovery, exact report reads and separate proven release; its before-dispatch and create-in-flight modes pass. The existing CLI integration reopens composition, retries teardown, retains observation/receipt evidence and preserves one physical termination. A synchronous event-loop bridge is required for embedded CLI callers. Mediation credentials are resolved only at I/O, so missing credentials do not suppress surrender or discard a filing awaiting retry.
-- Minimal shared fixes are `kit/deal-servicing/ingress.py` (immutable report identity is independent of refreshed push headers or pull's absent headers) and `kit/deal-lifecycle-buyer/ending.py` (an exact seller receipt can acknowledge surrender without an installed dispute adapter, without implying a refund). No VM source or wire/config model changes. Buyer client/contracts dependencies, generated consumer locks and the release-guide row are current.
-- Existing domain e2e functions are updated for canonical surrender, original signed reports, intended-end versus proven-release progress, and hosted commit replay. No test function was added or removed. The real-host scenario uses the installed buyer's actual run-ID verbs; it still has no operator-owned host target.
-- Validation: full **`make test` passes in 8m10s** with the prescribed proxy exclusions and shell-local Podman shim, including storefront **522 passed**, buyer **16 passed**, lifecycle buyer **18 passed**, e2e harness unit **315 passed**, release tooling **1,858 passed** and Helm render/structural assertions. Servicing-kit typing/all first-use examples, existing payment integration **16 passed** including reopened end/evidence and the callback trust fixture pass. Fresh distributions, targeted generated locks, architecture, packaging, lock currency, comment hygiene and pinned strict OpenSpec validation pass. The existing optional Torch-dependent VM collection skip remains; deployed domain scenarios are not part of this aggregate.
-- **Continuation:** 15.2 and the bare-metal half of 7.4 remain unchecked pending fresh-stack qualification. Build the mock lane from this branch, readiness-gate real local payments and mediation plus dispute-bearing publication, run `e2e_bare_metal_mock_deal` and the existing hosted payment scenario, repair/re-drive as needed, and report which scenarios actually ran. Leave 7.4's checkbox for the parent. Evidence/setup and failed-approach notes: `docs/attachments/bare-metal-lifecycle/index.md`. No external runtime, server, browser, tunnel or deployment was started for this checkpoint.
-
-### Bare-metal fresh-stack qualification (2026-11-02)
-
-- Supersedes the qualification remainder above: 15.2 passes. At `892ed4d5d`, the branch-built mock lane, real local payments/Formance/Postgres and mediation reached readiness before pytest; an authenticated listing read confirmed the settlement envelope and the exact served mediation authority, compute deadline, sufficient dispute window and unbounded hold.
-- Final clean-exit replay: **`e2e_bare_metal_mock_deal` 39 passed in 13.39s**, **`e2e_bare_metal_payment_deal` 3 passed in 7.88s**, zero skips, with baseline/held/replayed/refunded payment observations all passing. Mock lifecycle stages prove lease expiry, signed report receipt/recovery before release, repeated canonical surrender, capacity reuse and exactly one proven release. The payment scenario proves wallet-free approval/canonical commit, same-payment/fulfillment replay, reversal and separate physical release. Earlier passing mock and hosted attempts are recorded in the packet, not substituted for the final clean-exit result.
-- Located fixture defect `892ed4d5d` supplies the previously omitted lifecycle publication parameters and retains all prior assertions; the existing payment scenario now also asserts those terms. Its **315** harness unit cases, packaging and comment hygiene pass. No production source, dependency, configuration model or wire codec changed in this qualification pass. The earlier complete aggregate at the implementation revision passes in 8m10s; it was not rerun after the fixture-only correction.
-- All owned containers, networks and ephemeral volumes are removed; the external service source remains unchanged. No browser, tunnel, remote deployment or resident server remains. Evidence and reproduction boundary: `docs/attachments/bare-metal-lifecycle/index.md`. This is implementer qualification, not independent acceptance. Real-host execution still lacks an operator target; rate-stop/case-execution scenarios are not claimed. **7.4 remains unchecked for the parent.** Permanent promotion remains reviewed closeout in the destinations already recorded.
+Bare metal composes the same end/admission/evidence services. In-flight reserve/create
+is adopted before termination; physical recovery rotates bounded pages independently
+of hosted publication. Approval fixes commitment atomically; disclosure rechecks admission.
+Canonical commit/teardown and accepted-site signed push/pull keep delivery and proven
+release distinct. Recovery uses retained terms, not current admission policy.
+Setup, first-use race modes and exact deployed revisions:
+`docs/attachments/bare-metal-lifecycle/index.md`.
+Fresh owned mock-provisioned stack and real local authorities passed readiness:
+mock deal 39 stages and hosted payment deal 3 stages, zero skips; full tests/package
+gates passed. All owned resources were removed. No real host was available; rate-stop
+and ruling execution are deferred. 15.1/15.2 and 7.4 are complete.
+Promotion: lifecycle, buyer-orchestration, physical-provisioning and site-capacity.
 
 ## 16. Closeout
 
@@ -1467,7 +1091,7 @@ documentation only; a part needing code returns the change to implementation.
       particular that the dispute authority's and payments service's behaviour appears only as
       context in `deal-lifecycle/architecture.md` ("External authorities"), not as SCM
       requirements.
-- [ ] 16.4 **Narrative compression.** Compress completed-task notes to final behaviour, evidence,
+- [x] 16.4 **Narrative compression.** Compress completed-task notes to final behaviour, evidence,
       deferred work and destinations.
 - [ ] 16.5 **Roadmap currency.** Update Goals 6 and 8's current state and remove or mark landed
       this change's post-commitment lifecycle and buyer-end/report gaps in
@@ -1516,83 +1140,24 @@ documentation only; a part needing code returns the change to implementation.
 - [ ] 16.11 **Archival.** `openspec archive agreed-evidence-and-early-termination -y`, merging the
       deltas; link the index row to the archive.
 
-## Implementation review 19/20 disposition — domain repair checkpoint
+## Implementation review 19/20 disposition — domain
 
-- S-F2 / O-F7: `9061c2062` shares pure compute-family classification, correlates direct release/termination/truncation commands, keeps ambiguity pending and preserves controlling evidence, including failure echoes. `171b08a6a` binds the existing terminal-command assertion to its accepted negotiation. Permanent compute unit and bare-metal application-integration regressions fail under the base behavior and pass after repair.
-- S-F3: `2ca4537c7` recovers accepted bare-metal work from the retained mandate independently of current approval policy; permanent application-integration cases cover changed fee policy, removed payment policy, retry, and substituted mandate/payer refusal.
-- O-F17: `b905dacdd` corrects the teardown comment to describe the unchanged callback-proven-release assertion; no additional test is needed for a comment-only finding.
-- Validation: compute 12 passed; bare-metal storefront 527 passed; VM storefront 1,189 unit passed (one optional collection skip) and 501 integration passed; bare-metal buyer 16 passed. Architecture, packaging, locks, comment hygiene and pinned strict OpenSpec validation pass. The initial full aggregate reached release tooling and exposed two missing shared-compute dependency rows in the release guide; both are repaired in `1fea9839a` and the focused release suite passes (1,858). The full aggregate re-drive passes in 7m04s with the prescribed proxy exclusions and Podman shim, including release tooling and Helm structural/render checks.
-- O-F8 continuation (`6172aaac0`): both domain compositions map opaque payer/payee accounts to the accepted buyer/seller and the dispute account to its pinned record signer. The kit remains the ruling actor authority. Permanent domain watch/persistence regressions cover payer, payee, terms, authority stop and ruling; before repair VM fails payer/authority and bare metal fails authority, after repair all 10 pass. No account is interpreted as a marketplace identity.
-- O-F9 continuation (`d9e4ddfa2`): both domain watches compose the kit seller-retention observer. Bare-metal verified settlement also records the evidence commitment in the verification transaction, so retention uses post-commitment completion rather than acceptance expiry. Permanent domain integration regressions fail before composition and pass after it; held funds, open cases, incomplete physical recovery, unavailable authority and missing credentials retain evidence, and complete observations permit pruning at the frozen window. The observer computes no payment remedy.
-- O-F16 continuation (`ba051e273`): the VM sweep only invokes admission for missed availability deadlines, preserving ongoing admission revisions without suppressing non-delivery filings. Site recovery continues after release until an exact report is retained, then stops lease polling. Permanent integration regressions fail on both old behaviors (revision churn and a third released-reservation read); the repaired cycle and report recovery pass.
-- Remaining in this domain assignment: remaining O-F1 section 14/15 permanent domain tests; O-F18 fresh-stack hosted VM payments/mediation qualification. Delegated seams: O-F12 credential-independent adapter signing (its owner is completing the isolated domain callbacks) and O-F10 off-loop site ingress. These remain pending, not waived or reclassified as evidence-only work. The domain watches consume the shared kit retention observer and ruling attribution. The VM sweep avoids redundant admission calls rather than modifying the parallel kit's journal; its missed-deadline admission remains intact.
-- Whole-finding checkpoint validation at `ba051e273`: all 14 new focused integration cases pass; architecture, packaging, locks, comment hygiene and pinned strict OpenSpec validation pass. The required validation sequence, including the full `make test` with proxy exclusions and Podman shim, passes in 8m34s: VM storefront 1,189 unit (one optional collection skip) and 509 integration; bare-metal storefront 533; VM buyer 213; bare-metal buyer 16; e2e harness 316; release tooling 1,858; Helm structural/render checks. No dependency declaration changed, so no relock was required and no lock changed.
-- Checkpoint scope: O-F8/O-F9/O-F16 are whole and committed; O-F1 sections 14/15 and O-F18 remain as specified. The initial retention fixture tried to re-accept an existing envelope with changed author/expiry and was correctly refused; the kept case preserves the real acceptance. No deployed hosted VM qualification has been attempted in this continuation, and no external runtime was started. The next session must retain the named permanent-test and fresh-stack criteria rather than amend them away.
-- Reproduction, observations and approach limits: `docs/attachments/aeet-review-domain-repairs/index.md`. No live hosted end-to-end or real-hardware result is claimed. Permanent promotion remains reviewed closeout in the existing owning specifications/architecture destinations.
+| Finding | Final disposition |
+|---|---|
+| S-F2 / O-F7 | `9061c2062`, `171b08a6a`: shared compute classification correlates release/termination/truncation and preserves controlling evidence; ambiguity stays pending. |
+| S-F3 | `2ca4537c7`: retained mandate/ownership drives bare-metal recovery, not current admission policy. |
+| O-F8 | `6172aaac0`: opaque accepted accounts map to Agreement principals and pinned dispute signer. |
+| O-F9 | `d9e4ddfa2`: both watches compose retention eligibility from payout/case/recovery; no production prune trigger. |
+| O-F16 | `ba051e273`, `d125afb02`: unchanged cycles avoid admission churn; post-release full history reconciliation retires polling. |
+| O-F17 | `b905dacdd`: callback-proven release comment. |
+| O-F1 domain | `83e899ebb`: permanent CI tests cover acceptance/list, admission/end races, admin dispatch, signed ingress/capture and proven release. Local end precedes independent teardown/filing. |
+| O-F18 | `eac70ec3d`: fresh hosted VM commit/replay/servicing/end-case/refund/release, 4 stages passed, zero skips. Initial missing mediation history permits first filing only. |
 
-### O-F1 permanent-domain-test continuation
-
-- Keep every section 14/15 Verify clause and completed task; no scenario is
-  amended away. Normal pytest discovery now owns VM hosted acceptance, end
-  admission/restart, second-precision ends, both admin branches, signed site
-  push/retry/pull and buyer-half capture, plus bare-metal create-in-flight,
-  owner/site refusal, repeated teardown and callback-only release. The exact
-  file/property map and direct first-use command are in
-  `docs/attachments/aeet-domain-permanent-tests/index.md`; existing list,
-  payment/refund/terminal and recovery regressions are retained and cited.
-- The permanent unentitled-admin encounter found a real ordering race: the
-  off-loop submit could record its end after physical lookup had returned.
-  SellerServicing exposes local recording separately; VM awaits it before
-  driving teardown and filing independently. The authority-gated regression
-  fails under the old ordering and passes after repair, without sleeps.
-- The VM payment example asserts pending/provisioning/ready rather than only
-  printing. Its pre-delivery surrender assertion follows the accepted
-  `delivered=true` receipt contract; admin/site examples retain their proof
-  and dispatch checks with credential-independent signing and earlier-end
-  suppression of an automatic payer claim.
-- O-F1 section 14/15 permanent-test work is complete: final focused VM 50 and
-  bare-metal 7 cases pass; servicing 48 and typing pass; all asserted domain
-  first-use examples pass. Architecture, fresh-wheelhouse packaging, locks,
-  comment hygiene and pinned strict OpenSpec validation pass. The complete
-  required chain, including shim-backed `make test`, passes in 8m44s: VM
-  storefront 1,196 unit (one optional collection skip), 520 integration;
-  bare-metal storefront 538; VM buyer 213; bare-metal buyer 16; e2e harness
-  316; release tooling and Helm structural/render checks. Final test-only
-  refinements pass the focused re-drive. No lock/dependency changed.
-  Promotion remains reviewed section 16 closeout, not part of this repair.
-- O-F18 remains a whole outstanding item: extend and run hosted VM commit,
-  servicing and an end with its case on a fresh owned stack with real local
-  payment/mediation, readiness-gated before pytest and fully torn down. An
-  early shim-backed image build succeeded, but predates the admin-ordering
-  repair and must be rebuilt from the committed branch before qualification.
-  No deployment, authority service or e2e stage was started.
-
-### O-F18 hosted VM continuation
-
-- `e2e_vm_payment_deal` extends the VM lane with hosted-only negotiation,
-  verified approval and canonical commit, same-key replay/servicing,
-  unentitled administrator end with one mediation case, then seller refund
-  and callback-proven release. The existing Alkahest journeys are unchanged.
-- The real authority exposed first-filing deadlock: the semantic-case read
-  received initial 404 before the authority knew the Agreement. `eac70ec3d`
-  permits that absence only to prepare the original filing, never as verified
-  empty history for ordinary reads or an acknowledgement without a signed
-  filed record. The kept semantic-recovery regression models that boundary;
-  the old-call-path diagnostic fails, repaired mediation 45 and typing pass.
-- Fresh shim-backed images from `eac70ec3d` include both that repair and the
-  admin-ordering repair. Owned Compose, host/seller/buyer payments, mediation
-  and signed dispute-bearing publication passed readiness before pytest.
-  All four deployed stages pass in 10.09s with zero skips. The authority
-  source remained read-only, every attempted deployment was torn down and
-  both exact leaked build children (#326) were stopped by their supervisor.
-- Harness 319, comment hygiene, fresh-wheelhouse packaging/architecture/locks
-  and pinned strict OpenSpec validation pass. Full shim-backed `make test`
-  passes in 7m51s on the final production source, including release tooling
-  and Helm structural/render checks (one existing optional Torch collection
-  skip; zero skips in the hosted journey). O-F18 is qualified. Setup, stage
-  observations and limits are in
-  `docs/attachments/aeet-vm-hosted/index.md`; no rate/funding or real-hardware
-  result is claimed. Permanent promotion remains reviewed section 16 closeout.
+Focused/full suites and package/document gates passed. Setup and regression sensitivity:
+`docs/attachments/aeet-review-domain-repairs/index.md`,
+`docs/attachments/aeet-domain-permanent-tests/index.md`,
+`docs/attachments/aeet-vm-hosted/index.md`.
+Once-only qualification is not rate/ruling-execution or real-host qualification.
 
 ## Closeout validation
 
@@ -1647,231 +1212,66 @@ The remaining D1–D15 destinations are listed in proposal.md and task 16.9.
 | D6 VM administrator dispatch follows accepted payee rights; exceptional ends retain administrator/reason and drive physical teardown independently of the journaled authority filing | Deal-lifecycle delta and design, promoted to the new capability's spec/architecture, with VM fulfillment ownership at reviewed closeout |
 | Lifecycle distributions participate in public publication with their declared dependency order | `docs/development/RELEASING.md` and `manifests/published-distributions.json` |
 
-## Implementation review 19/20 disposition — servicing
+## Implementation review 19/20 disposition — kits
 
-- **S-F4, S-F5** — `f0b7f5ce2`: last verified records and current read outcomes
-  are separate; first-read failure, outage, verification rejection, recovery and
-  empty/shorter full-history replays have permanent integration coverage.
-- **O-F3, O-F4, kit O-F8, O-F10** — `243ed8c51`: unresolved respondent cases
-  remain visible/retryable without blocking account discovery; respondent answers
-  cannot be preempted by watch; ruling actors retain the pinned record signer;
-  asynchronous database units run off-loop and admission CAS follows unlocked
-  financial I/O. The same transaction protects the optional local delivery write.
-- **Kit O-F9** — `8bb7bb8eb` and `243ed8c51`: complete adapter-owned financial
-  completion projection, conservative shared seller retention observer, async
-  evidence observe/prune API, and seller refresh-before-prune. Domain observer
-  composition and synchronous ingress-call offloading belong to the domain repair.
-- **O-F1, sections 10 and 13** — `f0b7f5ce2`, `8bb7bb8eb`, `243ed8c51`,
-  `4510feb50`: `kit/deal-servicing` has a normal test target in the repository
-  aggregate (and therefore CI), with 39 permanent tests at the unit/library or
-  mounted-application boundary. Tests cover acceptance authors/exact evidence,
-  retention, admission/end/restart races, journaled billing and physical replay,
-  corrections/deferred filings, independent watch cursors/extensions/append races,
-  seller pages/credentials/operator ends, signed typed-client routes, authentication,
-  relay/backdate/future refusal, authority-outage surrender/retry and exact
-  owner-only report reads; budget warnings do not stop cycles. Every printed
-  first-use outcome now asserts. These tests replace the earlier checkpoint's
-  temporary-only verification, not its implementation history or named criteria.
+| Finding | Final disposition |
+|---|---|
+| S-F1 / O-F2 | `33d777ba0`, `3531af8b0`, `15c0d39f8`: durable original writer, one signed equivalent case, correlated failure echoes; E-N1 makes unresolved ownership retryable. Unsupported/ambiguous revisions require repair. |
+| S-F4 / S-F5 | `f0b7f5ce2`: current outcomes separate from verified history; full-snapshot floors include empty records. |
+| O-F3 / O-F4 / O-F8 / O-F10 | `243ed8c51`: respondent owns answers; local repairs retry fairly, ruling actor is pinned signer, unlocked authority I/O precedes off-loop CAS/local writes. Per-deal dispute cursor still holds at unresolvable unanswered cases. |
+| O-F5 / O-F6 | `ac139c842`, `3531af8b0`: resolve uncertain surrender before filing; only selected surrender concurs or auto-files. |
+| O-F9 | `8bb7bb8eb`: complete payout projection, conservative observer, refresh-before-prune API; no production storefront pruning trigger. |
+| O-F11 | `3531af8b0`: terminal refusal/per-filing progress survive restart. |
+| O-F12 | `eccc87ea1`, `d65e98e86`, `1d713730c`: adapter-owned credential-independent claims and schema-free ingress binding reads. |
+| O-F13 | `211e29f7b`: unused duplicate helpers removed; real public-surface assertions retained. |
+| O-F14 / O-F15 | `3531af8b0`: fixed Agreement-start non-delivery basis; validate before consuming key. |
+| O-F16 | `cf580bb6f`: unchanged admission does not write revision. |
+| O-F1 kits | `4510feb50`, `299adfd7c`, `ac139c842`: permanent servicing/client tests in aggregates; first-use outcomes assert. |
 
-Validation: 39 servicing tests, 98 payment tests, typing and all asserted first-use
-examples pass. `make lock`, architecture, packaging, locks, comment hygiene and
-strict pinned OpenSpec validation pass. The full `make test` aggregate passes in
-8m19s with the required proxy environment and Podman shim.
+Regression sensitivity, typing, package/document gates and full tests passed (combined
+chain 7m41s; parallel integration `1d713730c` 7m26s). Reproduction:
+`docs/attachments/aeet-servicing-review-fixes/index.md`,
+`docs/attachments/aeet-review-19-20-fix-a/index.md`,
+`docs/attachments/aeet-fix-a-integration/index.md`.
+Current API: `kit/deal-servicing/README.md`; review rationale is in design.
 
-Reproducible first use and sensitivity evidence:
-`docs/attachments/aeet-servicing-review-fixes/index.md`. Current API documentation
-is `kit/deal-servicing/README.md`; review implementation rationale is in `design.md`.
-Permanent specification/architecture promotion remains in the existing
-post-code-review closeout, with no owner decision reopened.
+## Re-review 21/22 disposition
 
-## Implementation review 19/20 disposition
+| Finding | Final disposition |
+|---|---|
+| S-N1 | `e7113a1ca`: lazy buyer ports forward case adoption without eager credentials; reconstructed real-port recovery retains one case. |
+| S-N2 / E-N6 | `746b51c7e`, `18e7f42df`: validate/adopt controlling classification/filing in the same journal without rewriting source. |
+| E-N1 | `5e8d291fe`: unresolved original writer is pending, not terminal rejected. |
+| E-N2 | Classified selected ends suppress later unnecessary filings; pending-source exception is N1 below. Earlier late evidence can require an unsupported revision. |
+| E-N3 / O-F6 | `2833b79ee`: contest payer claim over superseded surrender. |
+| E-N5 | `b6c30ef80`: skip foreign commitments; rotate local repairs fairly. |
+| E-N7 | `772ee3327`: operator reports its own filing, one diagnostic prefix, receipt-backed buyer recovery without unreachable fields. |
+| S-N3 / O-F16 | `d125afb02`: successful nonempty post-release full history read and durable marker retire VM polling; a partial push cannot certify completeness. |
+| E-N4 / O-F10 | `233fbfb6d`: ingress/cycles/local end/registration database units off-loop; borrowed sessions remain synchronous; N2 completes capture. |
+| O-F7 | `fd6fe6d53`: shared compute command/request matching, pending correction and actor policy. Respondent lifetime and term-end differences remain promotion limits. |
+| S-N4 / O-F1 | `66a824ee1`: CI producer tests prove atomic rollback/dedup, all causes, crash/lost ack, exact signed push/pull after rotation, parking/reconfiguration/resumption. |
 
-### Lifecycle filing and buyer-end repairs
-
-| Findings | Disposition and commits |
-| --- | --- |
-| S-F1 / O-F2 | `33d777ba0` reserves one original semantic delivery-end writer in caller-owned durable storage and adopts one equivalent signed case. `3531af8b0` correlates seller-failure site echoes without another filing; `15c0d39f8` proves concurrent adoption across reconstructed SQLite callers. Unsupported revisions/ambiguous or unresolved originals return repair required; the published API cannot safely map linked revisions, so SCM refuses rather than computes a monetary delta or allocates a new key. |
-| O-F5 / O-F6 | `ac139c842` retries uncertain surrender before fixing a case and skips automatic payer filing for a non-surrender selected end. `3531af8b0` signs concurrence only for the selected surrender. The signed client accepts withdrawal of concurrence when newly selected earlier evidence supersedes surrender. |
-| O-F11 | `3531af8b0` makes rejected filings terminal, exposes every intent/outcome through read/list, and marks repair required after restart instead of resubmitting forever. |
-| O-F12 | `eccc87ea1` supports credential-independent local claims through the pinned mediation adapter. `d65e98e86` dispatches both compute receipt callbacks through their selected adapter tables; absent adapters return no claim. Read-only binding lookup remains safe inside ingress's write transaction. |
-| O-F13 | `211e29f7b` removes the unused duplicate receipt-store/no-adapter helpers and their helper-only assertions. Kept public receipt persistence, retry and no-adapter delivery assertions are exercised through the real servicing/client surfaces. |
-| O-F14 | `3531af8b0` fixes never-delivered claims at Agreement start, including a pre-start failure recorded late. The design/delta correction reconciles the old minimum expression with mediation's at-or-after-start guard; no filing is future-dated. |
-| O-F15 | `3531af8b0` validates operator payload/time before consuming its operation key, allowing a corrected retry. |
-| O-F1 client seam | `ac139c842` adds the signed client's permanent suite and test target; `299adfd7c` wires it into the repository aggregate and asserts mediation first-use outcomes. The parallel servicing owner supplies that kit's aggregate target. Named verification tasks remain unchanged. |
-| O-F16 requested kit seam | `cf580bb6f` avoids a revision write on unchanged phase admission while retaining end/deadline checks. Compute cycle/report recovery is owned by the parallel domain repair. |
-
-The review corrections are recorded in `design.md`, the deal-lifecycle and
-buyer-orchestration deltas, and the affected kit READMEs. Subsystem-spec and
-architecture promotion remains the reviewed closeout work at 16.9; no roadmap,
-campaign status or archival transition is made by this repair round.
-
-Evidence and reproducible first use:
-`docs/attachments/aeet-review-19-20-fix-a/index.md`. All behavioral regression
-checks were run against the reviewed source and fail before their repairs.
-Focused checks pass: contracts 37, foundation 61, mediation 45, buyer 20, signed
-client 2, servicing 9, and 3 receipt-adapter checks in each compute domain.
-Mediation resource/model checks and mediation/servicing typing pass. `make lock`
-was run after the client test dependency; check-locks is part of qualification.
-The final-head `make check-architecture`, `make check-packaging`, `make
-check-locks`, `make check-comment-hygiene`, strict OpenSpec validation and full
-`make test` all pass (combined chain 7m 41s with proxy exclusions and the Podman
-shim). The preceding complete chain also passed. No hosted mediation deployment
-or deployed monetary-ruling qualification is claimed by this kit repair.
-
-## Re-review 21/22 disposition — buyer and servicing kit
-
-Implementation evidence and clean-checkout replay:
-`docs/attachments/aeet-fix2-kit-buyer/index.md`. These refinements retain the
-existing closeout promotion destinations; no authority or financial policy
-changes are introduced. Validation: servicing 61 passed plus mypy (11 files),
-buyer lifecycle 20 passed, signed client 2 passed, both real buyer-port checks
-passed, semantic-filing checks passed, and first-use examples passed. Architecture,
-packaging, locks, comment hygiene and pinned strict OpenSpec validation passed.
-Full `make test` passed in 7m59s with the prescribed proxy environment and Podman
-shim. No hosted deployment or independent acceptance verdict is claimed.
-The optional documentation-citation check found premature current-path references
-to the new capability's closeout outputs. References now name the existing delta
-and design as sources, while 16.9 still names the new companion's destination;
-no unreviewed permanent lifecycle document is synthesized to satisfy the check.
-
-- **E-N7:** Operator end returns only its own filing result (or accepted local recording if superseded), repair reasons have one prefix, and buyer filing uses only the acknowledged receipt without unreachable observed-time fallbacks or a redundant contested flag. Kept journal plans still decode the obsolete field. Regressions cover unrelated terminal filings, exact diagnostics, receipt-backed recovery, and retained-plan replay.
-- **E-N5:** Respondent discovery drops cases with no local registered commitment, including inherited foreign repair rows; a locally registered but temporarily unresolved Agreement remains repairable. The bounded repair queue uses insertion order and moves a failed attempt to the back. Regressions cover shared-account foreign/local cases across reconstruction and fair local retry rotation.
-- **E-N3 / O-F6 respondent:** Payer concurrence now requires the matching buyer request to be the selected end. The real signed respondent regression records an earlier seller failure, then proves the explicit payer claim receives contesting end evidence rather than concurrence. Receipt and automatic buyer suppression remain unchanged.
-- **E-N1:** An unresolved semantic writer now returns `Pending`, not terminal rejection; authority refusals and unsupported revisions remain terminal. The real seller/mediation regression loses the original write before receipt, reconstructs dispatch, and proves both required same-basis callers adopt one signed case with no permanent repair state. Existing concurrency expectations now distinguish retryable ownership from terminal refusal.
-- **S-N2 / E-N6:** `resolve_correction` accepts a verified controlling source, validates its classification/end and existing filing, and adopts it without rewriting the original request. Both domain correction callers pass the one new optional keyword; no other domain behavior changes. SQLite regressions cover delayed lawful/nonlawful sources, delivered/undelivered state, reconstruction, replay, and invalid controllers.
-- **E-N2:** Only a selected source journals a seller filing. Later superseded requests remain immutable evidence; a genuinely earlier late source still journals a revision. Regression proves both orderings and same-key replay. The terminal-refusal fixture now uses two successively selected failures rather than manufacturing an unnecessary later filing.
-- **S-N1:** Both lazy buyer mediation ports forward `case` without eager credential resolution. Each buyer package now drives lost-filing-response recovery through its real port and reconstructed evidence store, asserting one signed authority case. Before the repair both tests failed at the missing `case` operation.
-
-### Parallel repair integration checkpoint
-
-- `7fb2dae69` merges the lifecycle repair into `8b1a5cfb5`, preserving the
-  domain and servicing disposition notes. Seller reads combine current authority
-  outcomes with respondent and filing repair state; dispatch retains per-filing
-  progress and terminal rejections while keeping database work off-loop. Both
-  servicing and signed-client targets remain in the kit aggregate.
-- `1d713730c` makes both receipt callbacks' immutable binding reads schema-free.
-  The first aggregate exposed schema initialization on a second connection under
-  ingress's write lock; all six unchanged domain receipt-adapter checks pass after
-  the repair. The deferred-filing assertion follows the per-filing result shape
-  and still requires the exact pending filing and no authority submission.
-- Validation: `make dist`; servicing 48, foundation 61, buyer 20, signed client 2,
-  mediation 45 and payments 98 tests; servicing typing and all nine asserted
-  first-use examples; mediation typing/resources/models and asserted first use;
-  architecture, packaging, locks, comment hygiene and strict pinned OpenSpec
-  validation pass. The full `make test` re-drive passes on `1d713730c` in 7m26s
-  with the prescribed proxy exclusions and Podman shim, including release tooling
-  and Helm structural/render checks.
-- Setup, observations and reproduction:
-  `docs/attachments/aeet-fix-a-integration/index.md`. This integrates the parallel
-  kit repairs, not the remaining domain work or reviewed closeout promotion.
-
-## Re-review 21/22 disposition — domain
-
-- S-N3 / O-F16: VM recovery retires lease polling only after a successful full
-  report-history read after proven release. A partial push cannot certify
-  completeness; an empty read keeps recovery active. The reconciliation marker
-  is durable seller evidence and follows the Agreement's existing retention.
-  The multi-report/partial-push regression fails before repair (zero lease reads)
-  and all three cycle cases pass after repair, including reconstructed composition
-  and unchanged admission revision. Permanent recovery rationale promotes with
-  section 16 to VM fulfillment architecture; no owner decision changes.
-- E-N4 / O-F10 (domain half): site push/pull ingress, bounded cycle units,
-  VM interruption evidence/readback and capacity-return acknowledgement run on
-  database workers. Bare-metal terminal reconciliation, admission/disclosure and
-  VM verified-commit registration use the same off-loop boundary; no worker holds
-  a transaction across an authority or physical await. Busy independent SQLite
-  writers fail all four cycle/operator/local-end regressions before repair, and
-  injected site verifiers expose both old on-loop push/pull paths. Focused re-drive:
-  VM 11 and bare metal 14 pass. Borrowed-session methods remain synchronous for
-  transaction owners. Existing section 16 servicing architecture promotion owns
-  this execution rule; no new known limit is accepted.
-- O-F7 remainder: the compute-family classifier now owns command/request matching,
-  pending-site-correction selection and opaque payment-actor mapping. VM and
-  bare-metal adapters retain only their database/codec and atomic journal writes;
-  the family module imports neither servicing nor provisioning. A new shared API
-  regression is red before extraction (missing exported helpers); compute tests
-  and the domain correlation/actor/retention re-drive pass (VM 12, bare metal 8).
-  The shared correction result preserves controlling source and evidence; its
-  nonlawful adoption uses the parallel S-N2 journal repair merged from `49219d221`,
-  with `controlling_source_ref` preserved in both domain adapters. Existing
-  section 16 compute/lifecycle architecture promotion owns this factoring.
-- S-N4 / O-F1 producer remainder: task 10.6 now has permanent site integration
-  checks for atomic transition/event/borrowed-outbox rollback and deduplication,
-  and compute-service application checks for all five end causes, pre-send crash
-  reconstruction, lost acknowledgement, original signed push/pull bytes after
-  signer rotation, unsupported-peer parking (including unsigned HTTP 404),
-  transient HTTP retry, peer reconfiguration and explicit resumption. Failure
-  reports retain held capacity. The site gate fails all four cases when report
-  reservation is temporarily disabled; that diagnostic mutation was restored.
-  The defect was missing verification, not a newly found producer algorithm bug:
-  the permanent checks pass the existing producer. Normal `kit/site` and
-  `provisioning/compute/service` test discovery runs these checks through root
-  `test-kits` / `test-provisioning`, already present in the CI matrix; no optional
-  example or separate CI-only command is required. Focused service lease/outbox
-  suites: 24 pass; signed refusal/parking extension: four pass. Section 16 retains
-  site-capacity/physical-provisioning promotion and end-to-end qualification.
-- Aggregate encounter: the first full run reached compute-service integration
-  (457 passed) but its existing retired-setting startup case exhausted recursion.
-  Isolated replay passed. The integration fixture's top-level route guard missed
-  FastAPI's lazy included routers and repeatedly stacked their lifespans. The
-  separate fixture repair uses public OpenAPI paths and invalidates schema cache
-  only when mounting. This is repaired and re-driven (all 458 service integration
-  tests pass), not accepted as unrelated.
-- Whole-domain validation before the parallel merge: architecture, fresh-wheelhouse
-  packaging, locks, comment hygiene, strict pinned OpenSpec and full shim-backed
-  `make test` pass in 7m53s. The requested parent merge from `49219d221` preserves
-  both correction keywords and the shared classifier; focused merged re-drive
-  passes 7 kit correction-adoption, 15 VM and 10 bare-metal cases. Final combined
-  validation on merge `0143c1ea9` passes in 7m27s: architecture, fresh-wheelhouse
-  packaging, locks, comment hygiene, pinned strict OpenSpec and full shim-backed
-  `make test`. Included suites: compute 14, VM unit 1196 (one existing optional RL
-  skip), VM integration 523, bare-metal storefront 540, compute-service unit 607
-  and integration 458; release tooling and Helm structural/render checks pass.
-  The aggregate includes existing kit typing targets; no standalone domain mypy
-  run is claimed. Reproduction and before/after observations:
-  `docs/attachments/aeet-rereview-domain/index.md`. No resident server or external
-  deployment was started; change-wide review, promotion and archival remain the
-  owner's section 16 closeout, not work completed by this repair assignment.
+Fixture recursion was repaired separately in `908323b2e`, then service integration 458
+passed. Combined `0143c1ea9` validation: full tests 7m27s, kit typing and all package/document
+gates; compute 14, VM 1196 unit (one optional RL skip)/523 integration, bare-metal
+storefront 540, service 607 unit/458 integration. Reproduction:
+`docs/attachments/aeet-fix2-kit-buyer/index.md`,
+`docs/attachments/aeet-rereview-domain/index.md`.
+No standalone domain mypy or hosted requalification is claimed by these repairs.
 
 ## Confirmation review 23 disposition — N1–N3
 
-Repair plan (base `7c303dba1`):
+`fd85d9873` fixes all three findings; each retained regression fails on the reviewed
+source and passes after repair:
+- N1: only classified selected ends suppress later seller filings; pending site evidence
+  retains the filing in both arrival orders, with replay/read visibility.
+- N2: VM capture uses the database-worker transaction boundary; busy-writer regression
+  preserves event-loop progress, both envelopes and accepted expiry.
+- N3: cycle fixture mirrors the producer's `release_failed` cause.
 
-- N1: constrain `kit/deal-servicing/src/market_deal_servicing/journal.py`
-  suppression to classified selected ends. Extend the kept correction-adoption
-  regression across classified/pending sources, both arrival orders, replay and
-  seller-read filing visibility.
-- N2: move VM `deal_lifecycle.py` negotiation capture's accepted-Agreement read
-  and evidence write into the existing database-worker transaction boundary.
-  Extend the busy independent-writer regression to acceptance capture and check
-  both retained envelopes plus acceptance expiry.
-- N3: correct the VM lifecycle-cycle fixture to the producer's `release_failed`
-  cause, asserting that vocabulary after real ingress/history recovery.
-- Validation: prove all three regressions fail on the reviewed source, run the
-  affected servicing and VM integration checks, then architecture, packaging,
-  locks, comment hygiene, pinned strict OpenSpec validation and full shim-backed
-  `make test` with the prescribed proxy exclusions.
-- Closeout: retain section 16's existing comment/import/documentation compliance,
-  narrative compression, roadmap/campaign currency, packaging, end-to-end
-  evidence, promotion, citations and archival work. These are corrections of
-  existing decisions, not new authority or remedy policy. The pending-source
-  rule promotes with the deal-lifecycle specification/architecture; the worker
-  boundary promotes with servicing architecture at 16.9.
-
-Regression sensitivity before repair: N1 fails with zero rather than one filing
-for report-first pending evidence (the other eight correction checks pass).
-N2 fails the independent-writer event-loop progress assertion; N3 fails the
-recovered cause assertion in both cycle orderings. Repaired focused re-drive:
-servicing 63 passed and mypy passed (11 source files); VM lifecycle database,
-cycle and payment-settlement integration checks 28 passed. The pending-report
-case retains exactly one filing in both arrival orders, including replay and
-the asynchronous seller read. The capture case persists both envelopes and the
-accepted mandate's expiry while the independent writer releases promptly.
-Architecture, fresh-wheelhouse packaging, locks, comment hygiene and pinned
-strict validation of this change pass. Full shim-backed `make test` passes on
-repair commit `fd85d9873` in 7m54s with the prescribed proxy exclusions. Included:
-VM unit 1196 passed (one existing optional skip), VM integration 524 passed,
-kit typing, provisioning/domain suites, release tooling and Helm structural/render
-checks. Replay setup, before/after observations and final qualification:
-`docs/attachments/aeet-fix3/index.md`. No hosted deployment, resident server or
-change-wide closeout/promotion is claimed by this repair round.
+Servicing 63 plus typing and focused VM 28 passed. Package/document gates passed.
+Full shim-backed tests at `fd85d9873` passed in 7m54s: VM 1196 unit (one optional skip)/524
+integration, kit typing, provisioning/domains, release tooling and Helm checks.
+Setup and sensitivity evidence: `docs/attachments/aeet-fix3/index.md`.
+No hosted deployment was rerun. Pending-source/worker rationale promotes with lifecycle
+and servicing; no authority or remedy policy is added.
