@@ -76,10 +76,15 @@ permanent specification of an unarchived subsystem.
 - Buyer lifecycle: 20 passed.
 - Signed lifecycle client: 2 passed.
 - Both real buyer-port recovery checks: 1 passed each.
-- Mediation semantic-filing checks: 3 passed, including concurrent writer/adoption.
+- Mediation: 45 passed in the full target; focused semantic-filing checks: 3 passed,
+  including concurrent writer/adoption.
 - Servicing first-use examples and buyer/client first-use examples passed.
 - Architecture, packaging, locks, comment hygiene, and strict pinned OpenSpec validation passed.
 - Full repository `make test`: passed in 7m59s with the prescribed proxy settings
-  and Podman-compatible Docker shim; no failing target or skipped target.
+  and Podman-compatible Docker shim; no failing target. The pre-existing optional
+  VM RL test module skipped because `torch` is not installed. No assigned
+  lifecycle regression was skipped.
+- Scoped documentation-citation check passed after correcting premature references
+  to closeout outputs; existing delta/design sources remain the current references.
 
 Visual evidence: not applicable; no rendered surface changed.
