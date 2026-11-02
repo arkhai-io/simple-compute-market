@@ -377,7 +377,8 @@ class EndSession:
             raise ValueError("a filing cannot be future-dated")
         # A later source is evidence of an already ended deal, not a revision
         # of its financial claim. A genuinely earlier source still needs filing.
-        if self.selected_end(request.negotiation_id).source_ref != request.source_ref:
+        selected = self.selected_end(request.negotiation_id)
+        if selected is None or selected.source_ref != request.source_ref:
             return
         self.journal(
             request.negotiation_id, "filing", command.operation_key,
