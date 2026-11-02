@@ -1516,6 +1516,15 @@ documentation only; a part needing code returns the change to implementation.
 - [ ] 16.11 **Archival.** `openspec archive agreed-evidence-and-early-termination -y`, merging the
       deltas; link the index row to the archive.
 
+## Implementation review 19/20 disposition — domain repair checkpoint
+
+- S-F2 / O-F7: `9061c2062` shares pure compute-family classification, correlates direct release/termination/truncation commands, keeps ambiguity pending and preserves controlling evidence, including failure echoes. `171b08a6a` binds the existing terminal-command assertion to its accepted negotiation. Permanent compute unit and bare-metal application-integration regressions fail under the base behavior and pass after repair.
+- S-F3: `2ca4537c7` recovers accepted bare-metal work from the retained mandate independently of current approval policy; permanent application-integration cases cover changed fee policy, removed payment policy, retry, and substituted mandate/payer refusal.
+- O-F17: `b905dacdd` corrects the teardown comment to describe the unchanged callback-proven-release assertion; no additional test is needed for a comment-only finding.
+- Validation: compute 12 passed; bare-metal storefront 527 passed; VM storefront 1,189 unit passed (one optional collection skip) and 501 integration passed; bare-metal buyer 16 passed. Architecture, packaging, locks, comment hygiene and pinned strict OpenSpec validation pass. The initial full aggregate reached release tooling and exposed two missing shared-compute dependency rows in the release guide; both are repaired in `1fea9839a` and the focused release suite passes (1,858). The full aggregate re-drive passes in 7m04s with the prescribed proxy exclusions and Podman shim, including release tooling and Helm structural/render checks.
+- Remaining in this domain assignment: O-F8 actor attribution; O-F9 retention composition; O-F16 cycle churn/released-report polling; remaining O-F1 section 14/15 permanent domain tests; O-F18 fresh-stack hosted VM payments/mediation qualification. Delegated seams: O-F12 credential-independent adapter signing (its owner is completing the isolated domain callbacks) and O-F10 off-loop site ingress. These remain pending, not waived or reclassified as evidence-only work. The parallel kit repairs supply the shared retention observer, optional-client mediation adapter and unchanged-phase admission guard; domain composition must consume them rather than duplicate their algorithms.
+- Reproduction, observations and approach limits: `docs/attachments/aeet-review-domain-repairs/index.md`. No live hosted end-to-end or real-hardware result is claimed. Permanent promotion remains reviewed closeout in the existing owning specifications/architecture destinations.
+
 ## Design promotion record
 
 Planned destinations below; promotion is not performed during this design reconciliation.
