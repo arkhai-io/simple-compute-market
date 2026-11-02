@@ -130,8 +130,8 @@ from tests.e2e.roles.scenarios.vms.lifecycle_deal import (
 
 
 @pytest.fixture(scope="module")
-def vm_lifecycle_buyer(buyer_cli, storefront_client, site_capacity):
-    return CliLifecycleBuyer(buyer_cli, storefront_client, site_capacity)
+def vm_lifecycle_buyer(buyer_cli, storefront_client, storefront_admin_client, site_capacity):
+    return CliLifecycleBuyer(buyer_cli, storefront_client, storefront_admin_client, site_capacity)
 
 
 log = logging.getLogger(__name__)

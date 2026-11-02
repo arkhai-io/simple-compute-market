@@ -72,6 +72,8 @@ class TypedLifecycleBuyer:
         )
         self.client.settle_evm(uid, negotiation_id=negotiation_id,
                            buyer_evm_address=self.buyer["wallet_address"])
+        wait_for_stage_event(self.admin, "provision", "job_submitted",
+                             negotiation_id=negotiation_id, timeout=30)
         status = self.client.get_settle_status(uid)
         assert status.fulfillment_id, status
         test_client.drain(timeout=30)
@@ -100,8 +102,8 @@ class TypedLifecycleBuyer:
 
 
 class CliLifecycleBuyer:
-    def __init__(self, cli, client, site_capacity):
-        self.cli, self.client, self.site_capacity = cli, client, site_capacity
+    def __init__(self, cli, client, admin, site_capacity):
+        self.cli, self.client, self.admin, self.site_capacity = cli, client, admin, site_capacity
 
     def purchase(self, listing_id, provisioning, test_client):
         run = self.cli.run([
@@ -119,6 +121,8 @@ class CliLifecycleBuyer:
         try:
             uid = settle.wait_for_event("escrow_created", timeout=60)["escrow_uid"]
             settle.wait_for_event("settle_submitted", timeout=30)
+            wait_for_stage_event(self.admin, "provision", "job_submitted",
+                                 negotiation_id=negotiation_id, timeout=30)
             status = self.client.get_settle_status(uid)
             assert status.fulfillment_id, status
             test_client.drain(timeout=30)
