@@ -1,8 +1,8 @@
-# Bare-metal lifecycle composition checkpoint
+# Bare-metal lifecycle implementation and local qualification
 
-This is an **in-progress implementation checkpoint**, not acceptance or completed
-domain qualification. The storefront foundation and recovery work cover 15.1;
-15.2 and the bare-metal half of 7.4 remain open. The first foundation started at
+This records implementation and local qualification, not independent acceptance.
+The storefront foundation and recovery cover 15.1; canonical buyer/site ingress
+and fresh-stack qualification cover 15.2. Section 7.4 remains parent-owned. The first foundation started at
 458610d22; recovery continues from f283742ab. The surface is nonvisual; no
 screenshots apply.
 
@@ -87,8 +87,8 @@ through the mounted in-process application.
   and Helm structural/render assertions. It used the prescribed proxy exclusions
   and shell-local Podman shim. The aggregate retains one existing optional
   Torch-dependent VM collection skip; no new skip was added.
-- Fresh-stack domain scenarios and real payments/mediation qualification remain
-  **unrun**.
+- Fresh-stack domain scenarios and real payments/mediation qualification were
+  **unrun at that checkpoint**; the final observed runs are recorded below.
 
 The initial regression run failed because registration did not begin the caller's
 SQLite transaction. That is fixed. Availability now records the seller's own
@@ -188,12 +188,10 @@ Existing scenario functions now send canonical surrender, retrieve and verify
 site reports before release, and observe neutral released progress separately.
 The real-host scenario uses the installed buyer's actual `--run-id` command
 surface and its delivery read; no operator host is prepared or claimed.
-**Fresh-stack mock-deal and real payment/mediation qualification remain unrun.**
-Neither 15.2 nor 7.4 is checked off by this checkpoint. Continue by building a
-fresh owned mock lane from this branch, readiness-gating payment/mediation and
-dispute-bearing publication, then running `e2e_bare_metal_mock_deal`. Run the
-existing hosted payment scenario as well to qualify commit/replay against real
-HTTP authorities. The real-host lane still needs an operator-owned target.
+At this checkpoint, fresh-stack mock-deal and real payment/mediation
+qualification were unrun, so neither 15.2 nor 7.4 was checked off. The fresh-stack
+qualification below supplies that evidence for 15.2. The real-host lane still
+needs an operator-owned target; 7.4 remains for the parent.
 
 Initial regression found that an embedded CLI caller already owned an event
 loop and that recovery did not consume the bare-metal-only acceptance event.
@@ -217,8 +215,101 @@ Build/lock continuation must use repository-root `make dist` and
 The package Makefiles have neither `build` nor `lock` targets; trying those did not
 regenerate artifacts. The corrected root targets and subsequent checks passed.
 
+## Fresh-stack qualification
+
+At `3876c2295`, fresh checkout-built images and isolated empty lane state reached
+Compose readiness. Real local payments (Formance/Postgres) and mediation HTTP
+were healthy from the host and role namespaces. An authenticated registry read
+confirmed both Alkahest and hosted options; the hosted option pinned the served
+mediation authority, a 300-second delivery deadline, a 1,296,000-second dispute
+window and an unbounded case hold. Payment `window=P7D` remains distinct.
+
+Inside the owned branch-built runner, with the documented lane and payment
+configuration, the direct invocation was:
+
+~~~sh
+.venv/bin/pytest -q --tb=short \
+  tests/e2e/roles/scenarios/bare_metal/test_bare_metal_mock_deal.py
+~~~
+
+All **39 stages passed in 16.56s**, with zero skips. They cover negotiation and
+Alkahest fulfillment, controlled lease expiry, teardown/release, capacity reuse,
+repeated canonical surrender with stable receipt, the verified signed site
+report before physical completion, and exactly one proven capacity release.
+These are implementer observations, not independent acceptance.
+
+The additional hosted-payment scenario initially stopped before purchase
+because its pool override omitted required lifecycle publication parameters.
+Repair `892ed4d5d` supplies and asserts the compute deadline, sufficient dispute
+window and unbounded case hold in that existing fixture. No test function was
+added or removed. The repaired fixture's **315** harness unit checks, packaging
+and comment hygiene pass.
+
+At that revision a new branch-built run passed the **39 mock stages in 13.23s**
+and all **three existing hosted payment calls in 7.63s**, with zero skips.
+The payment observer verified baseline, held, replayed and refunded checkpoints:
+wallet-free buyer approval and canonical commit delivered once; canonical commit
+replay retained the same payment and fulfillment; seller reversal restored the
+buyer's baseline; physical surrender/convergence separately returned capacity.
+This does not claim rate-stop support, case filing/ruling execution, or real SSH.
+The launcher then attempted to remove a buyer namespace before its mediation
+forwarder. Its fallback cleanup still removed every owned resource. The final
+clean-exit replay removes those dependents first and passes at the same source
+revision: **39 mock stages in 13.39s**, **three hosted calls in 7.88s**, zero
+skips, all four payment checkpoints and process exit zero. Host and role health
+checks and dispute-bearing publication passed before pytest. Final owned
+container, network and volume inventories are empty; service source is unchanged.
+
+Initial setup attempts stopped at readiness before pytest: the disposable
+configuration mixed TOML inline and table arrays, then supplied only the
+authority minimum without adding the compute delivery deadline. Correcting the
+configuration, rather than weakening publication validation, reached the ready
+state above. Readiness reads the settlement envelope as documented in
+[#327](https://github.com/arkhai-io/simple-compute-market/issues/327).
+All attempted deployments were removed, including their networks and volumes.
+No external tooling source, raw logs or private runtime artifacts enter this
+packet.
+
+### Reproduction boundary
+
+Build this revision's wheelhouse and images with `make build-e2e-bare-metal`
+through the shell-local Podman shim. Use an unused owned Compose project with
+fresh volumes, remapped loopback host ports and the public bare-metal mock lane;
+do not select an inherited deployment. Supply actual development payments and
+mediation HTTP authorities with real Formance/Postgres, using the same pinned
+payment signer and mediation description for both roles. Loopback-only payment
+authentication must remain loopback in each role's network namespace; namespace
+forwarders can reach the shared isolated authority without relaxing that guard.
+
+Add hosted payment policy to the mounted storefront TOML, retain its Alkahest
+option, and publish the hosted clause with the deadline/window/cap above. The
+registry recommendation must contain that exact served mediation authority and
+its advertised minima; seller and buyer use registry recommendations. Supply
+and forward the named `PAYMENTS` configuration in
+[the shared payment setup](../../../e2e-tests/README.md#shared-payment-scenario-configuration),
+funding disposable development personas through `/operator/test-funds`. Gate on
+Compose health, host/role payment health, mediation health and an authenticated
+registry read with `option["settlement"]["schema"]` plus matching lifecycle terms.
+Only then invoke the two existing files inside the branch-built buyer runner
+with `ACTIVE_PROFILES=docker,payments`:
+
+~~~sh
+.venv/bin/pytest -q --tb=short \
+  tests/e2e/roles/scenarios/bare_metal/test_bare_metal_mock_deal.py
+.venv/bin/pytest -q --tb=short \
+  tests/e2e/roles/scenarios/bare_metal/test_bare_metal_payment_deal.py
+~~~
+
+The direct scenario commands above were personally run. The first-use app
+command remains a self-cleaning committed entry point for checkout-only replay;
+it is not a substitute for this deployed qualification. Remove role forwarders
+before namespace owners, then remove only the owned Compose projects, volumes
+and networks. Keep raw runtime evidence outside the public repository.
+
 ## Cleanup
 
-No container, HTTP server, browser page, tunnel, remote deployment or external
-runtime was created. Only checkout-owned package environments and managed
-build/test commands were used.
+The earlier in-process checkpoints created no external runtime. Fresh-stack
+qualification creates only run-owned local containers, networks and ephemeral
+volumes, removes namespace dependents before their owners, and verifies an empty
+owned inventory. No browser, tunnel, remote deployment or resident development
+server is needed. Source checkouts supplying external services remain unchanged.

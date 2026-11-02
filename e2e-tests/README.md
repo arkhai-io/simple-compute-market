@@ -249,14 +249,21 @@ the purchase buyer is a separate wallet-free Ed25519 profile. An unconfigured
 public CI run reports a named blocked payments prerequisite, not success.
 
 The fixture declares a distinct backed whole host and publishes only a USD
-1.00/hour option for a one-hour term. The installed `market bare-metal buy`
-emits `run_started → agreement_accepted → payment_approved →
-run_ended(status=agreed)`. Delivery reads use that purchase's signer and
-fulfillment transport. Re-drive recovers the original run's retained profile
-and calls the shared `settle_agreement` client, keeping both transaction and
-fulfillment unchanged; there is no bare-metal settle command. Seller refund
-reverses the held once payment, then a separate buyer teardown converges mock
-reclaim and site capacity release. Unless the refund stage completed the deal's
+1.00/hour option for a one-hour term. The registry must recommend the ready
+mediation authority; the option includes a 300-second delivery deadline,
+a 15-day dispute window and an unbounded case hold. The dispute window covers
+the delivery deadline plus the authority's minimum filing window; the payment
+`window=P7D` is a separate input.
+
+The installed `market bare-metal buy` emits
+`run_started → negotiation_completed(status=agreed) → payment_approved →
+run_ended(status=agreed)`. It commits through `BuyerLifecycle` after approval.
+Delivery reads use that purchase's signer and fulfillment transport. Re-drive
+recovers the original run's retained profile and repeats canonical lifecycle
+`commit`, keeping both transaction and fulfillment unchanged; there is no
+bare-metal settle command. Seller refund reverses the held once payment;
+idempotent canonical buyer surrender and convergence establish mock reclaim
+and proven site capacity release separately. Unless the refund stage completed the deal's
 teardown, the module's cleanup finds the purchase in the buyer's run log; when
 the log records the payment approved, it refunds the payment (a repeat refund
 returns the same result), then reads the purchase's fulfillment and releases a

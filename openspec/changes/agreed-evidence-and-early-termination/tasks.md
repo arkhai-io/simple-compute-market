@@ -1324,7 +1324,7 @@ Files: `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/` (`api.p
       end service, and order admission against the end. Verify: application-integration tests
       for "A buyer tears down bare metal" and the admission scenarios on the bare-metal path.
 
-- [ ] 15.2 Fold the buyer teardown route into `end_delivery` and move `market bare-metal
+- [x] 15.2 Fold the buyer teardown route into `end_delivery` and move `market bare-metal
       teardown` from its domain-only transport to the canonical lifecycle client through the
       buyer half. Retire the unbegun-fulfillment refusal: release undelivered holds, or adopt
       dispatched fulfillment and terminate. Mount accepted-site report receipt and lifecycle
@@ -1368,6 +1368,13 @@ must keep passing.
 - Existing domain e2e functions are updated for canonical surrender, original signed reports, intended-end versus proven-release progress, and hosted commit replay. No test function was added or removed. The real-host scenario uses the installed buyer's actual run-ID verbs; it still has no operator-owned host target.
 - Validation: full **`make test` passes in 8m10s** with the prescribed proxy exclusions and shell-local Podman shim, including storefront **522 passed**, buyer **16 passed**, lifecycle buyer **18 passed**, e2e harness unit **315 passed**, release tooling **1,858 passed** and Helm render/structural assertions. Servicing-kit typing/all first-use examples, existing payment integration **16 passed** including reopened end/evidence and the callback trust fixture pass. Fresh distributions, targeted generated locks, architecture, packaging, lock currency, comment hygiene and pinned strict OpenSpec validation pass. The existing optional Torch-dependent VM collection skip remains; deployed domain scenarios are not part of this aggregate.
 - **Continuation:** 15.2 and the bare-metal half of 7.4 remain unchecked pending fresh-stack qualification. Build the mock lane from this branch, readiness-gate real local payments and mediation plus dispute-bearing publication, run `e2e_bare_metal_mock_deal` and the existing hosted payment scenario, repair/re-drive as needed, and report which scenarios actually ran. Leave 7.4's checkbox for the parent. Evidence/setup and failed-approach notes: `docs/attachments/bare-metal-lifecycle/index.md`. No external runtime, server, browser, tunnel or deployment was started for this checkpoint.
+
+### Bare-metal fresh-stack qualification (2026-11-02)
+
+- Supersedes the qualification remainder above: 15.2 passes. At `892ed4d5d`, the branch-built mock lane, real local payments/Formance/Postgres and mediation reached readiness before pytest; an authenticated listing read confirmed the settlement envelope and the exact served mediation authority, compute deadline, sufficient dispute window and unbounded hold.
+- Final clean-exit replay: **`e2e_bare_metal_mock_deal` 39 passed in 13.39s**, **`e2e_bare_metal_payment_deal` 3 passed in 7.88s**, zero skips, with baseline/held/replayed/refunded payment observations all passing. Mock lifecycle stages prove lease expiry, signed report receipt/recovery before release, repeated canonical surrender, capacity reuse and exactly one proven release. The payment scenario proves wallet-free approval/canonical commit, same-payment/fulfillment replay, reversal and separate physical release. Earlier passing mock and hosted attempts are recorded in the packet, not substituted for the final clean-exit result.
+- Located fixture defect `892ed4d5d` supplies the previously omitted lifecycle publication parameters and retains all prior assertions; the existing payment scenario now also asserts those terms. Its **315** harness unit cases, packaging and comment hygiene pass. No production source, dependency, configuration model or wire codec changed in this qualification pass. The earlier complete aggregate at the implementation revision passes in 8m10s; it was not rerun after the fixture-only correction.
+- All owned containers, networks and ephemeral volumes are removed; the external service source remains unchanged. No browser, tunnel, remote deployment or resident server remains. Evidence and reproduction boundary: `docs/attachments/bare-metal-lifecycle/index.md`. This is implementer qualification, not independent acceptance. Real-host execution still lacks an operator target; rate-stop/case-execution scenarios are not claimed. **7.4 remains unchecked for the parent.** Permanent promotion remains reviewed closeout in the destinations already recorded.
 
 ## 16. Closeout
 
