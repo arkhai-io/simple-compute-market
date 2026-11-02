@@ -1096,7 +1096,7 @@ documentation only; a part needing code returns the change to implementation.
 - [x] 16.5 **Roadmap currency.** Update Goals 6 and 8's current state and remove or mark landed
       this change's post-commitment lifecycle and buyer-end/report gaps in
       `docs/development/ROADMAP.md`; name both updates in the promotion record.
-- [ ] 16.6 **Campaign index currency.** Update this change's row in `openspec/changes/README.md`
+- [x] 16.6 **Campaign index currency.** Update this change's row in `openspec/changes/README.md`
       and the campaign graph (`spot-deals-through-arkhai-payments`, `move-settle-out-of-core`,
       `automate-seller-spot` build on it), including the folded buyer-end/report boundary and
       its delivery/deadline dependents; run `make check-change-index`.
@@ -1192,6 +1192,11 @@ Once-only qualification is not rate/ruling-execution or real-host qualification.
   once-only lifecycle/buyer-end/site-report work from rate/delivery/deadline and
   deployed qualification gaps. Known retention/cursor/domain/rotation limits remain
   explicit; API-credit dispute servicing remains unowned.
+
+- 16.6: campaign row is `in closeout`; graph names the implemented folded
+  buyer-end/report boundary, delivery/deadline consumers, settle extraction and
+  seller automation. Dependency columns remain intact until archive cleanup.
+  `make check-change-index` passes.
 
 ## Design promotion record
 
