@@ -400,8 +400,8 @@ async def test_selected_site_lifecycle_is_idempotent_and_ends_its_lease() -> Non
         negotiation_id="neg-a",
         buyer_principal=BUYER,
     )
-    # Teardown ends the lease once; a repeat reports what the site has since
-    # converged, and only its capacity-released callback records the release.
+    # Teardown ends the lease once; a repeat retains teardown progress until
+    # the separate capacity-released callback proves capacity return.
     assert repeated_teardown.progress == "tearing_down"
     assert fulfillment.terminations == [("reservation-a", "buyer_teardown")]
     assert fulfillment.teardowns == []
