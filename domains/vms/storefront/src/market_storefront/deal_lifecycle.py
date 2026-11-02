@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import hashlib
 import json
 import logging
@@ -24,7 +26,8 @@ from market_deal_lifecycle.adapters import (
 from market_deal_lifecycle.evidence import CommitmentAttempt
 from market_deal_lifecycle.terms import decode_terms
 from market_deal_lifecycle_contracts.models import (
-    Accepted, CommitMessage, ListDealsRequest, Pending, Rejected, SubmitResponse, Unknown,
+    Accepted, CommitMessage, EvidenceItem, LifecycleCommand, ListDealsRequest,
+    Pending, Rejected, SubmitResponse, Unknown,
 )
 from market_deal_servicing import (
     DealWatch, DeliveryIngress, DeliveryRecord, EndSession, LifecycleRouteBinding,
@@ -164,6 +167,50 @@ class VmDealLifecycle:
             seller_account=data.mandate.to.root if data is not None else "",
             actor=lambda _: Identity.model_validate(agreement["seller"]), clock=self.clock,
         )
+
+    async def interrupt(self, negotiation_id, *, actor, operation_key, reason, dry_run=False):
+        agreement, _ = self.accepted(negotiation_id)
+        terms = decode_terms(agreement["settlement"].get("lifecycle"))
+        entitled = bool(terms and terms.early_termination and "payee" in terms.early_termination.entitlements)
+        command = LifecycleCommand(
+            negotiation_id=negotiation_id, operation_key=operation_key,
+            kind="stop" if entitled else "delivery_end",
+        )
+        if not reason or not reason.strip():
+            raise ValueError("administrator interruption requires a reason")
+        if dry_run:
+            return command.kind, Pending(reason="dry run; no interruption submitted"), self.seller.delivery_read(negotiation_id).delivery
+        # Keep operator attribution for notice stops as well as exceptional ends.
+        # The immutable evidence ID rejects a same-key retry changing its author.
+        with transaction(self.path) as conn:
+            EvidenceSession(conn).put(negotiation_id, EvidenceItem(
+                evidence_id="administrator-interrupt:" + operation_key,
+                kind="administrator_interrupt", classification="seller_assertion",
+                recorded_at=self.clock(), body=base64.b64encode(canonical_json({
+                    "command": command.model_dump(mode="json"),
+                    "administrator": actor.model_dump(mode="json"), "reason": reason,
+                })),
+            ))
+        if entitled:
+            outcome = await self.seller.submit(command, actor=actor, reason=reason)
+            # Only a verified authority stop may set an entitled delivery end.
+            return command.kind, outcome, self.seller.delivery_read(negotiation_id).delivery
+
+        async def physical():
+            # Seller submit records its end synchronously before its first I/O.
+            # Running both tasks lets teardown proceed even during authority loss.
+            await self.end.drive_physical(negotiation_id)
+
+        outcome, progress = await asyncio.gather(
+            self.seller.submit(command, actor=actor, reason=reason), physical(),
+            return_exceptions=True,
+        )
+        if isinstance(progress, BaseException):
+            logger.error("VM administrator end awaits physical recovery: %s", progress)
+        if isinstance(outcome, BaseException):
+            logger.error("VM administrator filing awaits authority recovery: %s", outcome)
+            outcome = Unknown(reason="delivery-end filing awaits authority recovery")
+        return command.kind, outcome, self.seller.delivery_read(negotiation_id).delivery
 
     async def peer(self, message):
         if isinstance(message, CommitMessage):

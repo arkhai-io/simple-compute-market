@@ -1144,7 +1144,7 @@ provision stages". Files: `domains/vms/storefront/src/market_storefront/`
       delta, and the admission scenarios on the VM path.
 - [x] 14.3 Keep the requested instant in VM lease ends (second precision). Verify: unit and
       integration tests in the VM fulfillment suites for the delta's scenarios.
-- [ ] 14.4 Route admin interrupts through the seller half: submit notice stop when the accepted
+- [x] 14.4 Route admin interrupts through the seller half: submit notice stop when the accepted
       option grants the payee an entitlement, otherwise journal delivery end and file
       delivery_end(cause=payee) through the dispute adapter. Keep administrator
       identity and reason. Verify both branches: authority notice governs entitled delivery end;
@@ -1226,6 +1226,42 @@ the first two gain delivery-only end/report stages, not hosted rate-part stop qu
   VM e2e, real local payment/mediation qualification or end/report e2e extension
   is claimed. No shared package or sibling-domain source was changed.
   Permanent promotion remains 16.9.
+
+### VM administrator dispatch continuation checkpoint (2026-11-02)
+
+- 14.4 routes hosted negotiation interrupts through the seller half. Accepted
+  payee rights select a notice stop; otherwise the attributed receipt-time end
+  and payee filing are journaled atomically, with physical drive concurrent with
+  the filing so authority loss does not delay teardown. Administrator and reason
+  are retained for both branches. Stable keys reject changed attribution;
+  hosted requests reject supplied times and payout amounts. The existing
+  Alkahest splitter-backed escrow path is unchanged.
+- First use mounts the real administrator router, identity middleware, SQLite
+  and signed client. The vector-derived mediation peer records one case before
+  deliberately losing its response; same-key recovery returns that case. An
+  injected future payment adapter demonstrates no local end before the effective
+  authority stop and no self-penalty. This is dispatch/order evidence, not rate
+  mandate or live-rate qualification. The existing payment example also shows
+  physical drive with a missing mediation credential and durable filing repair.
+- Evidence and clean-checkout entry points:
+  `docs/attachments/vm-admin-interrupt/index.md`. The 72 existing focused cases,
+  architecture, packaging, locks, comments and pinned strict validation pass.
+  Full `make test` passes in 8m10s with the shell-local Podman shim and proxy
+  exclusions, including release tooling and Helm checks. Citation checking
+  reports only the three known future destinations in #325.
+  No new permanent test function or weakened assertion; the payment fixture
+  now supplies the installed mediation interface's vector-derived authority.
+- First-use attempts caught a response lookup using the thread row's absent
+  listing_id; the route now uses the accepted Agreement. The initial temporary
+  diagnostic also lacked the explicit storefront-domain environment supplied by
+  test setup; the committed entry point includes it. Neither failure is carried.
+- Remaining 14.5: authenticated site-report receiver/pull recovery and callback
+  release progress; failure-source classification/correlation and the direct
+  failure-policy release path; VM buyer stages/CLI and the VM half of 7.4.
+  Keep 7.4 unchecked. No fresh-stack e2e, real local payments/mediation journey
+  or end/report stage extension is claimed. Shared-kit/client and provisioning
+  sources are unchanged; no sibling-domain work was touched. Promotion remains
+  16.9 to the lifecycle spec/architecture and VM fulfillment documents.
 
 ## 15. Bare-metal wiring
 
@@ -1371,4 +1407,5 @@ The remaining D1–D15 destinations are listed in proposal.md and task 16.9.
 | Hosted publication selects compatible offered authority projections; shared registry destinations use their ordered intersection; API-credit selection and approval check full accepted identities | `kit/arkhai-payments/README.md`; storefront-publication, settlement-configuration and buyer-orchestration spec deltas and lifecycle architecture at reviewed closeout |
 | Bounded current/retiring receipt identities and snapshot attestation/cursor verification before state consumption | `docs/development/DEPLOYMENT_AND_CONFIG.md#settlement-consumer-configuration-and-cutover`; settlement-servicing spec/architecture at reviewed closeout |
 | Accepted delivery metadata does not establish commitment: the verified-evidence transaction fixes the payment authority's approval instant once, preserves earlier ends and gates seller committed-deal pages; bounded recovery runs independently of payment publication | `openspec/specs/deal-lifecycle/spec.md` and its architecture companion at reviewed closeout |
+| D6 VM administrator dispatch follows accepted payee rights; exceptional ends retain administrator/reason and drive physical teardown independently of the journaled authority filing | `openspec/specs/deal-lifecycle/spec.md` and its architecture companion, with VM fulfillment ownership at reviewed closeout |
 | Lifecycle distributions participate in public publication with their declared dependency order | `docs/development/RELEASING.md` and `manifests/published-distributions.json` |
