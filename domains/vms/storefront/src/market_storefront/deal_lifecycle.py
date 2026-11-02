@@ -12,7 +12,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from compute_provisioning_contracts import SignedLeaseEndedReport, verify_lease_end
+from compute_provisioning_contracts import LeaseEndedEvent, SignedLeaseEndedReport, verify_lease_end
 from market_arkhai_mediation.adapter import MediationAdapter
 from market_arkhai_mediation.claims import sign_claim
 from market_arkhai_mediation.client import MediationClient, MediationCredential
@@ -43,6 +43,7 @@ from market_identity import Identity, canonical_json
 
 from market_storefront import container
 from market_storefront.delivery_lifecycle import VmPhysicalEnd
+from market_storefront.end_classification import resolve_site_corrections, site_classification
 from market_storefront.settlement_stages import PaymentSettlementError
 from market_storefront.services.capacity_client import build_capacity_runtime, build_fulfillment_client
 
@@ -71,6 +72,7 @@ class VmDealLifecycle:
         self.end = EndService(self.path, VmPhysicalEnd(db), clock=clock)
         self.ingress = DeliveryIngress(
             self.path, clock=clock, verify_site=self.verify_site, receipt_claim=self.receipt_claim,
+            classify_site=self.classify_site,
         )
         payment_entries = []
         if payments is not None:
@@ -273,6 +275,10 @@ class VmDealLifecycle:
             except Exception:
                 logger.exception("VM respondent discovery awaits recovery")
         for deal in deals:
+            with transaction(self.path) as conn, atomic(conn):
+                end = EndSession(conn)
+                record = end.read(deal.negotiation_id)
+                end.admit(deal.negotiation_id, record.phase, record.revision, now=self.clock())
             try:
                 await self.recover_site_reports(deal.negotiation_id)
             except Exception:
@@ -286,6 +292,11 @@ class VmDealLifecycle:
                     pass
             except Exception:
                 logger.exception("VM lifecycle watch awaits recovery for %s", deal.negotiation_id)
+            try:
+                with transaction(self.path) as conn, atomic(conn):
+                    resolve_site_corrections(EndSession(conn), deal.negotiation_id, now=self.clock())
+            except Exception:
+                logger.exception("VM end classification awaits recovery for %s", deal.negotiation_id)
             try:
                 await self.end.drive_physical(deal.negotiation_id)
             except Exception:
@@ -368,10 +379,34 @@ class VmDealLifecycle:
             report, capacity_reservation_id=row[1] or row[2], site_id=row[0],
             expected_sites=trust.site_authorities(row[0])(),
         )
+        with transaction(self.path) as conn:
+            end = EndSession(conn)
+            prior = next((request for request in end.requests(negotiation_id)
+                          if request.source_ref == "site-event:" + event.event_id), None)
+            controlling = prior.controlling_source_ref if prior else site_classification(end, negotiation_id, event)[1]
         return VerifiedSiteEnd(
+            controlling_source_ref=controlling,
             event_id=event.event_id, capacity_reservation_id=event.capacity_reservation_id,
             ended_at=event.effective_at, actor=event.caller or report.signer, cause=event.cause,
         )
+
+    def classify_site(self, verified, end):
+        rows = end.conn.execute(
+            """SELECT DISTINCT t.negotiation_id FROM negotiation_threads t
+               LEFT JOIN vm_delivery_records d USING(negotiation_id)
+               LEFT JOIN capacity_holds h USING(negotiation_id)
+               WHERE d.capacity_reservation_id=? OR h.capacity_reservation_id=?""",
+            (verified.capacity_reservation_id, verified.capacity_reservation_id),
+        ).fetchall()
+        if len(rows) != 1:
+            raise ValueError("site report has ambiguous deal binding")
+        negotiation_id = rows[0][0]
+        item = next(item for item in EvidenceSession(end.conn).read(negotiation_id).items
+                    if item.evidence_id == "site-event:" + verified.event_id)
+        event = LeaseEndedEvent.model_validate_json(SignedLeaseEndedReport.model_validate_json(item.body).payload)
+        record = end.read(negotiation_id)
+        end.admit(negotiation_id, record.phase, record.revision, now=self.clock())
+        return site_classification(end, negotiation_id, event)[0]
 
     def routes(self, administrators):
         return LifecycleRouteServices(
