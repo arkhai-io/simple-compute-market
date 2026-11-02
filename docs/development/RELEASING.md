@@ -33,6 +33,7 @@ the one its `pyproject.toml` declares.
 | `arkhai-kit-deal-lifecycle` | `kit/deal-lifecycle/` | `arkhai-kit-deal-lifecycle-contracts`, `arkhai-kit-identity` |
 | `arkhai-kit-deal-lifecycle-buyer` | `kit/deal-lifecycle-buyer/` | `arkhai-kit-deal-lifecycle`, `arkhai-kit-deal-lifecycle-contracts`, `arkhai-kit-identity` |
 | `arkhai-kit-arkhai-payments` | `kit/arkhai-payments/` | `arkhai-core`, `arkhai-kit-deal-lifecycle`, `arkhai-kit-identity`, `arkhai-kit-settlement-runtime` |
+| `arkhai-kit-arkhai-mediation` | `kit/arkhai-mediation/` | `arkhai-kit-deal-lifecycle`, `arkhai-kit-deal-lifecycle-contracts`, `arkhai-kit-identity` |
 | `arkhai-kit-policy` | `kit/policy/` | `arkhai-core`, `arkhai-kit-identity` |
 | `arkhai-kit-settlement-runtime` | `kit/settlement-runtime/` | `arkhai-core`, `arkhai-kit-deal-lifecycle`, `arkhai-kit-identity` |
 | `arkhai-kit-negotiation-runtime` | `kit/negotiation-runtime/` | `arkhai-kit-identity`, `arkhai-kit-policy` |
