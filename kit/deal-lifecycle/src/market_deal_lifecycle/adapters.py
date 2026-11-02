@@ -15,7 +15,7 @@ from types import MappingProxyType
 from typing import Literal, Protocol
 
 from market_deal_lifecycle_contracts.models import (
-    AuthorityView, Instant, LifecycleCommand, LifecycleOutcome, Reference, Rejected, WireModel,
+    AuthorityView, EvidenceItem, Instant, LifecycleCommand, LifecycleOutcome, Reference, Rejected, WireModel,
 )
 from pydantic import Field, JsonValue, ValidationError
 
@@ -57,6 +57,10 @@ class DisputeAdapter(Protocol):
 
     def build_request(self, intent: DeliveryEndIntent) -> InterfaceRequest | Rejected:
         """Map or refuse before I/O; concrete signing belongs to the owning dispute kit."""
+        ...
+
+    def build_append(self, case_ref: str, items: list[EvidenceItem]) -> dict[str, JsonValue] | Rejected:
+        """Own the interface's evidence packaging and append vocabulary."""
         ...
 
     def validate_request(self, request: InterfaceRequest) -> Rejected | None: ...
