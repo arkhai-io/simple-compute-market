@@ -46,6 +46,9 @@ from market_storefront.failure_actions import (
 )
 from market_storefront.middleware.seller_auth import listing_lifecycle_middleware
 from market_storefront.payment_settlement import VmPaymentsCoordinator
+from market_storefront.deal_lifecycle import VmDealLifecycle
+from market_deal_servicing import create_lifecycle_router
+from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
 from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests._settings_overrides import settings_overrides
@@ -244,6 +247,8 @@ async def _harness(tmp_path, *, deposit=False, actions=("emit_event",)):
     stage = PaymentSellerStage(_config(), client_for_owner=payments)
     data = await _seed(db, stage, deposit=deposit)
     coordinator = VmPaymentsCoordinator(domain=domain, db=db, stage=stage)
+    lifecycle = VmDealLifecycle(db, SELLER, coordinator, RegistryDisputePolicy.from_document({}))
+    coordinator.lifecycle = lifecycle
     _container.resolved_sqlite_client = db
     _container.resolved_domain_registry = registry
     _container.resolved_marketplace_signer = SELLER
@@ -252,10 +257,14 @@ async def _harness(tmp_path, *, deposit=False, actions=("emit_event",)):
         seller_stages=domain.settlement.seller_stages,
         local_principal=SELLER.identity,
         arkhai_payments_stage=stage,
+        lifecycle=lifecycle,
     )
     app = FastAPI()
     app.include_router(router)
     app.include_router(settlements_router)
+    app.include_router(create_lifecycle_router(lambda _: lifecycle.routes(
+        TrustedIdentitySet(identities=(SELLER.identity,))
+    )))
     app.middleware("http")(listing_lifecycle_middleware)
     transport = httpx.ASGITransport(app=app)
     return Harness(
@@ -264,10 +273,12 @@ async def _harness(tmp_path, *, deposit=False, actions=("emit_event",)):
         data=data,
         delivery=delivery,
         coordinator=coordinator,
+        lifecycle=lifecycle,
         actions=list(actions),
         transport=transport,
         buyer=_client(BUYER, "buyer", transport),
         seller=_client(SELLER, "seller", transport),
+        administrator=_client(SELLER, "admin", transport),
     )
 
 
@@ -288,6 +299,8 @@ async def make(tmp_path):
         await harness.coordinator.stop()
         await harness.buyer.close()
         await harness.seller.close()
+        await harness.administrator.close()
+        await harness.lifecycle.close()
         harness.overrides.__exit__(None, None, None)
     _container.resolved_sqlite_client = None
     _container.resolved_domain_registry = None
@@ -325,6 +338,11 @@ async def test_settlement_is_pending_until_a_verified_receipt_then_delivers_once
     repeated = await h.settle()
     assert repeated.status == "ready"
     assert h.delivery.starts == [NEGOTIATION]
+    page = await h.administrator.authenticated_request(
+        "GET", "/api/v1/admin/lifecycle", role="admin", operation="lifecycle_list", resource=""
+    )
+    assert [deal["negotiation_id"] for deal in page["deals"]] == [NEGOTIATION]
+    assert page["deals"][0]["commitment_ref"] == h.data.transaction_id
 
 
 @pytest.mark.asyncio
