@@ -11,7 +11,7 @@ import json
 from market_arkhai_mediation.adapter import MediationAdapter
 from market_arkhai_mediation.client import MediationClient, MediationCredential, MediationTransportError
 from market_arkhai_mediation.contract import INTERFACE
-from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM, PaymentApproval
+from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM, PaymentSettlementData
 from market_arkhai_payments.adapter import PaymentAdapter
 from market_arkhai_payments.receipts import verify_snapshot
 from market_core.schemas import Agreement
@@ -85,18 +85,23 @@ async def buyer_lifecycle(*, agreement_bytes, settlement_data, seller_url, signe
     commitment = hashlib.sha256(canonical_json(raw)).hexdigest()
     payment = None
     if mechanism == ARKHAI_PAYMENTS_MECHANISM:
-        approval = approval or PaymentApproval(config.arkhai_payments, config.payer_account)
-        raw, data = approval.check(agreement_bytes, settlement_data)
+        # Recovery binds accepted terms, not today's admission policy. Physical
+        # surrender remains available when no financial capability is configured.
+        data = PaymentSettlementData.parse(settlement_data)
+        data.require_bound_to(raw)
         commitment = data.transaction_id
-        payment = PaymentAdapter(
-            raw, data, account=approval.payer_account,
-            client_for_owner=approval._client_for_owner,
-            verify_snapshot=lambda signed, floor: verify_snapshot(
-                signed, approval.config.receipt_trust, mandate=data.mandate,
-                agreement_json=raw, livemode=approval.config.livemode,
-                minimum_sequence=floor,
-            ),
-        )
+        if approval is not None:
+            if approval.payer_account != data.mandate.from_.root:
+                raise ValueError("payment credential names another accepted payer")
+            payment = PaymentAdapter(
+                raw, data, account=approval.payer_account,
+                client_for_owner=approval._client_for_owner,
+                verify_snapshot=lambda signed, floor: verify_snapshot(
+                    signed, approval.config.receipt_trust, mandate=data.mandate,
+                    agreement_json=raw, livemode=approval.config.livemode,
+                    minimum_sequence=floor,
+                ),
+            )
     terms = decode_terms(option.lifecycle)
     dispute = (DisputeBinding(agreement.negotiation_id, commitment, terms.adjudication.dispute)
                if terms else None)
