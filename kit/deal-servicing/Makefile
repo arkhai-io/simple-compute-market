@@ -12,3 +12,4 @@ reinit:
 
 first-use: reinit
 	uv run --find-links $(DIST_DIR) python examples/first_use.py
+	uv run --find-links $(DIST_DIR) python examples/end_first_use.py

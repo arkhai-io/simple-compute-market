@@ -550,7 +550,7 @@ market-composition's "Marketplace roles hold no payment ledger". Files: new `kit
       comment hygiene and strict OpenSpec validation. No new acceptance tests were
       added under the implementation-worker testing boundary; domain wiring consumes
       the transport capture seam in sections 6, 14 and 15.
-- [ ] 10.2 Implement end service: earliest-wins final requests from authority, dispute and local
+- [x] 10.2 Implement end service: earliest-wins final requests from authority, dispute and local
       sources, recorded whether or not a lease exists; journaled terminate or truncate effects
       through a narrow domain port. Own `admit(negotiation_id, phase, expected_revision) → admitted |
       ended(T), revision` over the caller's storefront database session, with durable revision/CAS
@@ -570,7 +570,14 @@ market-composition's "Marketplace roles hold no payment ledger". Files: new `kit
       for unify's delivery consumer, not a whole-change cycle.
       Verify: unit tests with a fake domain port for "A ruling ends delivery before the lease
       exists", "The end overlaps delivery start" and "The storefront restarts between the end
-      and provisioning".
+      and provisioning". Caller-session revision/CAS, earliest-source ordering,
+      atomic filing/pending-classification slots, fixed-basis correction resolution,
+      deadline admission and one-owner billing intents are implemented. The committed
+      first-use examples exercise persistence/restart, dispatched adoption, late earlier
+      evidence without repeated termination, future-start correction and once no-op
+      billing. Seventeen temporary diagnostic checks cover rollback, equal-time ordering,
+      stale authorization, non-delivery despite a later lawful stop and unknown billing
+      resolution. Packaging/architecture, hygiene and strict validation pass.
 - [ ] 10.3 Implement `watch`: one durable cursor per record (payment authority, dispute
       authority), advancing after the effect is journaled; delivery ends to end service once per
       effect ID; a counterparty's case journaled as the seller's append with an idempotency key

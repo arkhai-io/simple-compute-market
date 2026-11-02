@@ -220,7 +220,14 @@ class EvidenceSession:
         return True
 
     def delete(self, negotiation_id: str) -> None:
-        for table in ("servicing_evidence_items", "servicing_evidence_commitments", "servicing_evidence_deals"):
+        for table in (
+            "servicing_evidence_items", "servicing_evidence_commitments", "servicing_evidence_deals",
+            "servicing_final_requests", "servicing_intents", "servicing_delivery",
+        ):
+            if not self.conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,),
+            ).fetchone():
+                continue
             self.conn.execute(f"DELETE FROM {table} WHERE negotiation_id=?", (negotiation_id,))
 
 
