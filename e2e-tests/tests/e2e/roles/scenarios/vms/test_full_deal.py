@@ -93,6 +93,13 @@ Phase 11 — Fulfillment convergence and resource release
   11a2 Release the teardown gate and drain provider teardown.
   11b  Converge to torn_down, run one lease cycle → released; observe
        storefront release, capacity reuse, and cleanup.
+
+Phase 12 — Buyer surrender on a second deal
+  12a  Republish the freed capacity and deliver another deal.
+  12b  Surrender twice through the canonical lifecycle client; verify one
+       signed site report while provider teardown remains gated.
+  12c  Complete provider teardown, then observe the capacity-return callback;
+       the original end and report remain unchanged and capacity releases once.
 """
 
 from __future__ import annotations

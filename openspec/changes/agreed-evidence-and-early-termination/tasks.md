@@ -1150,7 +1150,7 @@ provision stages". Files: `domains/vms/storefront/src/market_storefront/`
       identity and reason. Verify both branches: authority notice governs entitled delivery end;
       without entitlement end service drives delivery immediately and the filing retries independently.
 
-- [ ] 14.5 Mount the peer end/read route and authenticated site-report receiver in the VM
+- [x] 14.5 Mount the peer end/read route and authenticated site-report receiver in the VM
       storefront; terminate now through `terminate_vm_lease`/hold release, not a watchdog kick.
       Add the VM buyer end verb through the buyer half and canonical client. Files:
       `domains/vms/storefront` fulfillment services, callback/router composition and startup;
@@ -1166,7 +1166,7 @@ provision stages". Files: `domains/vms/storefront/src/market_storefront/`
   - [x] 14.5b Buyer wiring: compose retained evidence and the buyer half/client, use
         canonical commit for hosted settlement, and expose receipt-time `market end`
         with separate financial, receipt, case and proven-capacity progress.
-  - [ ] 14.5c End-to-end wiring/qualification: extend the VM end/report stages in
+  - [x] 14.5c End-to-end wiring/qualification: extend the VM end/report stages in
         `e2e_deal` and `e2e_deal_buyer_cli`; run the fresh branch-built stack through
         the Podman shim with real local payments and mediation. Keep 14.5 unchecked
         until this acceptance boundary is observed; 7.4 remains parent-owned.
@@ -1354,6 +1354,38 @@ the first two gain delivery-only end/report stages, not hosted rate-part stop qu
   without controlling evidence remain pending by design; renewable/funding-timer
   and rate execution stay outside this foundation. No external resource is left up.
   Permanent documentation promotion remains 16.9 at reviewed closeout.
+
+### VM fresh-stack qualification (2026-11-02)
+
+- Supersedes the remaining 14.5c boundary above: both existing VM journeys now
+  preserve lease-expiry qualification and add a second deal, repeated canonical
+  surrender, exact signed site-report verification before provider completion,
+  one teardown handle and callback-only capacity release. The CLI journey uses
+  real `market negotiate`, `market settle` and `market end` subprocesses; bounded
+  end wait/read mode observes current delivery separately from the durable receipt.
+- At `5874088d1`, fresh branch-built VM images and isolated empty volumes passed
+  Compose and real local payments/mediation readiness. An authenticated registry
+  read proved hosted adjudication terms, a 300-second delivery deadline, a
+  1,296,000-second dispute window and unbounded case hold. `e2e_deal` passed
+  **38/38 stages in 17.18s** and `e2e_deal_buyer_cli` **30/30 in 26.07s**,
+  with zero skips. The journeys retain their canonical Alkahest settlement;
+  this is delivery-only qualification, not hosted rate-stop or ruling execution.
+- Live qualification found that enabling payments broke unrelated Alkahest
+  publication when no payment clause was selected. Repair `d2c71b365` returns
+  no payment option in that case, with the existing builder regression extended;
+  all 97 payments-kit tests, typing, vectors and generated-model checks pass.
+  Harness preparation corrections preserve all previous assertions: explicitly
+  advance republication, await this deal's dispatch, use typed settlement wait,
+  observe release by reservation identity and request the CLI's current view.
+- Full `make test` passes in **7m19s** with the Podman shim and prescribed proxy
+  exclusions. Harness regression: **316 passed**. Architecture, packaging,
+  locks, comment hygiene and pinned strict OpenSpec validation pass. Citation
+  checking reports only the three known destinations in #325. Evidence and
+  committed readiness entry point: `docs/attachments/vm-end-classification/index.md`.
+- Every attempted deployment was removed, with final owned container, volume
+  and network inventories empty; external service source is unchanged. No
+  resident service remains. 14.5 and 14.5c are checked; **7.4 remains untouched**
+  for the parent. Permanent promotion remains reviewed closeout under 16.9.
 
 ## 15. Bare-metal wiring
 
