@@ -542,7 +542,7 @@ The codec MUST include early_termination.premature_stop_penalty in Agreement byt
 
 ### Requirement: The seller files ends its terms do not entitle
 
-For an unentitled site withdrawal or failed/never-started delivery, end service MUST journal `delivery_end(cause=payee)` for filing through the dispute adapter at the actual end. Never-delivered timing MUST follow "Never-delivered correction has a fixed non-future basis". A correlated lawful end MUST NOT create a second seller fault; an established earlier failure MUST remain correctable.
+For an unentitled site withdrawal or failed/never-started delivery, end service MUST journal `delivery_end(cause=payee)` for filing through the dispute adapter at the actual end. Never-delivered timing MUST follow "Never-delivered correction has a fixed non-future basis". A correlated end MUST adopt its controlling source's classification and filing without a second seller fault. A later superseded source MUST remain evidence without a new filing; an established earlier failure MUST remain correctable.
 
 #### Scenario: A withdrawal is reported late
 
@@ -599,7 +599,7 @@ End service MUST classify verified evidence as lawful, seller failure or pending
 
 ### Requirement: Pending correction resolves in the same journal
 
-record_end MUST atomically retain any pending-classification slot beside the end. resolve_correction(source_ref, expected_revision, evidence, classification, filing_intent?) MUST atomically discharge it or journal the fixed-basis filing in that journal. Stale revisions MUST retry without a synthetic end or second journal. Physical work MUST NOT await classification.
+record_end MUST atomically retain any pending-classification slot beside the end. resolve_correction(source_ref, expected_revision, evidence, classification, filing_intent?, controlling_source_ref?) MUST atomically discharge it, adopt a verified controlling source's filing, or journal the fixed-basis filing in that journal, without changing the original request. Stale revisions MUST retry without a synthetic end or second journal. Physical work MUST NOT await classification.
 
 #### Scenario: Evidence arrives after a pending end
 

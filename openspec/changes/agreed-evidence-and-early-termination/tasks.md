@@ -1694,6 +1694,8 @@ or deployed monetary-ruling qualification is claimed by this kit repair.
 
 ## Re-review 21/22 disposition — buyer and servicing kit
 
+- **S-N2 / E-N6:** `resolve_correction` accepts a verified controlling source, validates its classification/end and existing filing, and adopts it without rewriting the original request. Both domain correction callers pass the one new optional keyword; no other domain behavior changes. SQLite regressions cover delayed lawful/nonlawful sources, delivered/undelivered state, reconstruction, replay, and invalid controllers.
+- **E-N2:** Only a selected source journals a seller filing. Later superseded requests remain immutable evidence; a genuinely earlier late source still journals a revision. Regression proves both orderings and same-key replay. The terminal-refusal fixture now uses two successively selected failures rather than manufacturing an unnecessary later filing.
 - **S-N1:** Both lazy buyer mediation ports forward `case` without eager credential resolution. Each buyer package now drives lost-filing-response recovery through its real port and reconstructed evidence store, asserting one signed authority case. Before the repair both tests failed at the missing `case` operation.
 
 ### Parallel repair integration checkpoint

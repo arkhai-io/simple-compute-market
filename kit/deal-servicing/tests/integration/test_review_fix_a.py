@@ -208,7 +208,7 @@ def test_rejected_filings_are_terminal_and_visible_with_every_outcome(tmp_path):
         api = service(path, dispute)
         with transaction(path) as conn:
             failure(EndSession(conn), "failure:one")
-            failure(EndSession(conn), "failure:two")
+            failure(EndSession(conn), "failure:two", observed=110)
         first = await api.dispatch_filings("deal")
         assert len(first) == 2 and all(item.outcome.status == "rejected" for item in first)
         assert len(dispute.calls) == 2

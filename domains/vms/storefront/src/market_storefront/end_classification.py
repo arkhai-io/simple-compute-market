@@ -69,6 +69,7 @@ def resolve_site_corrections(end: EndSession, negotiation_id: str, *, now: int) 
         end.resolve_correction(
             negotiation_id, request.source_ref, record.revision,
             evidence=classification.evidence_refs, classification=classification,
+            controlling_source_ref=controlling,
             filing_intent=None if classification.lawful or controlling else end.failure_filing(
                 request, now=now, delivered=record.available_at is not None,
             ),
