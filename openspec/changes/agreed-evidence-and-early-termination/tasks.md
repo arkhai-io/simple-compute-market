@@ -131,7 +131,7 @@ by dispute interface", "Evidence is keyed by negotiation" and "A dispute is one 
       dependency; 13.1 signs the route response and embeds the separately signed contract claim after 12.1/12.5. Include rejected authority view beside readable delivery
       when no adapter exists. Define one delivery_end intent for either filer and either cause, neither a payments event. Define receipt embedding of the contract-owned SignedDeliveryEndClaim; vendor-gate its concrete payload at 12.1. Verify refusal of supplied at, receipt preservation on retry,
       Agreement-principal signature binding and exact report bytes. Gates 7, 10 and 13.
-- [ ] 2.5 Reshape core's `SettlementOption` to `{option_id, price: {asset, rates}, settlement:
+- [x] 2.5 Reshape core's `SettlementOption` to `{option_id, price: {asset, rates}, settlement:
       {schema, ...}, lifecycle?}` per D5 ("The option's shape"), with the option ID the hash of
       the canonical payload of `price`, `settlement` and `lifecycle`, the last omitted when
       absent; move every builder (hosted, Alkahest, contact-exchange, API credits), the buyer's
@@ -198,11 +198,17 @@ on the republished listings of 2.5; nothing composes the kits yet.
   a daemon or a replacement payment service.
 - Fresh branch-built lane stacks republished their listings. `e2e_deal`:
   **35 passed**. `e2e_bare_metal_mock_deal`: **39 passed**.
-  `e2e_credits_payment_deal`: invoked on a fresh API-credit stack, but all
-  **3 cases blocked/skipped** because `PAYMENTS.SERVICE_URL` is not configured.
-  This is the existing external-target readiness gate, not a mediation or
-  wire-format skip. No payment e2e success is claimed. **2.5 remains unchecked**
-  until that suite passes with a configured ready payment authority.
+  `e2e_credits_payment_deal`: the first run blocked/skipped all 3 cases because
+  `PAYMENTS.SERVICE_URL` was absent. The follow-up at SCM revision
+  `9e4fe5aff3b001a187576ac24cf9364eac55664d` configured a real local Arkhai
+  payments service with Formance/Postgres and republished the API-credit listings:
+  **3 passed, 0 skipped**, in 5.14 seconds. Baseline/held/replayed/refunded HTTP
+  balance observations confirm the 3,000,000 USD/6 debit, unchanged replay and
+  full seller reversal; buyer funds are restored and `feePaid=0`. Host, buyer
+  and seller payment readiness passed before pytest. **2.5 is complete**.
+  Operator-side readiness tooling needed the new `settlement.schema` path;
+  its disposable adaptation and follow-up #327 are recorded in the packet.
+  No SCM code or scenario assertion changed for this qualification.
 - Every owned lane container, volume and network was removed, and native Anvil
   children left by scenarios were stopped. No external resource is left running.
 - The payment smoke example reaches provisioning and ready delivery under the
