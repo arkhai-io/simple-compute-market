@@ -31,6 +31,7 @@ from market_arkhai_payments.mandates import (
     PaymentsOptionParams,
     check,
     derive_mandate,
+    derive_part_terms,
     duration_seconds,
     format_duration,
 )
@@ -128,6 +129,7 @@ __all__ = [
     "check",
     "create_arkhai_payments_registration",
     "derive_mandate",
+    "derive_part_terms",
     "duration_seconds",
     "format_duration",
     "mandate_policy_for_agreement",

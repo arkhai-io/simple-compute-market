@@ -5,7 +5,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from math import ceil, floor
 import re
-from typing import Any
+from typing import Any, Literal
+
+from market_deal_lifecycle.authorities import derive_stop_authorities
+from market_deal_lifecycle.terms import LifecycleTerms, partial_period
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -103,7 +106,63 @@ class MandatePolicy(BaseModel):
     amount: int | str
     asset: str = Field(pattern=_ASSET)
     fee_bps: int = Field(ge=0, le=10_000)
-    dispute_authority: str = Field(pattern=_ACCOUNT_ID)
+    lifecycle: LifecycleTerms
+
+    @property
+    def dispute_authority(self) -> str:
+        return self.lifecycle.adjudication.dispute.account
+
+
+def derive_part_terms(
+    policy: MandatePolicy, *, kind: Literal["once", "rate"], setup: bool = False,
+) -> dict[str, Any]:
+    """Derive payment permissions and maturity from accepted lifecycle rights.
+
+    Setup encodes Agreement start; the authority clamps an already-past end to
+    approval without changing the stored mandate. Whole-second ends round up so
+    fractional Agreement instants never shorten the paid service's protection.
+    """
+    lifecycle = policy.lifecycle
+    if lifecycle.bond is not None:
+        raise MandatePolicyError("seller-funded bond is unsupported")
+    if setup and kind != "once":
+        raise MandatePolicyError("setup must be a once part")
+    try:
+        start = _utc_seconds(policy.start_utc, "start_utc")
+        end = ceil(start + (0 if setup else policy.duration_seconds))
+        if end > MAX_SAFE_INTEGER:
+            raise ValueError("part end exceeds the JSON wire integer range")
+        dispute = policy.dispute_authority
+        if re.fullmatch(_ACCOUNT_ID, dispute) is None:
+            raise ValueError("dispute authority requires a payments account")
+        supported = frozenset({"charged", "returned", "prorated", "chosen"})
+        stops = derive_stop_authorities(
+            lifecycle.early_termination, payer=policy.buyer_account,
+            payee=policy.option.payee_account, dispute=dispute,
+            stoppable=kind == "rate", supported_partial_periods=supported,
+        )
+        adjudication = lifecycle.adjudication
+        cap = adjudication.case_hold_max_seconds
+        authorities: dict[str, Any] = {
+            "stop": [{"account": entry.account, "notice": format_duration(entry.notice_seconds),
+                      "partialPeriod": entry.partial_period} for entry in stops],
+            "reverse": list(dict.fromkeys((policy.option.payee_account, dispute))),
+            "extend": [dispute],
+        }
+        if kind == "rate":
+            authorities["start"] = [policy.option.payee_account]
+        treatment = (
+            partial_period(lifecycle.early_termination.settles_through, supported)
+            if kind == "rate" and lifecycle.early_termination is not None else "returned"
+        )
+        return {
+            "end": {"at": end, "partialPeriod": treatment},
+            "hold": {"afterStop": format_duration(adjudication.dispute_window_seconds)},
+            "maxHoldExtension": None if cap is None else format_duration(cap),
+            "authorities": authorities,
+        }
+    except ValueError as exc:
+        raise MandatePolicyError(str(exc)) from exc
 
 
 def derive_mandate(agreement_json: dict[str, Any], policy: MandatePolicy) -> Mandate:
@@ -120,17 +179,10 @@ def derive_mandate(agreement_json: dict[str, Any], policy: MandatePolicy) -> Man
         raise MandatePolicyError(str(exc)) from exc
     if start_utc < accepted_at:
         raise MandatePolicyError("start_utc precedes accepted_at")
-    # The wire uses seconds; rounding must not shorten the accepted hold interval.
-    hold_seconds = ceil(start_utc - accepted_at) + policy.duration_seconds + window
-    if hold_seconds > MAX_SAFE_INTEGER:
-        raise MandatePolicyError("hold duration exceeds the JSON wire integer range")
     expires = floor(accepted_at) + window
     if expires <= accepted_at or expires > MAX_SAFE_INTEGER:
         raise MandatePolicyError("mandate expiry must follow acceptance and fit the wire range")
 
-    # A once part has no service clock to start or stop. The payer cannot reverse
-    # earned funds; only the seller and the configured dispute authority may do so.
-    reverse = list(dict.fromkeys((policy.option.payee_account, policy.dispute_authority)))
     mandate = {
         "from": policy.buyer_account,
         "to": policy.option.payee_account,
@@ -139,9 +191,7 @@ def derive_mandate(agreement_json: dict[str, Any], policy: MandatePolicy) -> Man
                 "kind": "once",
                 "asset": policy.asset,
                 "amount": amount,
-                "hold": {"for": format_duration(hold_seconds)},
-                "maxHoldExtension": "P0D",
-                "authorities": {"stop": [], "reverse": reverse, "extend": []},
+                **derive_part_terms(policy, kind="once"),
             }
         ],
         "deal": agreement_hash(agreement_json),

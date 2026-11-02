@@ -682,7 +682,7 @@ settle by negotiation". Files: `kit/arkhai-payments/schema/`, `src/market_arkhai
       pass; installed-wheel first use, architecture, packaging, comment hygiene and
       strict OpenSpec validation pass. Evidence and aggregate-run disposition:
       `docs/attachments/payments-contract-foundation/index.md`.
-- [ ] 8.2 Derive each part's authorities and holds from the terms: prepaid `once` end at term end,
+- [x] 8.2 Derive each part's authorities and holds from the terms: prepaid `once` end at term end,
       setup `once` end at the later of the Agreement start and approval, hold `{afterStop: dispute_window}`;
       each party's stop notice exactly its entitlement's notice_seconds; derive the dispute
       authority's {account, notice: PT0S, partialPeriod: chosen} entry here, not again in spot;
@@ -694,6 +694,13 @@ settle by negotiation". Files: `kit/arkhai-payments/schema/`, `src/market_arkhai
       `case_hold_max_seconds`. Verify: `test_mandates.py` cases for "A once deal's hold is
       derived", "A bounded case hold is derived", "An unbounded case hold is derived" and "A
       mandate's extend authorities are derived".
+      Implemented: absolute once term ends (fractional ends round up), afterStop
+      holds, exact authority-only extensions and nullable caps. `derive_part_terms`
+      supplies the same setup and rate authority/end mapping to later builders;
+      once-only derivation refuses early termination and bonds. Payments kit:
+      92 tests, mypy, model/resource drift and producer vectors pass. A temporary
+      diagnostic exercised zero/bounded/unbounded caps, setup end, and payer/payee/
+      dispute rate entries with exact notice/treatment. Promotion remains closeout.
 - [ ] 8.3 Extend the buyer's mandate check to the derived authorities, holds and dispute
       authority. Verify:
       `test_buyer.py` cases including the payee-as-stop-authority refusal.

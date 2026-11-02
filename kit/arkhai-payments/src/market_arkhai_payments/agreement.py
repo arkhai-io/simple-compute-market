@@ -101,7 +101,7 @@ def _policy(
         lifecycle = LifecycleTerms.model_validate(
             settlement_option_lifecycle(agreement.get("settlement"))
         )
-        authority = AccountId.model_validate(lifecycle.adjudication.dispute.account).root
+        AccountId.model_validate(lifecycle.adjudication.dispute.account)
     except ValidationError as exc:
         raise MandatePolicyError(
             "selected payments option requires lifecycle.adjudication.dispute "
@@ -117,7 +117,7 @@ def _policy(
             amount=agreement["amount"],
             asset=agreement["asset"],
             fee_bps=fee_bps,
-            dispute_authority=authority,
+            lifecycle=lifecycle,
         )
     except (KeyError, ValidationError) as exc:
         raise MandatePolicyError("Agreement lacks the terms a payments mandate needs") from exc
