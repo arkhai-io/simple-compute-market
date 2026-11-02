@@ -12,6 +12,9 @@ from typing import Any
 
 from market_core import SettlementEvidence
 from market_core.schemas import AGREEMENT_SETTLEMENT_SCHEMA_PATH
+from market_deal_lifecycle.delivery import DeliveryPhase
+
+from market_storefront.delivery_records import DeliveryEnded, admit_delivery, record_delivery_end
 
 from market_storefront.services.vm_fulfillment_planner import (
     VERIFIED_EVIDENCE_STATUSES,
@@ -274,6 +277,13 @@ class VmSettlementRepository:
                     "UPDATE vm_settlement_evidence SET status='refunded' WHERE negotiation_id=? AND status='refunding'",
                     (negotiation_id,),
                 )
+                reference = conn.execute(
+                    "SELECT settlement_ref FROM vm_settlement_evidence WHERE negotiation_id=?", (negotiation_id,),
+                ).fetchone()[0]
+                record_delivery_end(
+                    conn, negotiation_id, source_ref="refund:" + reference,
+                    cause="settlement_refunded", now=int(datetime.now(timezone.utc).timestamp()),
+                )
 
         await asyncio.to_thread(complete)
 
@@ -289,6 +299,8 @@ class VmSettlementRepository:
                     raise ValueError(
                         "VM delivery requires verified settlement evidence"
                     )
+                if not admit_delivery(conn, negotiation_id, DeliveryPhase.RESERVE):
+                    return False
                 now = _now()
                 cursor = conn.execute(
                     "INSERT OR IGNORE INTO vm_delivery_records (negotiation_id, status, created_at, updated_at) VALUES (?, 'provisioning', ?, ?)",
@@ -306,7 +318,15 @@ class VmSettlementRepository:
                     "SELECT * FROM vm_delivery_records WHERE negotiation_id=?",
                     (negotiation_id,),
                 ).fetchone()
-                return dict(row) if row else None
+                result = dict(row) if row else None
+                if result is not None:
+                    selected = conn.execute(
+                        "SELECT MIN(ended_at) FROM servicing_final_requests WHERE negotiation_id=?",
+                        (negotiation_id,),
+                    ).fetchone()[0]
+                    if selected is not None and selected <= datetime.now(timezone.utc).timestamp():
+                        result.update(status="ended", connection_details=None, tenant_credentials=None)
+                return result
 
         return await asyncio.to_thread(load)
 
@@ -358,10 +378,26 @@ class VmSettlementRepository:
                             f"VM delivery {key} cannot change after binding"
                         )
                 if (
-                    current["status"] in ("ready", "failed", "refunded")
-                    and fields.get("status", current["status"]) != current["status"]
+                    current["status"] in ("ready", "failed", "refunded", "ended")
+                    and fields.get("status", current["status"]) not in (current["status"], "ended")
                 ):
                     raise ValueError("terminal VM delivery cannot restart")
+                phase = {
+                    "capacity_reserved": DeliveryPhase.COMMIT,
+                    "dispatch": DeliveryPhase.DISPATCH,
+                    "activate": DeliveryPhase.ACTIVATE,
+                    "disclose": DeliveryPhase.DISCLOSE,
+                }.get(fields.get("fulfillment_phase"), DeliveryPhase.RESERVE)
+                protected = fields.get("status") == "ready" or any(
+                    key in fields for key in ("fulfillment_phase", "connection_details", "tenant_credentials")
+                )
+                if protected and not admit_delivery(
+                    conn, negotiation_id, phase, available=fields.get("status") == "ready",
+                ):
+                    # Keep the final request and terminal checkpoint together.
+                    conn.execute("UPDATE vm_delivery_records SET status='ended', updated_at=? WHERE negotiation_id=?", (_now(), negotiation_id))
+                    conn.commit()
+                    raise DeliveryEnded("VM delivery ended before checkpoint")
                 conn.execute(
                     "UPDATE vm_delivery_records SET "
                     + ", ".join(key + "=?" for key in fields)
@@ -380,7 +416,7 @@ class VmSettlementRepository:
                 return [
                     dict(row)
                     for row in conn.execute(
-                        "SELECT * FROM vm_delivery_records WHERE status NOT IN ('ready', 'failed', 'refunded') ORDER BY updated_at LIMIT ?",
+                        "SELECT * FROM vm_delivery_records WHERE status NOT IN ('ready', 'failed', 'refunded', 'ended') ORDER BY updated_at LIMIT ?",
                         (limit,),
                     ).fetchall()
                 ]
@@ -398,7 +434,7 @@ class VmSettlementRepository:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.execute(
                     """UPDATE vm_delivery_records SET processing_owner=?, processing_lease_until=?, updated_at=?
-                    WHERE negotiation_id=? AND status NOT IN ('ready', 'failed', 'refunded')
+                    WHERE negotiation_id=? AND status NOT IN ('ready', 'failed', 'refunded', 'ended')
                     AND (processing_lease_until IS NULL OR processing_lease_until < ? OR processing_owner=?)""",
                     (
                         owner,

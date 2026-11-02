@@ -24,11 +24,14 @@ from market_arkhai_payments import (
     ArkhaiPaymentsConfig,
     PaymentApproval,
     PaymentSellerStage,
+    PaymentSettlementData,
 )
 from market_arkhai_payments.fixtures import FakePaymentsClient, dispute_lifecycle
+from market_arkhai_mediation.fixtures.authority import MediationContractFake
 from market_core import ImmutableFulfillmentCapability
 from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
-from market_deal_servicing import create_lifecycle_router
+from market_deal_servicing import create_lifecycle_router, EndSession, PhysicalResult
+from market_deal_servicing.evidence import transaction
 from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
 from market_storefront.deal_lifecycle import VmDealLifecycle
 from storefront_client import StorefrontClient
@@ -56,7 +59,7 @@ PAYER = "00000000-0000-4000-8000-000000000011"
 PAYEE = "00000000-0000-4000-8000-000000000012"
 
 
-async def main():
+async def main(*, end_before_delivery=False):
     service, buyer, seller = (Ed25519Signer(bytes([n]) * 32) for n in (11, 12, 13))
     # The kit's fake plays the payments service; its receipts come from the
     # vector-pinned fixture, so nothing here frames or signs a receipt itself.
@@ -100,6 +103,7 @@ async def main():
         "settlement": {"schema": "arkhai.payments.v1", **(params or {})},
         "lifecycle": dispute_lifecycle(PAYER),
     }
+    option_body["lifecycle"]["adjudication"]["dispute"] = MediationContractFake().authority
     option = SettlementOption(
         option_id=derive_settlement_option_id(**option_body), **option_body
     )
@@ -186,6 +190,12 @@ async def main():
         coordinator = VmPaymentsCoordinator(domain=domain, db=db, stage=stage)
         lifecycle = VmDealLifecycle(db, seller, coordinator, RegistryDisputePolicy.from_document({}))
         coordinator.lifecycle = lifecycle
+
+        class Physical:
+            async def apply_end(self, *_args, **_kwargs):
+                return PhysicalResult(progress="released" if not deliveries else "tearing_down", done=not deliveries)
+
+        lifecycle.end.physical = Physical()
         container.resolved_sqlite_client = db
         container.resolved_marketplace_signer = seller
         container.resolved_settlement_composition = SimpleNamespace(
@@ -247,6 +257,32 @@ async def main():
             PaymentApproval(config, PAYER, client_for_owner=payments).approve(
                 raw, settlement_data, interval=0.01
             )
+            if end_before_delivery:
+                data = PaymentSettlementData.parse(settlement_data)
+                checked = await stage.check_receipt(json.loads(raw), data)
+                await coordinator._record_verified("payment-demo", raw, json.loads(raw), data, checked.receipt)
+                async with StorefrontClient(
+                    "http://storefront.local", signer=buyer, caller_role="buyer",
+                    expected_publishers=TrustedIdentitySet(identities=(seller.identity,)),
+                    transport=httpx.ASGITransport(app),
+                ) as client:
+                    receipt = await client.authenticated_request(
+                        "POST", "/api/v1/negotiations/payment-demo/lifecycle", role="buyer",
+                        operation="lifecycle_peer", resource="payment-demo",
+                        body={"kind": "end_delivery", "negotiation_id": "payment-demo", "operation_key": "demo-end"},
+                    )
+                    assert receipt["delivery"]["progress"] == "released"
+                    assert receipt["signed_delivery_end_claim"]["claim"]["delivered"] is False
+                assert (await settle())["status"] == "ended"
+                assert deliveries == []
+                assert await db.load_vm_delivery(negotiation_id="payment-demo") is None
+                with transaction(db.db_path) as conn:
+                    assert len(EndSession(conn).requests("payment-demo")) == 1
+                print("end before delivery: signed receipt; released; later settlement ended; zero dispatches")
+                await lifecycle.close()
+                await coordinator.stop()
+                container.clear_lifespan_state(registry=registry)
+                return
             print("after approval:", (await settle())["status"])
             await coordinator.tasks["payment-demo"]
             print("retry:", (await settle())["status"], "deliveries:", len(deliveries))
@@ -273,3 +309,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    asyncio.run(main(end_before_delivery=True))

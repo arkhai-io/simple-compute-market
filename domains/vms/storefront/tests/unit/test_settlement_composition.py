@@ -39,7 +39,7 @@ from market_storefront.settlement_composition import (
 from market_storefront.settlement_stages import vm_seller_stages
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests._settings_overrides import replaced_setting
-from tests.fulfillment_fixtures import vm_delivery_evidence
+from tests.fulfillment_fixtures import vm_delivery_evidence, seed_delivery_admission
 
 _BUYER_SIGNER = Ed25519Signer(b"\x31" * 32)
 _SELLER_SIGNER = Ed25519Signer(b"\x32" * 32)
@@ -193,6 +193,7 @@ async def _persist_accepted_negotiation(
 
 
 def _prepared(db: SQLiteClient, *, escrow_uid: str = "0xescrow") -> PreparedSettlement:
+    seed_delivery_admission(db, commitment_ref=escrow_uid)
     obligation = _obligation()
     obligation_ref = derive_obligation_ref("neg-1", 0, obligation)
     return PreparedSettlement(
