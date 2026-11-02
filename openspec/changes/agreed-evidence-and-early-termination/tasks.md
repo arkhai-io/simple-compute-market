@@ -538,11 +538,18 @@ governs delivery admission" (kit half), the seller half of the evidence requirem
 market-composition's "Marketplace roles hold no payment ledger". Files: new `kit/deal-servicing`,
 `kit/storefront/src/market_storefront_kit/composition.py` (loop registration).
 
-- [ ] 10.1 Create `kit/deal-servicing` with the storefront evidence store (seller envelopes on
+- [x] 10.1 Create `kit/deal-servicing` with the storefront evidence store (seller envelopes on
       every acceptance path through the section 6 seam, administrator as author on
       administrative acceptance) and its retention. Verify: library-integration tests for "The
       seller accepts the buyer's opening", "An administrator accepts" and the retention
-      scenarios.
+      scenarios. The SQLite evidence port and caller-session capture/acceptance seam
+      retain exact envelopes, accepting author and frozen terms; retention requires
+      complete watched payout/case/recovery observations. First-use example exercises
+      verified opening/counteroffer/administrative messages, restart and retention.
+      Existing foundation/contracts suites pass (62/37), as do architecture, packaging,
+      comment hygiene and strict OpenSpec validation. No new acceptance tests were
+      added under the implementation-worker testing boundary; domain wiring consumes
+      the transport capture seam in sections 6, 14 and 15.
 - [ ] 10.2 Implement end service: earliest-wins final requests from authority, dispute and local
       sources, recorded whether or not a lease exists; journaled terminate or truncate effects
       through a narrow domain port. Own `admit(negotiation_id, phase, expected_revision) → admitted |

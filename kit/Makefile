@@ -6,6 +6,11 @@ test: dist test-arkhai-mediation test-deal-lifecycle test-deal-lifecycle-contrac
 
 .PHONY: test-deal-lifecycle test-deal-lifecycle-contracts dist-deal-lifecycle dist-deal-lifecycle-contracts test-arkhai-mediation dist-arkhai-mediation
 
+dist-deal-servicing: dist-deal-lifecycle
+	cd deal-servicing && $(MAKE) build
+
+.PHONY: dist-deal-servicing
+
 test-arkhai-mediation:
 	cd arkhai-mediation && $(MAKE) test
 
@@ -95,7 +100,7 @@ test-storefront:
 
 dist: dist-ci
 
-dist-ci: dist-arkhai-mediation dist-deal-lifecycle dist-deal-lifecycle-contracts dist-capability-shape dist-capability-pricing dist-capability-admissibility dist-capacity-publication dist-pool-overrides dist-contact-exchange dist-delivery dist-delivery-apprise dist-site dist-site-client dist-resource-pools-contracts dist-resource-pools dist-resource-pools-client dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-storefront dist-arkhai-payments
+dist-ci: dist-deal-servicing dist-arkhai-mediation dist-deal-lifecycle dist-deal-lifecycle-contracts dist-capability-shape dist-capability-pricing dist-capability-admissibility dist-capacity-publication dist-pool-overrides dist-contact-exchange dist-delivery dist-delivery-apprise dist-site dist-site-client dist-resource-pools-contracts dist-resource-pools dist-resource-pools-client dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-storefront dist-arkhai-payments
 
 dist-contact-exchange: dist-settlement-runtime
 	-mkdir -p $(DIST_DIR)
