@@ -27,7 +27,7 @@ async def export_case(
     if not isinstance(agreement, dict) or agreement.get("negotiation_id") != negotiation_id:
         raise ValueError("acceptance names another negotiation")
     terms = terms_from_agreement(raw)
-    if hasattr(terms, "model_dump"):
+    if isinstance(terms, LifecycleTerms):
         terms = terms.model_dump(mode="json")
     items = []
     for item in record.items:

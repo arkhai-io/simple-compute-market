@@ -37,7 +37,8 @@ class RetentionObservation:
                     or any(at is None for at in self.case_closes.values())):
                 return None
             instants = [self.delivery_ended_at, self.physical_recovered_at,
-                        *self.payouts.values(), *self.case_closes.values()]
+                        *(at for at in self.payouts.values() if at is not None),
+                        *(at for at in self.case_closes.values() if at is not None)]
         else:
             return None
         if any(type(at) is not int or at < 0 for at in instants):
