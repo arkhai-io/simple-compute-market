@@ -99,7 +99,7 @@ by dispute interface", "Evidence is keyed by negotiation" and "A dispute is one 
       payload, evidence items, and route contracts and response models for section 13. Wire it
       into the build, `.dist` and locks. Verify: unit tests round-trip each model and refuse
       unknown kinds; `make check-packaging`.
-- [ ] 2.2 Create `kit/deal-lifecycle` (foundation library, on the contracts) with the term codec
+- [x] 2.2 Create `kit/deal-lifecycle` (foundation library, on the contracts) with the term codec
       for `adjudication` (`dispute` as `{interface, origin, account, record_key, params}`),
       `early_termination` (no `exposure_seconds`; entitlements' and term end's `settles_through`
       values and `partialPeriod` mapping per D5, plus nonnegative minor-unit decimal-string `premature_stop_penalty`, absent/zero meaning none), positive-integer `delivery_deadline_seconds` (the "Delivery has a deadline" semantics; the compute builders in `negotiate-open-ended-compute-terms` emit it from the pool's tag) and reserved `bond`; malformed and bounded-term refusal
