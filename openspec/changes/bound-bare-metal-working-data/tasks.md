@@ -117,10 +117,10 @@ clarification changes no YAML task semantics. Helper SHA-256:
 
 `make check-packaging` passed, including lock, project, interpreter, wheelhouse and
 architecture checks. `make check-change CHANGE=bound-bare-metal-working-data`
-passed before this handoff and is rerun with the final task/index edits. Per the
-owner-approved intermediate cadence, the broad `make test-bare-metal`,
-`make test-provisioning` and full `make test` aggregates remain owed at the frozen
-combined source round; focused changed-boundary evidence is recorded above.
+passed before this handoff and is rerun with the final task/index edits. At that
+handoff, broad aggregates were still owed at the frozen combined source round;
+the later frozen runtime review and validation now passed with the scopes
+recorded in section 4.3. Focused evidence remains separately recorded above.
 A fresh-context section-check spawn hit the agent thread limit. The lead explicitly
 consolidated that check into the one independent frozen-round source review;
 no passing fresh review, personal owner reading, prior-round triage completion or
@@ -132,14 +132,12 @@ executor job still has retry budget. Real runner `AnsibleError("Playbook failed"
 classification is retryable under the default bare-metal codec; terminal failures
 remain immutable and hold capacity, with the existing separately audited operator
 override boundary. No synthetic terminal-job success or new recovery API was added.
-There is no deployed bounded-cleanup E2E marker yet. Section 4 still waits for the
-relay section 12 real bare-metal module and the frozen integration source's review
-and validation before destructive target qualification. Existing
-`e2e_bare_metal_mock_deal` proves the ordinary mock journey only. Owed by validation:
-`tests.yml`, jobs `test · test-bare-metal`, `test · test-provisioning` and
-`test · test-provisioning-iac` must run the owned aggregates successfully. Native
-and deployed cleanup evidence remain separately scoped; green CI alone does not
-qualify them. Permanent promotion remains closeout work.
+The dedicated `e2e_bare_metal_bounded_cleanup` marker remains unrun. The accepted
+physical observations and the frozen runtime review/validation now satisfy the
+technical prerequisites recorded in section 4.3; the formal pre-closeout/source
+joins remain. Existing `e2e_bare_metal_mock_deal` proves the ordinary mock
+journey only. Native helper, deployed cleanup, and pipeline evidence remain
+separately scoped. Permanent promotion remains closeout work.
 
 ## 4. Deployed cleanup qualification of the reviewed integration round
 
@@ -153,25 +151,25 @@ bounded-data helpers without importing complete chain-specific pytest drivers.
 The named original markers remain available; an unrun marker is never reported
 passed. Completed source tasks and original implementation history are preserved.
 
-For 4.1, use a normal Arkhai rental with the existing seed/observer contract,
-then a fresh-UID successor that cannot read predecessor data. For 4.2, use that
-successor's nonce-scoped foreign descendant, observe actual queued retry and
-held capacity, deliver the notification, repair only the fixture before budget
-exhaustion and observe the same ordinary job complete. Require final clean
-inventory, surviving sentinels and management. Terminal failed jobs remain
-failures requiring audited recovery. Reuse the normal GPU journey when inputs
-match; no automatic third rental. For 4.3 retain exact frozen review/validation
-before destructive cycles, with component/native/mock evidence scoped correctly.
+The accepted Arkhai method completed 4.1–4.2 using the shipped buyer and
+independent typed/operator observations. The first ordinary bare-metal GPU rental
+was cleaned and independently observed; a fresh-UID successor could not access
+predecessor data. Its nonce-scoped foreign descendant caused a real cleanup
+refusal, held capacity and automatic notification; fixture-only repair let the
+same ordinary job retry once and complete. Final inventory, sentinels and
+management remained sound. The literal
+`e2e_bare_metal_bounded_cleanup` marker was not run. Frozen runtime review,
+CI, E2E, composed local validation and Helm validation passed on the reviewed
+candidate; this source revision changes workflow and Markdown only and passed
+147 focused tests, packaging/change checks and all 23 CI jobs. Task 4.3 remains
+open to reconcile those exact inputs and scopes with its formal pre-closeout
+and source joins. No identity ledger reset, force release or policy bypass was
+used.
 
-The earlier source handoff below describes the existing pytest vehicle. Its
-`e2e_bare_metal_bounded_cleanup` invocation is optional for this Arkhai campaign,
-not a passed or removed test. Tasks 4.1–4.3 remain pending until equivalent real
-observations pass. No identity ledger reset, force release or policy bypass.
 
-
-- [ ] 4.1 Add bounded-cleanup observations to the existing protected bare-metal purchase/real-provisioning qualification path in `e2e-tests/tests/e2e/roles/scenarios/bare_metal/` and its owned helpers/configuration. Wait for relay section 12 to supply the bare-metal real-provisioning module (`test_real_provisioning_deal.py`) in that directory; extend that owned lane and its helpers, naming any additional exact module in the handoff before edits. Freeze, validate and independently review the integration source before executing destructive deployed qualification. Seed synthetic home/scratch/path-backed and System V IPC through the temporary tenant, perform normal lease teardown, and verify via operator observations that sessions/processes/scheduled activity, account/home and covered scratch/IPC are absent. Verify a second reservation gets a different UID and usable access. Never persist raw host evidence or environment identifiers in public artifacts.
-- [ ] 4.2 Qualify a refusal/retry on the disposable target: introduce a deliberately unsafe covered object, observe failed reclaim with unavailable capacity, repair only that fixture, then resume the ordinary lifecycle and verify complete cleanup. Verify operator/service sentinels survive and the management route still works. Record sanitized bounded observations, revision and outcome, not raw logs. A missing deployed prerequisite remains blocked/unrun; helper and mock passes do not count as deployed readiness.
-- [ ] 4.3 Before destructive deployed checks, freeze the integrated source revision and obtain independent implementation review and validation; run `make test`, `make check-packaging`, relevant native gates, `make -C e2e-tests test-e2e-bare-metal`, and the full end-to-end pipeline with matching revision evidence through `make run-e2e` / `make fetch-e2e-logs`. Execute 4.1–4.2 against that accepted revision. Reuse its source review/full-suite evidence when unchanged; obtain pre-closeout review and remaining validation per workflow. Resolve accepted findings and rerun affected checks; freeze a new source round if code changes. Reuse passing unchanged evidence with its revision and scope explicitly recorded.
+- [x] 4.1 Complete the accepted equivalent normal-cycle observation: the shipped bare-metal buyer completed a real GPU rental and ordinary bounded reclaim; independent operator observations confirmed the tenant session/process/activity, account/home and covered working data/IPC were absent. The successor received a fresh UID and usable access but could not read predecessor data. The literal `e2e_bare_metal_bounded_cleanup` module was not run; raw host evidence and environment identifiers remain private.
+- [x] 4.2 Complete the accepted equivalent refusal/retry observation: a nonce-scoped foreign descendant caused actual cleanup refusal, held capacity and automatic notification. Repairing only that fixture allowed the same ordinary job to retry once and complete; sentinels, management and final inventory were verified. This is deployed observation, not helper/mock inference or force-release.
+- [ ] 4.3 Reconcile the completed frozen-candidate review and validation evidence with the source and deployed observations before pre-closeout: CI's 23 jobs, all three E2E lanes, composed local validation and Helm validation passed with their recorded scopes; the current workflow/Markdown-only revision passed 147 focused tests and packaging/change checks. The deployed 4.1–4.2 observations use the accepted method and are recorded above. Preserve that evidence binding and obtain the remaining formal pre-closeout/source joins per workflow. Resolve accepted findings and rerun affected checks; freeze a new source round if code changes. Do not describe the composed local results as one successful `make test` invocation or treat helper checks as physical evidence.
 - [ ] 4.4 Before pre-closeout review, fix comments/docstrings to describe current invariants and inspect every added/touched local import, moving it to module level unless a verified reason justifies it. Run real affected suites after moves, comment hygiene and packaging. Complete the classification/promotion map in `design.md`; current-state permanent prose is written in closeout only.
 
 ### Section 4 source preparation
@@ -196,8 +194,11 @@ A dedicated bounded-cleanup marker requires explicit configuration. The shared s
 parameter labels to the underlying fixture name; a direct regression preserves
 its early-finalizer detection. The bare-metal real driver declares the new
 seed-observed state flag. Baseline
-real-lane execution without it remains a single lifecycle. Source checks do not
-check 4.1 or 4.2: deployed qualification and the frozen source gates remain owed.
+real-lane execution without it remains a single lifecycle. At the source handoff,
+source checks were distinct from deployed qualification. The accepted equivalent
+deployed observations now complete 4.1 and 4.2; the literal marker remains unrun.
+Frozen runtime review and validation passed, as recorded in 4.3; formal workflow
+joins remain open there.
 
 ### Section 4 source handoff
 

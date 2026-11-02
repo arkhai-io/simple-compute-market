@@ -2056,13 +2056,12 @@ diff checks; deployed force-release verification remains an operator obligation.
 
 ## 16. Live verification [log]
 
-Requires prepared VM and bare-metal targets, protected management access, and a
-buyer relay per lane with independent credentials and grant authority. Retain
-D20/D23's live topology: pinned frps container and admission-plugin sidecar
-sharing a network namespace, distinct from the native installer evidence. Raw
-operational output stays outside this public repository. Missing required
-physical evidence remains pending; it is also mapped to
-`relay-vm-access-without-a-dashboard` sections 6 and 8 for closeout.
+The physical observations below are recorded through the accepted Arkhai method
+and its shipped buyer plus independent typed operator observations. The live
+relay path used the pinned container/plugin topology; native installer evidence
+remains a separate scope. Raw operational output stays outside this public
+repository. Literal original Alkahest markers remain unrun. Formal workflow
+joins and closeout remain pending.
 
 ### Accepted Arkhai proof method on this branch
 
@@ -2074,34 +2073,54 @@ bounded-data helpers without importing complete chain-specific pytest drivers.
 The named original markers remain available; an unrun marker is never reported
 passed. Completed source tasks and original implementation history are preserved.
 
-- [ ] 16.1 **[log]** Actual negative admission on each buyer relay: ungranted,
-      forged and mismatched proxies refused with matching plugin logs and no
-      backend connection. Reuse unchanged relevant evidence; a genuine paid
-      Arkhai grant must additionally prove valid delivery.
-- [ ] 16.2 **[log]** Equivalent Arkhai two-CPU-VM relay cycle: negotiated shape,
-      pinned delivered endpoint, unrelated-key refusal, first SSH heartbeat
-      through second create and teardown, connectivity before/after each,
-      natural first-lease expiry, both guests absent and access denied after
-      their ordinary teardown. The old `e2e_vm_real_provisioning` invocation
-      is an alternative driver, not required new Alkahest qualification.
-- [ ] 16.3 **[log]** Management-client generation and authenticated connectivity
-      before/during/after that run show no restart or lost control.
-- [ ] 16.4 **[log]** Equivalent Arkhai two-CPU-VM direct cycle passes with its
-      second deal, heartbeat, shape, wrong-key, expiry and teardown assertions.
-      Drain the controlled pool before a mode change, preserve active holdings,
-      and do not expose management or count this as external relay proof.
-- [ ] 16.5 **[log]** Equivalent real Arkhai bare-metal cycle: pinned relay
-      endpoint and nonroot delivered account, checked GPU work, unrelated-key
-      refusal, ordinary bounded reclaim, access denial and restored compute
-      capacity with management continuity. The old
-      `e2e_bare_metal_real_provisioning` marker remains unrun unless executed.
-- [ ] 16.6 **[log]** Repeated supported canonical registrations and listing
-      adoption retain existing identities and create no duplicate allocator.
-- [ ] 16.7 Bind exact source/artifacts/configuration/run/payment/reservation/
+- [x] 16.1 **[log]** Actual negative admission on each buyer relay: missing, invalid-
+      signature, wrong-port and out-of-range grants were refused by both lanes
+      with matching plugin decisions and zero backend connections. This covers
+      negative admission only; genuine paid delivery is recorded below. The
+      original marker was not run.
+- [x] 16.2 **[log]** Equivalent Arkhai two-CPU-VM relay cycle: both rentals met the
+      negotiated CPU/memory/disk shape; unrelated keys were refused; the first
+      SSH heartbeat stayed open through the second create/release; both leases
+      naturally expired; ordinary teardown ended sessions, denied fresh access,
+      and restored full capacity. This controlled CPU pair supplements the
+      separately completed external GPU VM journey. The literal
+      `e2e_vm_real_provisioning` marker was not run.
+- [x] 16.3 **[log]** The paired relay/direct runs recorded unchanged management and
+      libvirtd generations; authenticated management SSH remained reachable at
+      the checked boundaries. No management restart or loss of control was
+      observed.
+- [x] 16.4 **[log]** The direct two-CPU-VM pair completed the second deal while the
+      first heartbeat stayed open, met its negotiated shape, refused unrelated
+      keys, naturally expired both leases, ended sessions and fresh access, and
+      restored full capacity. Management and libvirtd generations stayed
+      unchanged. This is controlled-path compatibility evidence, not external
+      relay proof.
+- [x] 16.5 **[log]** The external bare-metal GPU journey used the pinned relay endpoint
+      and nonroot account, performed checked GPU work, refused an unrelated key,
+      completed ordinary bounded reclaim, denied fresh access and restored
+      capacity with management continuity. The literal
+      `e2e_bare_metal_real_provisioning` marker was not run.
+- [x] 16.6 **[log]** Repeated canonical registration/import and actual publication
+      adoption preserved listing identities, states and pauses, retained relay
+      quarantine, and created no duplicate allocator, host, pool, resource or
+      listing. Protected state remained unchanged.
+- [x] 16.7 Bind exact source/artifacts/configuration/run/payment/reservation/
       jobs/grants privately to each item and sibling relay section 6/8 proof;
-      record sanitized outcomes here. Port reuse follows grant expiry and
-      quarantine, independently of compute-capacity restoration. No unrun
-      original marker or failed/repaired attempt is labelled passed.
+      record sanitized outcomes here. The completed join matches all three
+      actual final rental grants to lease ownership, host, port, expiry,
+      audience and trusted-key metadata, and binds the installed client and
+      enforcing relay/plugin configurations to the actual negative and paid
+      paths. No grant token is retained or replayed offline. A later port was
+      allocated while two released grants were still quarantined until grant
+      expiry plus the configured reuse margin. Under D9, sibling section 6.1's
+      session-preservation requirement is met by D8 step 3: both captured CPU
+      create jobs performed authenticated `/api/reload` while the original SSH
+      process heartbeat continued. This is not a separate CLI reload test.
+      Sibling section 8.6 is met by the released holdings retaining grant expiry
+      with no competing lease; reuse after expiry is covered at integration
+      level by the frozen allocator suite, not claimed as a physical exact-port
+      reuse. No unrun original marker or failed/repaired attempt is labelled
+      passed.
 
 ## 17. Closeout
 
