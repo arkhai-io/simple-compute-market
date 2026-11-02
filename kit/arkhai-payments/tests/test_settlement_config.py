@@ -123,6 +123,11 @@ def test_publication_builder_preserves_option_identity_and_rate_units(
         _resources(clause),
         "seller",
     )
+    unselected = {key: value for key, value in _resources(clause).items()
+                  if key != "publication_clause"}
+    assert arkhai_payments_option_builder(config, readiness, unselected, "seller") == {
+        "accepted_escrows": [], "settlement_options": [],
+    }
     registration = create_arkhai_payments_registration()
     option = built["settlement_options"][0]
 

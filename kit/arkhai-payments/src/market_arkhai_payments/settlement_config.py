@@ -332,9 +332,12 @@ def arkhai_payments_option_builder(
     config = ArkhaiPaymentsConfig.model_validate(section)
     if role != "seller" or not config.enabled or not readiness.ready:
         raise ValueError("Arkhai payments is not ready for seller publication")
-    clause = SettlementPublicationClause.model_validate(
-        resources.get("publication_clause")
-    )
+    raw_clause = resources.get("publication_clause")
+    if raw_clause is None:
+        # Enabling payments does not select it for every listing. Other
+        # mechanisms may publish without a payment price or payee clause.
+        return {"accepted_escrows": [], "settlement_options": []}
+    clause = SettlementPublicationClause.model_validate(raw_clause)
     if clause.mechanism != ARKHAI_PAYMENTS_MECHANISM:
         raise ValueError("publication clause does not select Arkhai payments")
     params = ArkhaiPaymentsPublicationInput.model_validate(clause.mechanism_input)
