@@ -389,14 +389,12 @@ async def test_selected_site_lifecycle_is_idempotent_and_ends_its_lease() -> Non
     assert db.result.ssh_user == "tenant-a"
     assert "host" not in db.result.model_dump()
 
-    tearing_down = await service.teardown(
-        negotiation_id="neg-a",
-        buyer_principal=BUYER,
+    tearing_down = await service.apply_end(
+        "neg-a", terminate=True, at=0, operation_key="end", reason="buyer_teardown",
     )
-    assert tearing_down["state"] == "terminating"
-    repeated_teardown = await service.teardown(
-        negotiation_id="neg-a",
-        buyer_principal=BUYER,
+    assert tearing_down.progress == "tearing_down"
+    repeated_teardown = await service.apply_end(
+        "neg-a", terminate=True, at=0, operation_key="end", reason="buyer_teardown",
     )
     torn_down = await service.status(
         negotiation_id="neg-a",
@@ -404,7 +402,7 @@ async def test_selected_site_lifecycle_is_idempotent_and_ends_its_lease() -> Non
     )
     # Teardown ends the lease once; a repeat reports what the site has since
     # converged, and only its capacity-released callback records the release.
-    assert repeated_teardown["state"] == "torn_down"
+    assert repeated_teardown.progress == "tearing_down"
     assert fulfillment.terminations == [("reservation-a", "buyer_teardown")]
     assert fulfillment.teardowns == []
     assert torn_down["state"] == "torn_down"

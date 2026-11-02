@@ -237,6 +237,22 @@ class BareMetalLifecycle:
             actor=report.signer, cause=event.cause, controlling_source_ref=controlling,
         )
 
+    async def recover_site(self, negotiation_id):
+        row = await self.runtime.db.load_bare_metal_fulfillment_lifecycle(negotiation_id=negotiation_id)
+        if row is None or not row.get("capacity_reservation_id"):
+            return
+        lease = await self.runtime.fulfillment_client.get_lease(row["capacity_reservation_id"])
+        for report in lease.end_reports:
+            self.ingress.site_report(negotiation_id, body=canonical_json(report), headers={})
+        # Intended ends never establish capacity return. The authenticated site
+        # lease read uses the same release guard as its separate callback.
+        if lease.status == "released":
+            await self.runtime.db.update_bare_metal_fulfillment_lifecycle(
+                negotiation_id=negotiation_id, state="released",
+            )
+            with transaction(self.path) as conn:
+                EndSession(conn).physical_progress(negotiation_id, "released")
+
     def classify_site(self, event, session):
         row = session.conn.execute(
             "SELECT negotiation_id FROM bare_metal_fulfillment_lifecycle WHERE capacity_reservation_id=?",
@@ -350,6 +366,10 @@ class BareMetalLifecycle:
         for deal in deals:
             # Physical work is independent of authority availability and payment
             # publication. Always attempt it, including an uncommitted surrender.
+            try:
+                await self.recover_site(deal.negotiation_id)
+            except Exception:
+                logger.exception("bare-metal site recovery failed for %s", deal.negotiation_id)
             try:
                 await self.end.drive_physical(deal.negotiation_id)
                 if self.reconcile_local(deal.negotiation_id):

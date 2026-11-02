@@ -13,6 +13,11 @@ import json
 import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+
+from compute_provisioning_contracts.lease_ends import LEASE_ENDED_CALLBACK, LeaseEndedEvent, sign_lease_end
+from site_trust import seeded_sites
+from storefront_client import StorefrontClient, StorefrontClientError
 
 import httpx
 from integration.test_payment_settlement_client import ADMIN, BUYER, SELLER, harness
@@ -22,7 +27,7 @@ from market_deal_lifecycle_client import LifecycleClient, LifecycleClientError
 from market_deal_lifecycle_contracts.models import CommitMessage, ListDealsRequest
 from market_deal_servicing import EndSession
 from market_deal_servicing.evidence import transaction
-from market_identity import TrustedIdentitySet, canonical_json
+from market_identity import Ed25519Signer, TrustedIdentitySet, canonical_json
 
 
 async def main():
@@ -97,6 +102,54 @@ async def main():
                 )
                 read = await client.read(state.negotiation_id)
                 assert read.delivery.recorded_end.cause == "buyer_surrender"
+                # Deterministic public development site identity, never for a
+                # public network. Its stored event does not prove access revoked.
+                site = Ed25519Signer(bytes.fromhex("44" * 32))
+                bindings, site_trust = seeded_sites(state.runtime.db.db_path, {"site-a": site.identity})
+                object.__setattr__(state.runtime, "site_bindings", bindings)
+                object.__setattr__(state.runtime, "service_peer_trust", site_trust)
+                report = sign_lease_end(LeaseEndedEvent(
+                    event_id="first-use-site-end", capacity_reservation_id="reservation-pay",
+                    site_id="site-a", effective_at=ack.receipt_at, cause="termination",
+                    source_state="active", reason="buyer-surrender:" + ack.operation_key,
+                    caller=SELLER.identity,
+                ), site)
+                callback = LEASE_ENDED_CALLBACK["path"].format(capacity_reservation_id="reservation-pay")
+                async with StorefrontClient("http://test", signer=site, caller_role="service",
+                                            expected_publishers=trust, transport=transport) as sender:
+                    for _ in range(2):
+                        assert await sender.authenticated_request(
+                            "POST", callback, role="service", operation="lease_ended",
+                            resource="reservation-pay", body=report.model_dump(mode="json"),
+                        ) == {"status": "recorded"}
+                before = await client.read(state.negotiation_id)
+                assert before.delivery.progress == "tearing_down"
+                assert len(before.delivery.site_reports) == 1
+                assert json.loads(before.delivery.site_reports[0].body) == report.model_dump(mode="json")
+
+                async def lease(_):
+                    return SimpleNamespace(end_reports=[report], status="releasing")
+
+                state.provisioning.get_lease = lease
+                await state.runtime.lifecycle.recover_site(state.negotiation_id)
+                assert (await client.read(state.negotiation_id)).delivery.site_reports == before.delivery.site_reports
+                async with StorefrontClient("http://test", signer=ADMIN, caller_role="service",
+                                            expected_publishers=trust, transport=transport) as wrong_site:
+                    try:
+                        await wrong_site.authenticated_request(
+                            "POST", callback, role="service", operation="lease_ended",
+                            resource="reservation-pay", body=report.model_dump(mode="json"),
+                        )
+                    except StorefrontClientError as exc:
+                        assert exc.status_code == 403
+                    else:
+                        raise AssertionError("wrong site was admitted")
+                async with StorefrontClient("http://test", signer=site, caller_role="service",
+                                            expected_publishers=trust, transport=transport) as sender:
+                    await sender.notify_capacity_released("reservation-pay", site_id="site-a")
+                after = await client.read(state.negotiation_id)
+                assert after.delivery.progress == "released"
+                assert after.delivery.site_reports == before.delivery.site_reports
             async with LifecycleClient("http://test", ADMIN, trust, transport=transport) as client:
                 try:
                     await client.end_delivery(state.negotiation_id, operation_key="wrong-buyer")
@@ -104,7 +157,7 @@ async def main():
                     assert exc.status_code == 403
                 else:
                     raise AssertionError("wrong buyer was admitted")
-            print("hosted commit replays once; list and exact acceptance evidence retained; signed surrender replays once; wrong buyer refuses")
+            print("hosted commit and surrender replay once; wrong buyer/site refuse; exact site report survives push retry/pull; only proven release advances capacity")
         finally:
             await setup.aclose()
 

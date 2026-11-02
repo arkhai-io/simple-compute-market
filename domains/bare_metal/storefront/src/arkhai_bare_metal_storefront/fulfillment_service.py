@@ -611,32 +611,12 @@ class BareMetalFulfillmentService:
             ),
         }
 
-    async def teardown(
-        self,
-        *,
-        negotiation_id: str,
-        buyer_principal: Identity,
-    ) -> dict[str, Any]:
-        lifecycle = await self.status(
-            negotiation_id=negotiation_id,
-            buyer_principal=buyer_principal,
-        )
-        if lifecycle["state"] in _TEARDOWN_STATES | {TERMINATING, "released"}:
-            return lifecycle
-        reservation_id = lifecycle.get("capacity_reservation_id")
-        fulfillment_id = lifecycle.get("fulfillment_id")
-        if not reservation_id or not fulfillment_id:
-            raise BareMetalFulfillmentError("bare-metal fulfillment has not begun")
-        return await self.end_lease(
-            negotiation_id=negotiation_id,
-            capacity_reservation_id=str(reservation_id),
-            reason="buyer_teardown",
-        )
-
     async def apply_end(self, negotiation_id: str, *, terminate: bool, at: int, operation_key: str, reason: str) -> PhysicalResult:
         row = await self.db.load_bare_metal_fulfillment_lifecycle(negotiation_id=negotiation_id)
         if row is None or row.get("state") == "released":
             return PhysicalResult(progress="released", done=True)
+        if row.get("state") in _TEARDOWN_STATES | {TERMINATING}:
+            return PhysicalResult(progress="tearing_down", done=True)
         reservation = row.get("capacity_reservation_id")
         if not reservation:
             return PhysicalResult(progress="released", done=True)
@@ -652,6 +632,8 @@ class BareMetalFulfillmentService:
             await self._effect(lambda effects, binding: effects.release(
                 binding, capacity_reservation_id=reservation,
             ), context)
+            await self.db.update_bare_metal_fulfillment_lifecycle(negotiation_id=negotiation_id, state="released")
+            return PhysicalResult(progress="released", done=True)
         else:
             await self.fulfillment_client.terminate_lease(reservation, reason=reason)
         await self.db.update_bare_metal_fulfillment_lifecycle(negotiation_id=negotiation_id, state=TERMINATING)

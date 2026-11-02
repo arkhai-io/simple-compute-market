@@ -36,6 +36,7 @@ from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
+from market_deal_lifecycle_client import LifecycleClientError
 from core_buyer.introductions import IntroductionPayloadsDeleted, IntroductionTransport
 from dataclasses import replace
 from buyer_commands import BuyerCommands
@@ -456,7 +457,7 @@ async def _settlement_and_fulfillment_answers(base_url: str, negotiation_id: str
     for name in _FULFILLMENT_READS:
         try:
             answers[name] = getattr(_fulfillment(base_url), name)(negotiation_id)
-        except RuntimeError as exc:
+        except (RuntimeError, LifecycleClientError) as exc:
             answers[name] = exc
     try:
         answers["outsider"] = _fulfillment(base_url, OUTSIDER_SIGNER).status(negotiation_id)
@@ -476,8 +477,13 @@ def _assert_settled_by_introduction(answers: dict) -> None:
         assert "completes by introduction, not settlement" in str(refused)
     for name in _FULFILLMENT_READS:
         refused = answers[name]
-        assert isinstance(refused, RuntimeError), (name, refused)
-        assert "HTTP 404" in str(refused) and "has no fulfillment" in str(refused), refused
+        if name == "teardown":
+            assert isinstance(refused, LifecycleClientError), refused
+            assert refused.status_code == 409
+            assert "settlement-stage Agreement" in str(refused)
+        else:
+            assert isinstance(refused, RuntimeError), (name, refused)
+            assert "HTTP 404" in str(refused) and "has no fulfillment" in str(refused), refused
     # Refused by the buyer authorization every deal's routes run before the
     # stage is resolved, so the answer names nothing of the mechanism. The
     # status is matched with its prefix: the message also names the loopback

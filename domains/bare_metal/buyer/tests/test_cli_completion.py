@@ -135,7 +135,6 @@ def _compose(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, option: Settlement
     monkeypatch.setattr(cli, "negotiate_with_seller", lambda **_kwargs: outcome)
     monkeypatch.setattr(cli, "BUYER_STAGES", {_PAYMENT.settlement_schema: stage})
     monkeypatch.setattr(cli, "payment_approval", lambda _config: object())
-    monkeypatch.setattr(cli, "BareMetalSettlementTransport", lambda **_kwargs: object())
 
 
 def _run_ended(tmp_path: Path) -> dict[str, Any]:

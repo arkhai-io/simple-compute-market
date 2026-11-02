@@ -202,6 +202,8 @@ dependencies = [
     { name = "arkhai-kit-contact-exchange" },
     { name = "arkhai-kit-deal-lifecycle" },
     { name = "arkhai-kit-deal-lifecycle-buyer" },
+    { name = "arkhai-kit-deal-lifecycle-client" },
+    { name = "arkhai-kit-deal-lifecycle-contracts" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-settlement-runtime" },
     { name = "pydantic" },
@@ -609,6 +611,19 @@ dependencies = [
 ]
 wheels = [
     { path = "arkhai_kit_deal_lifecycle_buyer-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-kit-deal-lifecycle-client"
+version = "0.1.0"
+source = { registry = "../.dist" }
+dependencies = [
+    { name = "arkhai-kit-deal-lifecycle-contracts" },
+    { name = "arkhai-kit-identity" },
+    { name = "httpx" },
+]
+wheels = [
+    { path = "arkhai_kit_deal_lifecycle_client-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]

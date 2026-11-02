@@ -16,6 +16,8 @@ dependencies = [
     "arkhai-kit-deal-lifecycle>=0.1.0",
     "arkhai-kit-arkhai-mediation>=0.1.0",
     "arkhai-kit-deal-lifecycle-buyer>=0.1.0",
+    "arkhai-kit-deal-lifecycle-client>=0.1.0",
+    "arkhai-kit-deal-lifecycle-contracts>=0.1.0",
     "arkhai-kit-settlement-runtime==0.6.0",
     "pydantic>=2.7",
     "typer>=0.12",
