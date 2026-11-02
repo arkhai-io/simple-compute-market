@@ -484,6 +484,16 @@ Filed as an idea, deferred until needed in practice: a bond (per-part direction 
 
 Arkhai mediation (arkhai.mediation.v1), including the delivery_end revision, is published and vendored with SOURCE provenance, installed models/resources and signing fixtures/vectors at 12.1. The exact revision is recorded only in `kit/arkhai-mediation/schema/SOURCE.md`; the payments contract is unchanged. Mediation is a separate authority, not payments core.
 
+The option-shape cutover at 2.5b has an additional producer gate: the published
+mediation `AgreementProjection` still requires the selected option's `mechanism`
+and `params.adjudication`. D5 instead places the mechanism under
+`settlement.schema` and the terms under `lifecycle`. The published schema refuses
+that shape. A coherent schema, mapping and regenerated vectors must be published
+and re-vendored before the coordinated cutover; rewriting the Agreement for the
+authority would invalidate its committed hash and signatures. Tracked in
+[payments #4](https://github.com/arkhai-io/arkhai-payments/issues/4). The accessor-only
+checkpoint retains the existing wire while this gate is unresolved.
+
 The published revision supplies D10's DeliveryEndClaim, SignedDeliveryEndClaim, canonical frame, Filing/Append.concurrence, signed ruling basis, respondent listing and producer mapping/guard vectors. Closed entries distinguish a nothing-held dismissal without basis from a decided closure requiring basis. Marketplace identities and proofs use per-scheme canonical wire definitions. The hosted development service is still on the older revision: vendoring satisfies the publication gate, not deployment, setup enablement, or live qualification.
 
 Authority qualification retains the published advertisement (mechanisms, minimum windows/holds, fees/deposits, Agreement mapping, repeated/concurrent-case and dismissal policy, key/origin continuity through deal life, window and open cases); idempotent file/append/read and exact case Agreement verification without attachments; per-case held/ref, not-held/reason, pending/error extension results; signed per-agreement records and stable authority-only effect IDs/lifts. A response bound is EULA/advertising only, with no code consequence or activation gate.

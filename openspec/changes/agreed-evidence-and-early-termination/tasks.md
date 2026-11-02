@@ -165,17 +165,29 @@ on the republished listings of 2.5; nothing composes the kits yet.
 
 ### Settlement-option accessor checkpoint (2026-11-02)
 
-- All option readers, including the integrated payments kit, use core accessors.
+- Payments Agreement and public-carrier readers now use core accessors.
   Mandate derivation consumes typed mechanism parameters, not the public carrier.
   Serialized options and IDs remain unchanged; no permanent wire docs are promoted.
-- Steps 2.5b and 2.5c remain unstarted, and 2.5 remains unchecked.
+- 2.5b is blocked before cutover: the published mediation `AgreementProjection`
+  requires `settlement.mechanism` and `settlement.params`; D5's selected option
+  is refused with `mechanism is a required property`. Both the vendored revision
+  and current producer main have this constraint. A coherent producer schema,
+  mapping and regenerated vectors must first support the D5 shape; tracked in
+  [payments #4](https://github.com/arkhai-io/arkhai-payments/issues/4).
+  The wire experiment was discarded; no partial flip is committed. 2.5b, 2.5c
+  and 2.5 remain unchecked.
   Payments typing, generated models, contract vectors and 92 tests pass. The full
   `make test`, architecture, packaging, comment hygiene and strict OpenSpec checks
-  pass. Validation uses ALL_PROXY/all_proxy unset and
+  pass. The existing VM `examples/payment_smoke.py` observes pending before
+  approval, provisioning after approval, then ready with one delivery on retry
+  and zero escrow rows. Validation uses ALL_PROXY/all_proxy unset and
   NO_PROXY=no_proxy=localhost,127.0.0.1 (#323).
 - End-to-end remains unrun: no wire cutover or republished deployment, and no Docker
-  daemon (#324). The temporary user-space Docker/Compose config-render tools used
-  for the aggregate release-tooling checks were removed after validation.
+  daemon (#324); `unshare -Ur true` also fails with `Operation not permitted`, so
+  user-space rootless containers cannot supply it here. A container-capable runner
+  must start fresh owned mock VM, bare-metal and API-credit lane stacks and
+  republish before the three named suites run. The temporary user-space
+  Docker/Compose config-render tools were removed after validation.
   The active plan's future lifecycle architecture citation is tracked in #325.
 
 ### Implementation checkpoint (2026-11-02)
