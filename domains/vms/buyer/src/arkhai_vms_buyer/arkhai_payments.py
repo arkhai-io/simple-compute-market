@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .evidence import evidence_store
+
 import base64
 import time
 from collections.abc import Callable
@@ -112,6 +114,7 @@ def settle_payment(
         timeout=timeout,
         interval=interval,
     )
+    evidence_store().remember_commitment(negotiation_id, transaction)
     on_event(
         "payment_approved",
         {"transaction_id": transaction, "negotiation_id": negotiation_id},

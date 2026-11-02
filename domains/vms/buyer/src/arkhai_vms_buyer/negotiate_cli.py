@@ -10,6 +10,8 @@ exists to exercise /negotiate/new + /negotiate/{id} directly.
 
 from __future__ import annotations
 
+from .evidence import evidence_store
+
 import json
 import time
 from typing import Any
@@ -571,6 +573,7 @@ def register(app: typer.Typer) -> None:
                 resume=resume_state,
                 chain=chain,
                 resolve_seller_principals=resolve_seller_principals,
+                capture=evidence_store().capture,
                 policy_params=negotiation_policy_params,
                 validate_advertised_plan=(
                     selected_stage.plan_validator(listing_dict or {}, selected_settlement)

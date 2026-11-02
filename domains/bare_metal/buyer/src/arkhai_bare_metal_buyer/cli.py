@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .evidence import evidence_store
+
 import json
 import os
 import time
@@ -427,6 +429,7 @@ def buy_bare_metal(
         seller_url=listing.storefront_url,
         principal=identity.principal,
         signer=identity.signer,
+        capture=evidence_store().capture,
         listing_id=listing_id,
         resolve_seller_principals=lambda: seller_principals,
         initial_price=amount,
@@ -554,6 +557,7 @@ def request_introduction(
         seller_url=listing.storefront_url,
         principal=identity.principal,
         signer=identity.signer,
+        capture=evidence_store().capture,
         listing_id=listing_id,
         resolve_seller_principals=lambda: publisher_principals,
         initial_price=0.0,

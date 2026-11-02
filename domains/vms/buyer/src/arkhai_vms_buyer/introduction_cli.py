@@ -9,6 +9,8 @@ recovery, transport, run log, and sinks to them.
 
 from __future__ import annotations
 
+from .evidence import evidence_store
+
 import json
 import time
 from typing import Any
@@ -181,6 +183,7 @@ def request_introduction(
         source_registry_authority=registry_authority,
     )
     outcome = negotiate_with_seller(
+        capture=evidence_store().capture,
         seller_url=storefront_url,
         principal=identity.principal,
         signer=identity.signer,

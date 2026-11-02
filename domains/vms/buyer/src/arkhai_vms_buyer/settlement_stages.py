@@ -36,6 +36,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from .evidence import evidence_store
 from . import common
 from .arkhai_payments import (
     AgreedTerms,
@@ -234,7 +235,11 @@ class AlkahestBuyerStage:
             settlement_poll_interval=context.poll_interval,
             settlement_total_timeout=context.timeout, sleep=context.sleep,
         )
-        return hook(negotiation, on_event)
+        def record(stage, payload):
+            if stage == "escrow_created":
+                evidence_store().remember_commitment(negotiation.outcome.negotiation_id, payload["escrow_uid"])
+            on_event(stage, payload)
+        return hook(negotiation, record)
 
     def resume(self, context):
         return _resume_alkahest(context)
@@ -541,6 +546,7 @@ def _resume_alkahest(context: BuyerResumeContext) -> dict:
             )
             raise typer.Exit(4)
         resolved_uid = uids[0]
+        evidence_store().remember_commitment(deal.negotiation_id, resolved_uid)
         log.event("escrow_created", escrow_uid=resolved_uid)
         console.print(f"[green]escrow created[/green]  {resolved_uid}")
     try:

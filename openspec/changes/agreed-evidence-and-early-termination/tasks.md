@@ -357,7 +357,7 @@ and the negotiation controllers that consume it), new `kit/deal-lifecycle-buyer`
       unchanged. Verify: unit tests that the seam receives exact bytes for a verified response
       and request and nothing for a refused one ("The buyer's transport verifies an
       acceptance").
-- [ ] 6.2 Create `kit/deal-lifecycle-buyer` (buyer-side area) with a file-backed evidence store
+- [x] 6.2 Create `kit/deal-lifecycle-buyer` (buyer-side area) with a file-backed evidence store
       under a root passed by the buyer composition beside the buyer profile, keyed by
       negotiation ID, keeping the seller's signed acceptance before `commit`. Verify: library
       integration test ("A buyer accepts").

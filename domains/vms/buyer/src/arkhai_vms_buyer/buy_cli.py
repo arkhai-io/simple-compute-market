@@ -15,6 +15,8 @@ The command composes VM inputs over core buyer orchestration.
 
 from __future__ import annotations
 
+from .evidence import evidence_store
+
 import json
 import os
 import time
@@ -225,6 +227,7 @@ def _run_resume_from(
                     settlement_plan=resume_point.settlement_plan,
                 ),
                 resolve_seller_principals=resolve_seller_principals,
+                capture=evidence_store().capture,
             )
         except RuntimeError as exc:
             run_log.event("negotiation_failed", error=str(exc))
@@ -763,6 +766,7 @@ def register(app: typer.Typer) -> None:
             max_negotiation_rounds=max_rounds,
             derive_prices=None,
             chain=negotiation_chain,
+            capture=evidence_store().capture,
         )
         settle_hook = make_legacy_settle_hook(
             config=config,

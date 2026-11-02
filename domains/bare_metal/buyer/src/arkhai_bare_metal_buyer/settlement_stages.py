@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .evidence import evidence_store
+
 import base64
 import time
 from dataclasses import dataclass
@@ -56,6 +58,7 @@ class PaymentStage:
             outcome.settlement_data,
             timeout=timeout,
         )
+        evidence_store().remember_commitment(outcome.negotiation_id, transaction)
         run_log.event("payment_approved", transaction_id=transaction)
         deadline = time.monotonic() + timeout
         while True:
