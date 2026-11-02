@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from market_deal_lifecycle.projections import LIFECYCLE_QUERY_FIELDS
+
 import pytest
 
 from core_registry.api.filter_eval import build_criteria, evaluate_all
@@ -44,7 +46,9 @@ def _match(spec, listing, **params) -> bool:
 def test_profile_loads_with_schema_identity(spec) -> None:
     assert spec.schema_identity is not None
     assert spec.schema_identity.id == "introductions.market"
-    assert {item.name for item in spec.filters} == {"region", "mechanism", "channel"}
+    assert {item.name for item in spec.filters} == {
+        "region", "mechanism", "channel", "option_asset", *LIFECYCLE_QUERY_FIELDS,
+    }
 
 
 def test_sparse_listings_stay_discoverable(spec) -> None:

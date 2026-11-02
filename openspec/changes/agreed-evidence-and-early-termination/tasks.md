@@ -334,13 +334,33 @@ namespaces" and settlement-configuration's "Mechanism clause fields stay in thei
 `kit/settlement-runtime/src/market_settlement_runtime/clauses.py`, the registry filter
 specification and the buyer query client.
 
-- [ ] 5.1 Reserve `adjudication.dispute.interface`, `adjudication.dispute.account`,
+- [x] 5.1 Reserve `adjudication.dispute.interface`, `adjudication.dispute.account`,
       `early_termination.payer`, `early_termination.payee` and
       `early_termination.payee.notice_seconds` and `early_termination.premature_stop_penalty`
       (absent zero, asset-correlated minor units) as common fields projected by the
       `kit/deal-lifecycle` codec. Verify: unit tests in `core/tests/unit/test_query_dsl.py` and
       the registry's filter tests; library-integration test in the registry for "A buyer asks
       for buyer-stoppable options" and "A lifecycle term is filtered".
+
+- Verified: common field compilation and same-option projection, asset-required
+  penalty comparisons, absent zero/no entitlement, and registry typed-client
+  filtering of retained lifecycle terms. Existing focused suites pass: lifecycle
+  contracts and foundation, settlement-runtime, core query DSL, registry filter
+  unit and library-integration suites. Positive lifecycle query cases seed the
+  query boundary directly; publishing lifecycle-bearing options still waits on
+  2.5b. No option bytes or IDs change here.
+- The lifecycle foundation/contracts now declare the same Python 3.10–3.13
+  range as their identity dependency and settlement-runtime consumer. Their
+  code uses no newer syntax; without this, uv refuses the new dependency on the
+  consumer's supported Python range. Locks were regenerated through `make lock`,
+  including mechanically required downstream dependency records. Final focused
+  results: contracts 37, foundation 62, settlement-runtime 175, core DSL 24,
+  registry unit 129 and library-integration 128; payments 92 plus typing,
+  generated models and contract vectors pass. Core typing, architecture,
+  packaging, comment hygiene and strict OpenSpec pass. The first aggregate
+  run exposed the introduction profile's intentionally changed exact-vocabulary
+  expectation; its kept assertion now includes the common fields and the complete
+  registry rerun passes. A fresh aggregate run is in progress.
 
 Verification point: the query DSL and filter unit suites; registry library-integration suite;
 `make test`. End-to-end: none exercises the new fields.

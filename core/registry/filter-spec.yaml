@@ -223,6 +223,17 @@ listing_shape:
       type: [string, "null"]
 
 filters:
+
+  # Common lifecycle projections are evaluated by the neutral term codec.
+  # All predicates, including the asset, must match one settlement option.
+  - {name: option_asset, query_name: asset, path: "$.settlement_options[*].price.asset", op: in, value_type: string, on_missing: fail}
+  - {name: adjudication.dispute.interface, path: "$.settlement_options[*].lifecycle.adjudication.dispute.interface", op: in, value_type: string, on_missing: fail}
+  - {name: adjudication.dispute.account, path: "$.settlement_options[*].lifecycle.adjudication.dispute.account", op: in, value_type: string, on_missing: fail}
+  - {name: early_termination.payer, path: "$.settlement_options[*].lifecycle.early_termination.entitlements.payer", op: in, value_type: boolean, on_missing: fail}
+  - {name: early_termination.payee, path: "$.settlement_options[*].lifecycle.early_termination.entitlements.payee", op: in, value_type: boolean, on_missing: fail}
+  - {name: early_termination.payee.notice_seconds, path: "$.settlement_options[*].lifecycle.early_termination.entitlements.payee.notice_seconds", op: range, value_type: integer, on_missing: fail}
+  - {name: early_termination.premature_stop_penalty, path: "$.settlement_options[*].lifecycle.early_termination.premature_stop_penalty", op: range, value_type: integer, on_missing: fail, requires: [option_asset]}
+  - {name: delivery_deadline_seconds, path: "$.settlement_options[*].lifecycle.delivery_deadline_seconds", op: range, value_type: integer, on_missing: fail}
   # Equality filters — listing_resource axes.  `op: in` covers eq via `in: [x]`.
   - {name: region,              path: $.listing_resource.region,              op: in, value_type: string,  on_missing: fail}
   - {name: gpu_model,           path: $.listing_resource.gpu_model,           op: in, value_type: string,  on_missing: fail}

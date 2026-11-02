@@ -93,7 +93,9 @@ class RegistryDescriptor(_StrictCarrier):
 
     @field_validator("recommended_dispute_authorities")
     @classmethod
-    def omit_empty_recommendations(cls, value: list[dict[str, JsonValue]] | None):
+    def omit_empty_recommendations(
+        cls, value: list[dict[str, JsonValue]] | None
+    ) -> list[dict[str, JsonValue]] | None:
         return value or None
 
     @field_validator("base_url")

@@ -12,6 +12,7 @@ import pytest
 from market_core.schemas import derive_settlement_option_id
 
 from registry_client import ListingRequest, RegistryClientError, compile_resource_query
+from core_registry.db.models import Listing
 
 pytestmark = pytest.mark.asyncio
 
@@ -151,7 +152,7 @@ def _introduction_listing(listing_id: str, amount: str) -> ListingRequest:
 
 
 async def test_a_rateless_introduction_listing_is_found_by_its_asking_rate(
-    registry_client,
+    registry_client, db_session,
 ):
     """Supply that settles by introduction carries no settlement rate, so its
     asking rate is the only price a buyer can compare it on."""
@@ -167,3 +168,52 @@ async def test_a_rateless_introduction_listing_is_found_by_its_asking_rate(
     (option,) = fetched.settlement_options
     assert option["rates"] == []
     assert fetched.listing_resource["asking_rate"]["amount"] == "4.00"
+    # An option without lifecycle terms grants no stop and has zero penalty.
+    assert await _ids(
+        registry_client,
+        "asset=introduction early_termination.payer=false early_termination.premature_stop_penalty<=0",
+    ) == {"intro-1"}
+    assert await _ids(
+        registry_client, "early_termination.payer=true",
+    ) == set()
+    assert await _ids(
+        registry_client, "asset=USD/2 early_termination.premature_stop_penalty<=0",
+    ) == set()
+    with pytest.raises(RegistryClientError):
+        await registry_client.list_listings(
+            **{"early_termination.premature_stop_penalty": "range:[0,1]"}
+        )
+
+    # Seed the query boundary directly: publication's option wire is a separate
+    # contract, while the registry query consumes retained opaque options.
+    lifecycle = {
+        "adjudication": {
+            "version": 1,
+            "dispute": {
+                "interface": "example.dispute.v1", "origin": "https://dispute.example",
+                "account": "acct_example", "record_key": "example-public-key", "params": {},
+            },
+            "dispute_window_seconds": 60, "case_hold_max_seconds": None,
+        },
+        "early_termination": {
+            "version": 1,
+            "entitlements": {"payer": {"notice_seconds": 0, "settles_through": "started_period"}},
+            "settles_through": "last_boundary", "premature_stop_penalty": "100",
+        },
+        "delivery_deadline_seconds": 30,
+    }
+    row = db_session.query(Listing).filter_by(listing_id="intro-1").one()
+    row.settlement_options = [dict(option) | {"lifecycle": lifecycle}]
+    db_session.commit()
+    assert await _ids(registry_client, "early_termination.payer=true") == {"intro-1"}
+    assert await _ids(
+        registry_client, "adjudication.dispute.account=acct_example delivery_deadline_seconds<=30",
+    ) == {"intro-1"}
+    assert await _ids(
+        registry_client,
+        "asset=introduction early_termination.premature_stop_penalty>=100",
+    ) == {"intro-1"}
+    assert await _ids(
+        registry_client,
+        "asset=USD/2 early_termination.premature_stop_penalty>=100",
+    ) == set()

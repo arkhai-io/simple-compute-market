@@ -99,7 +99,8 @@ class DisputeConfig(BaseModel):
             if entry.identity in seen:
                 continue
             seen.add(entry.identity)
-            if entry.not_offered if role == "seller" else entry.not_accepted:
+            excluded = entry.not_offered if role == "seller" else entry.not_accepted
+            if excluded:
                 continue
             resolved.append(entry)
         return tuple(resolved)

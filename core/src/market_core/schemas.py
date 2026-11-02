@@ -586,6 +586,13 @@ def settlement_option_asset(option: Any) -> str | None:
     return getattr(option, "asset", None)
 
 
+def settlement_option_lifecycle(option: Any) -> Any:
+    """Read neutral post-commitment rights without interpreting their codec."""
+    if isinstance(option, Mapping):
+        return option.get("lifecycle")
+    return getattr(option, "lifecycle", None)
+
+
 def settlement_option_rates(option: Any) -> list[Any]:
     """Read rate slots from a model or public carrier, empty when rateless."""
     if isinstance(option, Mapping):
