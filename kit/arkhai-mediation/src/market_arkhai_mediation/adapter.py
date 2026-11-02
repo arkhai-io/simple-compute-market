@@ -44,7 +44,7 @@ class MediationAdapter:
         selected = agreement.get("settlement", {})
         authorities = [
             section["adjudication"]["dispute"]
-            for section in (selected.get("lifecycle", {}), selected.get("params", {}))
+            for section in (selected.get("lifecycle") or {},)
             if "adjudication" in section
         ]
         if len(authorities) != 1 or DisputeAuthority.model_validate(authorities[0]) != binding.authority:

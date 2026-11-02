@@ -9,11 +9,11 @@
 # so sparse entries stay discoverable despite the strict default profile's
 # fail-closed posture. Deploy by pointing REGISTRY_FILTER_SPEC_PATH here.
 
-version: 2
+version: 3
 
 schema:
   id: introductions.market
-  version: 1
+  version: 2
 
 listing_shape:
   $schema: "https://json-schema.org/draft/2020-12/schema"
@@ -45,5 +45,5 @@ filters:
   # Descriptive fields remain underreport-friendly. Explicit lifecycle queries
   # require the requested rights rather than inferring a commitment from omission.
   - {name: region,    path: $.listing_resource.region,                    op: in, value_type: string, on_missing: pass}
-  - {name: mechanism, path: "$.settlement_options[*].mechanism",        op: in, value_type: string, on_missing: pass}
-  - {name: channel,   path: "$.settlement_options[*].params.channel",   op: in, value_type: string, on_missing: pass}
+  - {name: mechanism, path: "$.settlement_options[*].settlement.schema",        op: in, value_type: string, on_missing: pass}
+  - {name: channel,   path: "$.settlement_options[*].settlement.channel",   op: in, value_type: string, on_missing: pass}

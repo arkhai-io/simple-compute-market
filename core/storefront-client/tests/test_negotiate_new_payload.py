@@ -205,7 +205,11 @@ def test_an_escrow_opening_names_no_token_it_was_not_given():
     assert body["proposal"]["literal_fields"] == {}
 
 
-_SELECTION = {"mechanism": "example.rated.v1", "option_id": "a" * 64, "expiration_unix": 2_000}
+_SELECTION = {
+    "option_id": "a" * 64,
+    "settlement": {"schema": "example.rated.v1"},
+    "expiration_unix": 2_000,
+}
 
 
 def _selection_kwargs(envelope, **overrides):

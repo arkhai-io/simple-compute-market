@@ -169,8 +169,7 @@ def test_run_buy_composes_injected_negotiate_and_settle_hooks() -> None:
 @pytest.mark.parametrize("proposal", (None, {"stray": "escrow"}))
 def test_settle_hook_delegates_exact_agreement_to_declared_domain_stage(proposal) -> None:
     selection = SettlementSelection(
-        mechanism="example.payment.v1",
-        option_id="a" * 64,
+        option_id="a" * 64, settlement={"schema": "example.payment.v1"}
     )
     outcome = NegotiationOutcome(
         status="agreed",
@@ -178,7 +177,7 @@ def test_settle_hook_delegates_exact_agreement_to_declared_domain_stage(proposal
         settlement_selection=selection,
         accepted_escrow_proposal=proposal,
         settlement_data={"mandate": {"opaque": "to-core"}},
-        agreement=_agreement(selection.mechanism),
+        agreement=_agreement(selection.settlement_schema),
     )
     negotiation = NegotiationResult(
         match={"seller": "http://seller"},
@@ -198,7 +197,7 @@ def test_settle_hook_delegates_exact_agreement_to_declared_domain_stage(proposal
 
     stage = object()
     hook = make_settle_hook(
-        stages=SettlementStageTable({selection.mechanism: stage}),
+        stages=SettlementStageTable({selection.settlement_schema: stage}),
         invoke=lambda selected, actual, emit: (
             agreement_settlement(actual, emit)
             if selected is stage
@@ -240,11 +239,12 @@ def _agreement(mechanism: str) -> Agreement:
         start_utc="2026-01-01T00:00:00Z",
         accepted_at="2026-01-01T00:00:00Z",
         settlement=SettlementOption(
-            mechanism=mechanism,
             option_id=derive_settlement_option_id(
-                mechanism=mechanism, asset="usd", rates=[], params={},
+                price={"asset": "usd", "rates": []},
+                settlement={"schema": mechanism, **({} or {})},
             ),
-            asset="usd",
+            price={"asset": "usd", "rates": []},
+            settlement={"schema": mechanism},
         ),
         asset="usd",
     )

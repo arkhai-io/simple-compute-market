@@ -146,10 +146,8 @@ async def _persist_accepted_negotiation(
         }
     }
     option_body = {
-        "mechanism": "alkahest.v1",
-        "asset": "0x" + "22" * 20,
-        "rates": [],
-        "params": params,
+        "price": {"asset": "0x" + "22" * 20, "rates": []},
+        "settlement": {"schema": "alkahest.v1", **(params or {})},
     }
     option = SettlementOption(
         option_id=derive_settlement_option_id(**option_body), **option_body
@@ -162,7 +160,7 @@ async def _persist_accepted_negotiation(
         seller=_SELLER.model_dump(mode="json"),
         settlement=option,
         amount=42,
-        asset=option.asset,
+        asset=option.price_asset,
         duration_seconds=3600,
         start_utc="2026-01-01T00:00:00Z",
         accepted_at="2026-01-01T00:00:00Z",

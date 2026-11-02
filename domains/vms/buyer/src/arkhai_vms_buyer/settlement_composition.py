@@ -55,7 +55,9 @@ def advertised_plan_validator(match: Mapping[str, Any]):
     selected = match.get("_selected_settlement")
     if not isinstance(selected, SelectedSettlementOption):
         return None
-    return buyer_stage(selected.selection.mechanism).plan_validator(match, selected)
+    return buyer_stage(selected.selection.settlement_schema).plan_validator(
+        match, selected
+    )
 
 
 def accepted_listing_record(match: Mapping[str, Any], _proposal: Any) -> dict[str, Any]:
@@ -67,7 +69,7 @@ def accepted_listing_record(match: Mapping[str, Any], _proposal: Any) -> dict[st
     selected = match.get("_selected_settlement")
     if not isinstance(selected, SelectedSettlementOption):
         return {}
-    return buyer_stage(selected.selection.mechanism).listing_record(match)
+    return buyer_stage(selected.selection.settlement_schema).listing_record(match)
 
 
 def validate_buyer_acceptance(outcome) -> None:
@@ -173,6 +175,4 @@ def alkahest_entry_from_selection(
 ) -> dict[str, Any] | None:
     """Decode the mechanism-owned accepted escrow only after selection."""
 
-    return buyer_stage(selected.selection.mechanism).accepted_entry(selected)
-
-
+    return buyer_stage(selected.selection.settlement_schema).accepted_entry(selected)

@@ -38,12 +38,11 @@ def _option(mechanism: str, asset: str, rate: int) -> SettlementOption:
     params = {"claimant_principal": SELLER.identity.model_dump(mode="json")}
     return SettlementOption(
         option_id=derive_settlement_option_id(
-            mechanism=mechanism, asset=asset, rates=rates, params=params
+            price={"asset": asset, "rates": rates},
+            settlement={"schema": mechanism, **(params or {})},
         ),
-        mechanism=mechanism,
-        asset=asset,
-        rates=rates,
-        params=params,
+        price={"asset": asset, "rates": rates},
+        settlement={"schema": mechanism, **(params or {})},
     )
 
 
@@ -105,7 +104,7 @@ def _hook(selection: SettlementSelection, revalidated: list[SettlementOption]):
 
 def test_a_payment_selection_negotiates_with_the_advertised_payment_option() -> None:
     selection = SettlementSelection(
-        mechanism=PAYMENT.mechanism, option_id=PAYMENT.option_id
+        option_id=PAYMENT.option_id, settlement={"schema": PAYMENT.settlement_schema}
     )
     revalidated: list[SettlementOption] = []
     calls: list[dict[str, Any]] = []
@@ -163,7 +162,8 @@ def test_the_selected_option_lets_the_opening_carry_an_amount() -> None:
                 escrow_proposal=None,
                 encode_escrow_proposal=lambda proposal: proposal,
                 settlement_selection=SettlementSelection(
-                    mechanism=PAYMENT.mechanism, option_id=PAYMENT.option_id
+                    option_id=PAYMENT.option_id,
+                    settlement={"schema": PAYMENT.settlement_schema},
                 ),
                 policy_params=policy_params,
             )
@@ -180,8 +180,12 @@ def test_the_selected_option_lets_the_opening_carry_an_amount() -> None:
 @pytest.mark.parametrize(
     "selection",
     [
-        SettlementSelection(mechanism=PAYMENT.mechanism, option_id="f" * 64),
-        SettlementSelection(mechanism="unknown.v1", option_id=PAYMENT.option_id),
+        SettlementSelection(
+            settlement={"schema": PAYMENT.settlement_schema}, option_id="f" * 64
+        ),
+        SettlementSelection(
+            settlement={"schema": "unknown.v1"}, option_id=PAYMENT.option_id
+        ),
     ],
     ids=["unadvertised-option-id", "unadvertised-mechanism"],
 )

@@ -421,9 +421,11 @@ def buy_bare_metal(
         source_registry_authority=buyer_config.registry_authority,
     )
     selection = SettlementSelection(
-        mechanism=selected.settlement_schema,
         option_id=selected.option_id,
-        params={"payer_account": buyer_config.payer_account},
+        settlement={
+            "schema": selected.settlement_schema,
+            "payer_account": buyer_config.payer_account,
+        },
     )
     outcome = negotiate_with_seller(
         seller_url=listing.storefront_url,
@@ -535,8 +537,8 @@ def request_introduction(
             "option is not a rateless introduction; use `buy` for priced options"
         )
     selection = SettlementSelection(
-        mechanism=selected.settlement_schema,
         option_id=selected.option_id,
+        settlement={"schema": selected.settlement_schema},
         expiration_unix=int(time.time()) + expiration_seconds,
     )
     run_log = RunLog.start(

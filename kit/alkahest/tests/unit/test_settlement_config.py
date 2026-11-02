@@ -745,9 +745,9 @@ async def test_alkahest_option_builder_emits_canonical_buyer_choice() -> None:
 
     assert publication["accepted_escrows"] == [escrow]
     option = publication["settlement_options"][0]
-    assert option["mechanism"] == ALKAHEST_MECHANISM_ID
+    assert option["settlement"]["schema"] == ALKAHEST_MECHANISM_ID
     assert len(option["option_id"]) == 64
-    assert option["params"]["accepted_escrow"] == escrow
+    assert option["settlement"]["accepted_escrow"] == escrow
     assert registration.buyer_compatibility(
         config,
         option,
@@ -886,10 +886,13 @@ def test_alkahest_publication_clause_builds_exact_scaled_option(monkeypatch) -> 
         "literal_fields": {"token": clause.asset},
         "rates": [{"field": "amount", "per": "hour", "value": "1250000"}],
     }
-    assert option["mechanism"] == ALKAHEST_MECHANISM_ID
-    assert option["asset"] == clause.asset
-    assert option["rates"] == escrow["rates"]
-    assert option["params"] == {"accepted_escrow": escrow}
+    assert option["settlement"]["schema"] == ALKAHEST_MECHANISM_ID
+    assert option["price"]["asset"] == clause.asset
+    assert option.get("price", {}).get("rates", []) == escrow["rates"]
+    assert option["settlement"] == {
+        "schema": ALKAHEST_MECHANISM_ID,
+        "accepted_escrow": escrow,
+    }
 
 
 def _build_alkahest_option(monkeypatch, rate: str, decimals: int) -> dict:
@@ -941,7 +944,7 @@ def test_alkahest_rate_longer_than_a_decimal_context_scales_exactly(monkeypatch)
     # 40 significant digits: a 28-digit Decimal context would round the product.
     rate = "1234567890123456789012.123456789012345678"
     artifacts = _build_alkahest_option(monkeypatch, rate, 18)
-    assert artifacts["settlement_options"][0]["rates"] == [
+    assert artifacts["settlement_options"][0]["price"]["rates"] == [
         {
             "field": "amount",
             "per": "hour",

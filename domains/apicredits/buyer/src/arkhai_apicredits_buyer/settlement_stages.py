@@ -36,9 +36,17 @@ class PaymentBuyerStage:
         return {}
 
     def prepare_selection(self, selected: Any, **_unused: Any) -> Any:
-        return replace(selected, selection=selected.selection.model_copy(update={
-            "params": {"payer_account": configured_payer_account()},
-        }))
+        return replace(
+            selected,
+            selection=selected.selection.model_copy(
+                update={
+                    "settlement": {
+                        **selected.selection.settlement,
+                        "payer_account": configured_payer_account(),
+                    },
+                }
+            ),
+        )
 
     def accepted_entry(self, selected: Any) -> None:
         return None
@@ -103,9 +111,11 @@ class AlkahestBuyerStage:
                 "escrow. Pass --evm-address or configure wallet.address."
             )
         options = [
-            option for _registration, option in settlement_policy.compatible_options(
+            option
+            for _registration, option in settlement_policy.compatible_options(
                 listing.get("settlement_options") or (),
-            ) if option.settlement_schema == selected.selection.mechanism
+            )
+            if option.settlement_schema == selected.selection.settlement_schema
         ]
         constrained = dict(listing)
         constrained["accepted_escrows"] = [self.accepted_entry(

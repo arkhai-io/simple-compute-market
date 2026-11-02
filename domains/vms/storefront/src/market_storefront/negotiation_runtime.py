@@ -44,6 +44,7 @@ from market_core.schemas import (
     SettlementOption,
     SettlementPlan,
     SettlementSelection,
+    settlement_option_schema,
 )
 from market_identity import Identity
 from market_negotiation_runtime import (
@@ -369,12 +370,12 @@ def _accepted_selection_artifacts(
         raise OfferUnfulfillableError("selected_settlement_option_not_exact") from exc
     if (
         accepted.option_id != advertised_option.option_id
-        or accepted.mechanism != advertised_option.settlement_schema
+        or accepted.settlement_schema != advertised_option.settlement_schema
     ):
         raise OfferUnfulfillableError("settlement_selection_not_exact")
-    if accepted.mechanism not in dispatch:
+    if accepted.settlement_schema not in dispatch:
         raise OfferUnfulfillableError("settlement_mechanism_unsupported")
-    build_obligation = dispatch[accepted.mechanism]
+    build_obligation = dispatch[accepted.settlement_schema]
     if build_obligation is None:
         if not settles_from_agreement:
             raise OfferUnfulfillableError("settlement_selection_requires_plan")
@@ -460,10 +461,11 @@ def _accepted_settlement_artifacts(
         options = json.loads(options)
     option = next(
         (
-            item for item in options
+            item
+            for item in options
             if isinstance(item, Mapping)
             and item.get("option_id") == selection.option_id
-            and item.get("mechanism") == selection.mechanism
+            and settlement_option_schema(item) == selection.settlement_schema
         ),
         None,
     )
@@ -530,7 +532,7 @@ def _with_agreement(
     )
     plan = artifacts.get("settlement_plan")
     asset = settlement.price_asset if settlement is not None else None
-    if asset is None and isinstance(plan, Mapping):
+    if settlement is None and isinstance(plan, Mapping):
         obligations = plan.get("obligations")
         if isinstance(obligations, list) and obligations and isinstance(obligations[0], Mapping):
             raw_asset = obligations[0].get("asset")
@@ -559,7 +561,9 @@ def _with_agreement(
         settlement=settlement,
         settlement_params=SettlementSelection.model_validate(
             artifacts["settlement_selection"]
-        ).params if artifacts.get("settlement_selection") is not None else {},
+        ).settlement_params
+        if artifacts.get("settlement_selection") is not None
+        else {},
         amount=acceptance.agreed_amount,
         asset=asset,
         duration_seconds=acceptance.agreement.duration_seconds,

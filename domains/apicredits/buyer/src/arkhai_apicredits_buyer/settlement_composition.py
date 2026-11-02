@@ -48,8 +48,11 @@ def accepted_listing_record(match: Mapping[str, Any], proposal: Any) -> dict[str
     """
     if isinstance(proposal, EscrowProposal):
         return BUYER_STAGES["alkahest.v1"].listing_record(match)
-    if isinstance(proposal, SettlementSelection) and proposal.mechanism in BUYER_STAGES:
-        return BUYER_STAGES[proposal.mechanism].listing_record(match)
+    if (
+        isinstance(proposal, SettlementSelection)
+        and proposal.settlement_schema in BUYER_STAGES
+    ):
+        return BUYER_STAGES[proposal.settlement_schema].listing_record(match)
     return {}
 
 

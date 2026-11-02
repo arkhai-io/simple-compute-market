@@ -141,10 +141,12 @@ def test_reference_recovery_retains_accepted_state(
     signer = Ed25519Signer(b"\x15" * 32)
     publisher = Ed25519Signer(b"\x16" * 32)
     option = SettlementOption(
-        mechanism="example.payment.v1", asset="usd",
         option_id=derive_settlement_option_id(
-            mechanism="example.payment.v1", asset="usd", rates=[], params={},
+            price={"asset": "usd", "rates": []},
+            settlement={"schema": "example.payment.v1", **({} or {})},
         ),
+        price={"asset": "usd", "rates": []},
+        settlement={"schema": "example.payment.v1"},
     )
     agreement = Agreement(
         negotiation_id="neg-1", listing_id="listing-1", listing_hash="0" * 64,
@@ -272,10 +274,12 @@ def test_a_deal_reads_its_agreed_amount_exactly_from_the_agreement(
     signer, publisher = Ed25519Signer(b"\x29" * 32), Ed25519Signer(b"\x2a" * 32)
     amount = 10**21 + 1
     option = SettlementOption(
-        mechanism="example.payment.v1", asset="usd",
         option_id=derive_settlement_option_id(
-            mechanism="example.payment.v1", asset="usd", rates=[], params={},
+            price={"asset": "usd", "rates": []},
+            settlement={"schema": "example.payment.v1", **({} or {})},
         ),
+        price={"asset": "usd", "rates": []},
+        settlement={"schema": "example.payment.v1"},
     )
     agreement = Agreement(
         negotiation_id="neg-1", listing_id="listing-1", listing_hash="0" * 64,
@@ -313,10 +317,12 @@ def test_a_deals_seller_is_the_one_its_agreement_names_not_a_trusted_publisher(
     other, seller = Ed25519Signer(b"\x2c" * 32), Ed25519Signer(b"\x2d" * 32)
     trust = TrustedIdentitySet(identities=(other.identity, seller.identity))
     option = SettlementOption(
-        mechanism="example.payment.v1", asset="usd",
         option_id=derive_settlement_option_id(
-            mechanism="example.payment.v1", asset="usd", rates=[], params={},
+            price={"asset": "usd", "rates": []},
+            settlement={"schema": "example.payment.v1", **({} or {})},
         ),
+        price={"asset": "usd", "rates": []},
+        settlement={"schema": "example.payment.v1"},
     )
     agreement = Agreement(
         negotiation_id="neg-1", listing_id="listing-1", listing_hash="0" * 64,

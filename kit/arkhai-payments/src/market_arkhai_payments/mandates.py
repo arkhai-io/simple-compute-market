@@ -78,7 +78,6 @@ class PaymentsOptionParams(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True, validate_default=True)
 
     payee_account: str = Field(pattern=_ACCOUNT_ID)
-    asset: str = Field(pattern=_ASSET)
     window: str = DEFAULT_WINDOW
     deposit_agreement: bool = False
 
@@ -105,12 +104,6 @@ class MandatePolicy(BaseModel):
     asset: str = Field(pattern=_ASSET)
     fee_bps: int = Field(ge=0, le=10_000)
     dispute_authority: str = Field(pattern=_ACCOUNT_ID)
-
-    @model_validator(mode="after")
-    def payment_asset_matches_option(self) -> MandatePolicy:
-        if self.asset != self.option.asset:
-            raise ValueError("accepted asset must match the selected payments option")
-        return self
 
 
 def derive_mandate(agreement_json: dict[str, Any], policy: MandatePolicy) -> Mandate:

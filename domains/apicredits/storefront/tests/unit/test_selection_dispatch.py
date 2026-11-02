@@ -53,7 +53,9 @@ def _intro_registration() -> MechanismRegistration:
         section: BaseModel, option: Any, context: Mapping[str, Any]
     ) -> AcceptedObligationArtifacts:
         raw = option if isinstance(option, Mapping) else option.model_dump()
-        params = dict(raw["params"])
+        params = {
+            key: value for key, value in raw["settlement"].items() if key != "schema"
+        }
         return AcceptedObligationArtifacts(
             obligation={
                 "payer": "buyer",
@@ -118,22 +120,18 @@ def _intro_option() -> dict[str, Any]:
     }
     return {
         "option_id": derive_settlement_option_id(
-            mechanism=INTRO_MECHANISM,
-            asset="introduction",
-            rates=[],
-            params=params,
+            price={"asset": "introduction", "rates": []},
+            settlement={"schema": INTRO_MECHANISM, **(params or {})},
         ),
-        "mechanism": INTRO_MECHANISM,
-        "asset": "introduction",
-        "rates": [],
-        "params": params,
+        "price": {"asset": "introduction", "rates": []},
+        "settlement": {"schema": INTRO_MECHANISM, **(params or {})},
     }
 
 
 def _selection(option: Mapping[str, Any]) -> dict[str, Any]:
     return {
-        "mechanism": option["mechanism"],
         "option_id": option["option_id"],
+        "settlement": {"schema": option["settlement"]["schema"]},
         "expiration_unix": 1_900_000_000,
     }
 

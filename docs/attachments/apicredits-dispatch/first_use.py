@@ -131,8 +131,12 @@ async def drive(root: Path) -> dict:
             )
             params = {"payee_account": PAYEE, "asset": "USD/2", "window": "P7D", "deposit_agreement": True}
             option = SettlementOption(
-                option_id=derive_settlement_option_id(mechanism="arkhai.payments.v1", asset="USD/2", rates=[], params=params),
-                mechanism="arkhai.payments.v1", asset="USD/2", rates=[], params=params,
+                option_id=derive_settlement_option_id(
+                    price={"asset": "USD/2", "rates": []},
+                    settlement={"schema": "arkhai.payments.v1", **(params or {})},
+                ),
+                price={"asset": "USD/2", "rates": []},
+                settlement={"schema": "arkhai.payments.v1", **(params or {})},
             )
             agreement = Agreement(
                 negotiation_id=negotiation_id, listing_id="listing-controlled", listing_hash="a"*64,

@@ -57,7 +57,7 @@
         "settlement"
       ],
       "additionalProperties": {},
-      "description": "Projection of the hash-checked SCM Agreement carried in the filing, not a replacement Agreement schema. Extra domain fields are ignored. Timed terms need start_utc and duration_seconds or the selected option's early_termination.max_term_seconds. If both durations exist they must agree. Missing/unreadable terms are reported for operator handling."
+      "description": "Projection of the hash-checked SCM Agreement carried in the filing, not a replacement Agreement schema. Extra domain fields are ignored. Timed terms need start_utc and duration_seconds, the term's only source (open-ended terms resolve it at acceptance). Missing/unreadable terms are reported for operator handling."
     },
     "AgreementStart": {
       "type": "string",
@@ -567,7 +567,7 @@
         "params"
       ],
       "additionalProperties": false,
-      "description": "The authority pinned in the selected option's params.adjudication.dispute."
+      "description": "The authority pinned in the selected option's lifecycle.adjudication.dispute."
     },
     "Duration": {
       "type": "string",
@@ -580,20 +580,16 @@
           "type": "number",
           "const": 1
         },
-        "max_term_seconds": {
-          "$ref": "#/$defs/TermSeconds"
-        },
         "premature_stop_penalty": {
           "type": "string",
           "pattern": "^(0|[1-9][0-9]{0,37})$"
         }
       },
       "required": [
-        "version",
-        "max_term_seconds"
+        "version"
       ],
       "additionalProperties": {},
-      "description": "Only the maximum term and premature_stop_penalty (canonical decimal asset minor units; absent or 0 = none) are read here. Party entitlements and exposure remain the payment adapter's responsibility."
+      "description": "Only premature_stop_penalty (canonical decimal asset minor units; absent or 0 = none) is read here. Entitlements, settles_through and exposure remain the payment adapter's responsibility and pass through unvalidated."
     },
     "Effect": {
       "oneOf": [
@@ -1072,6 +1068,21 @@
       ],
       "additionalProperties": false
     },
+    "MappingLifecycle": {
+      "type": "object",
+      "properties": {
+        "adjudication": {
+          "$ref": "#/$defs/AdjudicationTerms"
+        },
+        "early_termination": {
+          "$ref": "#/$defs/EarlyTerminationProjection"
+        }
+      },
+      "required": [
+        "adjudication"
+      ],
+      "additionalProperties": {}
+    },
     "MappingMismatch": {
       "type": "object",
       "properties": {
@@ -1092,18 +1103,16 @@
       ],
       "additionalProperties": false
     },
-    "MappingParams": {
+    "MappingPaymentSettlement": {
       "type": "object",
       "properties": {
-        "adjudication": {
-          "$ref": "#/$defs/AdjudicationTerms"
-        },
-        "early_termination": {
-          "$ref": "#/$defs/EarlyTerminationProjection"
+        "schema": {
+          "type": "string",
+          "const": "arkhai.payments.v1"
         }
       },
       "required": [
-        "adjudication"
+        "schema"
       ],
       "additionalProperties": {}
     },
@@ -1120,17 +1129,16 @@
     "MappingSettlement": {
       "type": "object",
       "properties": {
-        "mechanism": {
-          "type": "string",
-          "const": "arkhai.payments.v1"
+        "settlement": {
+          "$ref": "#/$defs/MappingPaymentSettlement"
         },
-        "params": {
-          "$ref": "#/$defs/MappingParams"
+        "lifecycle": {
+          "$ref": "#/$defs/MappingLifecycle"
         }
       },
       "required": [
-        "mechanism",
-        "params"
+        "settlement",
+        "lifecycle"
       ],
       "additionalProperties": {}
     },

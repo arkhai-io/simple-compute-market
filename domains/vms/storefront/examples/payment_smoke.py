@@ -90,17 +90,10 @@ async def main():
     registry = build_vm_storefront_registry(domain)
     stage = PaymentSellerStage(config, client_for_owner=payments)
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    params = {
-        "payee_account": PAYEE,
-        "asset": "USD/2",
-        "window": "P7D",
-        "deposit_agreement": False,
-    }
+    params = {"payee_account": PAYEE, "window": "P7D", "deposit_agreement": False}
     option_body = {
-        "mechanism": "arkhai.payments.v1",
-        "asset": "USD/2",
-        "rates": [],
-        "params": params,
+        "price": {"asset": "USD/2", "rates": []},
+        "settlement": {"schema": "arkhai.payments.v1", **(params or {})},
     }
     option = SettlementOption(
         option_id=derive_settlement_option_id(**option_body), **option_body

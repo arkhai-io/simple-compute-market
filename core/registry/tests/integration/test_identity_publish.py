@@ -62,10 +62,14 @@ def _listing(listing_id: str, *, region: str = "us") -> ListingRequest:
         settlement_options=[
             {
                 "option_id": "a" * 64,
-                "mechanism": "example.payment.v1",
-                "asset": "usd",
-                "rates": [{"field": "amount", "per": "hour", "value": "100"}],
-                "params": {"account_ref": "seller-account"},
+                "price": {
+                    "asset": "usd",
+                    "rates": [{"field": "amount", "per": "hour", "value": "100"}],
+                },
+                "settlement": {
+                    "schema": "example.payment.v1",
+                    **({"account_ref": "seller-account"} or {}),
+                },
             }
         ],
         max_duration_seconds=3600,

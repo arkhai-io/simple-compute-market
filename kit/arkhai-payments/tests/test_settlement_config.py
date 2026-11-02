@@ -111,25 +111,27 @@ def test_publication_builder_preserves_option_identity_and_rate_units(
     option = built["settlement_options"][0]
 
     assert built["accepted_escrows"] == []
-    assert option["mechanism"] == ARKHAI_PAYMENTS_MECHANISM
-    assert option["rates"] == [{"field": "amount", "per": "hour", "value": "125"}]
+    assert option["settlement"]["schema"] == ARKHAI_PAYMENTS_MECHANISM
+    assert option.get("price", {}).get("rates", []) == [
+        {"field": "amount", "per": "hour", "value": "125"}
+    ]
     assert option["option_id"]
     for unit in ("unit", "item"):
         unit_clause = clause.model_copy(update={"rate": "125", "per": unit})
         unit_option = arkhai_payments_option_builder(
             config, readiness, {"publication_clause": unit_clause}, "seller"
         )["settlement_options"][0]
-        assert unit_option["rates"] == [
+        assert unit_option.get("price", {}).get("rates", []) == [
             {"field": "amount", "per": unit, "value": "125"}
         ]
-        assert unit_option["params"] == option["params"]
+        assert unit_option["settlement"] == option["settlement"]
     assert registration.client_factory is None
     assert registration.accepted_obligation_builder is None
     assert registration.settlement_verifier is None
     assert registration.buyer_compatibility(config, option, {})
     assert not registration.buyer_compatibility(
         config,
-        {**option, "asset": "EUR/2"},
+        {**option, "price": {**option["price"], "asset": "not-an-asset"}},
         {},
     )
 

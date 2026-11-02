@@ -304,12 +304,12 @@ def test_payment_deal_delivers_after_a_verified_receipt(
     options = [SettlementOption.model_validate(item) for item in listing.settlement_options]
     assert len(options) == 1
     option = options[0]
-    assert option.mechanism == "arkhai.payments.v1"
-    assert option.params["payee_account"] == str(payment_setting("SELLER_ACCOUNT"))
-    assert option.params["window"] == str(payment_setting("DISPUTE_WINDOW"))
-    assert option.asset == "USD/6"
-    assert option.rates[0].per == "hour"
-    assert compute_rate_total(option.rates[0], 3600) == 1000000
+    assert option.settlement_schema == "arkhai.payments.v1"
+    assert option.settlement_params["payee_account"] == str(payment_setting("SELLER_ACCOUNT"))
+    assert option.settlement_params["window"] == str(payment_setting("DISPUTE_WINDOW"))
+    assert option.price_asset == "USD/6"
+    assert option.price_rates[0].per == "hour"
+    assert compute_rate_total(option.price_rates[0], 3600) == 1000000
     payment_deal_state.complete(DealStage.DISCOVERY, listing_id=str(listing.id))
     buy = payment_buyer_cli.run([
         "bare-metal", "buy", str(listing.id),

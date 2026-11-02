@@ -120,7 +120,7 @@ def _with_agreement(
         raise NegotiationStateError("accepted Agreement lacks fixed acceptance timestamps")
     plan = artifacts.get("settlement_plan")
     asset = settlement.price_asset if settlement is not None else None
-    if asset is None and isinstance(plan, Mapping):
+    if settlement is None and isinstance(plan, Mapping):
         obligations = plan.get("obligations")
         if isinstance(obligations, list) and obligations and isinstance(obligations[0], Mapping):
             raw_asset = obligations[0].get("asset")
@@ -145,7 +145,9 @@ def _with_agreement(
         seller=acceptance.seller_principal.model_dump(mode="json"),
         settlement=settlement,
         settlement_params=(
-            SettlementSelection.model_validate(selection).params if selection is not None else {}
+            SettlementSelection.model_validate(selection).settlement_params
+            if selection is not None
+            else {}
         ),
         amount=acceptance.agreed_amount,
         asset=asset,
@@ -564,21 +566,21 @@ def build_bare_metal_negotiation_runtime(
         # under the listing's release condition, which a selection cannot
         # build, so its exact selection is refused.
         if (
-            selection.mechanism not in seller_stages
-            or selection.mechanism not in accepted_obligation_dispatch
+            selection.settlement_schema not in seller_stages
+            or selection.settlement_schema not in accepted_obligation_dispatch
         ):
             raise BareMetalNegotiationRefusal(
                 "exact settlement selection uses an unsupported mechanism",
                 status_code=400,
             )
-        build_obligation = accepted_obligation_dispatch[selection.mechanism]
+        build_obligation = accepted_obligation_dispatch[selection.settlement_schema]
         if (
             build_obligation is None
-            and not seller_stages[selection.mechanism].settles_from_agreement
+            and not seller_stages[selection.settlement_schema].settles_from_agreement
         ):
             raise BareMetalNegotiationRefusal(
                 "settlement_selection_requires_plan: "
-                f"{selection.mechanism} settles only under a settlement plan, "
+                f"{selection.settlement_schema} settles only under a settlement plan, "
                 "which an exact selection cannot build; open with an escrow proposal",
                 status_code=409,
             )
@@ -599,7 +601,7 @@ def build_bare_metal_negotiation_runtime(
                 option
                 for option in options
                 if option.option_id == selection.option_id
-                and option.settlement_schema == selection.mechanism
+                and option.settlement_schema == selection.settlement_schema
             ),
             None,
         )
@@ -610,7 +612,7 @@ def build_bare_metal_negotiation_runtime(
             )
         # A deal that provisions the listed machine is held to the same
         # admission rules and records the same terms however it settles.
-        provisions = seller_stages[selection.mechanism].fulfils_through_capacity
+        provisions = seller_stages[selection.settlement_schema].fulfils_through_capacity
         terms: BareMetalTerms | None = None
         if provisions:
             trusted_listing = await request.repository.load_bare_metal_listing_payload(

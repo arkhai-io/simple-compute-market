@@ -1,5 +1,23 @@
 ## MODIFIED Requirements
 
+### Requirement: Settlement options keep mechanism-owned parameters opaque
+
+A listing MUST advertise choices as `{option_id, price?, settlement, lifecycle?}`. `price`, when present, contains the asset and rates. `settlement` contains a nonempty `schema` naming the mechanism, with its parameters flat beside it; a mechanism MUST NOT define a parameter named `schema`. Core MUST keep mechanism parameters opaque. Lifecycle terms MUST have their own key, owned by the lifecycle codec, not a mechanism model. Rateless introductions MUST omit price; hosted parameters MUST NOT repeat its asset.
+
+#### Scenario: Alkahest option is published
+
+- **WHEN** a seller publishes an Alkahest choice
+- **THEN** its escrow policy is interpreted by the Alkahest kit under `settlement`, with no lifecycle terms
+
+### Requirement: Payment accounts come from domain input and the accepted option
+
+Buyer domain input MUST supply `payer_account` independently of marketplace identity and service policy: VM uses `[vms].payer_account` and API credits `[apicredits].payer_account`. Seller client ownership MUST come from the accepted option's `settlement.payee_account`, not service policy.
+
+#### Scenario: Buyer chooses a payer account
+
+- **WHEN** an Ed25519 buyer selects `arkhai.payments.v1`
+- **THEN** its account travels in `SettlementSelection.settlement.payer_account` and Agreement `settlement_params`, separately from its signer and API credential
+
 ### Requirement: Payments configuration separates accounts and credentials
 
 Shared Arkhai payments registration, typed configuration, and owner-scoped client provision MUST live in `kit/arkhai-payments`'s `settlement_config.py`.

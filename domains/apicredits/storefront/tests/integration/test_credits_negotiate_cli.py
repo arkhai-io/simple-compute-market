@@ -88,7 +88,7 @@ async def storefront(db, fake_capacity, key_records, monkeypatch):
         _DOMAIN,
         accepted_obligation_dispatch={ARKHAI_PAYMENTS_MECHANISM: None},
         settlement_artifacts_builder=lambda agreement: SELLER_STAGES[
-            agreement["settlement"]["mechanism"]
+            agreement["settlement"]["settlement"]["schema"]
         ].agreement_artifacts(agreement, composition),
     )
     holds = QuotaHolds()
@@ -179,7 +179,10 @@ async def test_payment_negotiation_is_accepted_and_recorded(
     negotiation_id = accepted["negotiation_id"]
     selection = accepted["settlement_selection"]
     assert selection["option_id"] == payment_option().option_id
-    assert selection["params"] == {"payer_account": PAYER_ACCOUNT}
+    assert selection["settlement"] == {
+        "schema": "arkhai.payments.v1",
+        "payer_account": PAYER_ACCOUNT,
+    }
     agreement = json.loads(base64.b64decode(accepted["agreement_bytes"]))
     assert agreement["amount"] == str(amount)
     assert agreement["settlement_params"] == {"payer_account": PAYER_ACCOUNT}

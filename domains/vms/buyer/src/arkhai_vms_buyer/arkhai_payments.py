@@ -67,7 +67,7 @@ def payer_selection(selected):
         selected,
         selection=selected.selection.model_copy(
             update={
-                "params": {**(selected.selection.params or {}), "payer_account": payer},
+                "settlement": {**selected.selection.settlement, "payer_account": payer},
             }
         ),
     )

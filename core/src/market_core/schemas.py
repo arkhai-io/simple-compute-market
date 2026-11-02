@@ -31,7 +31,7 @@ import re
 from collections.abc import Mapping
 from datetime import datetime, timezone
 
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 from pydantic import (
     BaseModel,
@@ -39,8 +39,10 @@ from pydantic import (
     Field,
     PlainSerializer,
     SerializeAsAny,
+    SerializerFunctionWrapHandler,
     field_serializer,
     field_validator,
+    model_serializer,
     model_validator,
 )
 
@@ -534,25 +536,6 @@ class RateValue(BaseModel):
 _SETTLEMENT_OPTION_ID = re.compile(r"^[0-9a-f]{64}$")
 
 
-def derive_settlement_option_id(
-    *,
-    mechanism: str,
-    asset: str,
-    rates: list[RateValue],
-    params: dict[str, Any],
-) -> str:
-    payload = {
-        "mechanism": mechanism,
-        "asset": asset,
-        "rates": [rate.model_dump(mode="json") for rate in rates],
-        "params": params,
-    }
-    encoded = json.dumps(
-        payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True
-    ).encode()
-    return hashlib.sha256(encoded).hexdigest()
-
-
 class SettlementPrice(BaseModel):
     """The asset and rate slots of a priced settlement option."""
 
@@ -562,28 +545,61 @@ class SettlementPrice(BaseModel):
     rates: list[RateValue] = Field(default_factory=list)
 
 
-AGREEMENT_SETTLEMENT_SCHEMA_PATH = "$.settlement.mechanism"
+def derive_settlement_option_id(
+    *,
+    settlement: dict[str, Any],
+    price: SettlementPrice | dict[str, Any] | None = None,
+    lifecycle: dict[str, Any] | None = None,
+) -> str:
+    payload: dict[str, Any] = {"settlement": settlement}
+    if price is not None:
+        payload["price"] = SettlementPrice.model_validate(price).model_dump(mode="json")
+    if lifecycle is not None:
+        payload["lifecycle"] = lifecycle
+    encoded = json.dumps(
+        payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+    ).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+AGREEMENT_SETTLEMENT_SCHEMA_PATH = "$.settlement.settlement.schema"
+
+
+def _settlement_envelope(option: Any) -> Mapping[str, Any]:
+    value = (
+        option.get("settlement")
+        if isinstance(option, Mapping)
+        else getattr(option, "settlement", None)
+    )
+    return value if isinstance(value, Mapping) else {}
 
 
 def settlement_option_schema(option: Any) -> str | None:
     """Read the mechanism identifier without admitting an option for selection."""
-    if isinstance(option, Mapping):
-        return option.get("mechanism")
-    return getattr(option, "mechanism", None)
+    return _settlement_envelope(option).get("schema")
 
 
-def settlement_option_params(option: Any) -> Mapping[str, Any]:
-    """Read mechanism-owned parameters from a model or public carrier."""
-    if isinstance(option, Mapping):
-        return option.get("params") or {}
-    return getattr(option, "params", {})
+def settlement_option_params(option: Any) -> dict[str, Any]:
+    """Read only mechanism-owned parameters, excluding the envelope tag."""
+    return {
+        key: value
+        for key, value in _settlement_envelope(option).items()
+        if key != "schema"
+    }
 
 
 def settlement_option_asset(option: Any) -> str | None:
-    """Read the option's advertised asset identifier."""
-    if isinstance(option, Mapping):
-        return option.get("asset")
-    return getattr(option, "asset", None)
+    """Read the option's advertised asset identifier, absent when rateless."""
+    price = (
+        option.get("price")
+        if isinstance(option, Mapping)
+        else getattr(option, "price", None)
+    )
+    return (
+        price.get("asset")
+        if isinstance(price, Mapping)
+        else getattr(price, "asset", None)
+    )
 
 
 def settlement_option_lifecycle(option: Any) -> Any:
@@ -595,63 +611,78 @@ def settlement_option_lifecycle(option: Any) -> Any:
 
 def settlement_option_rates(option: Any) -> list[Any]:
     """Read rate slots from a model or public carrier, empty when rateless."""
-    if isinstance(option, Mapping):
-        return list(option.get("rates") or [])
-    return list(getattr(option, "rates", []) or [])
+    price = (
+        option.get("price")
+        if isinstance(option, Mapping)
+        else getattr(option, "price", None)
+    )
+    return list(
+        (
+            price.get("rates")
+            if isinstance(price, Mapping)
+            else getattr(price, "rates", None)
+        )
+        or []
+    )
+
+
+def _validate_settlement_envelope(value: dict[str, Any]) -> dict[str, Any]:
+    schema = value.get("schema")
+    if not isinstance(schema, str) or not schema.strip():
+        raise ValueError("settlement.schema must be a non-empty mechanism identifier")
+    return value
 
 
 class SettlementOption(BaseModel):
-    """One immutable, mechanism-tagged settlement choice on a listing."""
+    """One immutable choice of commercial terms, settlement and lifecycle rights."""
 
     model_config = {"extra": "forbid"}
 
     option_id: str
-    mechanism: str = Field(min_length=1)
-    asset: str = Field(min_length=1)
-    rates: list[RateValue] = Field(default_factory=list)
-    params: dict[str, Any] = Field(default_factory=dict)
+    price: SettlementPrice | None = None
+    settlement: dict[str, Any]
+    lifecycle: dict[str, Any] | None = None
+
+    _validate_settlement = field_validator("settlement")(_validate_settlement_envelope)
+
+    @model_serializer(mode="wrap")
+    def _serialize_option(
+        self, handler: SerializerFunctionWrapHandler
+    ) -> dict[str, Any]:
+        value: dict[str, Any] = handler(self)
+        for key in ("price", "lifecycle"):
+            if value.get(key) is None:
+                value.pop(key, None)
+        return value
 
     @property
-    def price(self) -> SettlementPrice | None:
-        """Commercial terms; a rateless option has no price."""
-        if not self.rates:
-            return None
-        return SettlementPrice(asset=self.asset, rates=self.rates)
-
-    @property
-    def price_asset(self) -> str:
-        """The advertised asset identifier, including nominal deliverable tags."""
-        return self.asset
+    def price_asset(self) -> str | None:
+        """The advertised asset identifier, absent on a rateless option."""
+        return self.price.asset if self.price is not None else None
 
     @property
     def price_rates(self) -> list[RateValue]:
         """The option's commercial rate slots, empty when rateless."""
-        return self.rates
+        return self.price.rates if self.price is not None else []
 
     @property
     def settlement_schema(self) -> str:
         """The mechanism that interprets the settlement parameters."""
-        return self.mechanism
+        return cast(str, self.settlement["schema"])
 
     @property
     def settlement_params(self) -> dict[str, Any]:
-        """Parameters owned by the settlement mechanism."""
-        return self.params
-
-    @property
-    def lifecycle(self) -> None:
-        """No post-commitment rights are advertised by this carrier."""
-        return None
+        """Parameters owned by the settlement mechanism, not lifecycle rights."""
+        return settlement_option_params(self)
 
     @model_validator(mode="after")
     def validate_identity(self) -> "SettlementOption":
         if not _SETTLEMENT_OPTION_ID.fullmatch(self.option_id):
             raise ValueError("settlement option ID must be lowercase SHA-256")
         expected = derive_settlement_option_id(
-            mechanism=self.mechanism,
-            asset=self.asset,
-            rates=self.rates,
-            params=self.params,
+            price=self.price,
+            settlement=self.settlement,
+            lifecycle=self.lifecycle,
         )
         if self.option_id != expected:
             raise ValueError(
@@ -669,14 +700,20 @@ class SettlementSelection(BaseModel):
 
     model_config = {"extra": "forbid"}
 
-    mechanism: str = Field(min_length=1)
+    settlement: dict[str, Any]
     option_id: str = Field(pattern=r"^[0-9a-f]{64}$")
     expiration_unix: int | None = Field(default=None, gt=0)
-    # Buyer-side mechanism parameters, opaque to core. The seller's option
-    # params cannot name the buyer's own mechanism identity (for example the
-    # account a charge-first mechanism debits), so the buyer supplies it here
-    # and the Agreement carries it as settlement_params.
-    params: dict[str, Any] | None = None
+    _validate_settlement = field_validator("settlement")(_validate_settlement_envelope)
+
+    @property
+    def settlement_schema(self) -> str:
+        """The selected mechanism's envelope tag."""
+        return cast(str, self.settlement["schema"])
+
+    @property
+    def settlement_params(self) -> dict[str, Any]:
+        """The buyer's own mechanism parameters, opaque to core."""
+        return settlement_option_params(self)
 
 
 class Agreement(BaseModel):

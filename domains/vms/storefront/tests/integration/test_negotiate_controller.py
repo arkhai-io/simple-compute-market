@@ -224,9 +224,16 @@ async def _upsert_bound_listing(
         })
     options = []
     for each in entries:
-        body = {"mechanism": "alkahest.v1", "asset": _TOKEN,
+        body = {
+            "price": {
+                "asset": _TOKEN,
                 "rates": [RateValue.model_validate(rate) for rate in each["rates"]],
-                "params": {"accepted_escrow": each}}
+            },
+            "settlement": {
+                "schema": "alkahest.v1",
+                **({"accepted_escrow": each} or {}),
+            },
+        }
         options.append(
             SettlementOption(option_id=derive_settlement_option_id(**body), **body)
         )
@@ -273,9 +280,11 @@ async def _upsert_bound_listing(
 
 async def _selection(db, listing_id, index: int = 0):
     listing = await db.load_listing(listing_id=listing_id)
-    return {"mechanism": "alkahest.v1",
-            "option_id": listing["settlement_options"][index]["option_id"],
-            "expiration_unix": 1_800_000_000}
+    return {
+        "option_id": listing["settlement_options"][index]["option_id"],
+        "settlement": {"schema": "alkahest.v1"},
+        "expiration_unix": 1_800_000_000,
+    }
 
 
 async def _seed_listing(
@@ -792,9 +801,18 @@ class TestCounterNamingAnotherOption:
             "literal_fields": {"token": _TOKEN},
             "rates": [{"field": "amount", "per": "hour", "value": "6000"}],
         }
-        body = {"mechanism": "alkahest.v1", "asset": _TOKEN,
-                "rates": [RateValue.model_validate(rate) for rate in repriced_entry["rates"]],
-                "params": {"accepted_escrow": repriced_entry}}
+        body = {
+            "price": {
+                "asset": _TOKEN,
+                "rates": [
+                    RateValue.model_validate(rate) for rate in repriced_entry["rates"]
+                ],
+            },
+            "settlement": {
+                "schema": "alkahest.v1",
+                **({"accepted_escrow": repriced_entry} or {}),
+            },
+        }
         repriced = SettlementOption(option_id=derive_settlement_option_id(**body), **body)
         await db.update_listing(
             listing_id="neg-repriced",

@@ -186,8 +186,8 @@ class BuyerSettlementPolicy:
         return SelectedSettlementOption(
             option=option,
             selection=SettlementSelection(
-                mechanism=option.settlement_schema,
                 option_id=option.option_id,
+                settlement={"schema": option.settlement_schema},
                 expiration_unix=expiration_unix,
             ),
             registration=candidate.registration,
@@ -232,7 +232,7 @@ class BuyerSettlementPolicy:
                 registration.mechanism_id
                 for registration in self.ordered_registrations()
                 if any(
-                    choice.selection.mechanism == registration.mechanism_id
+                    choice.selection.settlement_schema == registration.mechanism_id
                     for _, choice in selected
                 )
             ),
@@ -243,7 +243,7 @@ class BuyerSettlementPolicy:
         return tuple(
             (listing, choice)
             for listing, choice in selected
-            if choice.selection.mechanism == preferred_mechanism
+            if choice.selection.settlement_schema == preferred_mechanism
         )
 
     def explain_listings(
@@ -292,7 +292,9 @@ class BuyerSettlementPolicy:
             (stage.index for stage in stages if stage.option_count),
             None,
         )
-        policy_mechanism = selected[0][1].selection.mechanism if selected else None
+        policy_mechanism = (
+            selected[0][1].selection.settlement_schema if selected else None
+        )
 
         rejection_categories = {
             "no_settlement_options": sum(not options for options in decoded),

@@ -642,15 +642,14 @@ def test_pricing_uses_only_the_selected_option_rate():
     from arkhai_vms_buyer.negotiate_cli import _pricing_listing_for_selection
 
     rates = [RateValue(field="amount", per="hour", value=125)]
-    params = {"payee_account": "22222222-2222-4222-8222-222222222222", "asset": "USD/2"}
+    params = {"payee_account": "22222222-2222-4222-8222-222222222222"}
     option = SettlementOption(
         option_id=derive_settlement_option_id(
-            mechanism="arkhai.payments.v1", asset="USD/2", rates=rates, params=params
+            price={"asset": "USD/2", "rates": rates},
+            settlement={"schema": "arkhai.payments.v1", **(params or {})},
         ),
-        mechanism="arkhai.payments.v1",
-        asset="USD/2",
-        rates=rates,
-        params=params,
+        price={"asset": "USD/2", "rates": rates},
+        settlement={"schema": "arkhai.payments.v1", **(params or {})},
     )
     legacy_alkahest_entry = {
         "chain_name": "anvil",

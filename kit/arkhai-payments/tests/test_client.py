@@ -91,12 +91,19 @@ def test_deposit_posts_only_when_advertised_and_absent():
         return httpx.Response(200, json=json.loads(request.content) | _stored(terms))
 
     client = _client(handler)
-    assert client.ensure_agreement_attached(
-        data.transaction_id, terms, PaymentsOptionParams.model_validate(option().params)
-    ) is None
+    assert (
+        client.ensure_agreement_attached(
+            data.transaction_id,
+            terms,
+            PaymentsOptionParams.model_validate(option().settlement_params),
+        )
+        is None
+    )
     assert seen == []
     client.ensure_agreement_attached(
-        data.transaction_id, terms, PaymentsOptionParams.model_validate(option(deposit=True).params)
+        data.transaction_id,
+        terms,
+        PaymentsOptionParams.model_validate(option(deposit=True).settlement_params),
     )
     assert seen[-1] == ("POST", f"/transactions/{data.transaction_id}/attachments")
 
@@ -147,7 +154,9 @@ def test_deposit_refuses_an_attachment_for_another_deal_in_any_position(order):
     client = _client(lambda request: httpx.Response(200, json=snapshot))
     with pytest.raises(PaymentsProtocolError):
         client.ensure_agreement_attached(
-            data.transaction_id, terms, PaymentsOptionParams.model_validate(option(deposit=True).params)
+            data.transaction_id,
+            terms,
+            PaymentsOptionParams.model_validate(option(deposit=True).settlement_params),
         )
 
 
@@ -161,6 +170,8 @@ def test_deposit_accepts_duplicate_matching_attachments_without_posting():
         return httpx.Response(200, json=snapshot)
 
     stored = _client(handler).ensure_agreement_attached(
-        data.transaction_id, terms, PaymentsOptionParams.model_validate(option(deposit=True).params)
+        data.transaction_id,
+        terms,
+        PaymentsOptionParams.model_validate(option(deposit=True).settlement_params),
     )
     assert stored is not None and methods == ["GET"]

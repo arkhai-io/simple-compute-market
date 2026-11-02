@@ -73,12 +73,11 @@ def _alkahest_option() -> SettlementOption:
     }
     return SettlementOption(
         option_id=derive_settlement_option_id(
-            mechanism=ALKAHEST_MECHANISM_ID, asset=TOKEN, rates=rates, params=params
+            price={"asset": TOKEN, "rates": rates},
+            settlement={"schema": ALKAHEST_MECHANISM_ID, **(params or {})},
         ),
-        mechanism=ALKAHEST_MECHANISM_ID,
-        asset=TOKEN,
-        rates=rates,
-        params=params,
+        price={"asset": TOKEN, "rates": rates},
+        settlement={"schema": ALKAHEST_MECHANISM_ID, **(params or {})},
     )
 
 
@@ -104,7 +103,7 @@ async def storefront(db, fake_capacity, key_records, monkeypatch):
             ARKHAI_PAYMENTS_MECHANISM: None,
         },
         settlement_artifacts_builder=lambda agreement: SELLER_STAGES[
-            agreement["settlement"]["mechanism"]
+            agreement["settlement"]["settlement"]["schema"]
         ].agreement_artifacts(agreement, composition),
     )
     monkeypatch.setattr(container, "resolved_sqlite_client", db)
@@ -147,10 +146,9 @@ async def _open_selecting(app, option: SettlementOption, **params) -> dict:
             initial_amount=300,
             provision_terms=terms(3).model_dump(mode="json"),
             settlement_selection={
-                "mechanism": option.mechanism,
                 "option_id": option.option_id,
+                "settlement": {"schema": option.settlement_schema, **(params or {})},
                 "expiration_unix": 1_900_000_000,
-                **({"params": params} if params else {}),
             },
             selection_only=True,
         )

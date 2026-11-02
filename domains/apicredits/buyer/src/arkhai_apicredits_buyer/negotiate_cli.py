@@ -236,7 +236,7 @@ def register(credits_app: typer.Typer) -> None:
                 raise typer.BadParameter("run has no recorded settlement selection")
             mechanism = SettlementSelection.model_validate(
                 resume_point.settlement_selection,
-            ).mechanism
+            ).settlement_schema
             if mechanism not in BUYER_STAGES:
                 raise typer.BadParameter("unsupported recorded API-credit settlement mechanism")
 
@@ -348,7 +348,9 @@ def register(credits_app: typer.Typer) -> None:
                         f"listing {listing_id!r} has no installed, enabled, compatible "
                         "settlement option"
                     )
-                selected_stage = BUYER_STAGES[selected_settlement.selection.mechanism]
+                selected_stage = BUYER_STAGES[
+                    selected_settlement.selection.settlement_schema
+                ]
                 selected_settlement = selected_stage.prepare_selection(
                     selected_settlement, listing=listing_dict,
                     settlement_policy=settlement_policy, policy=_policy,

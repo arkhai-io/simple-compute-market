@@ -72,7 +72,7 @@ def test_extra_reverse_authorities_are_refused():
 
 def test_policy_requires_payments_selection_payer_and_trusted_policy():
     other = agreement()
-    other["settlement"] = dict(other["settlement"], mechanism="alkahest.v1")
+    other["settlement"]["settlement"]["schema"] = "alkahest.v1"
     with pytest.raises(MandatePolicyError):
         mandate_policy_for_agreement(other, config())
     missing_payer = agreement()

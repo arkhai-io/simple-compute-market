@@ -31,6 +31,7 @@ from core_storefront.models.listing_models import (
 )
 from core_storefront.publication_runner import NoSettlementOption
 from core_storefront.stage_log import stage_event
+from market_core.schemas import settlement_option_schema
 from arkhai_vms_listings.models import Listing
 from arkhai_vms_listings.resources import parse_resource_from_dict
 from arkhai_vms_negotiation.policies import _amount_from_proposal
@@ -543,7 +544,7 @@ class ListingService:
 
         kept_options, dropped_options = backing.admissible_settlement(
             settlement_options,
-            mechanism=_clause_mechanism,
+            mechanism=settlement_option_schema,
             fulfils_through_capacity=fulfils_through_capacity,
         )
         kept_clauses, _ = backing.admissible_settlement(

@@ -45,19 +45,31 @@ def _listing(mechanism):
         "literal_fields": {"token": "0x" + "bb" * 20},
         "rates": [{"field": "amount", "per": "hour", "value": "100"}],
     }
-    params = {"accepted_escrow": entry} if mechanism == "alkahest.v1" else {
-        "payee_account": "22222222-2222-4222-8222-222222222222", "asset": "USD",
-    }
+    params = (
+        {"accepted_escrow": entry}
+        if mechanism == "alkahest.v1"
+        else {
+            "payee_account": "22222222-2222-4222-8222-222222222222",
+        }
+    )
     asset = "0x" + "bb" * 20 if mechanism == "alkahest.v1" else "USD"
     rates = [RateValue(field="amount", per="hour", value=100)]
     return {
-        "listing_id": "L-1", "storefront_url": "http://seller", "publisher_id": "publisher",
+        "listing_id": "L-1",
+        "storefront_url": "http://seller",
+        "publisher_id": "publisher",
         "publisher_principals": seller_principals().model_dump(mode="json"),
-        "accepted_escrows": [entry], "settlement_options": [{
-            "mechanism": mechanism, "option_id": derive_settlement_option_id(
-                mechanism=mechanism, asset=asset, rates=rates, params=params,
-            ), "asset": asset, "rates": rates, "params": params,
-        }],
+        "accepted_escrows": [entry],
+        "settlement_options": [
+            {
+                "option_id": derive_settlement_option_id(
+                    price={"asset": asset, "rates": rates},
+                    settlement={"schema": mechanism, **(params or {})},
+                ),
+                "price": {"asset": asset, "rates": rates},
+                "settlement": {"schema": mechanism, **(params or {})},
+            }
+        ],
     }
 
 
@@ -97,9 +109,11 @@ def test_selected_stage_controls_fresh_prices_and_proposal(negotiation, monkeypa
     assert negotiation["initial_price"] == expected
     assert negotiation["max_price"] == expected * 1.5
     assert negotiation["escrow_proposal"] is None
-    assert negotiation["settlement_selection"].mechanism == mechanism
+    assert negotiation["settlement_selection"].settlement_schema == mechanism
     if mechanism == "arkhai.payments.v1":
-        assert negotiation["settlement_selection"].params == {"payer_account": "11111111-1111-4111-8111-111111111111"}
+        assert negotiation["settlement_selection"].settlement_params == {
+            "payer_account": "11111111-1111-4111-8111-111111111111"
+        }
 
 
 _DEMANDS = [{

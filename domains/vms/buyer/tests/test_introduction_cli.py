@@ -45,12 +45,11 @@ def _option(mechanism: str, rates: list) -> dict:
     params = {"profile": "default"}
     return {
         "option_id": derive_settlement_option_id(
-            mechanism=mechanism, asset="introduction", rates=rates, params=params
+            price={"asset": "introduction", "rates": rates},
+            settlement={"schema": mechanism, **(params or {})},
         ),
-        "mechanism": mechanism,
-        "asset": "introduction",
-        "rates": rates,
-        "params": params,
+        "price": {"asset": "introduction", "rates": rates},
+        "settlement": {"schema": mechanism, **(params or {})},
     }
 
 
@@ -100,4 +99,4 @@ def test_only_an_advertised_rateless_introduction_is_negotiated(
     (call,) = negotiated
     assert call["initial_price"] == 0.0 and call["max_price"] == 0.0
     assert call["provision_terms"].ssh_public_key == ""
-    assert call["settlement_selection"].mechanism == "contact-exchange.v1"
+    assert call["settlement_selection"].settlement_schema == "contact-exchange.v1"

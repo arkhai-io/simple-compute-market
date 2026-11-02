@@ -635,7 +635,7 @@ def _settlement_option_for_selection(
     if not isinstance(selection, dict):
         return None
     option_id = selection.get("option_id")
-    mechanism = selection.get("mechanism")
+    mechanism = selection.get("settlement", {}).get("schema")
     for option in _loads_json_list(listing.get("settlement_options")):
         if (
             isinstance(option, dict)
