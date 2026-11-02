@@ -358,7 +358,7 @@ Every derived mandate MUST authorize `extend` and `lift` for the agreement's dis
 
 ### Requirement: Respondent discovery is durable
 
-The mediation adapter MUST expose authenticated GET /respondent?after=<cursor>&limit=n and its cases, next_after and has_more result. The listing MUST contain open cases where the account is respondent and has not appended; any append MUST count as an answer. SCM MUST persist respondent cursor and answer intent before advancing, independently of deal watch.
+The mediation adapter MUST expose authenticated GET /respondent?after=<cursor>&limit=n and its cases, next_after and has_more result. The listing MUST contain open cases where the account is respondent and has not appended; any append MUST count as an answer. SCM MUST persist respondent cursor and answer intent before advancing, independently of deal watch. Foreign commitments MUST be skipped without local repair rows; temporarily unresolved local commitments MUST retry fairly without blocking discovery.
 
 #### Scenario: A seller restarts before answering
 
@@ -367,7 +367,7 @@ The mediation adapter MUST expose authenticated GET /respondent?after=<cursor>&l
 
 ### Requirement: SCM signs matching claims or contests them
 
-The storefront MUST compare ended_at, delivered and cause with durable available/end records. It MUST append SignedDeliveryEndClaim concurrence for a match, and contesting items otherwise, as payee account mandate.to. An append MUST contain items or concurrence. Dead or non-SCM respondents MUST remain triage cases, never a safety dependency.
+The storefront MUST compare ended_at, delivered and cause with durable available/end records. A payer claim MUST match the selected buyer end, not a superseded request. It MUST append SignedDeliveryEndClaim concurrence for a match, and contesting items otherwise, as payee account mandate.to. An append MUST contain items or concurrence. Dead or non-SCM respondents MUST remain triage cases, never a safety dependency.
 
 #### Scenario: A cooperative seller agrees
 
@@ -613,7 +613,7 @@ The dispute adapter MUST bind the semantic filing identity to commitment, Agreem
 #### Scenario: The full policy is enforced
 
 - **WHEN** the owning component validates or applies this contract
-- **THEN** The dispute adapter MUST bind the semantic filing identity to commitment, Agreement authority, cause/end revision and fixed request. It MUST resolve/adopt the equivalent case without a concurrent-writer duplicate. A prior mechanical delivery_end ruling MUST route revision to an operator. Revised or linked cases MUST carry prior ruling/effect references and net prior authority effects after unknown originals resolve. Unsupported identity/revision mapping MUST report repair required, not allocate another key or use append as amendment.
+- **THEN** The dispute adapter MUST bind the semantic filing identity to commitment, Agreement authority, cause/end revision and fixed request. It MUST resolve/adopt the equivalent case without a concurrent-writer duplicate. An unresolved original writer MUST remain retryable rather than become a terminal rejection. A prior mechanical delivery_end ruling MUST route revision to an operator. Revised or linked cases MUST carry prior ruling/effect references and net prior authority effects after unknown originals resolve. Unsupported identity/revision mapping MUST report repair required, not allocate another key or use append as amendment.
 
 #### Scenario: An operator and online replay submit one intent
 

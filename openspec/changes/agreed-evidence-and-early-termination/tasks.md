@@ -1694,6 +1694,16 @@ or deployed monetary-ruling qualification is claimed by this kit repair.
 
 ## Re-review 21/22 disposition — buyer and servicing kit
 
+Implementation evidence and clean-checkout replay:
+`docs/attachments/aeet-fix2-kit-buyer/index.md`. These refinements retain the
+existing closeout promotion destinations; no authority or financial policy
+changes are introduced. Validation: servicing 61 passed plus mypy (11 files),
+buyer lifecycle 20 passed, signed client 2 passed, both real buyer-port checks
+passed, semantic-filing checks passed, and first-use examples passed. Architecture,
+packaging, locks, comment hygiene and pinned strict OpenSpec validation passed.
+Full `make test` passed in 7m59s with the prescribed proxy environment and Podman
+shim. No hosted deployment or independent acceptance verdict is claimed.
+
 - **E-N7:** Operator end returns only its own filing result (or accepted local recording if superseded), repair reasons have one prefix, and buyer filing uses only the acknowledged receipt without unreachable observed-time fallbacks or a redundant contested flag. Kept journal plans still decode the obsolete field. Regressions cover unrelated terminal filings, exact diagnostics, receipt-backed recovery, and retained-plan replay.
 - **E-N5:** Respondent discovery drops cases with no local registered commitment, including inherited foreign repair rows; a locally registered but temporarily unresolved Agreement remains repairable. The bounded repair queue uses insertion order and moves a failed attempt to the back. Regressions cover shared-account foreign/local cases across reconstruction and fair local retry rotation.
 - **E-N3 / O-F6 respondent:** Payer concurrence now requires the matching buyer request to be the selected end. The real signed respondent regression records an earlier seller failure, then proves the explicit payer claim receives contesting end evidence rather than concurrence. Receipt and automatic buyer suppression remain unchanged.
