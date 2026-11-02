@@ -36,11 +36,11 @@ class MediationAdapter:
     supported_intents = frozenset({"delivery_end"})
 
     def __init__(
-        self, binding: DisputeBinding, agreement: dict, client: MediationClient, *,
+        self, binding: DisputeBinding, agreement: dict, client: MediationClient | None = None, *,
         clock: Callable[[], int] = lambda: int(time.time()),
         concurrence: SignedDeliveryEndClaim | None = None,
     ):
-        if client.authority != binding.authority:
+        if client is not None and client.authority != binding.authority:
             raise ValueError("client does not address the Agreement's authority")
         selected = agreement.get("settlement", {})
         authorities = [
@@ -54,9 +54,15 @@ class MediationAdapter:
         self.binding = binding
         self._agreement = json.loads(canonical_json(agreement))
         self.agreement_digest = hashlib.sha256(canonical_json(agreement)).hexdigest()
-        self.client = client
+        self._client = client
         self.clock = clock
         self._concurrence = concurrence.model_copy(deep=True) if concurrence is not None else None
+
+    @property
+    def client(self) -> MediationClient:
+        if self._client is None:
+            raise MediationError("Agreement mediation client is unavailable; receipt claims remain local")
+        return self._client
 
     def sign_delivery_end(self, intent: DeliveryEndIntent, signer: Signer) -> dict[str, JsonValue]:
         if signer.identity != Identity.model_validate(self._agreement["seller"]):

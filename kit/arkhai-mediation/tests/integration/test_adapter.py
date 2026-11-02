@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 from market_deal_lifecycle.adapters import (
-    DisputeAdapterTable, DisputeBinding, InterfaceRequest, submit_dispute,
+    DeliveryEndIntent, DisputeAdapterTable, DisputeBinding, InterfaceRequest, submit_dispute,
 )
 from market_deal_lifecycle.terms import DisputeAuthority
 from market_deal_lifecycle_contracts.models import LifecycleCommand
@@ -16,6 +16,7 @@ from market_arkhai_mediation.adapter import MediationAdapter
 from market_arkhai_mediation.client import MediationClient, MediationCredential
 from market_arkhai_mediation.contract import INTERFACE, wire
 from market_arkhai_mediation.fixtures.authority import MediationContractFake
+from market_arkhai_mediation.fixtures import market_signer
 
 
 class Operations:
@@ -63,6 +64,21 @@ class Scenario:
 
 def run(scenario):
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("scheme", ["ed25519", "eip191"])
+def test_receipt_claim_adapter_needs_no_online_credential(scheme):
+    peer = MediationContractFake()
+    signer = market_signer(scheme)
+    filing = peer.data["filing"]["request"]
+    authority = DisputeAuthority.model_validate(peer.authority)
+    binding = DisputeBinding("deal", filing["transaction"], authority)
+    agreement = {**filing["agreement"], "seller": signer.identity.model_dump(mode="json")}
+    adapter = MediationAdapter(binding, agreement)
+    intent = DeliveryEndIntent(ended_at=1800000000, delivered=True, cause="payer")
+    signed = adapter.sign_delivery_end(intent, signer)
+    assert adapter.verify_delivery_end(signed, intent)
+    assert asyncio.run(adapter.read()).outcome.status == "rejected"
 
 
 def test_two_cases_on_one_deal():

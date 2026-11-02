@@ -64,5 +64,8 @@ def test_concurrent_callers_coordinate_before_authority_write():
             assert len(peer.cases) == 1
         finally:
             proceed.set()
+            if not first.done():
+                first.cancel()
+            await asyncio.gather(first, return_exceptions=True)
             await s.client.close()
     asyncio.run(drive())
