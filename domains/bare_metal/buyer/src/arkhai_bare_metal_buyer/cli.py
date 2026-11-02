@@ -395,13 +395,13 @@ def buy_bare_metal(
         raise typer.BadParameter("option_id must identify one advertised option")
     selected = matches[0]
     try:
-        stage = BUYER_STAGES[selected.mechanism]
+        stage = BUYER_STAGES[selected.settlement_schema]
         stage.validate_option(selected)
     except (KeyError, ValueError) as exc:
         raise typer.BadParameter(
             "buy requires a supported priced settlement option"
         ) from exc
-    rate = selected.rates[0]
+    rate = selected.price_rates[0]
     amount = compute_rate_total(rate, duration_seconds)
     approval = payment_approval(buyer_config)
     run_log = RunLog.start(
@@ -419,7 +419,7 @@ def buy_bare_metal(
         source_registry_authority=buyer_config.registry_authority,
     )
     selection = SettlementSelection(
-        mechanism=selected.mechanism,
+        mechanism=selected.settlement_schema,
         option_id=selected.option_id,
         params={"payer_account": buyer_config.payer_account},
     )
@@ -527,12 +527,12 @@ def request_introduction(
     if len(matches) != 1:
         raise typer.BadParameter("option_id must identify one advertised option")
     selected = matches[0]
-    if selected.mechanism != CONTACT_MECHANISM or selected.rates:
+    if selected.settlement_schema != CONTACT_MECHANISM or selected.price_rates:
         raise typer.BadParameter(
             "option is not a rateless introduction; use `buy` for priced options"
         )
     selection = SettlementSelection(
-        mechanism=selected.mechanism,
+        mechanism=selected.settlement_schema,
         option_id=selected.option_id,
         expiration_unix=int(time.time()) + expiration_seconds,
     )

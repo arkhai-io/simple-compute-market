@@ -26,9 +26,9 @@ class PaymentStage:
 
     @staticmethod
     def validate_option(option: Any) -> None:
-        if len(option.rates) != 1:
+        if len(option.price_rates) != 1:
             raise ValueError("buy requires one priced payment option")
-        if option.rates[0].per != "hour":
+        if option.price_rates[0].per != "hour":
             raise ValueError("bare-metal purchase currently requires an hourly option")
 
     @staticmethod

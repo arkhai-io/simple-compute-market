@@ -73,7 +73,7 @@ def accepted_seller_stage(
             raise ValueError("Agreement differs from accepted negotiation")
         if agreement.settlement is None:
             raise ValueError("Agreement has no selected settlement")
-        return stages[agreement.settlement.mechanism]
+        return stages[agreement.settlement.settlement_schema]
     except (KeyError, TypeError, ValueError) as exc:
         raise SettlementRequestError(
             "accepted Agreement has no supported settlement stage"
@@ -266,7 +266,7 @@ class BareMetalSettlementService:
             )
         agreement = Agreement.model_validate_json(thread["agreement_bytes"])
         if (
-            record["mechanism"] != agreement.settlement.mechanism
+            record["mechanism"] != agreement.settlement.settlement_schema
             or record["agreement_sha256"]
             != hashlib.sha256(thread["agreement_bytes"]).hexdigest()
         ):

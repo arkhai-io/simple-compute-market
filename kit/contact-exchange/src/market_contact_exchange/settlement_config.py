@@ -7,7 +7,14 @@ import re
 from collections.abc import Collection, Mapping
 from typing import Any, Literal
 
-from market_core.schemas import SettlementOption, derive_settlement_option_id
+from market_core.schemas import (
+    SettlementOption,
+    derive_settlement_option_id,
+    settlement_option_asset,
+    settlement_option_params,
+    settlement_option_rates,
+    settlement_option_schema,
+)
 from market_settlement_runtime import (
     AcceptedObligationArtifacts,
     ComparisonOperator,
@@ -455,9 +462,9 @@ def contact_buyer_compatibility(
     if not config.enabled:
         return False
     return (
-        _value(option, "mechanism") == MECHANISM
-        and _value(option, "asset") == INTRODUCTION_ASSET
-        and not _value(option, "rates")
+        settlement_option_schema(option) == MECHANISM
+        and settlement_option_asset(option) == INTRODUCTION_ASSET
+        and not settlement_option_rates(option)
     )
 
 
@@ -475,19 +482,19 @@ def contact_accepted_obligation_builder(
 
     config = ContactSettlementConfig.model_validate(section)
     selected = SettlementOption.model_validate(option)
-    if selected.rates:
+    if selected.price_rates:
         raise ValueError("contact exchange declines scalar rates")
     buyer = _principal_json(context.get("buyer_principal"))
     seller = _principal_json(context.get("seller_principal"))
     expiration_unix = int(context.get("expiration_unix") or 0)
     if expiration_unix <= 0:
         raise ValueError("introduction acceptance requires an expiration")
-    advertised_claimant = selected.params.get("claimant_principal")
+    advertised_claimant = selected.settlement_params.get("claimant_principal")
     if not isinstance(advertised_claimant, Mapping) or (
         dict(advertised_claimant) != seller
     ):
         raise ValueError("contact option claimant does not match the listing seller")
-    params = dict(selected.params)
+    params = dict(selected.settlement_params)
     for key in context.get("domain_param_keys", ()):
         params.pop(key, None)
     # Principals bind into the obligation params exactly as buyers rebuild
@@ -522,7 +529,7 @@ def contact_accepted_obligation_builder(
             # ``asset`` is the nominal deliverable tag from the advertised
             # option; the amount stays absent — the deal's value does not
             # reduce to a number.
-            "asset": selected.asset,
+            "asset": selected.price_asset,
             "expiration_unix": expiration_unix,
             "conditions": [],
             "mechanism": MECHANISM,
@@ -536,7 +543,7 @@ def contact_accepted_obligation_builder(
 def contact_channel_projection(option: Any) -> str | None:
     """Project the exact advertised introduction channel."""
 
-    params = _value(option, "params", {})
+    params = settlement_option_params(option)
     value = _value(params, "channel") if isinstance(params, Mapping) else None
     return value if isinstance(value, str) and value else None
 

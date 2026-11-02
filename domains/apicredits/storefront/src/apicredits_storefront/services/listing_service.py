@@ -15,6 +15,7 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
+from market_core.schemas import settlement_option_schema
 from core_storefront.stage_log import stage_event
 from market_alkahest import ALKAHEST_MECHANISM_ID
 from market_identity import Identity
@@ -142,7 +143,7 @@ def _admissible_settlement_terms(
     backing = pool.declaration.backing
     kept_options, dropped = backing.admissible_settlement(
         settlement_options,
-        mechanism=lambda option: str(option.get("mechanism")),
+        mechanism=lambda option: str(settlement_option_schema(option)),
         fulfils_through_capacity=_fulfils_through_capacity,
     )
     if accepted_escrows:

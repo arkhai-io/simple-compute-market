@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12, <3.14"
 
 [[package]]
@@ -236,6 +236,7 @@ version = "0.11.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "alkahest-py" },
+    { name = "arkhai-core" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-settlement-runtime" },
     { name = "pydantic" },
@@ -316,6 +317,7 @@ name = "arkhai-kit-policy"
 version = "0.6.0"
 source = { registry = "../../../.dist" }
 dependencies = [
+    { name = "arkhai-core" },
     { name = "arkhai-kit-identity" },
     { name = "pydantic" },
     { name = "typer" },

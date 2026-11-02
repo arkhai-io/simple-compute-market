@@ -24,6 +24,7 @@ import logging
 from collections.abc import Mapping
 from typing import Any, Optional
 
+from market_core.schemas import settlement_option_schema, settlement_option_rates
 from market_policy.negotiation_middleware import (
     NegotiationContext,
     NegotiationDecision,
@@ -639,7 +640,7 @@ def _settlement_option_for_selection(
         if (
             isinstance(option, dict)
             and option.get("option_id") == option_id
-            and option.get("mechanism") == mechanism
+            and settlement_option_schema(option) == mechanism
         ):
             return option
     return None
@@ -710,7 +711,7 @@ def option_uses_scalar_amount(option: dict[str, Any] | None) -> bool:
     """
     if not isinstance(option, dict):
         return True
-    for rate in option.get("rates") or []:
+    for rate in settlement_option_rates(option):
         field = (
             rate.get("field")
             if isinstance(rate, dict)

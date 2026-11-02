@@ -8,6 +8,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
 
+from market_core.schemas import settlement_option_schema
 from core_storefront.stage_log import stage_event
 from market_alkahest.alkahest import get_escrow_codec_for
 from market_alkahest.plans import escrow_terms_from_settlement_plan
@@ -411,7 +412,7 @@ def _accepted_mechanism(thread: dict[str, Any]) -> str | None:
     except ValueError:
         return None
     selected = agreement.get("settlement") if isinstance(agreement, dict) else None
-    mechanism = selected.get("mechanism") if isinstance(selected, dict) else None
+    mechanism = settlement_option_schema(selected) if isinstance(selected, dict) else None
     return mechanism if isinstance(mechanism, str) else None
 
 

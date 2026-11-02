@@ -62,7 +62,7 @@ def payment_selection_for_listing(
         )
         if candidate is None:
             return None
-        mechanism = candidate.mechanism
+        mechanism = candidate.settlement_schema
         option_id = candidate.option_id
     else:
         selected = policy.select(listing, expiration_unix=expiration_unix)
@@ -147,7 +147,7 @@ def settle_api_credit_payment(
     advertised = SettlementOption.model_validate(advertised_value)
     if (
         parsed_agreement.settlement != advertised
-        or selected.mechanism != advertised.mechanism
+        or selected.mechanism != advertised.settlement_schema
     ):
         raise ValueError("accepted Agreement differs from the selected listing option")
     if selected is not None and dict(selected.params or {}) != dict(

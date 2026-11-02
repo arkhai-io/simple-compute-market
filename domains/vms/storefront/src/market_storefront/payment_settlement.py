@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 from functools import partial
 from typing import Any
 
+from market_core.schemas import settlement_option_schema
 from arkhai_vms import normalize_vm_provision_terms
 from core_storefront.domain_lifecycle import (
     StorefrontFulfillmentContext,
@@ -88,7 +89,7 @@ class VmPaymentsCoordinator:
         return self.locks.setdefault(negotiation_id, asyncio.Lock())
 
     def _entry(self, agreement: dict[str, Any]) -> Any:
-        return self.domain.settlement.seller_stages[agreement["settlement"]["mechanism"]]
+        return self.domain.settlement.seller_stages[settlement_option_schema(agreement["settlement"])]
 
     async def stop(self) -> None:
         tasks = list(self.tasks.values())
@@ -301,7 +302,7 @@ class VmPaymentsCoordinator:
         return {
             "action": "refund",
             "status": "refunded" if status == "refunded" else "skipped",
-            "escrow_kind": agreement["settlement"]["mechanism"],
+            "escrow_kind": settlement_option_schema(agreement["settlement"]),
             "settlement_ref": result.payload.get("settlement_ref"),
         }
 

@@ -156,12 +156,12 @@ def request_introduction(
     if len(matches) != 1:
         raise typer.BadParameter("option_id must identify one advertised option")
     selected = matches[0]
-    if selected.mechanism != CONTACT_MECHANISM or selected.rates:
+    if selected.settlement_schema != CONTACT_MECHANISM or selected.price_rates:
         raise typer.BadParameter(
             "option is not a rateless introduction; use `buy` for priced options"
         )
     selection = SettlementSelection(
-        mechanism=selected.mechanism,
+        mechanism=selected.settlement_schema,
         option_id=selected.option_id,
         expiration_unix=int(time.time()) + expiration_seconds,
     )

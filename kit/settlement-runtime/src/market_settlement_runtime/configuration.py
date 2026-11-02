@@ -29,7 +29,7 @@ from pydantic import (
 )
 
 from market_core.query_dsl import FieldDescriptor, field_reference_json
-from market_core.schemas import SettlementOption
+from market_core.schemas import SettlementOption, settlement_option_rates
 from .ports import ConditionalEscrowClient
 
 SETTLEMENT_CONFIG_SCHEMA_VERSION = 1
@@ -224,11 +224,7 @@ def reject_scalar_rates_for_non_scalar(mechanism_id: str, built: Any) -> None:
     if not isinstance(built, Mapping):
         return
     for option in built.get("settlement_options") or []:
-        rates = (
-            option.get("rates")
-            if isinstance(option, Mapping)
-            else getattr(option, "rates", None)
-        )
+        rates = settlement_option_rates(option)
         for rate in rates or []:
             field = (
                 rate.get("field")

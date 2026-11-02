@@ -146,7 +146,7 @@ class BuyerSettlementPolicy:
 
         supported = tuple(
             option for option in _decode_options(tuple(advertised))
-            if option.mechanism in self.stages
+            if option.settlement_schema in self.stages
         )
         result = select_settlement_candidates(
             supported,
@@ -172,7 +172,7 @@ class BuyerSettlementPolicy:
         result = select_settlement_candidates(
             tuple(
                 option for option in _decode_options(listing.get("settlement_options"))
-                if option.mechanism in self.stages
+                if option.settlement_schema in self.stages
             ),
             registry=self.registry,
             config=self.config,
@@ -186,7 +186,7 @@ class BuyerSettlementPolicy:
         return SelectedSettlementOption(
             option=option,
             selection=SettlementSelection(
-                mechanism=option.mechanism,
+                mechanism=option.settlement_schema,
                 option_id=option.option_id,
                 expiration_unix=expiration_unix,
             ),

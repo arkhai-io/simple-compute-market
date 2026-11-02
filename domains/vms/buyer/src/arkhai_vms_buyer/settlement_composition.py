@@ -73,7 +73,7 @@ def accepted_listing_record(match: Mapping[str, Any], _proposal: Any) -> dict[st
 def validate_buyer_acceptance(outcome) -> None:
     if outcome.agreement is None or outcome.agreement.settlement is None:
         raise RuntimeError("accepted work has no Agreement settlement option")
-    buyer_stage(outcome.agreement.settlement.mechanism).validate_acceptance(outcome)
+    buyer_stage(outcome.agreement.settlement.settlement_schema).validate_acceptance(outcome)
 
 
 def _alkahest_command_group():

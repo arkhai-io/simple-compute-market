@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from functools import partial
 from typing import Any
 
+from market_core.schemas import settlement_option_schema
 from arkhai_vms import VmProvisionTerms, normalize_vm_provision_terms
 from core_storefront.domain_lifecycle import (
     StorefrontFulfillmentContext,
@@ -474,7 +475,7 @@ async def fulfill_vm_settlement(
         negotiation_id=evidence.negotiation_id
     )
     agreement = json.loads(thread["agreement_bytes"])
-    stage = domain.settlement.seller_stages[agreement["settlement"]["mechanism"]]
+    stage = domain.settlement.seller_stages[settlement_option_schema(agreement["settlement"])]
     lifecycle = await fulfill_domain(
         domain,
         StorefrontFulfillmentContext(

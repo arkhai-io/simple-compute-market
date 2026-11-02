@@ -96,7 +96,7 @@ def test_payment_selection_attaches_buyer_account_without_alkahest_resources() -
             assert tuple(advertised) == ({"option_id": option_id},)
             registration = SimpleNamespace(mechanism_id=ARKHAI_PAYMENTS_MECHANISM)
             option = SimpleNamespace(
-                mechanism=ARKHAI_PAYMENTS_MECHANISM, option_id=option_id
+                settlement_schema=ARKHAI_PAYMENTS_MECHANISM, option_id=option_id
             )
             return ((registration, option),)
 
