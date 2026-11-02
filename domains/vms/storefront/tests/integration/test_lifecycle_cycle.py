@@ -61,7 +61,7 @@ async def test_released_delivery_recovers_a_lost_report_then_stops_polling(make,
         ), SITE)
         later = sign_lease_end(LeaseEndedEvent(
             event_id="later-release-failure", capacity_reservation_id=RESERVATION, site_id=SITE_ID,
-            effective_at=h.lifecycle.clock() + 1, cause="release_failure", source_state="releasing",
+            effective_at=h.lifecycle.clock() + 1, cause="release_failed", source_state="releasing",
         ), SITE)
         if partial_push:
             h.lifecycle.ingress.site_report(NEGOTIATION, body=later.model_dump_json().encode(), headers={})
@@ -73,7 +73,10 @@ async def test_released_delivery_recovers_a_lost_report_then_stops_polling(make,
         await h.lifecycle.recover_site_reports(NEGOTIATION)
         assert get_lease.await_count == 2
         with transaction(h.lifecycle.path) as conn:
-            view = EndSession(conn).view(NEGOTIATION)
+            end = EndSession(conn)
+            view = end.view(NEGOTIATION)
+            assert next(request for request in end.requests(NEGOTIATION)
+                        if request.source_ref == "site-event:later-release-failure").cause == "release_failed"
         assert view.progress == "released"
         assert {item.evidence_id for item in view.site_reports} == {
             "site-event:recovered-end", "site-event:later-release-failure",

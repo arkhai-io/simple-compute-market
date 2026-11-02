@@ -375,11 +375,16 @@ class EndSession:
             raise ValueError("never-delivered correction must preserve its fixed basis")
         if filing.not_before < claim.ended_at:
             raise ValueError("a filing cannot be future-dated")
-        # A later source is evidence of an already ended deal, not a revision
-        # of its financial claim. A genuinely earlier source still needs filing.
+        # A classified earlier end settles whether a financial claim is owed.
+        # An unclassified report cannot discharge this seller failure's filing.
         selected = self.selected_end(request.negotiation_id)
-        if selected is None or selected.source_ref != request.source_ref:
-            return
+        if selected is not None and selected.source_ref != request.source_ref:
+            classification = self.conn.execute(
+                """SELECT classification FROM servicing_final_requests
+                   WHERE negotiation_id=? AND source_ref=?""", (request.negotiation_id, selected.source_ref),
+            ).fetchone()[0]
+            if classification is not None:
+                return
         self.journal(
             request.negotiation_id, "filing", command.operation_key,
             command.model_dump(mode="json"), not_before=filing.not_before,

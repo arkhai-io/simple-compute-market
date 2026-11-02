@@ -470,8 +470,12 @@ class VmDealLifecycle:
         if not negotiation_id:
             return
         raw = await request.body()
-        acceptance = self.accepted(negotiation_id) if payload.get("action") == "accept" and payload.get("agreement_bytes") else None
-        with transaction(self.path) as conn, atomic(conn):
+
+        def capture(conn):
+            acceptance = (
+                self.accepted(negotiation_id)
+                if payload.get("action") == "accept" and payload.get("agreement_bytes") else None
+            )
             session = EvidenceSession(conn)
             message_id = "buyer-envelope:" + hashlib.sha256(canonical_json(dict(request.headers)) + raw).hexdigest()
             session.capture(
@@ -506,3 +510,5 @@ class VmDealLifecycle:
                     negotiation_id, message_id=message_id, accepted_by=self.signer.identity,
                     expires_at=expiry, terms=decode_terms(agreement["settlement"].get("lifecycle")),
                 )
+
+        await in_transaction(self.path, capture)

@@ -1806,3 +1806,41 @@ no unreviewed permanent lifecycle document is synthesized to satisfy the check.
   `docs/attachments/aeet-rereview-domain/index.md`. No resident server or external
   deployment was started; change-wide review, promotion and archival remain the
   owner's section 16 closeout, not work completed by this repair assignment.
+
+## Confirmation review 23 disposition — N1–N3
+
+Repair plan (base `7c303dba1`):
+
+- N1: constrain `kit/deal-servicing/src/market_deal_servicing/journal.py`
+  suppression to classified selected ends. Extend the kept correction-adoption
+  regression across classified/pending sources, both arrival orders, replay and
+  seller-read filing visibility.
+- N2: move VM `deal_lifecycle.py` negotiation capture's accepted-Agreement read
+  and evidence write into the existing database-worker transaction boundary.
+  Extend the busy independent-writer regression to acceptance capture and check
+  both retained envelopes plus acceptance expiry.
+- N3: correct the VM lifecycle-cycle fixture to the producer's `release_failed`
+  cause, asserting that vocabulary after real ingress/history recovery.
+- Validation: prove all three regressions fail on the reviewed source, run the
+  affected servicing and VM integration checks, then architecture, packaging,
+  locks, comment hygiene, pinned strict OpenSpec validation and full shim-backed
+  `make test` with the prescribed proxy exclusions.
+- Closeout: retain section 16's existing comment/import/documentation compliance,
+  narrative compression, roadmap/campaign currency, packaging, end-to-end
+  evidence, promotion, citations and archival work. These are corrections of
+  existing decisions, not new authority or remedy policy. The pending-source
+  rule promotes with the deal-lifecycle specification/architecture; the worker
+  boundary promotes with servicing architecture at 16.9.
+
+Regression sensitivity before repair: N1 fails with zero rather than one filing
+for report-first pending evidence (the other eight correction checks pass).
+N2 fails the independent-writer event-loop progress assertion; N3 fails the
+recovered cause assertion in both cycle orderings. Repaired focused re-drive:
+servicing 63 passed and mypy passed (11 source files); VM lifecycle database,
+cycle and payment-settlement integration checks 28 passed. The pending-report
+case retains exactly one filing in both arrival orders, including replay and
+the asynchronous seller read. The capture case persists both envelopes and the
+accepted mandate's expiry while the independent writer releases promptly.
+Architecture, fresh-wheelhouse packaging, locks, comment hygiene and pinned
+strict validation of this change pass. Full `make test` and the final replay
+packet are recorded in the validation continuation below.

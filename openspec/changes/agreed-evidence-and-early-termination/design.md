@@ -755,7 +755,10 @@ recorded by this design pass; task 8.1 alone records it in payments schema/SOURC
   required authority records before applying the frozen Agreement window.
 
 The end journal treats later superseded sources as evidence, not new financial
-revisions. Only a newly selected end requires a filing; genuinely earlier late
+revisions once the selected end is classified. A pending selected site report
+cannot discharge an independently established seller failure: keep its filing
+in either arrival order and expose its progress on the seller read. Only a
+classified selected end suppresses a new later filing; genuinely earlier late
 evidence can still require a revision. Pending report resolution accepts an
 explicit controlling source, validates its classification and retained filing,
 and adopts it without changing the report's original request. Respondent payer
