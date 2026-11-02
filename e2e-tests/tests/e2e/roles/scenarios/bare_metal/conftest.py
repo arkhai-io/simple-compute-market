@@ -217,15 +217,21 @@ def site_capacity() -> SiteCapacity:
     )
 
 
-@pytest.fixture(scope="module")
-def buyer_config() -> dict[str, str]:
-    """The buyer's wallet, for the on-chain escrow; its key is its signer's."""
+def buyer_wallet_config(ssh_public_key: str) -> dict[str, str]:
+    """EVM settlement wallet inputs, independent of marketplace signing."""
+    private_key = settings.get("BARE_METAL_LANE", {}).get("buyer_wallet_private_key")
     return {
-        "private_key": lane_setting("buyer_credential"),
+        "private_key": str(private_key) if private_key else lane_setting("buyer_credential"),
         "wallet_address": lane_setting("buyer_wallet_address"),
         "rpc_url": lane_setting("buyer_rpc_url"),
-        "ssh_public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForE2E test@e2e",
+        "ssh_public_key": ssh_public_key,
     }
+
+
+@pytest.fixture(scope="module")
+def buyer_config() -> dict[str, str]:
+    # Offline placeholder for mock provisioning only; never use on a public network.
+    return buyer_wallet_config("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForE2E test@e2e")
 
 
 @pytest.fixture(scope="module")

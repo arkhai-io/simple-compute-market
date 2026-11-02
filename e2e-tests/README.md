@@ -219,6 +219,29 @@ access observation. Only public-key authentication refusal proves revocation; a
 transport or host-key failure fails the observation. It remains outside default
 lanes and skips when its configuration is absent.
 
+### Marketplace signing and controlled EVM settlement
+
+Real provisioning modules use the existing controlled Anvil/Alkahest settlement.
+Marketplace signing is independent of that wallet. In an external
+`CONFIG_DIRECTORY` profile, VM settings accept `buyer.marketplace_scheme`
+(default `eip191`) and the existing `buyer.marketplace_credential`;
+`seller.marketplace_scheme` (default `eip191`) and
+`seller.marketplace_credential` (fallback `seller.private_key`); and
+`registry.authority_scheme` (default `eip191`). The second registry uses the same
+`authority_scheme` field. Publisher pins use the seller marketplace principal,
+while administrator and service credentials keep their separate roles.
+`buyer.private_key`, `buyer.wallet_address` and `buyer.chain_rpc_url` remain EVM
+wallet/chain inputs.
+
+Bare-metal lane marketplace signing retains `buyer_scheme` and
+`buyer_credential`. Set `bare_metal_lane.buyer_wallet_private_key` for its separate
+EVM key; existing local profiles fall back to `buyer_credential`. Its
+`buyer_wallet_address` and `buyer_rpc_url` are unchanged. Ed25519 credentials use
+the identity kit's canonical unpadded base64url encoding. Keep secret values in
+private external configuration, never in `REAL_PROVISIONING_TARGET` or committed
+profiles. Existing local/mock profiles retain their current defaults. These are
+test fixture inputs, not changes to the public buyer CLI or service trust.
+
 ### Real VM provisioning
 
 `e2e_vm_real_provisioning` runs the canonical compute deal against a real KVM
