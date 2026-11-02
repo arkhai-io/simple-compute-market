@@ -137,7 +137,8 @@ def derive_part_terms(
             raise ValueError("dispute authority requires a payments account")
         supported = frozenset({"charged", "returned", "prorated", "chosen"})
         stops = derive_stop_authorities(
-            lifecycle.early_termination, payer=policy.buyer_account,
+            lifecycle.early_termination if kind == "rate" else None,
+            payer=policy.buyer_account,
             payee=policy.option.payee_account, dispute=dispute,
             stoppable=kind == "rate", supported_partial_periods=supported,
         )
@@ -170,6 +171,8 @@ def derive_mandate(agreement_json: dict[str, Any], policy: MandatePolicy) -> Man
 
     if not isinstance(agreement_json, dict):
         raise MandatePolicyError("agreement must be a JSON object")
+    if policy.lifecycle.early_termination is not None:
+        raise MandatePolicyError("early_termination requires a stoppable part")
     try:
         accepted_at = _utc_seconds(policy.accepted_at, "accepted_at")
         start_utc = _utc_seconds(policy.start_utc, "start_utc")

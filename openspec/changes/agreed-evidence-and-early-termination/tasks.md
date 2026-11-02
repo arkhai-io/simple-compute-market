@@ -697,7 +697,9 @@ settle by negotiation". Files: `kit/arkhai-payments/schema/`, `src/market_arkhai
       Implemented: absolute once term ends (fractional ends round up), afterStop
       holds, exact authority-only extensions and nullable caps. `derive_part_terms`
       supplies the same setup and rate authority/end mapping to later builders;
-      once-only derivation refuses early termination and bonds. Payments kit:
+      once-only derivation refuses early termination and bonds. Setup once parts
+      in a rate-bearing option ignore its rate entitlements and retain no stops.
+      Payments kit:
       92 tests, mypy, model/resource drift and producer vectors pass. A temporary
       diagnostic exercised zero/bounded/unbounded caps, setup end, and payer/payee/
       dispute rate entries with exact notice/treatment. Promotion remains closeout.
