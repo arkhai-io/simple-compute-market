@@ -1842,5 +1842,10 @@ case retains exactly one filing in both arrival orders, including replay and
 the asynchronous seller read. The capture case persists both envelopes and the
 accepted mandate's expiry while the independent writer releases promptly.
 Architecture, fresh-wheelhouse packaging, locks, comment hygiene and pinned
-strict validation of this change pass. Full `make test` and the final replay
-packet are recorded in the validation continuation below.
+strict validation of this change pass. Full shim-backed `make test` passes on
+repair commit `fd85d9873` in 7m54s with the prescribed proxy exclusions. Included:
+VM unit 1196 passed (one existing optional skip), VM integration 524 passed,
+kit typing, provisioning/domain suites, release tooling and Helm structural/render
+checks. Replay setup, before/after observations and final qualification:
+`docs/attachments/aeet-fix3/index.md`. No hosted deployment, resident server or
+change-wide closeout/promotion is claimed by this repair round.
