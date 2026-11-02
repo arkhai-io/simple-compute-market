@@ -23,6 +23,7 @@ class FileEvidenceStore:
         with self._connection() as db:
             db.execute("CREATE TABLE IF NOT EXISTS evidence (negotiation_id TEXT PRIMARY KEY, record TEXT NOT NULL)")
             db.execute("CREATE TABLE IF NOT EXISTS requests (request_id TEXT PRIMARY KEY, negotiation_id TEXT NOT NULL)")
+            db.execute("CREATE TABLE IF NOT EXISTS commitments (negotiation_id TEXT, commitment_ref TEXT, acceptance_id TEXT NOT NULL, PRIMARY KEY (negotiation_id, commitment_ref))")
 
     @contextmanager
     def _connection(self):
@@ -100,10 +101,48 @@ class FileEvidenceStore:
         with self._connection() as db:
             record = self._read(db, negotiation_id)
             attempts = {old.commitment_ref: old for old in record.commitments}
+            previous = attempts.get(commitment_ref)
+            if previous is not None and previous.superseded:
+                attempt = previous
             if not attempt.superseded:
                 attempts = {ref: old.model_copy(update={"superseded": True}) for ref, old in attempts.items()}
             attempts[attempt.commitment_ref] = attempt
             self._save(db, record.model_copy(update={"commitments": list(attempts.values())}))
+            acceptances = self._acceptances(record)
+            if acceptances:
+                db.execute("INSERT OR IGNORE INTO commitments VALUES (?, ?, ?)",
+                           (negotiation_id, commitment_ref, acceptances[-1].evidence_id))
+
+    @staticmethod
+    def _acceptances(record: EvidenceRecord) -> list[EvidenceItem]:
+        acceptances = []
+        for item in record.items:
+            if item.kind != "signed_response" or item.context.get("role") != "seller":
+                continue
+            try:
+                payload = json.loads(item.body)
+            except (ValueError, UnicodeDecodeError):
+                continue
+            if isinstance(payload, dict) and payload.get("action") == "accept" and isinstance(payload.get("agreement_bytes"), str):
+                acceptances.append(item)
+        return acceptances
+
+    async def case_material(self, negotiation_id: str, commitment_ref: str | None = None) -> tuple[EvidenceRecord, str, EvidenceItem]:
+        with self._connection() as db:
+            record = self._read(db, negotiation_id)
+            attempts = [a for a in record.commitments if
+                        (a.commitment_ref == commitment_ref if commitment_ref is not None else not a.superseded)]
+            if len(attempts) != 1:
+                raise ValueError("case export requires one retained commitment")
+            selected = attempts[0].commitment_ref
+            row = db.execute("SELECT acceptance_id FROM commitments WHERE negotiation_id = ? AND commitment_ref = ?",
+                             (negotiation_id, selected)).fetchone()
+            if row is None:
+                raise ValueError("commitment has no retained acceptance binding")
+            acceptance = next((item for item in record.items if item.evidence_id == row[0]), None)
+            if acceptance is None:
+                raise ValueError("commitment acceptance is missing")
+            return record, selected, acceptance
 
     async def set_acceptance_expiry(self, negotiation_id: str, expires_at: int) -> None:
         with self._connection() as db:
@@ -124,9 +163,11 @@ class FileEvidenceStore:
                 return False
             db.execute("DELETE FROM evidence WHERE negotiation_id = ?", (expected.negotiation_id,))
             db.execute("DELETE FROM requests WHERE negotiation_id = ?", (expected.negotiation_id,))
+            db.execute("DELETE FROM commitments WHERE negotiation_id = ?", (expected.negotiation_id,))
             return True
 
     async def delete(self, negotiation_id: str) -> None:
         with self._connection() as db:
             db.execute("DELETE FROM evidence WHERE negotiation_id = ?", (negotiation_id,))
             db.execute("DELETE FROM requests WHERE negotiation_id = ?", (negotiation_id,))
+            db.execute("DELETE FROM commitments WHERE negotiation_id = ?", (negotiation_id,))

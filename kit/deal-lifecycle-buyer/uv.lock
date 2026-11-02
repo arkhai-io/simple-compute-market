@@ -122,6 +122,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "arkhai-core" },
     { name = "arkhai-core-buyer" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -137,6 +138,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "arkhai-core", specifier = ">=0.5.0" },
     { name = "arkhai-core-buyer", specifier = ">=0.6.0" },
     { name = "pytest", specifier = ">=8.3.4,<9.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.25" },

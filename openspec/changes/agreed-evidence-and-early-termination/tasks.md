@@ -366,7 +366,7 @@ and the negotiation controllers that consume it), new `kit/deal-lifecycle-buyer`
       nothing it cannot read; deals with no lifecycle terms or no adapter, including today's
       Alkahest deals, kept. Verify: unit tests for each retention scenario with a fake reader;
       "A buyer prunes"; "An Alkahest deal's envelopes are kept".
-- [ ] 6.4 Add case export: one bundle with the commitment reference, terms, claim, requested
+- [x] 6.4 Add case export: one bundle with the commitment reference, terms, claim, requested
       outcome and ordered evidence items carrying exact bytes. Verify: unit test ("A buyer files
       a dispute" payload half).
 
@@ -374,6 +374,14 @@ Verification point: unit and library-integration suites of `kit/deal-lifecycle-b
 storefront-client and identity unit suites; `make check-architecture` (buyer-side area rule);
 `make test`. End-to-end: `e2e_deal_buyer_cli` must keep passing with capture enabled in the
 buyer CLI; none checks the stored envelopes.
+
+### Buyer evidence implementation checkpoint (2026-11-02)
+
+- `kit/deal-lifecycle-buyer` provides a transactional file store, a synchronous capture sink, superseded commitment/acceptance bindings, complete-observation retention, composable prune/export commands and exact-byte case export. VM and bare-metal CLI negotiation paths pass the profile-adjacent store; payment and VM escrow paths record references once known.
+- The command factory accepts an injected fresh reader and an exact-Agreement-to-terms projection. The projection belongs to the buyer composition and uses the option accessor; the buyer-side kit imports neither core buyer nor the core Agreement carrier. Domain lifecycle command registration and live authority-reader composition remain in 7.4.
+- The production HTTP negotiation integration reopens the store in the pre-payment acceptance callback. Retention covers running deals, recovery, every payout, open/closed cases, uncommitted expiry, missing terms/adapters, unavailable reads and concurrent capture. Export drives both composed commands and preserves superseded Agreements and binary evidence.
+- Focused checks: buyer evidence 18 passed; core buyer 159 passed; storefront client 68 passed; core storefront 225 passed; VM buyer 213 passed; bare-metal buyer 16 passed. `make check-architecture`, `make check-packaging`, `make check-comment-hygiene` and strict OpenSpec validation pass. Full-suite and end-to-end results are recorded separately; no live hosted or deployment-qualified end-to-end evidence is claimed here.
+- Durable behavior and rationale are scheduled for `openspec/specs/deal-lifecycle/spec.md` and its architecture companion, with buyer composition details in `openspec/specs/buyer-orchestration/architecture.md`, at 16.9. `kit/deal-lifecycle-buyer/README.md` documents the installed API and reproducible first use now.
 
 ## 7. Lifecycle client and the buyer half
 
