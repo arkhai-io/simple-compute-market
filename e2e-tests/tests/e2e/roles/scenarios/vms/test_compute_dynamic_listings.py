@@ -165,10 +165,9 @@ class TestComputeDynamicListings:
         host registered the projection is empty and `test_02`'s reserve is
         refused with "No available compute VM matched required attributes".
 
-        Registered through the admin API rather than a mounted inventory file:
-        `inventory_path` is docker-compose-specific while the canonical Helm
-        deployment supplies inventory as an inline secret, and a mount is shared
-        state no scenario declares. The projection pull that follows is asserted
+        Registered through the admin API rather than a mounted host definitions
+        document, which is deployment configuration every scenario on the stack
+        would share and no scenario declares. The projection pull that follows is asserted
         rather than slept out.
         """
         require_state(dynamic_state, "storefront_held")
@@ -345,10 +344,9 @@ class TestFungibleComputeDynamicListings:
         declarations into one entry carrying `resource_count`, which is the source
         the storefront publishes a fungible listing from.
 
-        Registered through the admin APIs rather than a mounted inventory file:
-        `inventory_path` is docker-compose-specific while the canonical Helm
-        deployment supplies inventory as an inline secret, and a mount is shared
-        state no scenario declares. The projection pull that follows is asserted
+        Registered through the admin APIs rather than a mounted host definitions
+        document, which is deployment configuration every scenario on the stack
+        would share and no scenario declares. The projection pull that follows is asserted
         rather than slept out.
         """
         members = ("compute-e2e-fungible-a", "compute-e2e-fungible-b")

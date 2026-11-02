@@ -881,7 +881,7 @@ templates/configmap.yaml,templates/deployment.yaml,tests/test_render.py}`;
 `e2e-bare-metal-dev-env` and the comment above `deploy-helm`;
 `dev-env/bare-metal/hosts.ini`, replaced by a host document.
 
-- [ ] 5.1 The chart (D3). Add `definitions.hosts: {}` to `values.yaml`, with its
+- [x] 5.1 The chart (D3). Add `definitions.hosts: {}` to `values.yaml`, with its
   line in the header comment (retained when unnamed; an entry declares its whole
   host); remove `config.inventory_path` and correct the persistence comment that
   says hosts reseed "from the secret-overlay". `configmap.yaml` renders a
@@ -896,7 +896,31 @@ templates/configmap.yaml,templates/deployment.yaml,tests/test_render.py}`;
   definitions path" and the ConfigMap checksum changing with the document; extend
   the existing per-kind tests' table with `hosts`. Run `make -C helm
   test-render`.
-- [ ] 5.2 Deployment scripts and compose (D2, D3). `topology-secrets.sh` stops
+  *Done, its render tests unrun here.* `values.yaml` gains `definitions.hosts:
+  {}`, its header lines (hosts retained and reported; an entry declares its
+  whole host; the example; validate-only before a release under `Recreate`),
+  drops `config.inventory_path`, and corrects the persistence comment and the
+  "never accepts … inventory" comment; `configmap.yaml` renders
+  `host-definitions.yaml` and sets `host_definitions_path`; `deployment.yaml`
+  mounts it read-only. The chart schema refuses `host_definitions_path`,
+  `relay_definitions_path`, and `inventory_path` beside the existing
+  `inventory_ini`, accepts `definitions.hosts` as an object, and refuses
+  `host-definitions.yaml` as a `configFiles` name; the umbrella schema refuses
+  the same four keys under provisioning `config`. Render tests
+  (`helm/charts/provisioning/tests/test_render.py`): `hosts` joins the per-kind
+  table, so the empty, alone, and together cases cover it; new cases for the
+  document rendered verbatim with a read-only mount, the ConfigMap checksum
+  changing with an edit to the document, every path refused (relay included),
+  both retired keys refused and absent from the default render, and the
+  `configFiles` name refused. `helm/scripts/test-render.sh` adds an umbrella
+  loop asserting each of the four keys fails the render with an error naming
+  it. **Not run:** this container has no `helm` binary, and fetching one has
+  no allow rule, so `make -C helm test-render` is owed by validation (below).
+  *Departure from TESTING.md's "parse one rendered instance with the service's
+  own parser":* the render tests check the rendered host document's text only,
+  as the pool and capacity cases do; the kit's parser needs an interpreter with
+  `compute_provisioning`, which `test-render.sh` runs without.
+- [x] 5.2 Deployment scripts and compose (D2, D3). `topology-secrets.sh` stops
   writing `inventory_ini: ""` and its comment; the provisioning-secrets profile it
   writes states nothing the mock profile needs, as a valid empty YAML mapping.
   `domains/bare_metal/compose.yml` mounts the host document named by
@@ -915,7 +939,27 @@ templates/configmap.yaml,templates/deployment.yaml,tests/test_render.py}`;
   environment, and a search finds no `INVENTORY_PATH`, `INVENTORY_FILE`, or
   `inventory_ini` left in `helm/`, `compose/`, `domains/*/compose.yml`, `dev-env/`,
   or the root `Makefile`.
-- [ ] 5.3 **Verification checkpoint.** Chart render: `make -C helm test-render`.
+  *Done.* `topology-secrets.sh` writes `{}` as the provisioning-secrets
+  profile. `domains/bare_metal/compose.yml` mounts
+  `BARE_METAL_PROVISIONING_HOST_DEFINITIONS_FILE` at
+  `/run/config/host-definitions.yaml` and sets
+  `PROVISIONING_HOST_DEFINITIONS_PATH`; `e2e-bare-metal-dev-env` prints the
+  variable naming `dev-env/bare-metal/hosts.yaml` (`hosts: []`, its comment
+  kept and corrected for `PROVISIONING_MODE=real`), and `hosts.ini` is removed.
+  `compose/seller.yml` mounts `SELLER_HOST_DEFINITIONS` (required, as the SSH
+  key is, since a missing bind source becomes a directory) at the same path and
+  sets the variable; its header describes the document. The `deploy-helm`
+  comment is corrected. Also, as section 4's notes handed over:
+  `e2e-tests/tests/unit/test_domain_stack_configuration.py` now pins the host
+  document's variable and path and that the bare-metal stack states no
+  `INVENTORY`, and the VM scenario docstrings no longer cite `inventory_path`;
+  `dev-env/identities/README.md` names the empty host document. Unit
+  (`make test-e2e-unit`): 352 passed. The search finds the keys in those trees
+  only in the schema refusals, their render tests, and the values comment
+  naming them as retired. **Not run:** `docker compose … config` for either
+  stack, and printing the lane's environment, had no allow rule here; the
+  pipeline's bare-metal lane renders the stack.
+- [x] 5.3 **Verification checkpoint.** Chart render: `make -C helm test-render`.
   `make test-deployment-packaging`, which runs it with the release tooling.
   `make test`. `make check-comment-hygiene`.
   End-to-end: the bare-metal lane (`e2e_bare_metal_publication`,
@@ -929,6 +973,42 @@ templates/configmap.yaml,templates/deployment.yaml,tests/test_render.py}`;
   Owed by validation: `tests.yml`, job `test · test-deployment-packaging` —
   `make -C helm test-render` passes with the `definitions.hosts` render, mount,
   and path, and with every refused key.
+  *Run.* `make -C helm test-render` and therefore `make test-deployment-packaging`
+  could not run (no `helm`); its `scripts/tests` step, `make
+  test-release-tooling`, passed (1805 passed, 11 skipped). `make
+  test-e2e-unit`: 352 passed. `make test` was not rerun in full: this section
+  changes no package, dependency, or lock, and the suites covering what it
+  changed ran; section 4's run passed every other suite. `make check-change`:
+  passed. End-to-end: confirmed as planned, by reading the lanes'
+  configuration — the bare-metal lane mounts the empty document, and the VM
+  lane's Helm validation reads the topology script's empty profile. None owed.
+  Owed by validation, as above: `tests.yml`, job `test ·
+  test-deployment-packaging` — `make -C helm test-render` passes, including the
+  chart's new render tests and the umbrella refusal loop.
+
+Section 5 notes:
+
+- **The chart render tests have never run.** Written against the templates by
+  reading, and traced by the fresh-context check, but not executed:
+  validation's `test-deployment-packaging` job is their first run. TESTING.md's
+  "break the template once" step was not done, for the same reason.
+- **Section 4's commit was pushed with this one.** `make push-branch` refuses a
+  dirty worktree, and this section's edits were already in it when section 4
+  was committed.
+- **Still stale until section 7:** `docs/seller-quickstart.md`'s "Bring it up"
+  runs `compose/seller.yml` without the now-required `SELLER_HOST_DEFINITIONS`,
+  and `docs/bare-metal-seller-quickstart.md` exports the retired
+  `BARE_METAL_PROVISIONING_INVENTORY_FILE`; 7.2 owns both.
+- **Fresh-context check.** No comment-hygiene, packaging, or compose-wiring
+  break; every `deployment-state` scenario has a render case, and it found no
+  render assertion likely to fail. Fixed: the umbrella loop passing on any
+  failure (it now requires the error to name the key, and no longer claims the
+  umbrella's own schema is what refused, which the subchart's also would); the
+  host-document cut that never matched (now the manifest's end); the values
+  comment pointing every document at the host import route; a mis-wrapped
+  `Makefile` comment; `hosts.yaml` saying the lane always runs mock;
+  `dev-env/identities/README.md`'s "empty host inventory". Disclosed rather
+  than fixed: the service-parser check (5.1).
 
 ## 6. Change-workflow tooling fixes
 

@@ -423,7 +423,7 @@ e2e-bare-metal-dev-env: ## Print VAR=value lines for the bare-metal lane's `dock
 	@echo 'BARE_METAL_PROVISIONING_IDENTITY_IDENTIFIER=$(E2E_BARE_METAL_SITE_AUTHORITY_ID)'
 	@echo 'BARE_METAL_PROVISIONING_ADMIN_IDENTITY_SCHEME=eip191'
 	@echo 'BARE_METAL_PROVISIONING_ADMIN_IDENTITY_IDENTIFIER=$(E2E_BARE_METAL_SITE_ADMIN_ID)'
-	@echo 'BARE_METAL_PROVISIONING_INVENTORY_FILE=$(E2E_BARE_METAL_DIR)/hosts.ini'
+	@echo 'BARE_METAL_PROVISIONING_HOST_DEFINITIONS_FILE=$(E2E_BARE_METAL_DIR)/hosts.yaml'
 	@echo 'BARE_METAL_POOL_DEFINITIONS_FILE=$(E2E_BARE_METAL_DIR)/resource-pools.yaml'
 	@echo 'BARE_METAL_PROVISIONING_SSH_PRIVATE_KEY_FILE=$(E2E_BARE_METAL_DIR)/ssh-key-placeholder'
 	@echo 'BARE_METAL_SITE_ID=$(E2E_BARE_METAL_SITE_ID)'
@@ -581,8 +581,10 @@ deploy-compose:
 	docker compose ps
 
 # Top-level Helm deploy consumes pre-existing Secret names from helm/values.yaml;
-# credential files and inventory content never pass through Helm values. It keeps
-# the release's volumes on uninstall; a local development cluster is deployed with
+# credential files never pass through Helm values, while a host definitions
+# document, which names keys by path and carries none, is the provisioning
+# chart's `definitions.hosts` value. It keeps the release's volumes on
+# uninstall; a local development cluster is deployed with
 # `make -C helm deploy-local` instead (docs/development/DEPLOYMENT_AND_CONFIG.md).
 deploy: deploy-helm
 

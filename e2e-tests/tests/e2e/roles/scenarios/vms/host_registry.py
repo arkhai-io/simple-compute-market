@@ -33,10 +33,9 @@ listing's `offer_resource.resource_id` into the claim, so the declaration must c
 that id to be matched at all. The declaration's `host_id` field names the host it
 is delivered through instead.
 
-Registration goes through the admin APIs rather than a mounted inventory file:
-`inventory_path` is docker-compose-specific while the canonical Helm deployment
-supplies inventory as an inline secret, and a mount is shared state no scenario
-declares.
+Registration goes through the admin APIs rather than a mounted host definitions
+document: a document is deployment configuration every scenario on the stack
+would share, and no scenario declares it.
 """
 
 from __future__ import annotations
