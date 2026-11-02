@@ -18,6 +18,8 @@ count, the provisioning payload) into the top-level `negotiate` /
 
 from __future__ import annotations
 
+from market_identity import EnvelopeCapture
+
 import asyncio
 import time
 import uuid
@@ -405,6 +407,7 @@ def make_negotiate_hook(
     validate_acceptance: Callable[[NegotiationOutcome], None] | None = None,
     advertised_plan_validator: AdvertisedPlanValidatorFn | None = None,
     accepted_listing_record: AcceptedListingRecordFn | None = None,
+    capture: EnvelopeCapture | None = None,
 ) -> NegotiateFn:
     """Build the schema-instantiated negotiate hook.
 
@@ -439,6 +442,7 @@ def make_negotiate_hook(
             validate_acceptance=validate_acceptance,
             advertised_plan_validator=advertised_plan_validator,
             accepted_listing_record=accepted_listing_record,
+            capture=capture,
             on_event=on_event,
         )
 
@@ -464,6 +468,7 @@ def _negotiate_matches(
     on_event: Callable[[str, dict], None],
     advertised_plan_validator: AdvertisedPlanValidatorFn | None = None,
     accepted_listing_record: AcceptedListingRecordFn | None = None,
+    capture: EnvelopeCapture | None = None,
 ) -> NegotiationResult:
     attempts: list[dict[str, Any]] = []
 
@@ -671,6 +676,7 @@ def _negotiate_matches(
                     else None
                 ),
                 resolve_seller_principals=resolve_seller_principals,
+                capture=capture,
             )
         except RuntimeError as exc:
             _emit_neg("negotiation_failed", error=f"http_error: {exc}")

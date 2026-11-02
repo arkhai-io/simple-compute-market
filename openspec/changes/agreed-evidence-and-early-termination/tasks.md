@@ -347,7 +347,7 @@ storefront's signed-request verification path (`kit/identity/src/market_identity
 and the negotiation controllers that consume it), new `kit/deal-lifecycle-buyer`, and
 `core/buyer/src/core_buyer/` composition where the buyer profile root is passed.
 
-- [ ] 6.1 Add the injected capture sink to production negotiation's _authenticated_json,
+- [x] 6.1 Add the injected capture sink to production negotiation's _authenticated_json,
       propagate it through the public negotiation API, core orchestration and both compute
       buyer callers, and capture raw bytes/proof headers before decoding discards them.
       Exercise an actual negotiation acceptance reaching the store before payment approval,

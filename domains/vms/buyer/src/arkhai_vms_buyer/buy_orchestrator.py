@@ -6,6 +6,8 @@ owns accepted-artifact validation, resource resolution and settlement effects.
 
 from __future__ import annotations
 
+from market_identity import EnvelopeCapture
+
 from typing import Any, Callable, Optional
 
 from arkhai_vms import VmProvisionTerms
@@ -64,6 +66,7 @@ def make_legacy_negotiate_hook(
     derive_prices: Optional[Callable[[dict[str, Any]], tuple[int, int]]],
     chain: Optional[list[Any]],
     revalidate_settlement: RevalidateSettlementFn | None = None,
+    capture: EnvelopeCapture | None = None,
 ) -> NegotiateFn:
     """Build the compute-instantiated negotiate hook over the core stage."""
     return _core_make_negotiate_hook(
@@ -82,6 +85,7 @@ def make_legacy_negotiate_hook(
         validate_acceptance=validate_buyer_acceptance,
         advertised_plan_validator=advertised_plan_validator,
         accepted_listing_record=accepted_listing_record,
+        capture=capture,
     )
 
 

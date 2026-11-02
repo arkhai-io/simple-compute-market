@@ -61,7 +61,9 @@ from market_core.schemas import (
 from market_identity import (
     EMPTY_BODY,
     AuthenticatedResponse,
+    EnvelopeCapture,
     Identity,
+    capture_envelope,
     RequestEnvelope,
     Signer,
     TrustedIdentitySet,
@@ -705,6 +707,7 @@ def _authenticated_json(
     request_id: str | None = None,
     timestamp: int | None = None,
     expected_response_role: str = "seller",
+    capture: EnvelopeCapture | None = None,
 ) -> dict[str, Any]:
     """Send one v2-authenticated JSON request and verify a pinned response."""
 
@@ -750,11 +753,13 @@ def _authenticated_json(
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            text = resp.read().decode("utf-8")
+            raw_response = resp.read()
+            text = raw_response.decode("utf-8")
             response_headers = getattr(resp, "headers", None)
             response_status = int(getattr(resp, "status", 200))
     except urllib.error.HTTPError as exc:
-        text = exc.read().decode("utf-8", errors="replace")
+        raw_response = exc.read()
+        text = raw_response.decode("utf-8", errors="replace")
         response_headers = getattr(exc, "headers", None)
         response_status = int(exc.code)
     except Exception as exc:
@@ -817,11 +822,17 @@ def _authenticated_json(
         expected_operation=operation,
         expected_resource=resource,
         expected_request_id=request_id,
+        capture=capture,
+        raw_body=raw_response,
+        headers=dict(response_headers or {}),
     )
     if not verification.verified:
         raise RuntimeError(
             f"{method} {url} response authentication failed: {verification.code.value}"
         )
+    capture_envelope(capture, envelope=authenticated, raw_body=data or b"", headers=headers,
+                     verified_at=int(time.time()),
+                     expected_principals=TrustedIdentitySet(identities=(principal,)))
     if not 200 <= response_status < 300:
         raise AuthenticatedHTTPError(
             f"{method} {url} -> authenticated HTTP {response_status}: {text[:500]}",
@@ -880,6 +891,7 @@ def negotiate_with_seller(
     policy_params: Optional[dict[str, Any]] = None,
     validate_advertised_plan: Callable[[SettlementPlan], None] | None = None,
     validate_acceptance: Callable[[NegotiationOutcome], None] | None = None,
+    capture: EnvelopeCapture | None = None,
 ) -> NegotiationOutcome:
     """Run a synchronous negotiation with one seller, round-by-round.
 
@@ -1209,6 +1221,7 @@ def negotiate_with_seller(
             operation="negotiate_new",
             resource=listing_id,
             expected_response_principals=trusted_seller_principals,
+            capture=capture,
         )
 
         raw_neg_id = reply.get("negotiation_id")
@@ -1381,6 +1394,7 @@ def negotiate_with_seller(
                     operation="negotiate_continue",
                     resource=neg_id,
                     expected_response_principals=resolve_seller_principals(),
+                    capture=capture,
                 )
             except Exception as notify_exc:
                 logger.warning(
@@ -1412,6 +1426,7 @@ def negotiate_with_seller(
             operation="negotiate_continue",
             resource=neg_id,
             expected_response_principals=trusted_seller_principals,
+            capture=capture,
         )
 
         # If our chain rejected (shape guard veto), the buyer terminates

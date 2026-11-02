@@ -14,6 +14,7 @@ from market_identity.canonical import (
     sign_response,
     sign_rotation,
 )
+from market_identity.capture import CapturedEnvelope, EnvelopeCapture, capture_envelope
 from market_identity.credentials import (
     CredentialProvider,
     CredentialProviderError,
@@ -100,6 +101,9 @@ from market_identity.verification import (
 )
 
 __all__ = [
+    "CapturedEnvelope",
+    "EnvelopeCapture",
+    "capture_envelope",
     "add_profile",
     "AuthenticatedRequest",
     "AuthenticatedResponse",

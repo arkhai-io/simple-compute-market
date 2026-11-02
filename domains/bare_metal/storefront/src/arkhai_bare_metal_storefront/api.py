@@ -172,6 +172,8 @@ async def _principal(
             resource=resource,
             body=body,
             expected_role=expected_role,
+            raw_body=await request.body(),
+            capture=getattr(request.app.state, "envelope_capture", None),
             replay_store=runtime.db,
             expected_principal=expected_principal,
             allowed_principals=allowed_principals,

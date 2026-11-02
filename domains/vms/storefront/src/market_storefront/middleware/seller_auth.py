@@ -178,6 +178,8 @@ async def authenticate_buyer_contract(
         resource=resource,
         body=body,
         expected_role="buyer",
+        raw_body=await request.body(),
+        capture=getattr(request.app.state, "envelope_capture", None),
         expected_principal=principal,
         replay_store=db,
     )
