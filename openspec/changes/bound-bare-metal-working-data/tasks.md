@@ -243,6 +243,23 @@ the harness unit suite; the full pipeline and physical-marker evidence remain
 separate obligations under 4.3. Permanent policy/qualification promotion remains
 closeout work.
 
+### Shared lane lease-correlation correction
+
+The combined reviewer identified an existing real bare-metal stage reading
+`provisioning_job_id` from `DealLease.refresh()`, whose normalized contract instead
+returns `create_job_id`. The lead accepted correction to that canonical key;
+the provider-job correlation assertion remains required. A regression constructs
+the actual typed family `LeaseView`, passes it through the real `DealLease`
+normalization, then invokes the real stage: matching grant identity passes and
+another grant identity fails. No API or normalization change is made. The same continuous review found that the two configured cycles shared the
+module SSH session but reused the unrelated-key filename, which the helper
+correctly refuses through exclusive creation. The unrelated-key stage now uses
+the cycle in its key name. A regression invokes the actual stage twice with one
+actual `SshSession` and a controlled refusing SSH process, verifies distinct keys,
+and confirms duplicate-name creation still fails. No SSH key protection is
+weakened. These are separate source corrections before the frozen combined
+candidate, not deployed qualification or formal review advancement.
+
 ## 5. Closeout (eleven parts, in this order)
 
 - [ ] 5.1 **Comment hygiene:** confirm `make check-comment-hygiene` and review touched comments for current-state rationale. Any code correction returns the change to implementation; closeout edits documentation only.

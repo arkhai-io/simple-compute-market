@@ -312,7 +312,7 @@ class TestStage09c_LeaseRecorded(Stage09c_LeaseRecorded):
 class TestStage09c3_LeaseNamesTheGrantJob:
     def test_09c3_lease_names_the_observed_grant(self, deal_state):
         require_state(deal_state, "deal_lease", "create_job_id")
-        assert deal_state.deal_lease.refresh().get("provisioning_job_id") == deal_state.create_job_id
+        assert deal_state.deal_lease.refresh().get("create_job_id") == deal_state.create_job_id
 
 
 class TestStage09d_BuyerConnectsWithPinnedHostKey:
@@ -324,9 +324,9 @@ class TestStage09d_BuyerConnectsWithPinnedHostKey:
 
 
 class TestStage09e_UnrelatedKeyRefused:
-    def test_09e_unrelated_key_is_refused(self, deal_state, ssh):
+    def test_09e_unrelated_key_is_refused(self, deal_state, ssh, cleanup_cycle):
         require_state(deal_state, "delivered_access")
-        ssh.assert_key_refused(deal_state.delivered_access, ssh.new_key("unrelated"))
+        ssh.assert_key_refused(deal_state.delivered_access, ssh.new_key("unrelated-" + cleanup_cycle))
 
 
 class TestStage09f_BoundedWorkingDataSeeded:
