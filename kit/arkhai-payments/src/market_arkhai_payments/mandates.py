@@ -145,8 +145,12 @@ def derive_part_terms(
         adjudication = lifecycle.adjudication
         cap = adjudication.case_hold_max_seconds
         authorities: dict[str, Any] = {
+            # Rights are an object in the Agreement; its insertion order is
+            # not committed by JCS. The derived permission list must be stable.
             "stop": [{"account": entry.account, "notice": format_duration(entry.notice_seconds),
-                      "partialPeriod": entry.partial_period} for entry in stops],
+                      "partialPeriod": entry.partial_period} for entry in sorted(
+                          stops, key=lambda entry: ("payer", "payee", "dispute").index(entry.role)
+                      )],
             "reverse": list(dict.fromkeys((policy.option.payee_account, dispute))),
             "extend": [dispute],
         }
