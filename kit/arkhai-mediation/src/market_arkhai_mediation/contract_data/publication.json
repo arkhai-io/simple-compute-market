@@ -1,22 +1,23 @@
 {
   "interface": "arkhai.mediation.v1",
   "published": true,
-  "revision": "b98fed26ef373045124b3e89bf14c7c1552b46bd",
-  "payments_revision": "3be127e4",
   "files": {
     "mediation.schema.json": {
       "source": "schema/mediation.schema.json",
-      "sha256": "f69d05d4ceef54170a3ff52f9de482a5d0dbcf0be2b55c86c9f1398103eb170e"
+      "sha256": "f75d7ef63c111f6c2df22d3a9ae86c80c4c6e10b492e905d96925784d6eb517d"
     },
     "mediation.vectors.json": {
       "source": "test-vectors/mediation.json",
-      "sha256": "9e5f918df7098ceb5dbe127522ef6355c876e77efb8178c6a4cb8850e05e1ae0"
+      "sha256": "2dce1a1f554edffcb002edd748d6f83a2ce81d90ab06da0ca6b39031ccdf4188"
     }
   },
   "capabilities": [
     "effects",
     "file",
     "append",
-    "read_record"
+    "read_record",
+    "delivery_end",
+    "concurrence",
+    "respondent"
   ]
 }

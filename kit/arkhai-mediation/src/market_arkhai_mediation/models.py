@@ -49,18 +49,15 @@ class Sha256Hex(RootModel[StrictStr]):
     root: Annotated[StrictStr, Field(pattern='^[0-9a-f]{64}$')]
 
 
+class Cause(StrEnum):
+    payee = 'payee'
+    payer = 'payer'
+
+
 class MediationTime(RootModel[StrictInt]):
     root: Annotated[
         StrictInt, Field(description='Integer Unix seconds.', ge=0, le=9007199254740991)
     ]
-
-
-class BuyerEndRequest(BaseModel):
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    kind: Literal['buyer_end']
-    at: MediationTime
 
 
 class PartIndex(RootModel[StrictInt]):
@@ -100,6 +97,40 @@ class AwardEffect(BaseModel):
     kind: Literal['award']
     part: PartIndex
     amount: Amount
+
+
+class MarketEd25519Identity(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    scheme: Literal['ed25519']
+    identifier: Annotated[
+        StrictStr, Field(pattern='^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$')
+    ]
+
+
+class MarketEip191Identity(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    scheme: Literal['eip191']
+    identifier: Annotated[StrictStr, Field(pattern='^0x[0-9a-f]{40}$')]
+
+
+class MarketEd25519SignatureProof(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    scheme: Literal['ed25519']
+    value: Annotated[StrictStr, Field(pattern='^[A-Za-z0-9_-]{85}[AQgw]$')]
+
+
+class MarketEip191SignatureProof(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    scheme: Literal['eip191']
+    value: Annotated[StrictStr, Field(pattern='^0x[0-9a-f]{130}$')]
 
 
 class EvidenceItem(BaseModel):
@@ -212,6 +243,12 @@ class Identity(BaseModel):
     ]
 
 
+class RulingBasis(StrEnum):
+    payee_filed = 'payee_filed'
+    payee_signed = 'payee_signed'
+    operator = 'operator'
+
+
 class State1(StrEnum):
     prepared = 'prepared'
     applied = 'applied'
@@ -265,6 +302,19 @@ class ReadAfter(BaseModel):
     limit: Annotated[StrictInt | None, Field(ge=1, le=1000)] = None
 
 
+class RespondentAfter(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    after: Annotated[StrictStr, Field(max_length=512)]
+    limit: Annotated[StrictInt | None, Field(ge=1, le=100)] = None
+
+
+class Filer(StrEnum):
+    payer = 'payer'
+    payee = 'payee'
+
+
 class DisputeAuthority(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -276,12 +326,14 @@ class DisputeAuthority(BaseModel):
     params: dict[StrictStr, MediationValue]
 
 
-class ExceptionalEndRequest(BaseModel):
+class DeliveryEndClaim(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    kind: Literal['exceptional_end']
-    at: MediationTime
+    kind: Literal['delivery_end']
+    ended_at: MediationTime
+    delivered: StrictBool
+    cause: Cause
 
 
 class ReverseEffect(BaseModel):
@@ -303,12 +355,14 @@ class StopEffect(BaseModel):
     partialPeriod: PartialPeriod
 
 
-class Append(BaseModel):
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    case_ref: CaseRef
-    items: Annotated[list[EvidenceItem], Field(min_length=1)]
+class MarketIdentity(RootModel[MarketEd25519Identity | MarketEip191Identity]):
+    root: MarketEd25519Identity | MarketEip191Identity
+
+
+class MarketSignatureProof(
+    RootModel[MarketEd25519SignatureProof | MarketEip191SignatureProof]
+):
+    root: MarketEd25519SignatureProof | MarketEip191SignatureProof
 
 
 class PartProtection(RootModel[HeldPart | NotHeldPart]):
@@ -322,6 +376,57 @@ class FilingRefused(BaseModel):
     status: Literal['rejected']
     reason: FilingRefusalCode
     message: StrictStr
+
+
+class Effect(
+    RootModel[
+        ReverseEffect
+        | StopEffect
+        | EndDeliveryEffect
+        | PenaltyEffect
+        | AwardEffect
+    ]
+):
+    root: ReverseEffect | StopEffect | EndDeliveryEffect | PenaltyEffect | AwardEffect
+
+
+class SignedDeliveryEndClaim(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    agreement: Sha256Hex
+    claim: DeliveryEndClaim
+    signer: MarketIdentity
+    proof: MarketSignatureProof
+
+
+class EvidenceAppend(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    case_ref: CaseRef
+    items: Annotated[list[EvidenceItem], Field(min_length=1)]
+    concurrence: SignedDeliveryEndClaim | None = None
+
+
+class ConcurrenceAppend(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    case_ref: CaseRef
+    items: list[EvidenceItem] | None = None
+    concurrence: SignedDeliveryEndClaim
+
+
+class CaseAnswer(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    case_ref: CaseRef
+    transaction: Sha256Hex
+    agreement: Sha256Hex
+    state: State
+    parts: Annotated[list[PartProtection], Field(max_length=64, min_length=1)]
 
 
 class AppendedEntry(BaseModel):
@@ -345,30 +450,8 @@ class AppendedEntry(BaseModel):
     parts: Annotated[list[PartProtection], Field(max_length=64, min_length=1)]
     issuer: Identity
     kind: Literal['appended']
-    items: Annotated[list[EvidenceItem], Field(min_length=1)]
-
-
-class Effect(
-    RootModel[
-        ReverseEffect
-        | StopEffect
-        | EndDeliveryEffect
-        | PenaltyEffect
-        | AwardEffect
-    ]
-):
-    root: ReverseEffect | StopEffect | EndDeliveryEffect | PenaltyEffect | AwardEffect
-
-
-class CaseAnswer(BaseModel):
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    case_ref: CaseRef
-    transaction: Sha256Hex
-    agreement: Sha256Hex
-    state: State
-    parts: Annotated[list[PartProtection], Field(max_length=64, min_length=1)]
+    items: list[EvidenceItem]
+    concurrence: SignedDeliveryEndClaim | None = None
 
 
 class OutcomeEffect(BaseModel):
@@ -388,6 +471,15 @@ class EffectsRequest(BaseModel):
     effects: Annotated[list[Effect], Field(min_length=1)]
 
 
+class Append(RootModel[EvidenceAppend | ConcurrenceAppend]):
+    root: Annotated[
+        EvidenceAppend | ConcurrenceAppend,
+        Field(
+            description='Either party may append evidence to an open case; only the payee may append concurrence. At least nonempty items or concurrence is required. Idempotency-Key is required; retries return the same record. Omitted items are recorded as an empty array.'
+        ),
+    ]
+
+
 class FilingAccepted(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -400,7 +492,33 @@ class Outcome(RootModel[list[OutcomeEffect]]):
     root: list[OutcomeEffect]
 
 
-class ClosedEntry(BaseModel):
+class NothingHeldClosedEntry(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    agreement: Sha256Hex
+    transaction: Sha256Hex
+    case_ref: CaseRef
+    sequence: Annotated[
+        StrictInt,
+        Field(
+            description='Per Agreement across ALL cases; starts at 1. Never a per-case cursor.',
+            ge=1,
+            le=9007199254740991,
+        ),
+    ]
+    record_ref: RecordRef
+    actor: AccountId
+    at: MediationTime
+    parts: Annotated[list[PartProtection], Field(max_length=64, min_length=1)]
+    issuer: Identity
+    kind: Literal['closed']
+    reason: Literal['dismissed']
+    dismissal_reason: Literal['nothing_held']
+    outcome: Outcome
+
+
+class DecidedClosedEntry(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -422,17 +540,12 @@ class ClosedEntry(BaseModel):
     issuer: Identity
     kind: Literal['closed']
     reason: Reason1
-    dismissal_reason: Annotated[
-        Literal['nothing_held'] | None,
-        Field(
-            description='Automatic dismissal: every part was definitively not_held at filing. Never inferred from an uncertain payments response.'
-        ),
-    ] = None
+    basis: RulingBasis
     outcome: Outcome
 
 
-class Request(RootModel[ExceptionalEndRequest | BuyerEndRequest | EffectsRequest]):
-    root: ExceptionalEndRequest | BuyerEndRequest | EffectsRequest
+class Request(RootModel[DeliveryEndClaim | EffectsRequest]):
+    root: DeliveryEndClaim | EffectsRequest
 
 
 class FilingAnswer(
@@ -462,7 +575,26 @@ class RuledEntry(BaseModel):
     parts: Annotated[list[PartProtection], Field(max_length=64, min_length=1)]
     issuer: Identity
     kind: Literal['ruled']
+    basis: RulingBasis
     outcome: Outcome
+
+
+class ClosedEntry(RootModel[NothingHeldClosedEntry | DecidedClosedEntry]):
+    root: NothingHeldClosedEntry | DecidedClosedEntry
+
+
+class PendingAnswer(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    case_ref: CaseRef
+    transaction: Sha256Hex
+    agreement: Sha256Hex
+    filed_at: MediationTime
+    filer: Filer
+    request: Request
+    parts: Annotated[list[PartProtection], Field(max_length=64, min_length=1)]
+    filed_record_ref: RecordRef
 
 
 class Filing(BaseModel):
@@ -472,6 +604,7 @@ class Filing(BaseModel):
     transaction: Sha256Hex
     agreement: MediationValue
     request: Request
+    concurrence: SignedDeliveryEndClaim | None = None
     claim: StrictStr
     items: list[EvidenceItem]
 
@@ -498,6 +631,15 @@ class FiledEntry(BaseModel):
     issuer: Identity
     kind: Literal['filed']
     filing: Filing
+
+
+class RespondentPage(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    cases: list[PendingAnswer]
+    next_after: StrictStr
+    has_more: StrictBool
 
 
 class RecordEntry(RootModel[FiledEntry | AppendedEntry | RuledEntry | ClosedEntry]):

@@ -6,8 +6,51 @@
     "identity": {
       "scheme": "ed25519",
       "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
-    }
+    },
+    "market_eip191_private_key_hex": "0808080808080808080808080808080808080808080808080808080808080808"
   },
+  "delivery_end_claims": [
+    {
+      "message": "0000002661726b6861692e6d6564696174696f6e2e64656c69766572792d656e642d636c61696d2e7631000000406233636464623530363564393038396333373765616138643662306630623537333062363830663433376262383066396233646463316465316666663465363600000007656432353531390000002b366b7073592d4b635567712d39564237457937462d5a56486471362d766e755351683771615252473069770000000a313830303030313830300000000474727565000000057061796565",
+      "signed": {
+        "agreement": "b3cddb5065d9089c377eaa8d6b0f0b5730b680f437bb80f9b3ddc1de1fff4e66",
+        "claim": {
+          "kind": "delivery_end",
+          "ended_at": 1800001800,
+          "delivered": true,
+          "cause": "payee"
+        },
+        "signer": {
+          "scheme": "ed25519",
+          "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+        },
+        "proof": {
+          "scheme": "ed25519",
+          "value": "k9II459CsXO_21h2Whq96x55xAy5RN70KLhYn-VKau85_KBhVmhxutF1t9-JhEHHRvOXrkUgQw9AF726CFa4CQ"
+        }
+      }
+    },
+    {
+      "message": "0000002661726b6861692e6d6564696174696f6e2e64656c69766572792d656e642d636c61696d2e76310000004062336364646235303635643930383963333737656161386436623066306235373330623638306634333762623830663962336464633164653166666634653636000000066569703139310000002a3078393963383531656161336333393736393134643633623832326336376532303165633062666262380000000a313830303030313830300000000474727565000000057061796565",
+      "signed": {
+        "agreement": "b3cddb5065d9089c377eaa8d6b0f0b5730b680f437bb80f9b3ddc1de1fff4e66",
+        "claim": {
+          "kind": "delivery_end",
+          "ended_at": 1800001800,
+          "delivered": true,
+          "cause": "payee"
+        },
+        "signer": {
+          "scheme": "eip191",
+          "identifier": "0x99c851eaa3c3976914d63b822c67e201ec0bfbb8"
+        },
+        "proof": {
+          "scheme": "eip191",
+          "value": "0x429622caac36401ef9cf62f9b03d917669340e2e8913f7c602bdb9dad9e43ba56574603c3c9dbcb8a66e29d23054eaa5d578d117d475b556a444550a0edaef9d1b"
+        }
+      }
+    }
+  ],
   "description": {
     "dispute": {
       "interface": "arkhai.mediation.v1",
@@ -43,6 +86,7 @@
       "origin": "reachable",
       "through": "deal_lifetime_and_dispute_window_and_any_open_case"
     },
+    "automatic_rulings": "payee_endorsed_delivery_end_once_per_agreement",
     "default_outcome": null,
     "agreement_projection": "AgreementProjection"
   },
@@ -50,6 +94,10 @@
     {
       "name": "timed-once-and-rate",
       "agreement": {
+        "seller": {
+          "scheme": "ed25519",
+          "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+        },
         "start_utc": "2027-01-15T08:00:00Z",
         "duration_seconds": 3600,
         "settlement": {
@@ -75,7 +123,7 @@
       "mandate": {
         "from": "11111111-1111-4111-8111-111111111111",
         "to": "22222222-2222-4222-8222-222222222222",
-        "deal": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
+        "deal": "b3cddb5065d9089c377eaa8d6b0f0b5730b680f437bb80f9b3ddc1de1fff4e66",
         "fee": {
           "bps": 250
         },
@@ -183,6 +231,10 @@
     {
       "name": "setup-once-end-at-agreement-start",
       "agreement": {
+        "seller": {
+          "scheme": "ed25519",
+          "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+        },
         "start_utc": "2027-01-15T08:00:00Z",
         "duration_seconds": 3600,
         "settlement": {
@@ -208,7 +260,7 @@
       "mandate": {
         "from": "11111111-1111-4111-8111-111111111111",
         "to": "22222222-2222-4222-8222-222222222222",
-        "deal": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
+        "deal": "b3cddb5065d9089c377eaa8d6b0f0b5730b680f437bb80f9b3ddc1de1fff4e66",
         "fee": {
           "bps": 250
         },
@@ -404,6 +456,10 @@
     {
       "name": "mismatches-are-evidence",
       "agreement": {
+        "seller": {
+          "scheme": "ed25519",
+          "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+        },
         "start_utc": "2027-01-15T08:00:00Z",
         "duration_seconds": 3600,
         "settlement": {
@@ -429,7 +485,7 @@
       "mandate": {
         "from": "11111111-1111-4111-8111-111111111111",
         "to": "22222222-2222-4222-8222-222222222222",
-        "deal": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
+        "deal": "b3cddb5065d9089c377eaa8d6b0f0b5730b680f437bb80f9b3ddc1de1fff4e66",
         "fee": {
           "bps": 250
         },
@@ -572,8 +628,12 @@
   "filing": {
     "idempotency_key": "filing-vector-1",
     "request": {
-      "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+      "transaction": "1eeb456d60ecde26d8cd585fd6adf60e086c1f47ac6ff5d58c52c8b2d5acfcb5",
       "agreement": {
+        "seller": {
+          "scheme": "ed25519",
+          "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+        },
         "start_utc": "2027-01-15T08:00:00Z",
         "duration_seconds": 3600,
         "settlement": {
@@ -597,8 +657,10 @@
         }
       },
       "request": {
-        "kind": "exceptional_end",
-        "at": 1800001800
+        "kind": "delivery_end",
+        "ended_at": 1800001800,
+        "delivered": true,
+        "cause": "payee"
       },
       "claim": "End delivery with the agreed self-penalty.",
       "items": [
@@ -615,8 +677,8 @@
       "status": "accepted",
       "case": {
         "case_ref": "case-vector-1",
-        "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
-        "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
+        "transaction": "1eeb456d60ecde26d8cd585fd6adf60e086c1f47ac6ff5d58c52c8b2d5acfcb5",
+        "agreement": "b3cddb5065d9089c377eaa8d6b0f0b5730b680f437bb80f9b3ddc1de1fff4e66",
         "state": "open",
         "parts": [
           {
@@ -648,10 +710,14 @@
       ]
     }
   },
-  "buyer_end": {
+  "delivery_end": {
     "filing": {
-      "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+      "transaction": "1eeb456d60ecde26d8cd585fd6adf60e086c1f47ac6ff5d58c52c8b2d5acfcb5",
       "agreement": {
+        "seller": {
+          "scheme": "ed25519",
+          "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+        },
         "start_utc": "2027-01-15T08:00:00Z",
         "duration_seconds": 3600,
         "settlement": {
@@ -675,8 +741,10 @@
         }
       },
       "request": {
-        "kind": "buyer_end",
-        "at": 1800001800
+        "kind": "delivery_end",
+        "ended_at": 1800001800,
+        "delivered": true,
+        "cause": "payer"
       },
       "claim": "Buyer ended delivery.",
       "items": []
@@ -684,37 +752,33 @@
     "append_actor": "22222222-2222-4222-8222-222222222222",
     "append": {
       "case_ref": "case-vector-2",
-      "items": [
-        {
-          "kind": "arkhai.mediation.end_acknowledgement.v1",
-          "producer": "22222222-2222-4222-8222-222222222222",
-          "at": 1800001800,
-          "sha256": "41b3a8ccbe51bf79da2d9d39158d8027fffd14adfb56aa2e6e317a16bc3d97b2",
-          "bytes": "eyJhdCI6MTgwMDAwMTc5OX0"
+      "concurrence": {
+        "agreement": "b3cddb5065d9089c377eaa8d6b0f0b5730b680f437bb80f9b3ddc1de1fff4e66",
+        "claim": {
+          "kind": "delivery_end",
+          "ended_at": 1800001800,
+          "delivered": true,
+          "cause": "payer"
+        },
+        "signer": {
+          "scheme": "ed25519",
+          "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+        },
+        "proof": {
+          "scheme": "ed25519",
+          "value": "fM09Lx3scVilaIG2grjZGBJ1QmF7z47qp6G5SL51N2woLedeONXXzpvFphGp2bE4-z0IPDsFQQ449bgxIwhJBg"
         }
-      ]
-    },
-    "routing": "operator_triage",
-    "default_effects": [
-      {
-        "kind": "end_delivery",
-        "at": 1800001800
-      },
-      {
-        "kind": "stop",
-        "part": 1,
-        "at": 1800001830,
-        "partialPeriod": "charged"
       }
-    ]
+    },
+    "routing_after_valid_concurrence": "mechanical_unless_replayed_or_ambiguous"
   },
   "records": [
     {
-      "message": "0000001a61726b6861692e6d6564696174696f6e2e7265636f72642e76310000004035663437376533336566666664616631316539316564323333353630333066393233616530643730663530376666363461323131623361633563636335626432",
+      "message": "0000001a61726b6861692e6d6564696174696f6e2e7265636f72642e76310000004034363538376132343237373639323631383538666261323033333164393938656164356661346432366632346236396332373966613763306265656133383861",
       "signed": {
         "entry": {
-          "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
-          "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+          "agreement": "b3cddb5065d9089c377eaa8d6b0f0b5730b680f437bb80f9b3ddc1de1fff4e66",
+          "transaction": "1eeb456d60ecde26d8cd585fd6adf60e086c1f47ac6ff5d58c52c8b2d5acfcb5",
           "case_ref": "case-vector-1",
           "at": 1800001800,
           "parts": [
@@ -738,8 +802,12 @@
           "record_ref": "record-vector-1",
           "actor": "22222222-2222-4222-8222-222222222222",
           "filing": {
-            "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+            "transaction": "1eeb456d60ecde26d8cd585fd6adf60e086c1f47ac6ff5d58c52c8b2d5acfcb5",
             "agreement": {
+              "seller": {
+                "scheme": "ed25519",
+                "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+              },
               "start_utc": "2027-01-15T08:00:00Z",
               "duration_seconds": 3600,
               "settlement": {
@@ -763,8 +831,10 @@
               }
             },
             "request": {
-              "kind": "exceptional_end",
-              "at": 1800001800
+              "kind": "delivery_end",
+              "ended_at": 1800001800,
+              "delivered": true,
+              "cause": "payee"
             },
             "claim": "End delivery with the agreed self-penalty.",
             "items": [
@@ -780,16 +850,16 @@
         },
         "proof": {
           "scheme": "ed25519",
-          "value": "3AK_1N9ELwJStWK3PtpHgjvn6rYH6WmvzEKyEgZcAYg2CHRNsXibpGRu36JRoKSTS14T1LELs94GtWUYY2PvDQ"
+          "value": "Ig4MyDB9r9jMK7Sizh26go8nqTZryeUs4VuB9n40UfPeSiAQkfUv6IKTG_JHt0avRPEHrmFi1yjUKno3p_J4Dw"
         }
       }
     },
     {
-      "message": "0000001a61726b6861692e6d6564696174696f6e2e7265636f72642e76310000004030626162613032323639373665363739393661306633616563383438383639653062303062373739333432316639303932303031643466343234346534643561",
+      "message": "0000001a61726b6861692e6d6564696174696f6e2e7265636f72642e76310000004039396330626365386138346166656266373630373636303930386466363965316330333930343561383163343631663465386636643434396164323962386337",
       "signed": {
         "entry": {
-          "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
-          "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+          "agreement": "b3cddb5065d9089c377eaa8d6b0f0b5730b680f437bb80f9b3ddc1de1fff4e66",
+          "transaction": "1eeb456d60ecde26d8cd585fd6adf60e086c1f47ac6ff5d58c52c8b2d5acfcb5",
           "case_ref": "case-vector-1",
           "at": 1800001800,
           "parts": [
@@ -824,16 +894,16 @@
         },
         "proof": {
           "scheme": "ed25519",
-          "value": "0zdWN757NIvhlIMJG7UMYMo-iAg4IWT_0c6D9Zw325eP6thBs15-_okmXjc1464AAdCs2zC60sMgOIUDG0-nAA"
+          "value": "dDjom2nhsZdPMdLEh9PGjRcGFiHM-tt5C-kOPdkgX6XU6AiALyfTuOgn8LTxu-5AOsjG-b0w1sb7m0leAFJNDg"
         }
       }
     },
     {
-      "message": "0000001a61726b6861692e6d6564696174696f6e2e7265636f72642e76310000004064666131383632613034396436656330333431396236343364613131636366343832336338366530353931383136613433353664653032643433363464643738",
+      "message": "0000001a61726b6861692e6d6564696174696f6e2e7265636f72642e76310000004039343231356364363737383964386665383732323031316662616366663434323930353734353261613936656266386137646334633161353933326131623962",
       "signed": {
         "entry": {
-          "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
-          "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+          "agreement": "b3cddb5065d9089c377eaa8d6b0f0b5730b680f437bb80f9b3ddc1de1fff4e66",
+          "transaction": "1eeb456d60ecde26d8cd585fd6adf60e086c1f47ac6ff5d58c52c8b2d5acfcb5",
           "case_ref": "case-vector-1",
           "at": 1800001800,
           "parts": [
@@ -856,6 +926,7 @@
           "sequence": 3,
           "record_ref": "record-vector-3",
           "actor": "44444444-4444-4444-8444-444444444444",
+          "basis": "operator",
           "outcome": [
             {
               "id": "case-vector-1:reverse:0",
@@ -896,16 +967,16 @@
         },
         "proof": {
           "scheme": "ed25519",
-          "value": "IOW7df7wiMZdmS5VZDP3fIiAmA0sU_kj5eghT4wo7gVTJz1Z5qsz07fnJzfSN_skpCucqt9m0MThsazZnClmBg"
+          "value": "f8oY2Y4MREsfeSpPf4Al6sQaDPMjHWpC47sYdKE7l_UYMCp8a5LBkFFj0uFCNFhda9jmlzRWMa6OcR6ojZz4AQ"
         }
       }
     },
     {
-      "message": "0000001a61726b6861692e6d6564696174696f6e2e7265636f72642e76310000004037376537316235653037313737333031353537393333666335313633326331313061393865643230383064363532666132303965656234346465303837336138",
+      "message": "0000001a61726b6861692e6d6564696174696f6e2e7265636f72642e76310000004064323931656366643730343935383362343662613463656163393032393266343839303364333832393531306365306535346563306334643664333762643163",
       "signed": {
         "entry": {
-          "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
-          "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+          "agreement": "b3cddb5065d9089c377eaa8d6b0f0b5730b680f437bb80f9b3ddc1de1fff4e66",
+          "transaction": "1eeb456d60ecde26d8cd585fd6adf60e086c1f47ac6ff5d58c52c8b2d5acfcb5",
           "case_ref": "case-vector-1",
           "at": 1800001800,
           "parts": [
@@ -929,6 +1000,7 @@
           "record_ref": "record-vector-4",
           "actor": "33333333-3333-4333-8333-333333333333",
           "reason": "ruled",
+          "basis": "operator",
           "outcome": [
             {
               "id": "case-vector-1:reverse:0",
@@ -969,16 +1041,16 @@
         },
         "proof": {
           "scheme": "ed25519",
-          "value": "EDqrVkIQvorrOr0tYTOKHiaTzf2EFpZ12zx_Il9IGkAJIaqdpVimUdbKzKaAeJXOAm4GYrRJp9eGN1CmcWoRBQ"
+          "value": "trqqCfQhTBrcwC6k8RV508w3r7OD2yaFxhhloQbcW_geQRkOjQHByzSfoTnM1xM86R4HmNKQsiGaR6-CArhGCw"
         }
       }
     },
     {
-      "message": "0000001a61726b6861692e6d6564696174696f6e2e7265636f72642e76310000004037383839643261616636353065653562623137346133666135343636363663326637346137376664353761383666346532343134653937623633613532313062",
+      "message": "0000001a61726b6861692e6d6564696174696f6e2e7265636f72642e76310000004032393666356430326138646439656233306535313333333965313430393662373633306333626234333838363039376634313634336136633663346339633663",
       "signed": {
         "entry": {
-          "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
-          "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+          "agreement": "b3cddb5065d9089c377eaa8d6b0f0b5730b680f437bb80f9b3ddc1de1fff4e66",
+          "transaction": "1eeb456d60ecde26d8cd585fd6adf60e086c1f47ac6ff5d58c52c8b2d5acfcb5",
           "case_ref": "case-vector-2",
           "at": 1800001800,
           "parts": [
@@ -1002,8 +1074,12 @@
           "record_ref": "record-vector-5",
           "actor": "11111111-1111-4111-8111-111111111111",
           "filing": {
-            "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+            "transaction": "1eeb456d60ecde26d8cd585fd6adf60e086c1f47ac6ff5d58c52c8b2d5acfcb5",
             "agreement": {
+              "seller": {
+                "scheme": "ed25519",
+                "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+              },
               "start_utc": "2027-01-15T08:00:00Z",
               "duration_seconds": 3600,
               "settlement": {
@@ -1027,8 +1103,10 @@
               }
             },
             "request": {
-              "kind": "buyer_end",
-              "at": 1800001800
+              "kind": "delivery_end",
+              "ended_at": 1800001800,
+              "delivered": true,
+              "cause": "payer"
             },
             "claim": "Buyer ended delivery.",
             "items": []
@@ -1036,16 +1114,16 @@
         },
         "proof": {
           "scheme": "ed25519",
-          "value": "z3JoyXDk1p_kGDcANCrdhOAkGHhwp6rZkPfySEoalzpkgRoW4L-Jz4TuFaFLNkMwOs4FkMBl4laLo-EDT-qECg"
+          "value": "YPc2WiI-W0EOQQIYugoBovKQDAPNRhtTlWPdYH8QM_u2zeaNlapDcOY_mHm8IyzB-iV_PuFFN7hnZVKwBey1Bw"
         }
       }
     },
     {
-      "message": "0000001a61726b6861692e6d6564696174696f6e2e7265636f72642e76310000004035333263633561323334636666363461656638346565653031653739393533363735356661386535366335366365363261613431363039623433313130666533",
+      "message": "0000001a61726b6861692e6d6564696174696f6e2e7265636f72642e76310000004064666530376333333738343032396333336661613763333139393166373133636532633063303333643036643064346532363261616336376432316632633265",
       "signed": {
         "entry": {
-          "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
-          "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+          "agreement": "b3cddb5065d9089c377eaa8d6b0f0b5730b680f437bb80f9b3ddc1de1fff4e66",
+          "transaction": "1eeb456d60ecde26d8cd585fd6adf60e086c1f47ac6ff5d58c52c8b2d5acfcb5",
           "case_ref": "case-vector-2",
           "at": 1800001800,
           "parts": [
@@ -1068,28 +1146,37 @@
           "sequence": 6,
           "record_ref": "record-vector-6",
           "actor": "22222222-2222-4222-8222-222222222222",
-          "items": [
-            {
-              "kind": "arkhai.mediation.end_acknowledgement.v1",
-              "producer": "22222222-2222-4222-8222-222222222222",
-              "at": 1800001800,
-              "sha256": "41b3a8ccbe51bf79da2d9d39158d8027fffd14adfb56aa2e6e317a16bc3d97b2",
-              "bytes": "eyJhdCI6MTgwMDAwMTc5OX0"
+          "items": [],
+          "concurrence": {
+            "agreement": "b3cddb5065d9089c377eaa8d6b0f0b5730b680f437bb80f9b3ddc1de1fff4e66",
+            "claim": {
+              "kind": "delivery_end",
+              "ended_at": 1800001800,
+              "delivered": true,
+              "cause": "payer"
+            },
+            "signer": {
+              "scheme": "ed25519",
+              "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+            },
+            "proof": {
+              "scheme": "ed25519",
+              "value": "fM09Lx3scVilaIG2grjZGBJ1QmF7z47qp6G5SL51N2woLedeONXXzpvFphGp2bE4-z0IPDsFQQ449bgxIwhJBg"
             }
-          ]
+          }
         },
         "proof": {
           "scheme": "ed25519",
-          "value": "l712YFqjP0yi-MErw4YhEWcBCFiR-IRufvTp5hZjmBl3lyEZdM52DkV2ED6BYXA4YR-3zCns2xtJe8gzP-F5DQ"
+          "value": "teWxB401sv91WQT-E4Z3gvmdReHwpKJvZs9o02-BnL5PZesv_GKPOvdsRKUAa9qYqN-Ysb31pPRYhq9PW18aAQ"
         }
       }
     },
     {
-      "message": "0000001a61726b6861692e6d6564696174696f6e2e7265636f72642e76310000004036663161383335376239663862356637616265323562376261663366616531343966613235356537383330323062323362643839383838333237343031383033",
+      "message": "0000001a61726b6861692e6d6564696174696f6e2e7265636f72642e76310000004061343465313332656666323564636366303764613639323561636264663836306631386334353439666564316532313535356431306161396239353530363533",
       "signed": {
         "entry": {
-          "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
-          "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+          "agreement": "b3cddb5065d9089c377eaa8d6b0f0b5730b680f437bb80f9b3ddc1de1fff4e66",
+          "transaction": "1eeb456d60ecde26d8cd585fd6adf60e086c1f47ac6ff5d58c52c8b2d5acfcb5",
           "case_ref": "case-vector-3",
           "at": 1800001800,
           "parts": [
@@ -1113,8 +1200,12 @@
           "record_ref": "record-vector-7",
           "actor": "11111111-1111-4111-8111-111111111111",
           "filing": {
-            "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+            "transaction": "1eeb456d60ecde26d8cd585fd6adf60e086c1f47ac6ff5d58c52c8b2d5acfcb5",
             "agreement": {
+              "seller": {
+                "scheme": "ed25519",
+                "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+              },
               "start_utc": "2027-01-15T08:00:00Z",
               "duration_seconds": 3600,
               "settlement": {
@@ -1138,8 +1229,10 @@
               }
             },
             "request": {
-              "kind": "buyer_end",
-              "at": 1800001800
+              "kind": "delivery_end",
+              "ended_at": 1800001800,
+              "delivered": true,
+              "cause": "payer"
             },
             "claim": "Buyer ended delivery.",
             "items": []
@@ -1147,16 +1240,16 @@
         },
         "proof": {
           "scheme": "ed25519",
-          "value": "4l-ph052KQr0SZFxTMQq944UY-sI711M13S1r209YAl6PBIWKc9FacJxIUWENuAt6eQpkYcUhr2pGAbllLL4Bw"
+          "value": "L3g8J28PLBThzgCEoR3gxv3woURuW2SJ_UJE1Rpw4w4LudI54u0LPa1FvewYE4rQenZJm_qSM9odHILayz6bCA"
         }
       }
     },
     {
-      "message": "0000001a61726b6861692e6d6564696174696f6e2e7265636f72642e76310000004062663438666563633264353438653363363661323037633961623566316263343436363339303030643931626362333366646366376265366461343335613064",
+      "message": "0000001a61726b6861692e6d6564696174696f6e2e7265636f72642e76310000004033383261393362303962666165633064326462346437323961653736313737306563363932303837366234316565366361363466663365373534633335656435",
       "signed": {
         "entry": {
-          "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
-          "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+          "agreement": "b3cddb5065d9089c377eaa8d6b0f0b5730b680f437bb80f9b3ddc1de1fff4e66",
+          "transaction": "1eeb456d60ecde26d8cd585fd6adf60e086c1f47ac6ff5d58c52c8b2d5acfcb5",
           "case_ref": "case-vector-3",
           "at": 1800001800,
           "parts": [
@@ -1185,24 +1278,67 @@
         },
         "proof": {
           "scheme": "ed25519",
-          "value": "Zz2liNLQl4DC9k91C6FqliMjYpApXMvW78LDT7d7V2hfttks9RXjUHLCNFSzwOrBPkD6nbBr3iicgQ9uGgjSBQ"
+          "value": "YqifN18e4pvLwQjiYjwQrEXvWJc_6a1iEzTAZsKIUSpJXBjYC4AMdcSwrqOXHkY1OuBedgIYS31HLm_CjvHZDA"
         }
       }
     }
   ],
+  "respondent": {
+    "request": {
+      "after": "",
+      "limit": 1
+    },
+    "page": {
+      "cases": [
+        {
+          "case_ref": "case-vector-2",
+          "transaction": "1eeb456d60ecde26d8cd585fd6adf60e086c1f47ac6ff5d58c52c8b2d5acfcb5",
+          "agreement": "b3cddb5065d9089c377eaa8d6b0f0b5730b680f437bb80f9b3ddc1de1fff4e66",
+          "filed_at": 1800001800,
+          "filer": "payer",
+          "request": {
+            "kind": "delivery_end",
+            "ended_at": 1800001800,
+            "delivered": true,
+            "cause": "payer"
+          },
+          "parts": [
+            {
+              "part": 0,
+              "status": "not_held",
+              "reason": "paid_out"
+            },
+            {
+              "part": 1,
+              "status": "held",
+              "extension_ref": 3
+            }
+          ],
+          "filed_record_ref": "record-vector-5"
+        }
+      ],
+      "next_after": "WzE4MDAwMDE4MDAsImNhc2UtdmVjdG9yLTIiXQ",
+      "has_more": false
+    },
+    "after_answer": {
+      "cases": [],
+      "next_after": "",
+      "has_more": false
+    }
+  },
   "read": {
     "request": {
-      "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
+      "agreement": "b3cddb5065d9089c377eaa8d6b0f0b5730b680f437bb80f9b3ddc1de1fff4e66",
       "after": 2,
       "limit": 100
     },
     "page": {
-      "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
+      "agreement": "b3cddb5065d9089c377eaa8d6b0f0b5730b680f437bb80f9b3ddc1de1fff4e66",
       "entries": [
         {
           "entry": {
-            "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
-            "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+            "agreement": "b3cddb5065d9089c377eaa8d6b0f0b5730b680f437bb80f9b3ddc1de1fff4e66",
+            "transaction": "1eeb456d60ecde26d8cd585fd6adf60e086c1f47ac6ff5d58c52c8b2d5acfcb5",
             "case_ref": "case-vector-1",
             "sequence": 3,
             "record_ref": "record-vector-3",
@@ -1225,6 +1361,7 @@
               "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
             },
             "kind": "ruled",
+            "basis": "operator",
             "outcome": [
               {
                 "id": "case-vector-1:reverse:0",
@@ -1265,13 +1402,13 @@
           },
           "proof": {
             "scheme": "ed25519",
-            "value": "IOW7df7wiMZdmS5VZDP3fIiAmA0sU_kj5eghT4wo7gVTJz1Z5qsz07fnJzfSN_skpCucqt9m0MThsazZnClmBg"
+            "value": "f8oY2Y4MREsfeSpPf4Al6sQaDPMjHWpC47sYdKE7l_UYMCp8a5LBkFFj0uFCNFhda9jmlzRWMa6OcR6ojZz4AQ"
           }
         },
         {
           "entry": {
-            "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
-            "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+            "agreement": "b3cddb5065d9089c377eaa8d6b0f0b5730b680f437bb80f9b3ddc1de1fff4e66",
+            "transaction": "1eeb456d60ecde26d8cd585fd6adf60e086c1f47ac6ff5d58c52c8b2d5acfcb5",
             "case_ref": "case-vector-1",
             "sequence": 4,
             "record_ref": "record-vector-4",
@@ -1295,6 +1432,7 @@
             },
             "kind": "closed",
             "reason": "ruled",
+            "basis": "operator",
             "outcome": [
               {
                 "id": "case-vector-1:reverse:0",
@@ -1335,13 +1473,13 @@
           },
           "proof": {
             "scheme": "ed25519",
-            "value": "EDqrVkIQvorrOr0tYTOKHiaTzf2EFpZ12zx_Il9IGkAJIaqdpVimUdbKzKaAeJXOAm4GYrRJp9eGN1CmcWoRBQ"
+            "value": "trqqCfQhTBrcwC6k8RV508w3r7OD2yaFxhhloQbcW_geQRkOjQHByzSfoTnM1xM86R4HmNKQsiGaR6-CArhGCw"
           }
         },
         {
           "entry": {
-            "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
-            "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+            "agreement": "b3cddb5065d9089c377eaa8d6b0f0b5730b680f437bb80f9b3ddc1de1fff4e66",
+            "transaction": "1eeb456d60ecde26d8cd585fd6adf60e086c1f47ac6ff5d58c52c8b2d5acfcb5",
             "case_ref": "case-vector-2",
             "sequence": 5,
             "record_ref": "record-vector-5",
@@ -1365,8 +1503,12 @@
             },
             "kind": "filed",
             "filing": {
-              "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+              "transaction": "1eeb456d60ecde26d8cd585fd6adf60e086c1f47ac6ff5d58c52c8b2d5acfcb5",
               "agreement": {
+                "seller": {
+                  "scheme": "ed25519",
+                  "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+                },
                 "start_utc": "2027-01-15T08:00:00Z",
                 "duration_seconds": 3600,
                 "settlement": {
@@ -1390,8 +1532,10 @@
                 }
               },
               "request": {
-                "kind": "buyer_end",
-                "at": 1800001800
+                "kind": "delivery_end",
+                "ended_at": 1800001800,
+                "delivered": true,
+                "cause": "payer"
               },
               "claim": "Buyer ended delivery.",
               "items": []
@@ -1399,13 +1543,13 @@
           },
           "proof": {
             "scheme": "ed25519",
-            "value": "z3JoyXDk1p_kGDcANCrdhOAkGHhwp6rZkPfySEoalzpkgRoW4L-Jz4TuFaFLNkMwOs4FkMBl4laLo-EDT-qECg"
+            "value": "YPc2WiI-W0EOQQIYugoBovKQDAPNRhtTlWPdYH8QM_u2zeaNlapDcOY_mHm8IyzB-iV_PuFFN7hnZVKwBey1Bw"
           }
         },
         {
           "entry": {
-            "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
-            "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+            "agreement": "b3cddb5065d9089c377eaa8d6b0f0b5730b680f437bb80f9b3ddc1de1fff4e66",
+            "transaction": "1eeb456d60ecde26d8cd585fd6adf60e086c1f47ac6ff5d58c52c8b2d5acfcb5",
             "case_ref": "case-vector-2",
             "sequence": 6,
             "record_ref": "record-vector-6",
@@ -1428,25 +1572,34 @@
               "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
             },
             "kind": "appended",
-            "items": [
-              {
-                "kind": "arkhai.mediation.end_acknowledgement.v1",
-                "producer": "22222222-2222-4222-8222-222222222222",
-                "at": 1800001800,
-                "sha256": "41b3a8ccbe51bf79da2d9d39158d8027fffd14adfb56aa2e6e317a16bc3d97b2",
-                "bytes": "eyJhdCI6MTgwMDAwMTc5OX0"
+            "items": [],
+            "concurrence": {
+              "agreement": "b3cddb5065d9089c377eaa8d6b0f0b5730b680f437bb80f9b3ddc1de1fff4e66",
+              "claim": {
+                "kind": "delivery_end",
+                "ended_at": 1800001800,
+                "delivered": true,
+                "cause": "payer"
+              },
+              "signer": {
+                "scheme": "ed25519",
+                "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+              },
+              "proof": {
+                "scheme": "ed25519",
+                "value": "fM09Lx3scVilaIG2grjZGBJ1QmF7z47qp6G5SL51N2woLedeONXXzpvFphGp2bE4-z0IPDsFQQ449bgxIwhJBg"
               }
-            ]
+            }
           },
           "proof": {
             "scheme": "ed25519",
-            "value": "l712YFqjP0yi-MErw4YhEWcBCFiR-IRufvTp5hZjmBl3lyEZdM52DkV2ED6BYXA4YR-3zCns2xtJe8gzP-F5DQ"
+            "value": "teWxB401sv91WQT-E4Z3gvmdReHwpKJvZs9o02-BnL5PZesv_GKPOvdsRKUAa9qYqN-Ysb31pPRYhq9PW18aAQ"
           }
         },
         {
           "entry": {
-            "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
-            "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+            "agreement": "b3cddb5065d9089c377eaa8d6b0f0b5730b680f437bb80f9b3ddc1de1fff4e66",
+            "transaction": "1eeb456d60ecde26d8cd585fd6adf60e086c1f47ac6ff5d58c52c8b2d5acfcb5",
             "case_ref": "case-vector-3",
             "sequence": 7,
             "record_ref": "record-vector-7",
@@ -1470,8 +1623,12 @@
             },
             "kind": "filed",
             "filing": {
-              "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+              "transaction": "1eeb456d60ecde26d8cd585fd6adf60e086c1f47ac6ff5d58c52c8b2d5acfcb5",
               "agreement": {
+                "seller": {
+                  "scheme": "ed25519",
+                  "identifier": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+                },
                 "start_utc": "2027-01-15T08:00:00Z",
                 "duration_seconds": 3600,
                 "settlement": {
@@ -1495,8 +1652,10 @@
                 }
               },
               "request": {
-                "kind": "buyer_end",
-                "at": 1800001800
+                "kind": "delivery_end",
+                "ended_at": 1800001800,
+                "delivered": true,
+                "cause": "payer"
               },
               "claim": "Buyer ended delivery.",
               "items": []
@@ -1504,13 +1663,13 @@
           },
           "proof": {
             "scheme": "ed25519",
-            "value": "4l-ph052KQr0SZFxTMQq944UY-sI711M13S1r209YAl6PBIWKc9FacJxIUWENuAt6eQpkYcUhr2pGAbllLL4Bw"
+            "value": "L3g8J28PLBThzgCEoR3gxv3woURuW2SJ_UJE1Rpw4w4LudI54u0LPa1FvewYE4rQenZJm_qSM9odHILayz6bCA"
           }
         },
         {
           "entry": {
-            "agreement": "2fd0e48c8206da799bf2960df6ba9b7f8a737ba3b63c25a8ac95f503b29a6606",
-            "transaction": "7e8c6967717eaa2f801bfc2f4f1ff63cfe608abb7ffb5de446750e71a91647ca",
+            "agreement": "b3cddb5065d9089c377eaa8d6b0f0b5730b680f437bb80f9b3ddc1de1fff4e66",
+            "transaction": "1eeb456d60ecde26d8cd585fd6adf60e086c1f47ac6ff5d58c52c8b2d5acfcb5",
             "case_ref": "case-vector-3",
             "sequence": 8,
             "record_ref": "record-vector-8",
@@ -1539,7 +1698,7 @@
           },
           "proof": {
             "scheme": "ed25519",
-            "value": "Zz2liNLQl4DC9k91C6FqliMjYpApXMvW78LDT7d7V2hfttks9RXjUHLCNFSzwOrBPkD6nbBr3iicgQ9uGgjSBQ"
+            "value": "YqifN18e4pvLwQjiYjwQrEXvWJc_6a1iEzTAZsKIUSpJXBjYC4AMdcSwrqOXHkY1OuBedgIYS31HLm_CjvHZDA"
           }
         }
       ],

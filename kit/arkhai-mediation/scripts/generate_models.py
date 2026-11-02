@@ -12,6 +12,7 @@ PACKAGE = ROOT / "src" / "market_arkhai_mediation"
 ROOTS = (
     "DisputeAuthority", "Filing", "Append", "FilingAnswer", "AppendAnswer",
     "ReadAfter", "RecordPage", "CaseAnswer", "SignedRecordEntry",
+    "DeliveryEndClaim", "SignedDeliveryEndClaim", "RespondentAfter", "RespondentPage",
 )
 
 

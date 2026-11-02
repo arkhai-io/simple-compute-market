@@ -1,11 +1,11 @@
 # Tasks — agreed evidence and early termination
 
-Reconciled design-stage plan, updated 2026-10-29 after triage of reviews 17 and 18; amended 2026-11-02 for one payee-agreed delivery_end claim and the proposed mediation revision.
+Reconciled design-stage plan, updated 2026-10-29 after triage of reviews 17 and 18; amended 2026-11-02 for one payee-agreed delivery_end claim and the published mediation revision.
 No implementation is implied by unchecked tasks. Depends on no open
 change for design or planning. Implementation depends on two external contracts (design.md,
 "Dependencies on the hosted payments service"): the published payments partialPeriod contract revision, ready to vendor at 8.1
 (hold extensions, per-part start/stop and authorities with notice
-durations, per-part `end` and `afterStop` holds, one re-vendor) gates section 8, and the published arkhai.mediation.v1 baseline is ready to vendor at 12.1. Its proposed delivery_end revision (claim/signature/concurrence/respondent listing) is not yet published and gates those concrete adapter paths, receipt embedding, buyer concurrence, respondent HTTP polling and setup-bearing presets; candidate implementation is proposed-only.
+durations, per-part `end` and `afterStop` holds, one re-vendor) gates section 8, and the arkhai.mediation.v1 delivery_end revision (claim/signature/concurrence/respondent listing) is now published and vendored at 12.1. Receipt embedding, buyer concurrence, respondent HTTP polling and setup-bearing presets still require their implementation tasks; the hosted service remains on the older contract and live qualification is pending.
 
 Sections follow the design's implementation cadence. Sections 1–7 are round 1 (foundation,
 wire and buyer side), except 7.5's explicitly round-2 end verification; section 8 joins round 1 once its schema and vectors are vendored
@@ -603,14 +603,7 @@ paid-out money" (client side) and "Dispute writes are idempotent". Files: new
 `kit/arkhai-mediation` (`schema/SOURCE.md`, adapter, client, signing fixtures),
 `docs/development/ARCHITECTURE.toml` (`[[disputes]]` row).
 
-- [ ] 12.1 Vendor the published arkhai.mediation.v1 baseline (arkhai-payments main b98fed26; payments 3be127e4) with SOURCE provenance. At this same gate, wait for the proposed delivery_end revision before vendoring DeliveryEndClaim, SignedDeliveryEndClaim, Filing/Append.concurrence, ruling basis and GET /respondent. Include canonical frame and ed25519/eip191 vectors, both cause mappings, setup identification, pre-start/replay guards and netting. Candidate resources are kit-owned/unpublished, never live. Supply installed schema/model/vector metadata APIs and shared signing fixtures from one canonical source; both in-process fake and HTTP double consume them. Register [[disputes]] and verify built-wheel resources and architecture boundary. Baseline work may start now; final claim mapping and setup enablement wait for the revision.
-  - [x] Published baseline: exact schema/vectors, installed resources and transport models,
-        shared record-signing fixtures, and the dispute-kit registration. All eight
-        signed producer records round-trip and verify from the built wheel; model drift,
-        mypy, architecture, packaging, comment hygiene and strict OpenSpec checks pass.
-        No claim, concurrence, respondent or setup model has been invented.
-  - [ ] Delivery-end revision: waits for publication with both signature-scheme vectors;
-        12.3–12.5 remain gated.
+- [x] 12.1 Vendor the published arkhai.mediation.v1 delivery_end revision with SOURCE provenance, installed schema/model/vector metadata APIs, shared signing fixtures, and the dispute-kit registration. The exact producer revision is recorded only in `kit/arkhai-mediation/schema/SOURCE.md`. Includes DeliveryEndClaim, SignedDeliveryEndClaim, Filing/Append.concurrence, ruling basis, respondent read models and both ed25519/eip191 canonical-frame vectors. Schema/record/claim vectors round-trip, reproduce signatures and verify from the built wheel; architecture, packaging, typing, model drift, comment hygiene and strict OpenSpec checks pass. Mapping/guard/netting vectors are preserved as producer data; SCM performs no monetary computation. No candidate or live service evidence is claimed. Tasks 12.3–12.5 no longer await publication but remain implementation work.
 
 - [ ] 12.2 Implement the adapter and client: file, append and read at the Agreement's origin with
       credentials bound by identity; build and validate free-form requests; return the authority's answers, per-part
