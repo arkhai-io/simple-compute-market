@@ -1111,7 +1111,7 @@ documentation only; a part needing code returns the change to implementation.
       `activate-per-period-compute-servicing`, with convergence owning consuming servicing scenarios
       and in-lane double evidence labelled separately
       from hosted qualification.
-- [ ] 16.9 **Promotion.** Write the permanent documents and the design-promotion record:
+- [x] 16.9 **Promotion.** Write the permanent documents and the design-promotion record:
       `docs/development/ARCHITECTURE.md` ("Composition from above and below", "Authority
       boundaries" with D4's independent per-deal authority and D6's counterpart table, "Kit
       areas", "Registry self-description", major flows); `docs/development/ARCHITECTURE.toml`;
@@ -1211,32 +1211,58 @@ Once-only qualification is not rate/ruling-execution or real-host qualification.
   unrun checks: `docs/attachments/aeet-closeout/index.md`. No new deployment or
   rate/ruling-execution qualification is claimed.
 
+- 16.9: repository architecture, lifecycle companion and nine owning companions,
+  configuration/testing guidance, capability index and promotion record are written.
+  The record explicitly preserves D12/O-F7/O-F9/O-F4 and deployed qualification
+  limits; normative delta synchronization remains exclusively 16.11. A direct
+  path/link/heading audit over changed Markdown checks 385 references, all resolve.
+  `make check-change` (including repository-pinned strict validation) and the
+  installed seller `first-use` entry pass. No production code changes.
+
 ## Design promotion record
 
-Planned destinations below; promotion is not performed during this design reconciliation.
-The remaining D1–D15 destinations are listed in proposal.md and task 16.9.
+Architecture/configuration/index promotion is written on this branch. Permanent
+prose describes the implemented system, with external monetary policy contextual
+rather than prescribed as SCM behavior. The fourteen delta-covered normative
+specifications are reserved for 16.11 synchronization, not manually merged here.
+In particular, the new capability's normative `spec.md` will be generated from
+`specs/deal-lifecycle/spec.md` at archival; the capability index links the existing
+architecture companion only until that owner-approved step. No archival is performed.
 
 | Accepted decision | Permanent location |
 |---|---|
-| Initial missing mediation history permits the first filing only, not a verified empty ordinary read or unproved case acknowledgement | `kit/arkhai-mediation/README.md` now; existing deal-lifecycle spec/architecture ownership at reviewed closeout (16.9) |
-| Mediation owns installed published schema/models/vectors and marketplace claim framing; its stateless adapter only communicates with the exact Agreement authority, preserving aggregate monetary answers without computing remedies | Deal-lifecycle delta and design, promoted to the new capability's spec/architecture in 16.9; `docs/development/ARCHITECTURE.md` kit areas |
-| D5 Alkahest release-model list, option-owned release conditions, undeliverable-model startup refusal and atomic legacy-flag migration | `docs/development/DEPLOYMENT_AND_CONFIG.md#alkahest-release-models` and `docs/development/ARCHITECTURE.md` readiness boundary; settlement-configuration delta promoted at 16.9 |
-| D5 price/settlement/lifecycle option envelope, canonical identity, selection mirror and forward-only registry paths | Settlement-configuration and negotiation-protocol spec deltas; lifecycle ownership in deal-lifecycle spec/architecture, promoted at reviewed closeout (16.9) |
-| D6 neutral authorization/evidence envelope, sole end-service billing-start intent; D8 cause classification, pre-start timing exception and revised-remedy netting | New `deal-lifecycle` spec/architecture and settlement-servicing spec/architecture at closeout |
-| D8 receipt-embedded SignedDeliveryEndClaim, buyer concurrence/stop retry and both CLI paths | `openspec/specs/buyer-orchestration/spec.md` and `architecture.md` |
-| D5 premature-stop penalty codec and D10 capped held-earnings remedy; D10 one payee-agreed delivery_end rule for either filer, receipt concurrence and durable respondent sign-or-contest; D8 delivery_end filing and stable keys; D9 retained signed evidence; D10 case-carried Agreement and human triage | New `deal-lifecycle` capability's spec and architecture companion (created at archive/closeout) |
-| D8 site-signed intended-end report, transactional event/outbox and recovery; canonical payload framed under `arkhai.site.lease-ended.v1`, stored proof preserved across retries/pull, per-peer unsupported parking and explicit resumption | `openspec/specs/site-capacity/spec.md`, `openspec/specs/physical-provisioning/spec.md` and their architecture companions |
-| D5 coherent hosted contract selection and generated installed resources; one shared clock-injected payments fixture engine | `kit/arkhai-payments/README.md` (current API); settlement-servicing spec/architecture and `docs/development/TESTING.md` at closeout |
-| D8 intended end versus proven release; terminate versus future truncate | `docs/development/ARCHITECTURE.md`, "Site authority", "Fulfillment status and results", "Release"; `openspec/specs/site-capacity/architecture.md` |
-| D8 VM buyer end and second-precision lease effects | `openspec/specs/vm-storefront-fulfillment/spec.md` |
-| Ordered dispute preferences, local identity vetoes, identity-bound credential references and opt-in registry recommendations | `docs/development/DEPLOYMENT_AND_CONFIG.md#dispute-authority-preferences` and its registry descriptor section; payment kit README, seller quickstart and e2e runner guide. Normative settlement-configuration/registry-discovery spec deltas and lifecycle architecture promotion remain at reviewed closeout (16.9) |
-| Codec-owned common lifecycle query projections, absent-value semantics and same-option asset correlation | `openspec/specs/cli-query-language/spec.md` and `openspec/specs/settlement-configuration/spec.md` at closeout |
-| Per-part absolute ends, stop-relative dispute holds and exact rights-derived authority/cap derivation; setup once permissions remain independent of rate rights | `kit/arkhai-payments/README.md`; settlement-servicing spec/architecture and deal-lifecycle spec/architecture at reviewed closeout |
-| Hosted publication selects compatible offered authority projections; shared registry destinations use their ordered intersection; API-credit selection and approval check full accepted identities | `kit/arkhai-payments/README.md`; storefront-publication, settlement-configuration and buyer-orchestration spec deltas and lifecycle architecture at reviewed closeout |
-| Bounded current/retiring receipt identities and snapshot attestation/cursor verification before state consumption | `docs/development/DEPLOYMENT_AND_CONFIG.md#settlement-consumer-configuration-and-cutover`; settlement-servicing spec/architecture at reviewed closeout |
-| Accepted delivery metadata does not establish commitment: the verified-evidence transaction fixes the payment authority's approval instant once, preserves earlier ends and gates seller committed-deal pages; bounded recovery runs independently of payment publication | Deal-lifecycle delta and design, promoted to the new capability's spec/architecture at reviewed closeout |
-| D6 VM administrator dispatch follows accepted payee rights; exceptional ends retain administrator/reason and drive physical teardown independently of the journaled authority filing | Deal-lifecycle delta and design, promoted to the new capability's spec/architecture, with VM fulfillment ownership at reviewed closeout |
-| Lifecycle distributions participate in public publication with their declared dependency order | `docs/development/RELEASING.md` and `manifests/published-distributions.json` |
+| D1–D3 protocol ends at mechanism commitment; exact derivation and later evidence | `docs/development/ARCHITECTURE.md#composition-from-above-and-below`; `openspec/specs/deal-lifecycle/architecture.md#commitment-and-authority`; buyer-orchestration delta |
+| D4 independent per-deal authority, full identity/params admission and registry-specific consent | `docs/development/ARCHITECTURE.md#authority-boundaries`, `#registry-self-description`; `openspec/specs/deal-lifecycle/architecture.md#commitment-and-authority`; negotiation-protocol, registry-discovery and settlement-configuration deltas |
+| D5 option price/settlement/lifecycle envelope, canonical identity, same-option query projections, per-part events, independent approval/hold windows and rights-derived authority/cap | `openspec/specs/deal-lifecycle/architecture.md#parts-and-terms`; `openspec/specs/settlement-servicing/architecture.md#charge-first-payment-settlement`; `openspec/specs/storefront-publication/architecture.md#arkhai-payment-options`; settlement-configuration, cli-query-language, negotiation-protocol and settlement-servicing deltas |
+| D5 Alkahest release-model list and option-owned conditions; undeliverable model readiness blocker and explicit migration | `docs/development/DEPLOYMENT_AND_CONFIG.md#alkahest-release-models`; `docs/development/ARCHITECTURE.md` readiness boundary; settlement-configuration delta. Existing guide already documents the implemented blocker, not startup refusal of the whole storefront |
+| D6 adapter/role boundaries, buyer-side and independent dispute kits, counterpart answer ownership | `docs/development/ARCHITECTURE.md#kit-areas`, `#post-commitment-counterparts`; `docs/development/ARCHITECTURE.toml` independent dispute registry/scope (existing enforcement retained); `openspec/specs/deal-lifecycle/architecture.md#package-and-counterpart-boundaries` |
+| D7 verified authority records, separate cursors and current outcomes; pinned ruling actor and opaque account mapping | `openspec/specs/deal-lifecycle/architecture.md#one-end-instant-transactional-admission`; `openspec/specs/settlement-servicing/architecture.md#charge-first-payment-settlement` |
+| D8 one attributed delivery end, all sources retained, atomic admission/end/classification/filing journal, no core financial-end record | `openspec/specs/deal-lifecycle/architecture.md#one-end-instant-transactional-admission`; `openspec/specs/settlement-servicing/architecture.md#capacity-coupling`; deal-lifecycle and vm-storefront-fulfillment deltas |
+| D8 receipt-time surrender, signed embedded claim, same-key recovery, canonical compute verbs and distinct payment/case progress | `openspec/specs/buyer-orchestration/architecture.md#delivery-only-ends-and-case-evidence`; `openspec/specs/deal-lifecycle/architecture.md#buyer-surrender-and-cases`; buyer-orchestration delta |
+| D8 intended end before teardown, transactional event/outbox, original signed push/pull after signer changes, peer parking/resumption, terminate-now versus second-precision future truncate and separate proven return | `openspec/specs/site-capacity/architecture.md#intended-end-evidence`; `openspec/specs/physical-provisioning/architecture.md#lease-end-report-delivery`; `docs/development/ARCHITECTURE.md` Site authority/Fulfillment status and results/Release; site-capacity, physical-provisioning and vm-storefront-fulfillment deltas |
+| D8 seller capacity budget diagnostics warn and continue, not a second payment term or buyer guarantee | `docs/development/DEPLOYMENT_AND_CONFIG.md#seller-servicing-budget-diagnostics` beside the settlement/dispute entries; current library inputs and absent role-level budget table stated explicitly |
+| D9 exact acceptance/peer/site/authority bytes, three evidence classes and conservative frozen-window retention | `openspec/specs/deal-lifecycle/architecture.md#site-evidence-and-retention`; `openspec/specs/buyer-orchestration/architecture.md#delivery-only-ends-and-case-evidence`; `openspec/specs/deployment-state/architecture.md#lifecycle-state-and-coordinated-rollout`; deal-lifecycle delta |
+| D10 original semantic filing ownership/adoption, fixed claims, one delivery_end for either filer, respondent sign-or-contest, setup treatment and capped held-earnings remedy | `openspec/specs/deal-lifecycle/architecture.md#buyer-surrender-and-cases`, `#external-authorities`; `openspec/specs/settlement-servicing/architecture.md#charge-first-payment-settlement`; deal-lifecycle and settlement-servicing deltas. Authority remedies are context only |
+| D11 triage fallback; unsigned/contested/unanswered claims never rule by silence | `openspec/specs/deal-lifecycle/architecture.md#external-authorities` (external context), with SCM observation/delegation obligations in the deal-lifecycle delta |
+| D12 adversarial buyer protection and accepted mid-deal dispute origin/key rotation limit | `docs/development/ARCHITECTURE.md#post-commitment-counterparts`; `openspec/specs/deal-lifecycle/architecture.md#current-limits`; `docs/development/DEPLOYMENT_AND_CONFIG.md#dispute-authority-preferences`; `openspec/specs/deployment-state/architecture.md#lifecycle-state-and-coordinated-rollout` |
+| D13 neutral alternative, current Alkahest risk and absent specialized arbiter/adapter | `docs/development/ARCHITECTURE.md#post-commitment-counterparts`; `openspec/specs/deal-lifecycle/architecture.md#current-limits` |
+| D14 information placement and compute commit versus API-credit settle | `docs/development/ARCHITECTURE.md#composition-from-above-and-below`; `openspec/specs/buyer-orchestration/architecture.md`; market-composition and buyer-orchestration deltas |
+| D15 current scope and deferrals: no rate-stop/funding/ruling execution or real-host qualification, hosted-development mediation on an older revision, API credits compatible but not serviced | `openspec/specs/deal-lifecycle/architecture.md#current-limits`; `openspec/specs/settlement-servicing/architecture.md#current-limits`; `openspec/specs/api-credits/architecture.md#payment-composition-and-recovery`; `openspec/specs/test-compatibility/architecture.md#lifecycle-contract-evidence`; `docs/development/ROADMAP.md` Goals 6 and 8 |
+| Ordered authority preferences/credentials and publication's registry-list intersection | `docs/development/DEPLOYMENT_AND_CONFIG.md#dispute-authority-preferences`; `openspec/specs/storefront-publication/architecture.md#arkhai-payment-options`; settlement-configuration and registry-discovery deltas |
+| Verified snapshots and bounded current/retiring receipt pins; one shared clock-injected payment fixture engine and independent mediation vectors | `openspec/specs/settlement-servicing/architecture.md#charge-first-payment-settlement`; `openspec/specs/test-compatibility/architecture.md#lifecycle-contract-evidence`; `docs/development/TESTING.md#payment-receipts-in-tests`; existing deployment receipt-identity guide and payment/mediation kit READMEs |
+| Verified-evidence transaction fixes approval commitment once; bounded physical recovery independent of publication; accepted payee-right administrator dispatch | `openspec/specs/vm-storefront-fulfillment/architecture.md#delivery-end-and-post-release-history`; deal-lifecycle and vm-storefront-fulfillment deltas |
+| S-N3 full post-release history marker: nonempty read fully ingested after proven release, checked across restart | `openspec/specs/vm-storefront-fulfillment/architecture.md#delivery-end-and-post-release-history` |
+| O-F7 accepted respondent-lifetime and term-end composition differences; O-F9 no production prune trigger; O-F4 unresolved unanswered case holds its per-deal cursor | `openspec/specs/deal-lifecycle/architecture.md#current-limits`; `openspec/specs/settlement-servicing/architecture.md#current-limits`; VM fulfillment companion records the domain differences |
+| Goal 6/Goal 8 current-state and gap ownership; campaign dependency gates remain until archival | `docs/development/ROADMAP.md` Goals 6 and 8; `openspec/changes/README.md` row and graph (16.5/16.6); `openspec/specs/README.md` capability/authority index |
+| Published lifecycle distribution dependency order | Existing `docs/development/RELEASING.md` and `manifests/published-distributions.json`; packaging check passes without further edits |
+
+Archive-owned normative destinations (all deltas already present under this change):
+new deal-lifecycle capability, buyer-orchestration, cli-query-language,
+deployment-state, market-composition, negotiation-protocol, registry-discovery,
+settlement-configuration, settlement-servicing, storefront-publication,
+test-compatibility, vm-storefront-fulfillment, physical-provisioning and site-capacity.
+Each archive-generated `spec.md` receives its own delta, including D8 attribution
+and D9 site-report retention. Companion promotion does not substitute for that merge.
 
 ## Implementation review 19/20 disposition — kits
 

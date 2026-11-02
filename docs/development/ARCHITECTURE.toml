@@ -8,8 +8,10 @@
 
 version = 1
 
-# Dispute interfaces register their identity, kit and vocabulary tokens just
-# like mechanisms. A dispute kit has kind "dispute" and no mechanism scope.
+# Dispute interfaces register identity, kit and vocabulary independently of
+# payment mechanisms. Compatibility is advertisement data, not a kit dependency.
+# A dispute kit has kind "dispute" and no mechanism scope; see ARCHITECTURE.md,
+# "Kit areas", and openspec/specs/deal-lifecycle/architecture.md.
 [[disputes]]
 name = "arkhai-mediation"
 kit = "arkhai-kit-arkhai-mediation"

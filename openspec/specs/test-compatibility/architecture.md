@@ -59,7 +59,35 @@ Core tests own contribution discovery, frozen registry invariants, exact-object 
 
 SCM's credential-free suites exercise generated payment models, shared JCS vectors, mandate policy, signed receipts, accepted-state persistence, and domain composition through deterministic collaborators. A controlled VM smoke can prove pending → provisioning → ready with one delivery, but cannot prove a live ledger or hardware effect.
 
-The payments service owns ledger accounting, fee collection, hold release, disputes, and cash-provider behavior. Consumer tests do not inherit Stripe claims or a signed hosted-release profile matrix. Complete-deal qualification that needs the payments service's internals (local ledger, development-mode auth, operator test funds, ledger reads) is owned by the payments service's own end-to-end tests, which import this repository's published packages; this repository does not import the private service to test it. This repository's live payment scenario targets a public payments test deployment through its public API, runs only when such a target is configured, and otherwise reports the unmet prerequisite. A live payment run records the actual service target, consumer revision, authentication method, seed state, and observed readiness. An absent or unready payments target, or a missing physical target, is reported as an unmet prerequisite before scenario mutations, not converted into local acceptance. Once a payments target is configured, the settings a scenario supplies itself — its parties' accounts and credentials and the service policy it pins — are configuration the run owes, so a missing one fails the scenario, naming it, rather than blocking it: a pipeline with no target stays a blocked skip, while a misconfigured payments run fails deterministically.
+The payments service owns ledger accounting, fees, hold release/extensions and
+cash providers; the dispute authority owns cases/rulings and applies their effects. Consumer tests do not inherit Stripe claims or a signed hosted-release profile matrix. Complete-deal qualification that needs the payments service's internals (local ledger, development-mode auth, operator test funds, ledger reads) is owned by the payments service's own end-to-end tests, which import this repository's published packages; this repository does not import the private service to test it. This repository's live payment scenario targets a public payments test deployment through its public API, runs only when such a target is configured, and otherwise reports the unmet prerequisite. A live payment run records the actual service target, consumer revision, authentication method, seed state, and observed readiness. An absent or unready payments target, or a missing physical target, is reported as an unmet prerequisite before scenario mutations, not converted into local acceptance. Once a payments target is configured, the settings a scenario supplies itself — its parties' accounts and credentials and the service policy it pins — are configuration the run owes, so a missing one fails the scenario, naming it, rather than blocking it: a pipeline with no target stays a blocked skip, while a misconfigured payments run fails deterministically.
+
+## Lifecycle contract evidence
+
+The payments kit owns installed JSON Schema/generated models, JCS/signature and
+snapshot vectors, and one clock-injected per-part `PaymentsAuthority` fixture
+engine. Its HTTP fake and consumer fixtures use that engine. Mediation owns its
+independently installed schema/models, both ed25519/eip191 claim vectors and
+ruling traces. These fixtures prove deterministic public-contract compatibility,
+not the internal implementation or deployed monetary execution of either service.
+SCM imports no authority service implementation.
+
+Unit/service suites own same-key retry, lost-response adoption, caller-session
+admission/end races, exact-envelope capture, pinned-authority verification,
+independent cursor floors, respondent answer journals and conservative retention.
+Site/provisioning producer integration tests own atomic event/outbox rollback,
+all ending causes, crash/ack recovery, exact signed push/pull after signer change,
+unsupported-peer parking and explicit resumption. Consumers do not replace that
+producer proof with a hand-built report.
+
+Deployed VM and mock-bare-metal scenarios distinguish receipt-time surrender,
+retrieval of the original signed site report before teardown, and later proven
+capacity return. Mock provisioning proves no physical access or revocation.
+Once-only payment/case encounters prove no rate stop, funding or monetary ruling
+execution. A configured real authority and, for physical claims, a disposable
+real host remain qualification prerequisites. Readiness failures and unrun lanes
+are named, not converted into fixture passes. See the
+[lifecycle limits](../deal-lifecycle/architecture.md#current-limits).
 
 ## Current limits
 

@@ -937,9 +937,15 @@ configured for one mode is tested with a receipt signed in the other:
 payments.serve(build_signed_receipt(signer=SERVICE, mandate=accepted.mandate, livemode=True))  # refused unless the role sets livemode
 ```
 
-A fake may give the surrounding transaction snapshot a placeholder proof,
-because sellers trust only the embedded receipt. A change that makes snapshot
-state authoritative must first add a snapshot vector and fixture.
+A snapshot consumed as authority state needs its own verified proof, mode,
+deal/mandate/receipt binding and nonregressing event sequence. The payments kit
+owns snapshot vectors, `sign_snapshot` and the shared clock-injected
+`PaymentsAuthority` fixture engine. `FakePaymentsClient` uses that engine rather
+than reimplementing billing; a receipt-only fixture proves only the receipt gate,
+not part-state observation. The mediation kit independently owns claim framing,
+both signature-scheme vectors and ruling traces. Neither fixture qualifies a
+deployed authority or monetary ruling execution. See
+[lifecycle contract evidence](../../openspec/specs/test-compatibility/architecture.md#lifecycle-contract-evidence).
 
 ## Boundary-Change Validation
 

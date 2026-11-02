@@ -295,6 +295,24 @@ Readiness recovery may add a deterministic option without changing listing ident
 
 ## Arkhai payment options
 
-VM, bare-metal, and API-credit publication composes ready `arkhai.payments.v1` clauses beside supported Alkahest choices. The public option discloses payee account, asset/rates, hold window, and Agreement deposit policy; no Stripe profile, instrument, or provider object enters the listing.
+VM, bare-metal and API-credit publication composes ready `arkhai.payments.v1`
+clauses beside supported Alkahest choices. Each option has commercial `price`,
+schema-tagged `settlement` and codec-owned `lifecycle`; the canonical option ID
+covers all present groups. Public data includes payee account, asset/rates,
+approval window and Agreement deposit policy. Adjudication includes the full
+dispute-authority projection, dispute window and case-hold cap; compute clauses
+also disclose their delivery deadline. Approval expiry does not set the hold.
+No credential, provider object or Stripe profile enters an option.
+
+Domain roots pass neutral offered-authority/installed-interface projections to
+builders, never import the payments kit from the dispute kit. Advertisement
+compatibility, minimum windows and the installed interface must all match.
+One stored option set serves all registry destinations, so offered authorities
+are the ordered intersection of those registries' independently resolved lists,
+not their union; a listing with no destination uses local-only preferences.
+Local full-identity vetoes win over recommendations. Publication failure affects
+new options only; accepted deals keep their original authority and terms.
+API-credit options carry adjudication/holds, but its roles compose no watch or
+buyer case filing. See [lifecycle terms](../deal-lifecycle/architecture.md#parts-and-terms).
 
 Bare-metal readiness intersects fresh selected-site availability and SSH capability with payment consumer policy. API-credit readiness starts from sellable named-service quota. One mechanism's blocker suppresses only its new options, not a ready peer or an accepted Agreement. Acceptance records the seller-derived mandate in shared opaque `settlement_data`; provisioning/issuance uses the signed receipt gate, not a publication readiness hint.
