@@ -32,7 +32,6 @@ def register_agreement(conn, agreement_bytes: bytes, settlement_data=None, *, ca
         commitment = data.transaction_id
         expiry = data.mandate.expires
     start = int(datetime.fromisoformat(agreement.start_utc.replace("Z", "+00:00")).timestamp())
-    accepted = int(datetime.fromisoformat(agreement.accepted_at.replace("Z", "+00:00")).timestamp())
     create_schema(conn)
     captured = acceptance_envelope.get() if capture else None
     if captured is not None:
@@ -51,7 +50,7 @@ def register_agreement(conn, agreement_bytes: bytes, settlement_data=None, *, ca
     EndSession(conn).register(DeliveryRecord(
         negotiation_id=agreement.negotiation_id, commitment_ref=commitment,
         seller=Identity.model_validate(agreement.seller), start_at=start,
-        term_end=start + agreement.duration_seconds, committed_at=accepted,
+        term_end=start + agreement.duration_seconds,
         delivery_deadline_seconds=terms.delivery_deadline_seconds if terms else None,
     ))
     SellerSession(conn).register(SellerDeal(

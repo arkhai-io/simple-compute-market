@@ -112,6 +112,12 @@ class EndService:
                 operation_id=f"{evidence.negotiation_id}:{phase.value}",
                 evidence_refs=[evidence.commitment_ref],
             )
+        if record.committed_at is None:
+            return DeliveryAuthorization(
+                status="pending", reason="commitment has not been verified",
+                operation_id=f"{evidence.negotiation_id}:{phase.value}",
+                evidence_refs=[evidence.commitment_ref],
+            )
         financial = await adapter.authorize(phase, evidence)
         admission = session.admit(
             evidence.negotiation_id, phase, expected_revision, now=self.clock(),
@@ -157,6 +163,8 @@ class EndService:
             record = session.read(evidence.negotiation_id)
             if record.commitment_ref != evidence.commitment_ref:
                 return self._billing_refusal(evidence, operation_key, "billing evidence names another commitment")
+            if record.committed_at is None:
+                return self._billing_refusal(evidence, operation_key, "commitment has not been verified")
             existing = [item for item in session.intents(evidence.negotiation_id) if item.kind == "billing"]
             if existing:
                 intent = existing[0]

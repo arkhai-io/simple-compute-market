@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import sqlite3
 import time
 from datetime import datetime, timezone
@@ -22,7 +23,7 @@ from market_deal_lifecycle_contracts.models import Accepted, CommitMessage, List
 from market_deal_servicing import (
     Classification, DealWatch, DeliveryIngress, EndService, EndSession,
     FinalRequest, LifecycleRouteBinding, LifecycleRouteServices, RespondentPoller,
-    SellerServicing, SellerSession, SQLiteEvidenceStore, VerifiedSiteEnd,
+    PhysicalResult, SellerDeal, SellerServicing, SellerSession, SQLiteEvidenceStore, VerifiedSiteEnd,
 )
 from market_deal_servicing.evidence import transaction
 from market_identity import Identity, canonical_json
@@ -30,6 +31,9 @@ from market_identity import Identity, canonical_json
 from .lifecycle_records import register_agreement
 from .models import BareMetalSettleRequest
 from .settlement_stages import SettlementRequestError
+
+
+logger = logging.getLogger(__name__)
 
 
 class BareMetalLifecycle:
@@ -40,6 +44,8 @@ class BareMetalLifecycle:
         self.evidence = SQLiteEvidenceStore(self.path)
         self.locks: dict[str, asyncio.Lock] = {}
         self.clients = {}
+        with transaction(self.path) as conn:
+            conn.execute("CREATE TABLE IF NOT EXISTS bare_metal_lifecycle_cursor (id INTEGER PRIMARY KEY CHECK (id=1), continuation TEXT)")
         self.end = EndService(self.path, self, clock=self.clock)
         self.seller = SellerServicing(
             self.path,
@@ -50,7 +56,7 @@ class BareMetalLifecycle:
         )
         self.ingress = DeliveryIngress(
             self.path, clock=self.clock, verify_site=self.verify_site,
-            receipt_claim=self.receipt_claim,
+            classify_site=self.classify_site, receipt_claim=self.receipt_claim,
         )
 
     def lock(self, negotiation_id):
@@ -159,19 +165,16 @@ class BareMetalLifecycle:
             raise ValueError("delivery ended before disclosure")
 
     async def apply_end(self, negotiation_id, *, terminate, at, operation_key):
+        # Do not terminate a lease before its in-flight dispatch has been adopted.
+        # The end is already durable; begin's finally and the recovery loop retry it.
+        if self.lock(negotiation_id).locked():
+            return PhysicalResult(progress="end_recorded", done=False)
         with transaction(self.path) as conn:
             selected = EndSession(conn).selected_end(negotiation_id)
-        result = await self.runtime.fulfillment_service().apply_end(
+        return await self.runtime.fulfillment_service().apply_end(
             negotiation_id, terminate=terminate, at=at, operation_key=operation_key,
-            reason=selected.cause if selected else "lifecycle_end",
+            reason=selected.source_ref if selected else "lifecycle_end",
         )
-        # A reservation or dispatched create may still be in flight. Its owner
-        # adopts the returned identity and re-drives this pending end on exit.
-        in_flight = self.lock(negotiation_id).locked()
-        return result.model_copy(update={
-            "done": result.done and not in_flight,
-            "progress": "end_recorded" if in_flight and result.progress == "released" else result.progress,
-        })
 
     async def local_end(self, negotiation_id, *, cause):
         self.binding(negotiation_id)
@@ -215,10 +218,66 @@ class BareMetalLifecycle:
             report, capacity_reservation_id=row[0], site_id=row[1],
             expected_sites=trust.site_trusted_set(row[1]),
         )
+        controlling = None
+        with transaction(self.path) as conn:
+            session = EndSession(conn)
+            for request in session.requests(negotiation_id):
+                if (event.cause == "termination" and event.reason == request.source_ref
+                        and event.caller == session.read(negotiation_id).seller
+                        and event.effective_at >= request.ended_at):
+                    classification_row = conn.execute(
+                        "SELECT classification FROM servicing_final_requests WHERE negotiation_id=? AND source_ref=?",
+                        (negotiation_id, request.source_ref),
+                    ).fetchone()
+                    if classification_row[0] is not None and Classification.model_validate_json(classification_row[0]).lawful:
+                        controlling = request.source_ref
+                        break
         return VerifiedSiteEnd(
             event_id=event.event_id, capacity_reservation_id=row[0], ended_at=event.effective_at,
-            actor=report.signer, cause=event.cause,
+            actor=report.signer, cause=event.cause, controlling_source_ref=controlling,
         )
+
+    def classify_site(self, event, session):
+        row = session.conn.execute(
+            "SELECT negotiation_id FROM bare_metal_fulfillment_lifecycle WHERE capacity_reservation_id=?",
+            (event.capacity_reservation_id,),
+        ).fetchone()
+        record = session.read(row[0])
+        refs = ["site-event:" + event.event_id]
+        if event.controlling_source_ref:
+            classification = session.conn.execute(
+                "SELECT classification FROM servicing_final_requests WHERE negotiation_id=? AND source_ref=?",
+                (record.negotiation_id, event.controlling_source_ref),
+            ).fetchone()[0]
+            return Classification.model_validate_json(classification)
+        earlier = session.selected_end(record.negotiation_id)
+        if (record.committed_at is not None and record.delivery_deadline_seconds is not None
+                and event.ended_at > record.deadline and record.available_at is None
+                and (earlier is None or earlier.ended_at > record.deadline)):
+            return Classification(kind="non_delivery", evidence_refs=refs)
+        if event.cause == "expiry" and event.ended_at == record.term_end:
+            return Classification(kind="terms", evidence_refs=refs)
+        return Classification(kind="unentitled_withdrawal", evidence_refs=refs)
+
+    def reconcile_local(self, negotiation_id):
+        now = self.clock()
+        with transaction(self.path) as conn:
+            session = EndSession(conn)
+            record = session.read(negotiation_id)
+            if record.committed_at is None:
+                return False
+            # Admission establishes a missed delivery deadline before a later
+            # terms expiry can incorrectly turn non-delivery into a lawful end.
+            session.admit(negotiation_id, record.phase, record.revision, now=now)
+            if now >= record.term_end and not any(
+                request.source_ref == "term-end" for request in session.requests(negotiation_id)
+            ):
+                session.record_end(FinalRequest(
+                    negotiation_id=negotiation_id, source_ref="term-end", ended_at=record.term_end,
+                    observed_at=now, actor=record.seller, cause="terms", source="agreement",
+                    evidence_refs=[record.commitment_ref],
+                ), now=now, classification=Classification(kind="terms", evidence_refs=[record.commitment_ref]))
+        return True
 
     async def peer(self, message):
         if isinstance(message, CommitMessage):
@@ -251,33 +310,60 @@ class BareMetalLifecycle:
         )
 
     async def cycle(self):
+        # One bounded page per cycle, with durable rotation even if one peer is
+        # unavailable. A bad deal must not starve physical recovery of the rest.
         with transaction(self.path) as conn:
-            deals, _ = SellerSession(conn).page(ListDealsRequest(limit=100))
+            row = conn.execute("SELECT continuation FROM bare_metal_lifecycle_cursor WHERE id=1").fetchone()
+            deals, continuation = SellerSession(conn).page(
+                ListDealsRequest(limit=100, continuation=row[0] if row else None),
+                committed_only=False,
+            )
         authorities = {}
         for deal in deals:
             if deal.dispute and self.credential_available(deal.dispute):
                 authorities.setdefault(deal.dispute.model_dump_json(), deal)
-        # Discovery and answering precede watch, sharing its case-keyed journal.
         for deal in authorities.values():
-            adapter = self.dispute(deal.dispute_binding)
+            try:
+                adapter = self.dispute(deal.dispute_binding)
 
-            def resolve(case):
-                for candidate in deals:
-                    if candidate.dispute == deal.dispute and candidate.commitment_ref == case.commitment_ref:
-                        resolved = self.dispute(candidate.dispute_binding)
-                        if resolved.agreement_digest == case.agreement_ref:
-                            return candidate.negotiation_id, resolved
-                return None
+                def resolve(case):
+                    with transaction(self.path) as conn:
+                        rows = conn.execute(
+                            "SELECT deal FROM servicing_seller_deals WHERE json_extract(deal, '$.commitment_ref')=?",
+                            (case.commitment_ref,),
+                        ).fetchall()
+                    for row in rows:
+                        candidate = SellerDeal.model_validate_json(row[0])
+                        if candidate.dispute == deal.dispute:
+                            resolved = self.dispute(candidate.dispute_binding)
+                            if resolved.agreement_digest == case.agreement_ref:
+                                return candidate.negotiation_id, resolved
+                    return None
 
-            await RespondentPoller(
-                self.path, authority=deal.dispute, account=self.payment(deal).data.mandate.to.root,
-                read=adapter.respondent, resolve=resolve, signer=self.runtime.marketplace_signer,
-                clock=self.clock,
-            ).poll()
+                await RespondentPoller(
+                    self.path, authority=deal.dispute, account=self.payment(deal).data.mandate.to.root,
+                    read=adapter.respondent, resolve=resolve, signer=self.runtime.marketplace_signer,
+                    clock=self.clock,
+                ).poll()
+            except Exception:
+                logger.exception("bare-metal respondent recovery failed")
         for deal in deals:
-            await self.seller.read(deal.negotiation_id)
-            await self.seller.dispatch_filings(deal.negotiation_id)
-            await self.end.drive_physical(deal.negotiation_id)
+            # Physical work is independent of authority availability and payment
+            # publication. Always attempt it, including an uncommitted surrender.
+            try:
+                await self.end.drive_physical(deal.negotiation_id)
+                if self.reconcile_local(deal.negotiation_id):
+                    await self.seller.read(deal.negotiation_id)
+                    await self.seller.dispatch_filings(deal.negotiation_id)
+            except Exception:
+                logger.exception("bare-metal lifecycle recovery failed for %s", deal.negotiation_id)
+            finally:
+                try:
+                    await self.end.drive_physical(deal.negotiation_id)
+                except Exception:
+                    logger.exception("bare-metal physical recovery failed for %s", deal.negotiation_id)
+        with transaction(self.path) as conn:
+            conn.execute("INSERT OR REPLACE INTO bare_metal_lifecycle_cursor VALUES (1,?)", (continuation,))
         return len(deals)
 
     async def close(self):

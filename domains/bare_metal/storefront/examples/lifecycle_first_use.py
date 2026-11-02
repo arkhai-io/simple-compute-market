@@ -10,6 +10,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -19,6 +20,8 @@ from market_arkhai_mediation.claims import verify_claim
 from market_arkhai_mediation.models import DeliveryEndClaim, SignedDeliveryEndClaim
 from market_deal_lifecycle_client import LifecycleClient, LifecycleClientError
 from market_deal_lifecycle_contracts.models import CommitMessage, ListDealsRequest
+from market_deal_servicing import EndSession
+from market_deal_servicing.evidence import transaction
 from market_identity import TrustedIdentitySet, canonical_json
 
 
@@ -35,6 +38,44 @@ async def main():
                     negotiation_id=state.negotiation_id,
                     commitment_ref=state.data.transaction_id, operation_key="first-use-commit",
                 )
+                if len(sys.argv) > 1:
+                    mode = sys.argv[1]
+                    if mode not in {"before-dispatch", "create-in-flight"}:
+                        raise ValueError("expected before-dispatch or create-in-flight")
+                    started, release = asyncio.Event(), asyncio.Event()
+                    releases = []
+                    if mode == "create-in-flight":
+                        state.provisioning.started, state.provisioning.release = started, release
+                    else:
+                        schedule = state.provisioning.schedule_resource
+
+                        async def paused_schedule(request):
+                            started.set()
+                            await release.wait()
+                            return await schedule(request)
+
+                        async def release_reservation(**request):
+                            releases.append(request)
+                            return {"capacity_reservation_id": request["capacity_reservation_id"], "site": request["site_id"]}
+
+                        state.provisioning.schedule_resource = paused_schedule
+                        state.runtime.capacity_client.release = release_reservation
+                    pending = asyncio.create_task(client.commit(message))
+                    await asyncio.wait_for(started.wait(), timeout=5)
+                    ack = await client.end_delivery(state.negotiation_id, operation_key="racing-end")
+                    assert ack.delivery.progress == "end_recorded"
+                    assert state.provisioning.terminated == []
+                    release.set()
+                    result = await asyncio.wait_for(pending, timeout=5)
+                    assert result.outcome.status == ("rejected" if mode == "before-dispatch" else "accepted")
+                    assert len(state.provisioning.begin_calls) == (0 if releases else 1)
+                    assert len(state.provisioning.terminated) == (0 if releases else 1)
+                    assert len(releases) == (1 if mode == "before-dispatch" else 0)
+                    with transaction(state.runtime.db.db_path) as conn:
+                        record = EndSession(conn).read(state.negotiation_id)
+                    assert record.committed_at == 1_800_000_000
+                    print(mode + ": durable surrender returns without waiting for create; adopted work ends once; no credential disclosure")
+                    return
                 assert (await client.commit(message)).outcome.status == "accepted"
                 assert (await client.commit(message)).outcome.status == "accepted"
                 assert len(state.provisioning.begin_calls) == 1

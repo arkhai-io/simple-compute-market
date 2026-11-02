@@ -256,7 +256,6 @@ def _loops(runtime: BareMetalStorefrontRuntime) -> tuple[_Loop, ...]:
 
         async def payment_reconciliation_step() -> Mapping[str, Any]:
             done = await runtime.settlement_service().reconcile_payments_once()
-            await runtime.lifecycle.cycle()
             return {
                 "loop": PAYMENT_RECONCILIATION,
                 "attempted": done.attempted,
@@ -272,6 +271,15 @@ def _loops(runtime: BareMetalStorefrontRuntime) -> tuple[_Loop, ...]:
                 initial_delay_seconds=runtime.payment_reconciliation_interval_seconds,
             )
         )
+
+    async def delivery_recovery_step() -> Mapping[str, Any]:
+        return {"loop": "delivery_recovery", "processed": await runtime.lifecycle.cycle()}
+
+    composed.append(_Loop(
+        "delivery_recovery", "delivery-recovery", delivery_recovery_step,
+        interval_seconds=runtime.payment_reconciliation_interval_seconds,
+        initial_delay_seconds=runtime.payment_reconciliation_interval_seconds,
+    ))
 
     worker = runtime.settlement_worker
     if worker is not None:
