@@ -302,6 +302,27 @@ async def main(*, end_before_delivery=False):
                 )
                 assert [deal["negotiation_id"] for deal in page["deals"]] == ["payment-demo"]
                 print("lifecycle list:", page["deals"][0]["mechanism"])
+            kind, outcome, progress = await lifecycle.interrupt(
+                "payment-demo", actor=seller.identity, operation_key="demo-admin-end",
+                reason="development hardware withdrawal",
+            )
+            assert kind == "delivery_end"
+            assert progress.progress == "tearing_down"
+            with transaction(db.db_path) as conn:
+                end = EndSession(conn)
+                request = end.selected_end("payment-demo")
+                assert request.actor == seller.identity
+                assert request.administrator_reason == "development hardware withdrawal"
+                filings = [intent for intent in end.intents("payment-demo") if intent.kind == "filing"]
+                assert len(filings) == 1
+                assert filings[0].payload["payload"]["cause"] == "payee"
+            retry = await lifecycle.interrupt(
+                "payment-demo", actor=seller.identity, operation_key="demo-admin-end",
+                reason="development hardware withdrawal",
+            )
+            assert retry[0] == kind
+            print("administrator exceptional end:", progress.progress, "filing:", outcome.status,
+                  "same-key retry retains one filing")
         await lifecycle.close()
         await coordinator.stop()
         container.clear_lifespan_state(registry=registry)

@@ -29,6 +29,7 @@ from market_arkhai_payments import (
     servicing_stage,
 )
 from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt, dispute_lifecycle
+from market_arkhai_mediation.fixtures.authority import MediationContractFake
 from market_core import ImmutableFulfillmentCapability
 from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
 from market_identity import Ed25519Signer, TrustedIdentitySet
@@ -126,6 +127,7 @@ def _option(*, deposit: bool) -> SettlementOption:
         "settlement": {"schema": "arkhai.payments.v1", **(params or {})},
         "lifecycle": dispute_lifecycle(DISPUTE),
     }
+    body["lifecycle"]["adjudication"]["dispute"] = MediationContractFake().authority
     return SettlementOption(option_id=derive_settlement_option_id(**body), **body)
 
 
