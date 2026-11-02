@@ -68,15 +68,17 @@ def payment_option(rate: int = 100) -> SettlementOption:
     """An Arkhai payments option priced per credit, as a seller publishes one."""
     rates = [RateValue(field="amount", per="credit", value=rate)]
     params = {"payee_account": PAYEE_ACCOUNT}
+    lifecycle = dispute_lifecycle(DISPUTE_ACCOUNT)
+    lifecycle["adjudication"]["dispute"]["interface"] = "arkhai.mediation.v1"
     return SettlementOption(
         option_id=derive_settlement_option_id(
             price={"asset": "USD/2", "rates": rates},
             settlement={"schema": "arkhai.payments.v1", **(params or {})},
-            lifecycle=dispute_lifecycle(DISPUTE_ACCOUNT),
+            lifecycle=lifecycle,
         ),
         price={"asset": "USD/2", "rates": rates},
         settlement={"schema": "arkhai.payments.v1", **(params or {})},
-        lifecycle=dispute_lifecycle(DISPUTE_ACCOUNT),
+        lifecycle=lifecycle,
     )
 
 
