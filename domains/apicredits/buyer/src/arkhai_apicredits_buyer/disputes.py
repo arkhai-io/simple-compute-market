@@ -5,7 +5,9 @@ import logging
 from typing import Any
 
 from core_buyer.buyer_config import ResolvedBuyerIdentity
-from core_buyer.registry_config import registry_descriptors
+from core_buyer.registry_config import (
+    registry_descriptors, resolve_indexer_urls, resolve_registry_authorities,
+)
 from market_deal_lifecycle.configuration import (
     DisputeEntry, authorities_by_registry, dispute_config,
 )
@@ -17,7 +19,10 @@ def buyer_dispute_authorities(
 ) -> dict[str, tuple[DisputeEntry, ...]]:
     config = dispute_config(document, role="buyer")
     descriptors = (
-        registry_descriptors(signer=identity.signer, urls=list(urls))
+        registry_descriptors(
+            signer=identity.signer, urls=list(urls),
+            authorities=resolve_registry_authorities(resolve_indexer_urls()),
+        )
         if identity is not None and config.use_registry_dispute_authorities else {}
     )
     return authorities_by_registry(
