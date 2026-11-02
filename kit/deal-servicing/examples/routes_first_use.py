@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+import uuid
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -16,7 +17,7 @@ from market_identity import (
 )
 
 from market_deal_servicing import (
-    DealWatch, DeliveryRecord, EndSession, LifecycleRouteBinding, LifecycleRouteServices,
+    DealWatch, DeliveryIngress, DeliveryRecord, EndService, EndSession, PhysicalResult, VerifiedSiteEnd, LifecycleRouteBinding, LifecycleRouteServices,
     SellerDeal, SellerServicing, SellerSession, create_lifecycle_router,
 )
 from market_deal_servicing.evidence import transaction
@@ -41,7 +42,7 @@ async def main():
         with transaction(path) as conn:
             EndSession(conn).register(DeliveryRecord(
                 negotiation_id="example", seller=seller.identity, commitment_ref="fixture-commitment",
-                start_at=now, committed_at=now, term_end=now + 1000,
+                start_at=now, committed_at=now, term_end=now + 1000, progress="active",
             ))
             SellerSession(conn).register(SellerDeal(
                 negotiation_id="example", buyer=buyer.identity, commitment_ref="fixture-commitment",
@@ -49,17 +50,32 @@ async def main():
             ))
 
         def binding(negotiation):
-            if negotiation != "example":
+            if negotiation not in {"example", "introduction"}:
                 raise KeyError(negotiation)
-            return LifecycleRouteBinding(buyer=buyer.identity, seller=seller.identity, settlement=True)
+            return LifecycleRouteBinding(buyer=buyer.identity, seller=seller.identity, settlement=negotiation != "introduction")
 
         async def peer(message):
             calls.append(message.kind)
             return SubmitResponse(outcome=Accepted())
 
+        physical_calls = []
+
+        class Physical:
+            async def apply_end(self, negotiation_id, **kwargs):
+                physical_calls.append(kwargs["operation_key"])
+                return PhysicalResult(progress="tearing_down", done=True)
+
+        ingress = DeliveryIngress(
+            path, clock=lambda: int(time.time()), verify_site=lambda negotiation, body, headers: VerifiedSiteEnd(
+                event_id="site-report", capacity_reservation_id="fixture-reservation",
+                ended_at=now, actor=seller.identity, cause="site_failure",
+            ),
+        )
+        end = EndService(path, Physical(), clock=lambda: int(time.time()))
         services = LifecycleRouteServices(
             seller=servicing, binding=binding, signer=seller,
             administrators=TrustedIdentitySet(identities=(admin.identity,)), peer=peer,
+            ingress=ingress, end=end,
         )
         app = FastAPI()
         app.include_router(create_lifecycle_router(lambda _: services))
@@ -86,7 +102,7 @@ async def main():
         async def raw(signer, role, operation, resource, body, method, url):
             envelope = sign_request(signer=signer, envelope=RequestEnvelope(
                 role=role, principal=signer.identity, method=method, operation=operation,
-                resource=resource, request_id=operation + signer.identity.identifier,
+                resource=resource, request_id=uuid.uuid4().hex,
                 timestamp=now, body_hash=canonical_body_hash(body),
             ))
             headers = {
@@ -107,7 +123,31 @@ async def main():
             "kind": "stop", "negotiation_id": "example", "operation_key": "relay",
         }, "POST", "/api/v1/negotiations/example/lifecycle")
         assert relay.status_code == 422 and calls == ["commit", "hint"]
+        url = "/api/v1/negotiations/example/lifecycle"
+        message = {"kind": "end_delivery", "negotiation_id": "example", "operation_key": "end-now"}
+        for supplied in (now - 3600, now + 3600):
+            assert (await raw(buyer, "buyer", "lifecycle_peer", "example",
+                              {**message, "at": supplied}, "POST", url)).status_code == 422
+        assert (await raw(stranger, "buyer", "lifecycle_peer", "example", message, "POST", url)).status_code == 403
+        intro = await raw(buyer, "buyer", "lifecycle_peer", "introduction", {
+            **message, "negotiation_id": "introduction",
+        }, "POST", "/api/v1/negotiations/introduction/lifecycle")
+        assert intro.status_code == 409
+        first = await raw(buyer, "buyer", "lifecycle_peer", "example", message, "POST", url)
+        retry = await raw(buyer, "buyer", "lifecycle_peer", "example", message, "POST", url)
+        assert first.status_code == retry.status_code == 200
+        assert first.json()["receipt_at"] == retry.json()["receipt_at"]
+        assert retry.json()["delivery"]["progress"] == "tearing_down" and len(physical_calls) == 1
+        # The report verifier is injected above; the route must not reconstruct
+        # its opaque payload or proof. Production supplies the site wire verifier.
+        report = b'{"payload": "fixture-original-bytes", "proof": "fixture-only"}'
+        ingress.site_report("example", body=report, headers={"fixture-site-proof": "unchanged"})
+        async with LifecycleClient("http://fixture", buyer, trust, transport=transport) as client:
+            kept = await client.read("example")
+            assert kept.delivery.site_reports[0].body == report
+        assert (await raw(stranger, "buyer", "lifecycle_buyer_read", "example", EMPTY_BODY, "GET", url)).status_code == 403
         assert len(captures) == 6
+        print("receipt-time surrender and retry keep one physical intent; supplied times and introduction refuse; exact site bytes are owner-only")
         print("mounted typed-client commit/hint/read; wrong buyer/admin and authority relay refused; six exact signed envelopes")
 
 

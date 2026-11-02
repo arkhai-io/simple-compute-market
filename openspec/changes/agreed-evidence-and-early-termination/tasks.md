@@ -1100,7 +1100,7 @@ seller's budget". Files: `kit/deal-servicing` (router factory),
       Warn on runtime shortfall and never stop lifecycle loops. Verify the budget diagnostic
       and continued-loop scenarios.
 
-- [ ] 13.3 Serve `end_delivery` directly as the accepted buyer's peer message, keyed by
+- [x] 13.3 Serve `end_delivery` directly as the accepted buyer's peer message, keyed by
       negotiation ID, without an authority read; reject supplied at (past or future) and
       outside-settlement stages. Record own durable receipt; no billing stop is sent;
       same-key retry retains receipt. Return signed acknowledgement with cause/source/progress;

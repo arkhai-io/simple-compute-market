@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, TypeAlias
@@ -12,7 +13,9 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Request
 from fastapi.responses import Response
+from market_deal_lifecycle.acknowledgements import verify_end_acknowledgement
 from market_deal_lifecycle_contracts.models import (
+    EndDeliveryMessage, SignedEndDeliveryReceipt,
     CommitMessage, EvidenceItem, HintMessage, LifecycleCommand, ListDealsRequest,
     SubmitResponse, WireModel,
 )
@@ -22,6 +25,8 @@ from market_identity import (
     Signer, TrustedIdentitySet, canonical_body_hash, canonical_json, sign_response, verify_request,
 )
 
+from .end import EndService
+from .ingress import DeliveryIngress
 from .evidence import EvidenceSession, transaction
 from .journal import EndSession, atomic
 from .seller import SellerServicing
@@ -46,6 +51,8 @@ class LifecycleRouteServices:
     signer: Signer
     administrators: TrustedIdentitySet
     peer: PeerHandler
+    ingress: DeliveryIngress | None = None
+    end: EndService | None = None
 
 
 def create_lifecycle_router(
@@ -129,8 +136,32 @@ def create_lifecycle_router(
                 result = SubmitResponse(outcome=await svc.seller.submit(
                     command, actor=envelope.principal, reason=reason,
                 ))
-            elif operation in {"lifecycle_seller_read", "lifecycle_buyer_read"}:
+            elif operation == "lifecycle_buyer_read":
+                result = svc.seller.delivery_read(negotiation_id)
+            elif operation == "lifecycle_seller_read":
                 result = await svc.seller.read(negotiation_id)
+            elif body.get("kind") == "end_delivery":
+                message_end = EndDeliveryMessage.model_validate(body)
+                if message_end.negotiation_id != negotiation_id:
+                    raise ValueError("peer message names another negotiation")
+                if binding is None or not binding.settlement:
+                    raise RouteRefusal(409, "end_delivery requires a settlement-stage Agreement")
+                if svc.ingress is None or svc.end is None:
+                    raise RouteRefusal(503, "delivery servicing is unavailable")
+                if svc.ingress.path.resolve() != svc.seller.path.resolve() or svc.end.path.resolve() != svc.seller.path.resolve():
+                    raise RuntimeError("lifecycle delivery services must share persistence")
+                acknowledgement = svc.ingress.end_delivery(envelope, body=raw, headers=dict(request.headers))
+                try:
+                    await svc.end.drive_physical(negotiation_id)
+                except Exception:
+                    # Receipt is durable even if physical I/O fails. The pending
+                    # effect keeps its key for the controller to retry.
+                    logging.getLogger(__name__).exception("Delivery end awaits physical recovery")
+                with transaction(svc.seller.path) as conn:
+                    delivery = EndSession(conn).view(negotiation_id)
+                result = acknowledgement.model_copy(update={
+                    "delivery": delivery, "selected_end": delivery.recorded_end,
+                })
             else:
                 message: Peer = (CommitMessage.model_validate(body) if body.get("kind") == "commit"
                                  else HintMessage.model_validate(body))
@@ -157,6 +188,12 @@ def create_lifecycle_router(
         ))
         rendered = canonical_json(payload)
         headers = _headers(signed)
+        if status == 200 and isinstance(body, dict) and body.get("kind") == "end_delivery":
+            assert envelope is not None and binding is not None
+            verify_end_acknowledgement(SignedEndDeliveryReceipt(
+                request=envelope, request_body=base64.b64encode(raw), response=signed,
+                response_body=base64.b64encode(rendered),
+            ), negotiation_id=negotiation_id, buyer=binding.buyer, seller=binding.seller)
         if envelope is not None and negotiation_id:
             with transaction(svc.seller.path) as conn:
                 EvidenceSession(conn).put(negotiation_id, EvidenceItem(

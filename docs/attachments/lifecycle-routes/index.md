@@ -31,6 +31,15 @@ against a 350-second configured budget, then a 450-second runtime budget. Zero
 payer notice also warns. Both measured servicing cycles run and return unchanged;
 no codec, publication rule or buyer guarantee is changed.
 
+The mounted surrender surface rejects both supplied past/future `at`, a different
+buyer and an introduction-stage binding. A valid end records receipt without a
+payment read/stop; a retry keeps its time and one physical operation while showing
+`tearing_down`. The neutral offline verifier checks both kept signatures. The
+buyer read returns exact opaque site bytes/proof headers and refuses another
+principal. Delivery reads use kept state, not authority I/O. The existing ingress
+example also exercises surrender before fulfillment. Physical I/O failure leaves
+its journaled effect pending without discarding the durable acknowledgement.
+
 ## Validation
 
 The servicing first-use examples and source typing pass; the existing lifecycle

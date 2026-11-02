@@ -150,6 +150,17 @@ class SellerServicing:
         async for item in watch.watch():
             yield item
 
+    def delivery_read(self, negotiation_id: str) -> LifecycleRead:
+        """Return kept delivery evidence even when either authority is unreachable."""
+        deal = self._deal(negotiation_id)
+        authority = self._authority(deal, self._watch(deal))
+        with transaction(self.path) as conn:
+            delivery = EndSession(conn).view(negotiation_id)
+        return LifecycleRead(
+            negotiation_id=negotiation_id, commitment_ref=deal.commitment_ref,
+            authority=authority, delivery=delivery,
+        )
+
     async def read(self, negotiation_id: str) -> LifecycleRead:
         deal = self._deal(negotiation_id)
         watch = self._watch(deal)
