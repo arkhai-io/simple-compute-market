@@ -400,8 +400,13 @@ bare-metal storefronts' publication and migration modules
     has no lifecycle. Undeliverable models now refuse startup, as designed.
     Existing test intent follows that deliberate refusal change; no new test
     functions were added. Templates and generated Helm schemas use the list.
-- [ ] 4.3 Extend the dry-run and write migration to map the old flags to `release_models` and
+- [x] 4.3 Extend the dry-run and write migration to map the old flags to `release_models` and
       remove them. Verify: migration unit tests for each flag and for both flags absent.
+  - Verified: shared configuration suite, 272 passed, including dry-run,
+    each old flag, absent/false flags, atomic backup and byte-identical repeat.
+    Bare-metal sellers now have a thin CLI over the same migration engine;
+    first use covers preview, write, restrictive backup, repeat and conflict
+    refusal. Fixture: docs/attachments/alkahest-release-models/legacy-recipient.toml.
 - [ ] 4.4 Document `release_models` in `DEPLOYMENT_AND_CONFIG.md`. Verify: doc citations check.
 
 Verification point: `kit/alkahest` unit suites; both storefronts' integration suites; `make test`.
