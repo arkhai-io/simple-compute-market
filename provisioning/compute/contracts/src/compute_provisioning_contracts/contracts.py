@@ -9,6 +9,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from market_core import VersionedEnvelope
+from .lease_ends import SignedLeaseEndedReport
 
 # Each major is accepted alone, and a model stating another is refused by its
 # version, naming the major supported, never coerced: the majors differ in what
@@ -104,6 +105,7 @@ class LeaseView(VersionedContractModel):
     release_job_id: str | None = None
     failure_reason: str | None = None
     failure_message: str | None = None
+    end_reports: list[SignedLeaseEndedReport] = Field(default_factory=list, exclude_if=lambda reports: not reports)
 
 
 class LeaseListResponse(BaseModel):

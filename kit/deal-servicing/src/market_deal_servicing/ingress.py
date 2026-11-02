@@ -61,8 +61,6 @@ class DeliveryIngress:
     def site_report(self, negotiation_id: str, *, body: bytes, headers: dict[str, str]) -> DeliveryView:
         verified = self.verify_site(negotiation_id, body, headers)
         now = self.clock()
-        if verified.ended_at > now:
-            raise ValueError("a site cannot report a future lease-ended observation")
         ref = "site-event:" + verified.event_id
         with transaction(self.path) as conn, atomic(conn):
             end = EndSession(conn)

@@ -140,8 +140,10 @@ class LeaseLifecycleService:
         capacity_released_notifier: CapacityReleasedNotifier | None = None,
         capacity_release_outbox: CapacityReleaseOutboxPort | None = None,
         parse_utc_value: ParseUtc = parse_utc,
+        lease_end_report_drain: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         self._settings = settings
+        self._lease_end_report_drain = lease_end_report_drain
         self._site_authority = site_authority
         self._release_executor = release_executor
         self._release_status = release_status
@@ -188,7 +190,7 @@ class LeaseLifecycleService:
             raise LeaseNotFoundError(f"Lease '{lease_id}' not found")
         return reservation
 
-    async def terminate_lease(self, lease_id: str, body: Any | None = None) -> dict[str, Any]:
+    async def terminate_lease(self, lease_id: str, body: Any | None = None, *, caller: dict | None = None) -> dict[str, Any]:
         """Release a leased reservation now, as its expiry would.
 
         A lease already releasing or released is returned as it is; one an
@@ -208,7 +210,11 @@ class LeaseLifecycleService:
                 f"Lease '{lease_id}' is {state}; only leased reservations can be terminated.",
                 state=state,
             )
-        await self._request_release(reservation)
+        await self._request_release(reservation, end_context={
+            "cause": "termination", "reason": getattr(body, "reason", None), "caller": caller,
+            "effective_at": int(datetime.now(timezone.utc).timestamp()),
+        })
+        await self._drain_lease_end_reports()
         return self.get_lease(lease_id)
 
     def release_oversight(self, lease_id: str, body: Any) -> dict[str, Any]:
@@ -251,7 +257,7 @@ class LeaseLifecycleService:
         await self._request_release(reservation)
         return self.get_lease(lease_id)
 
-    async def force_release(self, lease_id: str, body: Any) -> dict[str, Any]:
+    async def force_release(self, lease_id: str, body: Any, *, caller: dict | None = None) -> dict[str, Any]:
         reservation = self.get_lease(lease_id)
         state = str(reservation.get("state"))
         if state in self.TERMINAL_SUCCESS_STATES:
@@ -270,11 +276,13 @@ class LeaseLifecycleService:
             lease_id,
             forced=True,
             reason="admin_force_release",
+            end_context={"cause": "force_release", "reason": message, "caller": caller},
             message=message,
         )
         if released is None:
             raise LeaseNotFoundError(f"Lease '{lease_id}' not found or is not held.")
         await self._deliver_capacity_release(lease_id)
+        await self._drain_lease_end_reports()
         return released
 
     async def check_leases(self) -> dict:
@@ -299,6 +307,7 @@ class LeaseLifecycleService:
         return await self._run_cycle()
 
     async def _run_cycle(self) -> dict:
+        await self._drain_lease_end_reports()
         await self._drain_capacity_release_outbox()
         now = datetime.now(timezone.utc)
         grace_seconds = int(
@@ -357,6 +366,7 @@ class LeaseLifecycleService:
                 )
                 skipped += 1
 
+        await self._drain_lease_end_reports()
         if checked or released or release_failed:
             logger.info(
                 "[LEASE_LIFECYCLE] Cycle: checked=%d released=%d release_failed=%d skipped=%d",
@@ -369,7 +379,7 @@ class LeaseLifecycleService:
             "skipped": skipped,
         }
 
-    async def _request_release(self, reservation: dict[str, Any]) -> str:
+    async def _request_release(self, reservation: dict[str, Any], *, end_context: dict | None = None) -> str:
         """Act on the fulfillment's decision; return the lease's resulting state.
 
         A direct release the site's guard refuses means the aggregate moved
@@ -378,17 +388,24 @@ class LeaseLifecycleService:
         the capacity free, and an operator must verify.
         """
         capacity_reservation_id = reservation["capacity_reservation_id"]
+        if end_context is None:
+            deadline = self._parse_utc(reservation.get("lease_end_utc"))
+            now = datetime.now(timezone.utc)
+            end_context = ({
+                "cause": "expiry", "effective_at": int(deadline.timestamp()),
+                "claimed_deadline": int(deadline.timestamp()), "deadline_phase": "lease",
+            } if deadline is not None and deadline <= now else {"cause": "release"})
         decision = await self._release_executor.submit_release(reservation)
         if decision.action is ReleaseAction.FREE:
-            if await self._finish_release(reservation):
+            if await self._finish_release(reservation, end_context=end_context):
                 return "released"
             decision = await self._release_executor.submit_release(reservation)
             if decision.action is ReleaseAction.FREE:
-                if await self._finish_release(reservation):
+                if await self._finish_release(reservation, end_context=end_context):
                     return "released"
                 return self._mark_release_failed(
                     reservation,
-                    reason="release_unproven",
+                    reason="release_unproven", end_context=end_context,
                     message=(
                         "nothing is left to tear down, but the reservation's "
                         "provenance does not prove that nothing was dispatched"
@@ -399,7 +416,7 @@ class LeaseLifecycleService:
             # releasing pass resumes, never a teardown the lease knows nothing of.
             began = self._site_authority.begin_release(
                 capacity_reservation_id,
-                release_job_id=str(decision.fulfillment_id),
+                release_job_id=str(decision.fulfillment_id), end_context=end_context,
             )
             if began is None:
                 return self._yield_to_current_state(capacity_reservation_id, "begin releasing")
@@ -416,7 +433,7 @@ class LeaseLifecycleService:
             return "releasing"
         return self._mark_release_failed(
             reservation,
-            reason=decision.reason or "release_unproven",
+            reason=decision.reason or "release_unproven", end_context=end_context,
             message=decision.message,
         )
 
@@ -499,6 +516,7 @@ class LeaseLifecycleService:
 
     def _mark_release_failed(
         self, reservation: dict[str, Any], *, reason: str, message: str | None,
+        end_context: dict | None = None,
     ) -> str:
         """Record the release as failed, unless the reservation moved on.
 
@@ -519,6 +537,7 @@ class LeaseLifecycleService:
             reason=reason,
             message=message,
             release_job_id=expected_handle,
+            end_context={**(end_context or {}), "cause": "release_failed", "reason": message or reason},
         )
         if recorded is None:
             return self._yield_to_current_state(capacity_reservation_id, "record a failure")
@@ -540,11 +559,11 @@ class LeaseLifecycleService:
         )
         return "skipped"
 
-    async def _finish_release(self, reservation: dict[str, Any]) -> bool:
+    async def _finish_release(self, reservation: dict[str, Any], *, end_context: dict | None = None) -> bool:
         capacity_reservation_id = reservation["capacity_reservation_id"]
         self._capacity_release_outbox.reserve(capacity_reservation_id)
         released = self._site_authority.record_release_success(
-            capacity_reservation_id,
+            capacity_reservation_id, end_context=end_context,
         )
         if released is None:
             return False
@@ -556,6 +575,10 @@ class LeaseLifecycleService:
         )
         await self._deliver_capacity_release(capacity_reservation_id)
         return True
+
+    async def _drain_lease_end_reports(self) -> None:
+        if self._lease_end_report_drain is not None:
+            await self._lease_end_report_drain()
 
     async def _drain_capacity_release_outbox(self) -> None:
         for capacity_reservation_id in self._capacity_release_outbox.pending():

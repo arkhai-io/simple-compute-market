@@ -34,6 +34,7 @@ from market_site.db import CapacityBucket
 
 from compute_provisioning_service.db.models import (
     DEFAULT_POOL_ID,
+    LeaseEndReportOutbox,
     Host,
     ResourcePool,
 )
@@ -3519,6 +3520,11 @@ def _rebuild_hosts_from_model(engine: Engine, stored_columns: set[str]) -> None:
             index.create(connection, checkfirst=True)
 
 
+def _migrate_lease_end_reports(engine: Engine) -> None:
+    SiteBase.metadata.tables["site_lease_ended_events"].create(engine, checkfirst=True)
+    LeaseEndReportOutbox.__table__.create(engine, checkfirst=True)
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
@@ -3651,4 +3657,5 @@ MIGRATIONS: tuple[Migration, ...] = (
         _migrate_retired_reservation_states,
     ),
     Migration("20261028_002_hosts_drop_gpu_columns", _migrate_hosts_drop_gpu_columns),
+    Migration("20261102_001_lease_end_reports", _migrate_lease_end_reports),
 )

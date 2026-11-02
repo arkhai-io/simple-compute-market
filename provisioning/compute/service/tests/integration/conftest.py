@@ -126,6 +126,7 @@ from compute_provisioning_service.identity import ProvisioningIdentityContext
 from compute_provisioning_service.middleware.auth import (
     SqlAlchemyProvisioningReplayStore,
 )
+from compute_provisioning_service.services.lease_end_reports import LeaseEndReports
 from compute_provisioning_service.services.capacity_reservation_watchdog import (
     CapacityReservationWatchdog,
 )
@@ -643,8 +644,13 @@ async def client_and_queue(
     # it, filled and frozen by composing the bundles below and run by the
     # ledger whenever it releases capacity.
     release_effects = _container_module._make_release_effects()
+    lease_end_reports = LeaseEndReports(
+        session_factory, signer=identity_context.signer, peer=str(mock_settings.storefront_url),
+    )
     capacity_ledger_service = CapacityLedgerService(
         session_factory=session_factory,
+        site_id=identity_context.storefront_site_id,
+        lease_end_effect=lease_end_reports.record,
         unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count",
         host_requirement=host_requirement,
         # The release guard exactly as the production container composes it,
@@ -895,7 +901,7 @@ async def client_and_queue(
     executor_lease_service = ExecutorLeaseService(site_authority)
     _container_module.resolved_executor_lease_service = executor_lease_service
     _container_module.resolved_lease_route_service = LeaseRouteService(
-        executor_lease_service, lease_lifecycle_service
+        executor_lease_service, lease_lifecycle_service, reports=lease_end_reports.read
     )
     _container_module.resolved_host_operations_service = app.container.host_operations_service()
 
