@@ -915,10 +915,14 @@ async def client_and_queue(
     # Mount each adapter's test routes unless ``main.py`` already did: it
     # mounts them only when the mock profile is active at import, and the suite
     # must behave the same however pytest is invoked.
-    _mounted_paths = {getattr(route, "path", "") for route in app.routes}
+    # Included routers may be lazy rather than flattened in app.routes. The
+    # public schema resolves their paths, so repeated fixtures do not stack
+    # duplicate routes and lifespan wrappers until startup exhausts recursion.
+    _mounted_paths = set(app.openapi()["paths"])
     for _test_router in (_vm_mock_router(), _bare_metal_mock_router()):
         if not {route.path for route in _test_router.routes} <= _mounted_paths:
             app.include_router(_test_router)
+            app.openapi_schema = None
 
     clients = provisioning_clients(transport)
     try:
