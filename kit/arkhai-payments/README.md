@@ -144,6 +144,40 @@ seller-initiated refunds only: it re-checks the receipt first and reports
 uses a deterministic transaction-scoped idempotency key, so an exact retry
 cannot create a second reverse event.
 
+## Once payment lifecycle
+
+`market_arkhai_payments.adapter.PaymentAdapter` binds one exact accepted
+Agreement and its stored `PaymentSettlementData`. It supports voluntary
+`reverse` commands with exactly `payload={"part": "0", "amount": "100"}`:
+part references and positive minor-unit amounts are canonical decimal strings.
+Only the part's reverse authorities may send them. Rate commands, supplied
+`at`, and exceptional-end fields refuse before I/O. Exceptional seller ends
+belong to the dispute adapter, not to this payment adapter.
+
+Construction takes the acting account, `client_for_owner`, a required
+`verify_snapshot(signed, minimum_sequence) -> bool`, and an optional durable
+`minimum_sequence` floor. The composition owns key rotation and cursor storage;
+`pinned_snapshot_verifier(agreement, data, config)` binds the current single
+receipt identity for deployments without key rotation. Reads reject unverified,
+cross-commitment, incomplete or regressing authority records. They return all
+per-part events for the seller watch to replay, and open extensions independently
+by ref and case. Partial refunds never imply a delivery end. Once-only delivery
+authorization verifies commitment evidence; billing start makes no financial
+operation.
+
+Every part request uses `OperationKeys.part_event`. Submit reads before sending
+to recover an earlier lost answer and reject changed content; after sending it
+reads again, because an unsigned POST response does not prove the outcome.
+An unreachable or unverifiable post-write read is `unknown`, resolved by read
+and an identical-key retry, never by assuming the money moved or did not move.
+Callers use the foundation's durable operation store before submit; the adapter
+keeps no ledger, cursor store or daemon.
+
+From the repository root, `make dist && make -C kit/arkhai-payments first-use`
+starts an invocation-owned fixture and demonstrates a lost reverse response,
+signed-read recovery and a same-key replay, plus observation-only scripted case
+effects and overlapping extensions. No service, secrets or network are needed.
+
 ## Testing with the kit
 
 `market_arkhai_payments.fixtures` provides `build_signed_receipt`, which signs a

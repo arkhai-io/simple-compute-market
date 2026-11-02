@@ -190,6 +190,19 @@ class PaymentsClient:
             return existing
         return self.attach_agreement(identifier, agreement_json)
 
+    def submit_event(
+        self, transaction: str, event: EventCommand | Mapping[str, Any], *, request_id: str,
+    ) -> StoredEvent:
+        """Submit one authenticated per-part command under a stable retry identity."""
+
+        identifier = _transaction_id(transaction)
+        parsed = EventCommand.model_validate(event)
+        payload = self._request(
+            "POST", f"/transactions/{identifier}/events",
+            headers={"Idempotency-Key": request_id}, json=_json(parsed),
+        )
+        return _validated(StoredEvent, payload)
+
     def reverse(self, transaction: str) -> StoredEvent:
         """Reverse all still-held parts with a stable transaction-scoped retry ID."""
 

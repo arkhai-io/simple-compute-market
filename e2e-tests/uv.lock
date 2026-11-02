@@ -477,6 +477,7 @@ source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-core" },
     { name = "arkhai-kit-deal-lifecycle" },
+    { name = "arkhai-kit-deal-lifecycle-contracts" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-settlement-runtime" },
     { name = "httpx" },

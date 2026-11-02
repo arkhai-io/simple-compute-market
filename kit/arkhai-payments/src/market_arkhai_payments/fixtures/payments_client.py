@@ -172,6 +172,20 @@ class FakePaymentsClient:
         self.reversed = True
         return StoredEvent.model_validate(result)
 
+    def submit_event(
+        self, transaction: str, event: Mapping[str, Any], *, request_id: str,
+    ) -> StoredEvent:
+        self.calls.append(("reverse" if event.get("kind") == "reverse" else "submit_event", transaction))
+        self._require_available()
+        if self.reverse_error is not None and event.get("kind") == "reverse":
+            raise PaymentsAPIError(409, self.reverse_error)
+        if self.receipt is None:
+            raise PaymentsAPIError(404, "transaction_not_found")
+        return self.submit(transaction, {
+            "account": self.owners[-1] if self.owners else self.receipt.receipt.to.root,
+            "requestId": request_id, "event": dict(event),
+        })
+
     def submit(self, transaction: str, request: Mapping[str, Any]) -> StoredEvent:
         """Exercise the same authority command path used by an HTTP double."""
 

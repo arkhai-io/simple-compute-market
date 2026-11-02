@@ -1,5 +1,6 @@
 """Stateless client for the external Arkhai payments authority."""
 
+from .adapter import PaymentAdapter, SnapshotVerifier, pinned_snapshot_verifier
 from .reconciliation import (
     ReconciliationPass,
     reconcile_accepted_payments,
@@ -93,6 +94,7 @@ __all__ = [
     "MandatePolicyError",
     "NotPaid",
     "NothingToReverse",
+    "PaymentAdapter",
     "PaymentApproval",
     "PaymentApprovalDeclined",
     "PaymentSellerStage",
@@ -118,6 +120,7 @@ __all__ = [
     "RefundOutcome",
     "RefundUnavailable",
     "Refunded",
+    "SnapshotVerifier",
     "SignedReceipt",
     "SignedTransactionSnapshot",
     "StoredDealAttachment",
@@ -132,6 +135,7 @@ __all__ = [
     "format_duration",
     "mandate_policy_for_agreement",
     "payments_client_for_owner",
+    "pinned_snapshot_verifier",
     "receipt_message",
     "reconcile_accepted_payments",
     "run_payment_reconciliation",

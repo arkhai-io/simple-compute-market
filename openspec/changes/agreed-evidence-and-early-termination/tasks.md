@@ -926,7 +926,7 @@ names its target" (hold extensions are the payments service's evidence, cases th
 authority's; this change's suites claim neither). Files: `kit/arkhai-payments/src/market_arkhai_payments/`
 (new adapter module, `seller.py`, `reconciliation.py`).
 
-- [ ] 11.1 Implement the payment adapter against the kit-owned vector-derived in-process payments contract fake (no runnable tooling dependency): per-part event
+- [x] 11.1 Implement the payment adapter against the kit-owned vector-derived in-process payments contract fake (no runnable tooling dependency): per-part event
       translation, derived idempotency keys, `unknown` resolved by `read`, verified snapshots
       (section 9), open extensions per ref. Verify: library-integration tests for "A reverse's
       response is lost", "A ruling discounts a deal" (observation side), "Two outcomes reverse
@@ -941,6 +941,20 @@ authority's; this change's suites claim neither). Files: `kit/arkhai-payments/sr
 Verification point: `kit/arkhai-payments` unit and library-integration suites against the
 kit-owned in-process payments contract fake; `make test`. End-to-end: `e2e_credits_payment_deal`'s seller refund is
 evidence where a payments target is reachable.
+
+### Section 11 adapter checkpoint (2026-11-02)
+
+- 11.1 supplies the once-only payment adapter, stable per-part reverse keys,
+  required injected snapshot verification and cursor floor, signed-read recovery,
+  and per-ref/case extension observation. The current-pin helper is available;
+  rotation-aware verification is composed through the same required port.
+- Existing payments suites: 92 pass; typing, generated resources, producer vectors,
+  architecture, packaging, locks, comment hygiene and strict OpenSpec validation pass.
+  Runnable first use and observation-side case effects are recorded in
+  `docs/attachments/once-payment-adapter/index.md`. No new acceptance test was added.
+- 11.2 seller refund/reconciliation and the full aggregate remain pending here.
+  Permanent documentation promotion remains at reviewed closeout in deal-lifecycle
+  and settlement-servicing; no rate or exceptional-end payment command was added.
 
 ## 12. Arkhai mediation dispute kit
 
