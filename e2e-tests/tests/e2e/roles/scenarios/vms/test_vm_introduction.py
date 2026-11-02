@@ -73,7 +73,9 @@ def introduction_driver(
         binary=buyer_cli_binary,
         base=base,
         domain_identity="vms.compute",
-        marketplace_scheme=IdentityScheme.EIP191,
+        marketplace_scheme=IdentityScheme(
+            str(settings.BUYER.get("marketplace_scheme", "eip191") or "eip191")
+        ),
         marketplace_credential=credential,
         registries=(registry_url,),
         registry_authorities={
@@ -81,7 +83,7 @@ def introduction_driver(
                 "authority": str(settings.REGISTRY.get("authority_id", "") or ""),
                 "identities": [
                     {
-                        "scheme": "eip191",
+                        "scheme": str(settings.REGISTRY.get("authority_scheme", "eip191") or "eip191"),
                         "identifier": str(settings.REGISTRY.get("identifier", "") or ""),
                     }
                 ],

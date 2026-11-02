@@ -39,7 +39,7 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
 from tests.e2e.roles.helpers.domain_deal import require_state
 from tests.e2e.roles.helpers.real_provisioning import JobWatch, configured_relay
 from tests.e2e.roles.helpers.ssh_access import ssh_session
-from tests.e2e.roles.scenarios.bare_metal.conftest import lane_setting
+from tests.e2e.roles.scenarios.bare_metal.conftest import buyer_wallet_config, lane_setting
 from tests.e2e.roles.scenarios.bare_metal.publication_stages import (
     BareMetalPublicationClosesListing, BareMetalEvidencePublished,
 )
@@ -98,9 +98,7 @@ def buyer_key(ssh):
 
 @pytest.fixture(scope="module")
 def buyer_config(buyer_key):
-    return {"private_key": lane_setting("buyer_credential"),
-            "wallet_address": lane_setting("buyer_wallet_address"),
-            "rpc_url": lane_setting("buyer_rpc_url"), "ssh_public_key": buyer_key.public_line}
+    return buyer_wallet_config(buyer_key.public_line)
 
 
 @pytest.fixture(scope="module")

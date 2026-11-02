@@ -1731,6 +1731,18 @@ Delivers D11: "Real-lane SSH access goes through one helper".
 - [x] 13.3 Verify. `make test-e2e-unit`; `make test`. End-to-end: `e2e_bare_metal_deal`, in no lane,
       keeps its configuration and skips without it.
 
+- [x] 13.4 Keep marketplace credentials and EVM wallet inputs independent in
+      the shared VM and bare-metal fixtures and their scenario consumers.
+      `vms/conftest.py` reads optional buyer/seller marketplace schemes and
+      seller credential, plus registry authority scheme; existing defaults
+      remain EIP-191. Bare-metal conftest and its real module read optional
+      `buyer_wallet_private_key`, falling back to the existing buyer credential.
+      Test real signer/trust/typed-client composition with deterministic offline
+      Ed25519 principals and a separate EVM wallet; preserve local defaults.
+      Document the profile contract in the harness README. Focused E2E unit,
+      packaging and change checks precede the intermediate commit; the frozen
+      candidate still owes combined review/full validation and actual-host proof.
+
 ### Handoff — section 13
 
 The installed bare-metal buyer scenario now maps its authenticated access view to
@@ -1762,6 +1774,38 @@ formal joins/personal reading remain pending. No new broad section review or
 physical qualification is claimed. Owed by validation: the normal pipeline must
 collect the installed marker as opt-in/skipped without configuration; configured
 real purchase/access/release proof remains in section 16.
+
+### Follow-up handoff — fixture identity and wallet separation
+
+The lead verified that the controlled EVM settlement fixtures could not safely
+reuse a service's existing Ed25519 marketplace principals: VM consumers assumed
+EIP-191, and bare metal reused its marketplace seed as an EVM wallet key.
+The accepted correction stays inside the harness. Shared VM signer/publisher
+selection, registry trust, explicit buyer-principal consumers and introduction
+CLI profile generation now honor optional marketplace/authority schemes.
+Seller marketplace credentials fall back to the prior private key. Administrator
+and service signer inputs remain separate. Bare metal's shared and real buyer
+configurations read the same optional EVM key, with the prior credential fallback
+for existing profiles. `e2e-tests/settings.toml` declares the defaults and
+`e2e-tests/README.md` owns the exact external-profile contract. Nothing changes
+service trust, retained state, public buyer APIs or payment architecture.
+
+The initial new focused test passed two cases and reported four fixture errors:
+it supplied deterministic Ed25519 seeds as hex rather than the identity kit's
+canonical unpadded base64url. After correcting those fixture values,
+`make test-e2e-unit` passed all 468 tests (12.47s). Six new cases load profiles
+through the real external `CONFIG_DIRECTORY` boundary and compose actual typed
+storefront, registry and site clients; they check exact Ed25519 signer/publisher
+and registry principals, separate EVM key/address/RPC inputs in both real and
+shared bare-metal fixtures, and unchanged local/docker defaults. No network or
+machine is contacted. `make check-packaging` passed using owned temporary
+storage; change/comment-hygiene/citation/task checks passed and the final staged
+public-content check accompanies the commit.
+
+This is an authorized intermediate source correction. The frozen final candidate
+still owes combined independent review, full `make test`, pipeline validation and
+actual-host purchase/access/release proof. Earlier formal joins/personal reading
+are not advanced by these checks; no configured deployment is claimed.
 
 ## 14. The admission plugin on a relay, and the signer against its vector
 

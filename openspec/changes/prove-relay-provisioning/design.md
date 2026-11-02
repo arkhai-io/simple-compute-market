@@ -1158,6 +1158,20 @@ create without a buyer key today (correction 8).
 Rejected: renaming only the generated-key block to `frp`; leaving the variants
 inconsistent.
 
+### Fixture identity and wallet separation
+
+The real modules use controlled Anvil Alkahest settlement while their services
+may already trust Ed25519 marketplace principals. The existing marketplace
+identity architecture separates those principals from selected EVM effects;
+changing service trust or retained state to fit hardcoded test signers would
+contradict that boundary. The lead accepted a narrow harness correction:
+optional VM buyer/seller marketplace schemes, optional seller marketplace
+credential, registry authority scheme, and a separate bare-metal buyer EVM key.
+Existing local EIP-191 defaults remain. Private credentials stay in an external
+`CONFIG_DIRECTORY`, never in the real-provisioning target. No client product
+API or payment architecture changes. The harness README owns the profile
+contract; final combined validation and actual-host evidence remain required.
+
 ### D13. Implementation cadence
 
 Execution reconciliation: the plugin prerequisite is now archived and integrated. Keep the section order below. The owner-authorized cadence for unfinished work is focused checks and packaging per intermediate commit, then one full suite and combined independent review per frozen source round, reusing unchanged evidence. The tasks record this override without rewriting completed history. Bounded-working-data integration joins after verified section 9; its real-lane qualification additionally waits for section 12. Sections 14–15 gate live admission/section 16, not harness implementation. D23 retains native installation and containerized live qualification as separate evidence scopes.
