@@ -2056,33 +2056,52 @@ diff checks; deployed force-release verification remains an operator obligation.
 
 ## 16. Live verification [log]
 
-Requires a VM host and a bare-metal host (which may be a virtual machine), prepared
-with `relay-client`, reached through a management relay, and a buyer relay for each
-lane's release, each with its own token and key: frps in a container with the
-plugin's image as a sidecar (D20, D23). The owner supplies each item's output, free of
-addresses, project, cluster, namespace, and host names; until then the change is
-`blocked in implementation`. Each item is also evidence for
-`relay-vm-access-without-a-dashboard`'s sections 6 and 8, recorded here (D9).
-Unchanged by the replanning but for its relays.
+Requires prepared VM and bare-metal targets, protected management access, and a
+buyer relay per lane with independent credentials and grant authority. Retain
+D20/D23's live topology: pinned frps container and admission-plugin sidecar
+sharing a network namespace, distinct from the native installer evidence. Raw
+operational output stays outside this public repository. Missing required
+physical evidence remains pending; it is also mapped to
+`relay-vm-access-without-a-dashboard` sections 6 and 8 for closeout.
 
-- [ ] 16.1 **[log]** The runbook's admission check on each buyer relay: an ungranted
-      proxy refused, the plugin's refusal in its log. (relay change 8.2, restated; D19)
-- [ ] 16.2 **[log]** `e2e_vm_real_provisioning` under relay access passes: the guest
-      reached at the relay and leased port; an unrelated key refused; the heartbeat
-      held through the second deal's create and teardown; the second port released;
-      connectivity before and after each create and teardown; the guest gone and access
-      ended after expiry. (relay change 6.1, 8.1, 8.3, 8.4, 8.5, 8.6 restated)
-- [ ] 16.3 **[log]** The management client's status across that run shows no restart.
-      (relay change 8.4)
-- [ ] 16.4 **[log]** `e2e_vm_real_provisioning` under direct access passes, its second
-      deal included.
-- [ ] 16.5 **[log]** `e2e_bare_metal_real_provisioning` passes: the tenant reached at the
-      relay and leased port with the pinned host key; an unrelated key refused; after
-      reclaim the string refused and the lease released; connectivity unchanged.
-- [ ] 16.6 **[log]** A rerun of each lane against the same stack reconciles its
-      registrations and adopts its listing.
-- [ ] 16.7 Record the evidence against each item here, and the relay change's section 6
-      and 8 items it closes, for that change's closeout.
+### Accepted Arkhai proof method on this branch
+
+The owner selected Arkhai-only TEST qualification. The alternative method in
+`openspec/changes/qualify-arkhai-real-provisioning/design.md#accepted-method-mapping`
+is accepted for the unfinished live observations below. It drives the shipped
+buyer CLI and independent typed operator observations, reusing neutral SSH and
+bounded-data helpers without importing complete chain-specific pytest drivers.
+The named original markers remain available; an unrun marker is never reported
+passed. Completed source tasks and original implementation history are preserved.
+
+- [ ] 16.1 **[log]** Actual negative admission on each buyer relay: ungranted,
+      forged and mismatched proxies refused with matching plugin logs and no
+      backend connection. Reuse unchanged relevant evidence; a genuine paid
+      Arkhai grant must additionally prove valid delivery.
+- [ ] 16.2 **[log]** Equivalent Arkhai two-CPU-VM relay cycle: negotiated shape,
+      pinned delivered endpoint, unrelated-key refusal, first SSH heartbeat
+      through second create and teardown, connectivity before/after each,
+      natural first-lease expiry, both guests absent and access denied after
+      their ordinary teardown. The old `e2e_vm_real_provisioning` invocation
+      is an alternative driver, not required new Alkahest qualification.
+- [ ] 16.3 **[log]** Management-client generation and authenticated connectivity
+      before/during/after that run show no restart or lost control.
+- [ ] 16.4 **[log]** Equivalent Arkhai two-CPU-VM direct cycle passes with its
+      second deal, heartbeat, shape, wrong-key, expiry and teardown assertions.
+      Drain the controlled pool before a mode change, preserve active holdings,
+      and do not expose management or count this as external relay proof.
+- [ ] 16.5 **[log]** Equivalent real Arkhai bare-metal cycle: pinned relay
+      endpoint and nonroot delivered account, checked GPU work, unrelated-key
+      refusal, ordinary bounded reclaim, access denial and restored compute
+      capacity with management continuity. The old
+      `e2e_bare_metal_real_provisioning` marker remains unrun unless executed.
+- [ ] 16.6 **[log]** Repeated supported canonical registrations and listing
+      adoption retain existing identities and create no duplicate allocator.
+- [ ] 16.7 Bind exact source/artifacts/configuration/run/payment/reservation/
+      jobs/grants privately to each item and sibling relay section 6/8 proof;
+      record sanitized outcomes here. Port reuse follows grant expiry and
+      quarantine, independently of compute-capacity restoration. No unrun
+      original marker or failed/repaired attempt is labelled passed.
 
 ## 17. Closeout
 

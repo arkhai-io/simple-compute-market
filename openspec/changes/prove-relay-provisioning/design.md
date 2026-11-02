@@ -1299,3 +1299,13 @@ round 1 session 2 and round 4 as listed.
 
 The proposal's existing knowledge-to-promote list and section 17 retain every
 other material decision; this additional row does not replace that mapping.
+
+## Arkhai qualification method amendment
+
+On this branch the owner selected Arkhai-only TEST qualification. The accepted
+method mapping in `openspec/changes/qualify-arkhai-real-provisioning/design.md#accepted-method-mapping`
+replaces payment-specific driver requirements for unfinished section 16 while
+preserving every physical observation, existing source history and the original
+pytest drivers. This changes qualification method, not relay behavior or grant
+authority. Direct/concurrent VM, management continuity, genuine paid grants,
+repeat adoption and bare-metal reclaim remain required and unproven until run.

@@ -143,6 +143,32 @@ qualify them. Permanent promotion remains closeout work.
 
 ## 4. Deployed cleanup qualification of the reviewed integration round
 
+### Accepted Arkhai proof method on this branch
+
+The owner selected Arkhai-only TEST qualification. The alternative method in
+`openspec/changes/qualify-arkhai-real-provisioning/design.md#accepted-method-mapping`
+is accepted for the unfinished live observations below. It drives the shipped
+buyer CLI and independent typed operator observations, reusing neutral SSH and
+bounded-data helpers without importing complete chain-specific pytest drivers.
+The named original markers remain available; an unrun marker is never reported
+passed. Completed source tasks and original implementation history are preserved.
+
+For 4.1, use a normal Arkhai rental with the existing seed/observer contract,
+then a fresh-UID successor that cannot read predecessor data. For 4.2, use that
+successor's nonce-scoped foreign descendant, observe actual queued retry and
+held capacity, deliver the notification, repair only the fixture before budget
+exhaustion and observe the same ordinary job complete. Require final clean
+inventory, surviving sentinels and management. Terminal failed jobs remain
+failures requiring audited recovery. Reuse the normal GPU journey when inputs
+match; no automatic third rental. For 4.3 retain exact frozen review/validation
+before destructive cycles, with component/native/mock evidence scoped correctly.
+
+The earlier source handoff below describes the existing pytest vehicle. Its
+`e2e_bare_metal_bounded_cleanup` invocation is optional for this Arkhai campaign,
+not a passed or removed test. Tasks 4.1–4.3 remain pending until equivalent real
+observations pass. No identity ledger reset, force release or policy bypass.
+
+
 - [ ] 4.1 Add bounded-cleanup observations to the existing protected bare-metal purchase/real-provisioning qualification path in `e2e-tests/tests/e2e/roles/scenarios/bare_metal/` and its owned helpers/configuration. Wait for relay section 12 to supply the bare-metal real-provisioning module (`test_real_provisioning_deal.py`) in that directory; extend that owned lane and its helpers, naming any additional exact module in the handoff before edits. Freeze, validate and independently review the integration source before executing destructive deployed qualification. Seed synthetic home/scratch/path-backed and System V IPC through the temporary tenant, perform normal lease teardown, and verify via operator observations that sessions/processes/scheduled activity, account/home and covered scratch/IPC are absent. Verify a second reservation gets a different UID and usable access. Never persist raw host evidence or environment identifiers in public artifacts.
 - [ ] 4.2 Qualify a refusal/retry on the disposable target: introduce a deliberately unsafe covered object, observe failed reclaim with unavailable capacity, repair only that fixture, then resume the ordinary lifecycle and verify complete cleanup. Verify operator/service sentinels survive and the management route still works. Record sanitized bounded observations, revision and outcome, not raw logs. A missing deployed prerequisite remains blocked/unrun; helper and mock passes do not count as deployed readiness.
 - [ ] 4.3 Before destructive deployed checks, freeze the integrated source revision and obtain independent implementation review and validation; run `make test`, `make check-packaging`, relevant native gates, `make -C e2e-tests test-e2e-bare-metal`, and the full end-to-end pipeline with matching revision evidence through `make run-e2e` / `make fetch-e2e-logs`. Execute 4.1–4.2 against that accepted revision. Reuse its source review/full-suite evidence when unchanged; obtain pre-closeout review and remaining validation per workflow. Resolve accepted findings and rerun affected checks; freeze a new source round if code changes. Reuse passing unchanged evidence with its revision and scope explicitly recorded.

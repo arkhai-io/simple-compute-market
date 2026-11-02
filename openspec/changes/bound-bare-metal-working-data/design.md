@@ -245,3 +245,12 @@ operator/service sentinels must survive unchanged; only after successful indepen
 observations does the observer remove its own sentinel files. Missing utilities,
 unknown output and inaccessible state fail qualification rather than imply absence.
 This source seam does not establish live readiness without actual deployed runs.
+
+## Arkhai qualification method amendment
+
+The accepted method in `openspec/changes/qualify-arkhai-real-provisioning/design.md#accepted-method-mapping`
+applies to unfinished deployed tasks 4.1–4.3 on this branch. Existing probe and
+independent observation semantics remain unchanged. A normal Arkhai rental and
+fresh-UID successor/refusal rental provide the ordinary teardown, held-capacity,
+same-job retry and notification proof. Do not claim unrun original pytest markers
+passed or replace reviewed physical evidence with helper/native results.

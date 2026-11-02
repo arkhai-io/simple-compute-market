@@ -2,9 +2,8 @@
 
 ``CURRENT_REQUEST`` is written from the published schema and the service's documented
 normalization of mandate-level authorities, not from the kit's derivation, so the
-derivation is checked against the contract rather than against itself. It is SCM's
-own synthetic fixture: current-wire producer vectors were not supplied with this
-schema snapshot.
+derivation is checked against the contract rather than against itself. It is an independent synthetic fixture checked alongside the published producer
+vectors.
 """
 
 from __future__ import annotations
@@ -31,12 +30,14 @@ from market_arkhai_payments import (
     transaction_id,
     verify_receipt,
 )
+from market_arkhai_payments.canonical import wire_json
+from market_arkhai_payments.models import Balance, HttpUrl, PartEnd, PartSnapshot
 from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt
 
 from payment_terms import BUYER, DISPUTE, PAYEE, SERVICE, agreement, config
 
 VECTORS = json.loads(
-    (Path(__file__).resolve().parents[1] / "test-vectors" / "payments.json").read_text()
+    (Path(__file__).resolve().parents[1] / "test-vectors" / "historical-payments.json").read_text()
 )
 # payment_terms.agreement() is accepted at 2026-10-07T12:00:00.25Z.
 ACCEPTED = 1_791_374_400
@@ -172,3 +173,66 @@ def test_a_receipt_snapshot_and_reversal_for_the_derived_mandate_hold():
     assert SignedTransactionSnapshot.model_validate(_wire(snapshot)) == snapshot
     assert [part.extensions for part in snapshot.snapshot.parts] == [[]]
     assert StoredEvent.model_validate(_wire(payments.reverse(txid))).event.kind.value == "reverse"
+
+
+CURRENT_VECTORS = json.loads(
+    (Path(__file__).resolve().parents[1] / "test-vectors" / "payments.json").read_text()
+)
+
+
+@pytest.mark.parametrize("vector", CURRENT_VECTORS["snapshots"], ids=lambda v: v["name"])
+def test_current_producer_snapshots_round_trip(vector):
+    parsed = SignedTransactionSnapshot.model_validate(vector["signed"])
+    assert wire_json(parsed) == vector["signed"]
+    assert transaction_id(vector["mandate"]) == parsed.snapshot.transaction.root
+
+
+@pytest.mark.parametrize("gross", ["0", "1", "9" * 38])
+def test_snapshot_gross_accepts_nonnegative_minor_units(gross):
+    part = copy.deepcopy(CURRENT_VECTORS["snapshots"][0]["signed"]["snapshot"]["parts"][0])
+    part["gross"] = gross
+    assert PartSnapshot.model_validate(part).gross.root == gross
+
+
+@pytest.mark.parametrize("gross", ["-1", "00", "01", "9" * 39])
+def test_snapshot_gross_refuses_invalid_minor_units(gross):
+    part = copy.deepcopy(CURRENT_VECTORS["snapshots"][0]["signed"]["snapshot"]["parts"][0])
+    part["gross"] = gross
+    with pytest.raises(ValidationError):
+        PartSnapshot.model_validate(part)
+
+
+def test_effective_end_is_optional_and_unknown_snapshot_fields_are_refused():
+    part = copy.deepcopy(CURRENT_VECTORS["snapshots"][0]["signed"]["snapshot"]["parts"][0])
+    part["end"] = {"at": 1_800_000_000, "partialPeriod": "charged"}
+    assert wire_json(PartSnapshot.model_validate(part)) == part
+    del part["end"]
+    assert "end" not in wire_json(PartSnapshot.model_validate(part))
+    part["unknown"] = True
+    with pytest.raises(ValidationError):
+        PartSnapshot.model_validate(part)
+
+
+@pytest.mark.parametrize("at", [-1, 9_007_199_254_740_992])
+def test_effective_end_refuses_timestamps_outside_safe_integer_bounds(at):
+    with pytest.raises(ValidationError):
+        PartEnd.model_validate({"at": at, "partialPeriod": "charged"})
+
+
+def test_http_url_publication_accepts_http_and_https_and_refuses_other_schemes():
+    for url in ("http://example.com/", "https://example.com/return"):
+        assert HttpUrl.model_validate(url).root == url
+    for url in ("ftp://example.com/", "https://example.com/with space", "example.com"):
+        with pytest.raises(ValidationError):
+            HttpUrl.model_validate(url)
+
+
+def test_balance_asset_keys_remain_hashable_and_round_trip():
+    body = {"available": {"USD/2": "100", "EUR/6": "-25"}, "held": []}
+    assert wire_json(Balance.model_validate(body)) == body
+
+
+@pytest.mark.parametrize("asset", ["usd/2", "INVALID SPACE", "USD/1234567"])
+def test_balance_refuses_invalid_asset_keys(asset):
+    with pytest.raises(ValidationError):
+        Balance.model_validate({"available": {asset: "100"}, "held": []})
