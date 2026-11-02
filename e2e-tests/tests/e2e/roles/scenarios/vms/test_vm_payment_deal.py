@@ -20,7 +20,6 @@ from e2e_harness.settings import settings
 from tests.e2e.roles.helpers.compute_deal import (
     DealLease, advance_fulfillment_to, advance_storefront, wait_for_stage_event,
 )
-from tests.e2e.roles.helpers.domain_deal import require_state
 from tests.e2e.roles.helpers.payments import configured_payments, payment_setting
 from tests.e2e.roles.scenarios.vms.conftest import (
     _publisher_trust, _signer, capacity_source_for,
@@ -34,7 +33,7 @@ from tests.e2e.roles.scenarios.vms.test_full_deal import OFFER_RESOURCE
 pytestmark = [
     pytest.mark.usefixtures(
         "storefront_loops_held", "fulfillment_convergence_held", "lease_watchdog_held",
-        "ensure_storefront_resumed", "release_reserved_resources",
+        "ensure_storefront_resumed", "reap_buyer_settle_subprocess", "release_reserved_resources",
     ),
     pytest.mark.e2e_vm_payment_deal,
 ]
