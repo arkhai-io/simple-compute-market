@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import builtins
 from collections.abc import Callable
 from pathlib import Path
 
@@ -14,14 +15,14 @@ from market_deal_lifecycle.adapters import (
 from market_deal_lifecycle.terms import DisputeAuthority
 from market_deal_lifecycle_contracts.models import (
     Accepted, AuthorityView, DealPage, DealSummary, LifecycleCommand, LifecycleOutcome,
-    LifecycleRead, LifecycleState, ListDealsRequest, Pending, Reference, Rejected, WireModel,
+    FilingProgress, LifecycleRead, LifecycleState, ListDealsRequest, Pending, Reference, Rejected, SubmitResponse, WireModel,
 )
 from market_identity import Identity, canonical_json
 from pydantic import Field, JsonValue
 
 from .end import SQLiteOperationStore
 from .evidence import transaction
-from .journal import Classification, EndSession, FinalRequest, atomic, create_schema
+from .journal import Classification, EndSession, FinalRequest, JournalIntent, atomic, create_schema
 from .watch import DealWatch, WatchSession
 
 
@@ -130,9 +131,13 @@ class SellerServicing:
             session = WatchSession(conn)
             payment = session.view(deal.negotiation_id, watch.payment_record)
             dispute = session.view(deal.negotiation_id, watch.dispute_record) if watch.dispute_record else None
+        rejected = next((item.outcome for item in self._filings(deal.negotiation_id)
+                         if isinstance(item.outcome, Rejected)), None)
         missing = deal.dispute is not None and not self.credential_available(deal.dispute)
-        if missing:
-            outcome: LifecycleOutcome = Rejected(reason="repair required: Agreement authority credential is missing")
+        if rejected is not None:
+            outcome: LifecycleOutcome = Rejected(reason="repair required: " + rejected.reason)
+        elif missing:
+            outcome = Rejected(reason="repair required: Agreement authority credential is missing")
         elif watch.payment is None:
             outcome = Rejected(reason=f"{deal.payment.mechanism} has no lifecycle adapter")
         else:
@@ -141,7 +146,7 @@ class SellerServicing:
             if payment is None:
                 outcome = Pending(reason="payment authority has not been observed")
         return AuthorityView(
-            outcome=outcome, state="repair_required" if missing else payment.state if payment else None,
+            outcome=outcome, state="repair_required" if missing or rejected is not None else payment.state if payment else None,
             events=payment.events if payment else [], disputes=dispute.disputes if dispute else [],
             cases=dispute.cases if dispute else [], extensions=payment.extensions if payment else [],
             deadline=payment.deadline if payment else None,
@@ -162,7 +167,7 @@ class SellerServicing:
             delivery = EndSession(conn).view(negotiation_id)
         return LifecycleRead(
             negotiation_id=negotiation_id, commitment_ref=deal.commitment_ref,
-            authority=authority, delivery=delivery,
+            authority=authority, delivery=delivery, filings=self._filings(negotiation_id),
         )
 
     async def read(self, negotiation_id: str) -> LifecycleRead:
@@ -174,7 +179,7 @@ class SellerServicing:
             delivery = EndSession(conn).view(negotiation_id)
         return LifecycleRead(
             negotiation_id=negotiation_id, commitment_ref=deal.commitment_ref,
-            authority=authority, delivery=delivery,
+            authority=authority, delivery=delivery, filings=self._filings(negotiation_id),
         )
 
     async def list(self, request: ListDealsRequest = ListDealsRequest()) -> DealPage:
@@ -201,6 +206,7 @@ class SellerServicing:
                 state=state, deadline=selected.ended_at if selected else authority.deadline or delivery.term_end,
                 has_open_extension=bool(authority.extensions),
                 open_cases=[case.case_ref for case in authority.cases if case.state != "closed"],
+                filings=self._filings(deal.negotiation_id),
             ))
         return DealPage(deals=summaries, continuation=continuation)
 
@@ -226,6 +232,8 @@ class SellerServicing:
     async def _operator_end(
         self, command: LifecycleCommand, *, actor: Identity, reason: str,
     ) -> LifecycleOutcome:
+        if command.at is not None or command.payload:
+            return Rejected(reason="operator end uses durable receipt time, without at or payload")
         # Bind the administrator and reason too, so retries cannot rewrite attribution.
         digest = hashlib.sha256(canonical_json({
             "command": command.model_dump(mode="json"), "actor": actor.model_dump(mode="json"), "reason": reason,
@@ -238,8 +246,6 @@ class SellerServicing:
             prior = next((item for item in end.requests(command.negotiation_id)
                           if item.source_ref == "operator:" + command.operation_key), None)
             if prior is None:
-                if command.at is not None or command.payload:
-                    return Rejected(reason="operator end uses durable receipt time, without at or payload")
                 request = FinalRequest(
                     negotiation_id=command.negotiation_id, source_ref="operator:" + command.operation_key,
                     ended_at=now, observed_at=now, actor=actor, cause="operator_end", source="administrator",
@@ -252,33 +258,46 @@ class SellerServicing:
                         request, now=now, delivered=end.read(command.negotiation_id).available_at is not None,
                     ),
                 )
-        return await self.dispatch_filings(command.negotiation_id)
+        results = await self.dispatch_filings(command.negotiation_id)
+        priority = {"accepted": 0, "pending": 1, "unknown": 2, "rejected": 3}
+        return max((item.outcome for item in results), key=lambda item: priority[item.status], default=Accepted())
 
-    async def dispatch_filings(self, negotiation_id: str) -> LifecycleOutcome:
+    def _filings(self, negotiation_id: str) -> builtins.list[FilingProgress]:
+        with transaction(self.path) as conn:
+            return [FilingProgress(
+                intent_ref=intent.intent_ref,
+                outcome=SubmitResponse.model_validate({"outcome": intent.result}).outcome if intent.result else
+                    Pending(reason="delivery-end filing has not been attempted"),
+            ) for intent in EndSession(conn).intents(negotiation_id) if intent.kind == "filing"]
+
+    async def dispatch_filings(self, negotiation_id: str) -> builtins.list[FilingProgress]:
         deal = self._deal(negotiation_id)
         binding = deal.dispute_binding
-        if binding is None:
-            return Rejected(reason=f"{deal.payment.mechanism} has no Agreement dispute authority")
-        if not self.credential_available(binding.authority):
-            return Rejected(reason="repair required: Agreement authority credential is missing")
         with transaction(self.path) as conn:
             filings = [intent for intent in EndSession(conn).intents(negotiation_id) if intent.kind == "filing"]
-        outcome: LifecycleOutcome = Accepted()
+        results = []
         for intent in filings:
-            if intent.state == "done":
-                if intent.result is not None:
-                    outcome = Accepted.model_validate(intent.result)
-                continue
-            if intent.not_before > self.clock():
+            if intent.state != "pending" and intent.result is not None:
+                outcome = SubmitResponse.model_validate({"outcome": intent.result}).outcome
+            elif binding is None:
+                outcome = Rejected(reason=f"{deal.payment.mechanism} has no Agreement dispute authority")
+            elif not self.credential_available(binding.authority):
+                outcome = Rejected(reason="repair required: Agreement authority credential is missing")
+            elif intent.not_before > self.clock():
                 outcome = Pending(reason="delivery-end filing waits for Agreement start")
-                continue
-            command = LifecycleCommand.model_validate(intent.payload)
-            # The neutral dispatcher builds the interface request and uses this same key
-            # after unknown responses; only the authority may apply monetary effects.
-            outcome = await submit_dispute(command, binding, self.disputes, self.operations)
-            with transaction(self.path) as conn:
-                EndSession(conn).acknowledge(
-                    intent.intent_ref, outcome.model_dump(mode="json"),
-                    state="done" if isinstance(outcome, Accepted) else "pending",
-                )
+            else:
+                outcome = await self._dispatch_filing(intent, binding)
+            results.append(FilingProgress(intent_ref=intent.intent_ref, outcome=outcome))
+        return results
+
+    async def _dispatch_filing(self, intent: JournalIntent, binding: DisputeBinding) -> LifecycleOutcome:
+        command = LifecycleCommand.model_validate(intent.payload)
+        # The neutral dispatcher builds the interface request and uses this same key
+        # after unknown responses; only the authority may apply monetary effects.
+        outcome = await submit_dispute(command, binding, self.disputes, self.operations)
+        with transaction(self.path) as conn:
+            EndSession(conn).acknowledge(
+                intent.intent_ref, outcome.model_dump(mode="json"),
+                state="done" if isinstance(outcome, (Accepted, Rejected)) else "pending",
+            )
         return outcome

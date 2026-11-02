@@ -100,7 +100,8 @@ class DeliveryIngress:
                     pending_classification=classification is None,
                     filing_intent=end.failure_filing(
                         request, now=now, delivered=end.read(negotiation_id).available_at is not None,
-                    ) if classification is not None and not classification.lawful else None,
+                    ) if (classification is not None and not classification.lawful
+                          and request.controlling_source_ref is None) else None,
                 )
             return end.view(negotiation_id)
 
@@ -135,20 +136,6 @@ class DeliveryIngress:
                     "INSERT INTO servicing_end_receipts VALUES (?,?,?,?)",
                     (message.negotiation_id, message.operation_key, digest, receipt_at),
                 )
-            claim_row = conn.execute(
-                "SELECT claim FROM servicing_receipt_claims WHERE negotiation_id=? AND operation_key=?",
-                (message.negotiation_id, message.operation_key),
-            ).fetchone()
-            if claim_row is None:
-                claim = self.receipt_claim(message.negotiation_id, receipt_at)
-                if deal.dispute is not None and claim is None:
-                    raise ValueError("Agreement dispute authority requires a reusable seller receipt claim")
-                conn.execute(
-                    "INSERT INTO servicing_receipt_claims VALUES (?,?,?)",
-                    (message.negotiation_id, message.operation_key, canonical_json(claim).decode()),
-                )
-            else:
-                claim = json.loads(claim_row[0])
             evidence_ref = "buyer-end-envelope:" + envelope.request_id
             EvidenceSession(conn).put(message.negotiation_id, EvidenceItem(
                 evidence_id=evidence_ref, kind="end_delivery", classification="buyer_observation",
@@ -169,6 +156,20 @@ class DeliveryIngress:
                 ))
             selected = end.selected_end(message.negotiation_id)
             assert selected is not None
+            claim = None
+            if selected.source_ref == source_ref:
+                claim_row = conn.execute(
+                    "SELECT claim FROM servicing_receipt_claims WHERE negotiation_id=? AND operation_key=?",
+                    (message.negotiation_id, message.operation_key),
+                ).fetchone()
+                if claim_row is None:
+                    claim = self.receipt_claim(message.negotiation_id, receipt_at)
+                    conn.execute(
+                        "INSERT INTO servicing_receipt_claims VALUES (?,?,?)",
+                        (message.negotiation_id, message.operation_key, canonical_json(claim).decode()),
+                    )
+                else:
+                    claim = json.loads(claim_row[0])
             return EndDeliveryAcknowledgement(
                 negotiation_id=message.negotiation_id, operation_key=message.operation_key,
                 receipt_at=receipt_at, selected_end=selected.attribution,

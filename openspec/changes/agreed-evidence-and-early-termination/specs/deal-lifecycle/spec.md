@@ -376,7 +376,7 @@ The storefront MUST compare ended_at, delivered and cause with durable available
 
 ### Requirement: Receipts embed reusable signed claims
 
-The storefront end_delivery receipt MUST embed SignedDeliveryEndClaim(cause=payer, delivered=true) at its durable receipt time, signed by Agreement.seller. Same-key retry MUST preserve identical claim/proof. The buyer MUST verify and retain it and MAY file it later in Filing.concurrence. It MUST NOT claim the receipt attests an earlier time.
+When buyer surrender is the selected end, the storefront end_delivery receipt MUST embed SignedDeliveryEndClaim(cause=payer, delivered=true) at its durable receipt time, signed by Agreement.seller through its dispute adapter. An earlier selected end MUST suppress that claim and automatic payer filing. Same-key retry MUST preserve identical claim/proof while that surrender remains selected. The buyer MUST verify and retain it and MAY file it later in Filing.concurrence. It MUST NOT claim the receipt attests an earlier time.
 
 #### Scenario: Payments is unreachable
 
@@ -556,7 +556,7 @@ For an unentitled site withdrawal or failed/never-started delivery, end service 
 
 ### Requirement: Never-delivered correction has a fixed non-future basis
 
-End service MUST fix min(accepted start, failure-observation time) with never-delivered evidence. If accepted start is ahead, it MUST journal now but file at that start with at equal to start. Otherwise it MUST file at the fixed minimum basis. It MUST NOT future-date the filing, recompute on retry, or resume delivery.
+End service MUST fix the accepted Agreement start as the basis with never-delivered evidence, including a pre-start failure recorded after that start. If accepted start is ahead, it MUST journal now but file at that start with at equal to start. It MUST NOT future-date the filing, recompute on retry, or resume delivery.
 
 #### Scenario: Failure precedes accepted start
 

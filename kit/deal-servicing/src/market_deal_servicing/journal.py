@@ -297,7 +297,8 @@ class EndSession:
                 raise ValueError("classification is either resolved or pending")
             if classification is not None and classification.lawful and filing_intent is not None:
                 raise ValueError("lawful end cannot carry a self-penalty filing")
-            if classification is not None and not classification.lawful and filing_intent is None:
+            if (classification is not None and not classification.lawful and filing_intent is None
+                    and request.controlling_source_ref is None):
                 raise ValueError("seller failure must atomically journal its filing")
             if pending_classification and filing_intent is not None:
                 raise ValueError("pending classification cannot yet carry a filing")
@@ -321,12 +322,14 @@ class EndSession:
                        WHERE negotiation_id=? AND source_ref=?""",
                     (request.negotiation_id, request.controlling_source_ref),
                 ).fetchone()
-                if controlling is None or controlling[0] is None or not Classification.model_validate_json(controlling[0]).lawful:
-                    raise ValueError("correlated lawful end requires its verified controlling request")
-                if classification is None or not classification.lawful:
-                    raise ValueError("correlated report must preserve its lawful classification")
-            # Future-start failure uses that start and is not filed before it.
-            basis = record.start_at if now < record.start_at else min(record.start_at, request.observed_at)
+                if controlling is None or controlling[0] is None:
+                    raise ValueError("correlated end requires its verified controlling request")
+                if classification is None or Classification.model_validate_json(controlling[0]).kind != classification.kind:
+                    raise ValueError("correlated report must preserve its controlling classification")
+                if filing_intent is not None:
+                    raise ValueError("correlated report adopts its controlling filing")
+            # A never-delivered correction covers the entire accepted term.
+            basis = record.start_at
             self.conn.execute(
                 "INSERT INTO servicing_final_requests VALUES (?,?,?,?,?,?)",
                 (
@@ -405,9 +408,7 @@ class EndSession:
             "SELECT correction_basis FROM servicing_final_requests WHERE negotiation_id=? AND source_ref=?",
             (request.negotiation_id, request.source_ref),
         ).fetchone()
-        basis = old[0] if old else (
-            record.start_at if now < record.start_at else min(record.start_at, request.observed_at)
-        )
+        basis = old[0] if old else record.start_at
         if delivered:
             basis = request.ended_at
         command = LifecycleCommand(
