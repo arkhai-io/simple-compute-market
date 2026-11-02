@@ -97,6 +97,9 @@ registration in the caller's transaction. Supply metadata from the selected
 Agreement through its accessors. `SellerServicing` resolves adapters using those
 pinned bindings, not the currently offered authorities. Its credential hook checks
 the complete authority identity, independently of publication preferences.
+For an immutable binding read while ingress owns a write transaction, use
+`SellerSession(conn, initialize=False)` on the separate read connection; schema
+installation belongs to the writer, not the receipt-signing callback.
 
 `list` returns bounded keyset pages from durable watched views. `read` refreshes
 both records and returns physical progress even without a payment adapter. A

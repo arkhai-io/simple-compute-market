@@ -45,9 +45,11 @@ class SellerDeal(WireModel):
 
 
 class SellerSession:
-    def __init__(self, conn):
+    def __init__(self, conn, *, initialize: bool = True):
         self.conn = conn
-        create_schema(conn)
+        # Read-only callbacks may share a database with an active ingress writer.
+        if initialize:
+            create_schema(conn)
 
     def register(self, deal: SellerDeal) -> None:
         """Register in the transaction that records the verified commitment."""

@@ -195,7 +195,7 @@ class BareMetalLifecycle:
         # Ingress holds its write transaction; this immutable binding read
         # must not open a competing writer while building a local claim.
         with sqlite3.connect(self.path) as conn:
-            binding = SellerSession(conn).read(negotiation_id).dispute_binding
+            binding = SellerSession(conn, initialize=False).read(negotiation_id).dispute_binding
         adapter = self.seller.disputes.resolve(binding) if binding else None
         if not isinstance(adapter, DeliveryEndClaims):
             return None
