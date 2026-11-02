@@ -9,7 +9,11 @@ import sqlite3
 import time
 from datetime import datetime, timezone
 
-from arkhai_compute.end_classification import CommandEnd, classify_site_end
+from arkhai_compute.end_classification import (
+    payment_actor,
+    resolve_site_corrections as pending_site_corrections,
+    site_classification as classify_journal,
+)
 from compute_provisioning_contracts.lease_ends import LeaseEndedEvent, SignedLeaseEndedReport, verify_lease_end
 
 from market_arkhai_mediation.adapter import MediationAdapter
@@ -126,15 +130,18 @@ class BareMetalLifecycle:
         agreement, _ = self.agreement(deal.negotiation_id)
         buyer = Identity.model_validate(agreement.buyer)
 
+        authority = None
+        if deal.dispute:
+            scheme, separator, key = deal.dispute.record_key.partition(":")
+            authority = Identity(scheme=scheme if separator else "ed25519", identifier=key if separator else scheme)
+
         def actor(value):
-            if payment and value == payment.data.mandate.from_.root:
-                return buyer
-            if value == account or value == "terms":
-                return self.runtime.seller_principal
-            if deal.dispute and value == deal.dispute.account:
-                scheme, separator, key = deal.dispute.record_key.partition(":")
-                return Identity(scheme=scheme if separator else "ed25519", identifier=key if separator else scheme)
-            raise ValueError("unrecognized payment actor")
+            return payment_actor(
+                value, payer_account=payment.data.mandate.from_.root if payment else None,
+                payee_account=account if payment else None, buyer=buyer,
+                seller=self.runtime.seller_principal,
+                authority_account=deal.dispute.account if deal.dispute else None, authority=authority,
+            )
 
         return DealWatch(
             self.path, negotiation_id=deal.negotiation_id, commitment_ref=deal.commitment_ref,
@@ -271,37 +278,31 @@ class BareMetalLifecycle:
 
     def site_classification(self, session, negotiation_id, event):
         record = session.read(negotiation_id)
-        commands = []
-        for intent in session.intents(negotiation_id):
-            if intent.kind not in {"terminate", "truncate"}:
-                continue
-            for request in session.requests(negotiation_id):
-                if request.ended_at != intent.payload["at"]:
-                    continue
-                classification = self.classification_for(session, negotiation_id, request.source_ref)
-                if classification is None:
-                    continue
-                commands.append(CommandEnd(
-                    intent.intent_ref, intent.kind, intent.payload["at"], request.source_ref,
-                    classification.kind if classification else None,
-                    classification.evidence_refs if classification else [],
-                ))
-        return classify_site_end(
+        requests = session.requests(negotiation_id)
+        return classify_journal(
             event, seller=record.seller, term_end=record.term_end,
-            available=record.available_at is not None, commands=commands,
+            available=record.available_at is not None, intents=session.intents(negotiation_id),
+            requests=requests,
+            classifications={request.source_ref: self.classification_for(session, negotiation_id, request.source_ref)
+                             for request in requests},
             termination_ref=stable_ref(negotiation_id, "terminate", "terminate"),
         )
 
     def resolve_site_corrections(self, session, negotiation_id, *, now):
         items = {item.evidence_id: item for item in EvidenceSession(session.conn).read(negotiation_id).items}
-        for request in session.requests(negotiation_id):
-            if request.source != "lease_ended" or self.classification_for(session, negotiation_id, request.source_ref) is not None:
-                continue
-            report = SignedLeaseEndedReport.model_validate_json(items[request.source_ref].body)
-            event = LeaseEndedEvent.model_validate_json(report.payload)
-            result = self.site_classification(session, negotiation_id, event)
-            if result.kind is None:
-                continue
+        requests = session.requests(negotiation_id)
+
+        def report_for(source_ref):
+            report = SignedLeaseEndedReport.model_validate_json(items[source_ref].body)
+            return LeaseEndedEvent.model_validate_json(report.payload)
+
+        for request, result in pending_site_corrections(
+            requests,
+            classifications={request.source_ref: self.classification_for(session, negotiation_id, request.source_ref)
+                             for request in requests},
+            report_for=report_for,
+            classify=lambda event: self.site_classification(session, negotiation_id, event),
+        ):
             record = session.read(negotiation_id)
             classification = Classification(kind=result.kind, evidence_refs=result.evidence_refs)
             session.resolve_correction(

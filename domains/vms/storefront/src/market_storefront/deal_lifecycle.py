@@ -12,6 +12,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from arkhai_compute.end_classification import payment_actor
 from compute_provisioning_contracts import LeaseEndedEvent, SignedLeaseEndedReport, verify_lease_end
 from market_arkhai_mediation.adapter import MediationAdapter
 from market_arkhai_mediation.client import MediationClient, MediationCredential
@@ -165,15 +166,20 @@ class VmDealLifecycle:
     def watch(self, deal, payment, dispute):
         agreement, raw = self.accepted(deal.negotiation_id)
         data = PaymentSettlementData.parse(raw) if deal.payment.mechanism == "arkhai.payments.v1" else None
+        authority = None
+        if deal.dispute is not None:
+            scheme, separator, key = deal.dispute.record_key.partition(":")
+            authority = Identity(scheme=scheme if separator else "ed25519", identifier=key if separator else scheme)
+
         def actor(value):
-            if data is not None and value == data.mandate.from_.root:
-                return Identity.model_validate(agreement["buyer"])
-            if value == "terms" or data is not None and value == data.mandate.to.root:
-                return Identity.model_validate(agreement["seller"])
-            if deal.dispute is not None and value == deal.dispute.account:
-                scheme, separator, key = deal.dispute.record_key.partition(":")
-                return Identity(scheme=scheme if separator else "ed25519", identifier=key if separator else scheme)
-            raise ValueError("unrecognized payment actor")
+            return payment_actor(
+                value, payer_account=data.mandate.from_.root if data is not None else None,
+                payee_account=data.mandate.to.root if data is not None else None,
+                buyer=Identity.model_validate(agreement["buyer"]),
+                seller=Identity.model_validate(agreement["seller"]),
+                authority_account=deal.dispute.account if deal.dispute is not None else None,
+                authority=authority,
+            )
 
         return DealWatch(
             self.path, negotiation_id=deal.negotiation_id, commitment_ref=deal.commitment_ref,

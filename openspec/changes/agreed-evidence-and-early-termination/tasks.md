@@ -1735,3 +1735,12 @@ or deployed monetary-ruling qualification is claimed by this kit repair.
   VM 11 and bare metal 14 pass. Borrowed-session methods remain synchronous for
   transaction owners. Existing section 16 servicing architecture promotion owns
   this execution rule; no new known limit is accepted.
+- O-F7 remainder: the compute-family classifier now owns command/request matching,
+  pending-site-correction selection and opaque payment-actor mapping. VM and
+  bare-metal adapters retain only their database/codec and atomic journal writes;
+  the family module imports neither servicing nor provisioning. A new shared API
+  regression is red before extraction (missing exported helpers); compute tests
+  and the domain correlation/actor/retention re-drive pass (VM 12, bare metal 8).
+  The shared correction result preserves controlling source and evidence; its
+  nonlawful adoption still relies on the parallel S-N2 journal repair. Existing
+  section 16 compute/lifecycle architecture promotion owns this factoring.
