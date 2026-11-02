@@ -1,3 +1,24 @@
+## Domain regression qualification continuation
+
+Retain the permanent-test boundary instead of replacing it with examples.
+VM application tests own hosted acceptance/list, end admission, administrator
+dispatch, signed site ingress and buyer-half capture; bare-metal tests own
+create/end races, owner/site refusal and release proof. Parsing is unit-tested;
+future truncation is checked through the capacity client. Existing aggregate
+and CI discovery own execution. Exact file/property mapping:
+`docs/attachments/aeet-domain-permanent-tests/index.md`.
+
+The admin encounter exposed a race after off-loop journal preparation:
+racing submit with physical lookup no longer ensured the local end existed.
+The seller exposes local recording separately; VM awaits it before driving
+teardown and filing independently. Waiting for authority submission instead
+would violate teardown availability during authority loss. This restores D8,
+with permanent destinations unchanged: section 16's lifecycle and VM
+fulfillment contracts/architecture after code review.
+
+O-F18 remains separate fresh-stack qualification. A build is neither authority
+readiness nor a deployed hosted case; its readiness and scenario gates remain.
+
 ## Context
 
 What exists today (evidence for the decisions below, not a specification):

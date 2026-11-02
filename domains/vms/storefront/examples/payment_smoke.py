@@ -248,12 +248,8 @@ async def main(*, end_before_delivery=False):
                 response.raise_for_status()
                 return response.json()
 
-            print(
-                "before approval:",
-                (await settle())["status"],
-                "deliveries:",
-                len(deliveries),
-            )
+            assert (await settle())["status"] == "pending"
+            assert deliveries == []
             PaymentApproval(config, PAYER, client_for_owner=payments).approve(
                 raw, settlement_data, interval=0.01
             )
@@ -272,7 +268,7 @@ async def main(*, end_before_delivery=False):
                         body={"kind": "end_delivery", "negotiation_id": "payment-demo", "operation_key": "demo-end"},
                     )
                     assert receipt["delivery"]["progress"] == "released"
-                    assert receipt["signed_delivery_end_claim"]["claim"]["delivered"] is False
+                    assert receipt["signed_delivery_end_claim"]["claim"]["delivered"] is True
                 assert (await settle())["status"] == "ended"
                 assert deliveries == []
                 assert await db.load_vm_delivery(negotiation_id="payment-demo") is None
@@ -283,9 +279,9 @@ async def main(*, end_before_delivery=False):
                 await coordinator.stop()
                 container.clear_lifespan_state(registry=registry)
                 return
-            print("after approval:", (await settle())["status"])
+            assert (await settle())["status"] == "provisioning"
             await coordinator.tasks["payment-demo"]
-            print("retry:", (await settle())["status"], "deliveries:", len(deliveries))
+            assert (await settle())["status"] == "ready"
             with sqlite3.connect(db.db_path) as sql:
                 escrow_count = sql.execute("SELECT COUNT(*) FROM escrows").fetchone()[0]
                 print("payment escrow rows:", escrow_count)

@@ -15,14 +15,14 @@ from market_identity import Ed25519Signer, TrustedIdentitySet, canonical_json
 from site_trust import seeded_sites
 from storefront_client import StorefrontClient
 
-from integration.test_payment_settlement_client import BUYER, SELLER, harness, enabled
+from integration.test_payment_settlement_client import BUYER, SELLER, harness, enabled, _runtime
 
 # Public deterministic development identity; never use on a public network.
 SITE = Ed25519Signer(bytes.fromhex("44" * 32))
 
 
 @pytest.mark.asyncio
-async def test_surrender_before_dispatch_correlates_direct_release_push_and_pull(harness):
+async def test_surrender_before_dispatch_correlates_direct_release_push_and_pull(harness, tmp_path):
     h = harness
     h.serve()
     started, release = asyncio.Event(), asyncio.Event()
@@ -60,6 +60,10 @@ async def test_surrender_before_dispatch_correlates_direct_release_push_and_pull
         command = stable_ref(h.negotiation_id, "terminate", "terminate")
         assert len(releases) == 1
         assert releases[0]["failure_reason"] == command
+        restarted, provisioning = _runtime(tmp_path, h.payments)
+        await restarted.settlement_service().reconcile_payments_once()
+        assert provisioning.begin_calls == []
+        await restarted.lifecycle.close()
         report = sign_lease_end(LeaseEndedEvent(
             event_id="direct-release", capacity_reservation_id="reservation-pay", site_id="site-a",
             effective_at=ack.receipt_at, cause="release", source_state="leased", reason=command,

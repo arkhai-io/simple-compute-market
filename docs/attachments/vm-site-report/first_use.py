@@ -162,7 +162,7 @@ async def main():
                     retry = await buyer.end_delivery(NEGOTIATION)
                     assert retry.acknowledgement.receipt_at == progress.acknowledgement.receipt_at
                     assert retry.payment.status == "rejected"  # Once-only has no stop.
-                    assert retry.case.status == "unknown"  # No authority credential supplied.
+                    assert retry.case.status == "rejected"  # The earlier seller end must not become a payer claim.
                 evidence = await store.read(NEGOTIATION)
                 assert len([item for item in evidence.items if item.kind == "lease_ended"]) == 2
                 assert any(item.kind == "end_delivery_receipt" for item in evidence.items)
@@ -221,7 +221,7 @@ async def main():
                 print("signed push and duplicate: one report; forged proof and mutated event rejected")
                 print("authenticated typed pull: earlier source retained once; first push bytes/headers preserved")
                 print("buyer half and market end: canonical commit, signed surrender/retry and exact site proof kept")
-                print("once-only has no stop; missing mediation credential retains unknown case; capacity return alone marks released")
+                print("once-only has no stop; earlier seller end suppresses a payer case; capacity return alone marks released")
         finally:
             await h.coordinator.stop()
             await h.lifecycle.close()

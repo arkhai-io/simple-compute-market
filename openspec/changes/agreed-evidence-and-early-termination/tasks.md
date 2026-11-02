@@ -1530,6 +1530,43 @@ documentation only; a part needing code returns the change to implementation.
 - Checkpoint scope: O-F8/O-F9/O-F16 are whole and committed; O-F1 sections 14/15 and O-F18 remain as specified. The initial retention fixture tried to re-accept an existing envelope with changed author/expiry and was correctly refused; the kept case preserves the real acceptance. No deployed hosted VM qualification has been attempted in this continuation, and no external runtime was started. The next session must retain the named permanent-test and fresh-stack criteria rather than amend them away.
 - Reproduction, observations and approach limits: `docs/attachments/aeet-review-domain-repairs/index.md`. No live hosted end-to-end or real-hardware result is claimed. Permanent promotion remains reviewed closeout in the existing owning specifications/architecture destinations.
 
+### O-F1 permanent-domain-test continuation
+
+- Keep every section 14/15 Verify clause and completed task; no scenario is
+  amended away. Normal pytest discovery now owns VM hosted acceptance, end
+  admission/restart, second-precision ends, both admin branches, signed site
+  push/retry/pull and buyer-half capture, plus bare-metal create-in-flight,
+  owner/site refusal, repeated teardown and callback-only release. The exact
+  file/property map and direct first-use command are in
+  `docs/attachments/aeet-domain-permanent-tests/index.md`; existing list,
+  payment/refund/terminal and recovery regressions are retained and cited.
+- The permanent unentitled-admin encounter found a real ordering race: the
+  off-loop submit could record its end after physical lookup had returned.
+  SellerServicing exposes local recording separately; VM awaits it before
+  driving teardown and filing independently. The authority-gated regression
+  fails under the old ordering and passes after repair, without sleeps.
+- The VM payment example asserts pending/provisioning/ready rather than only
+  printing. Its pre-delivery surrender assertion follows the accepted
+  `delivered=true` receipt contract; admin/site examples retain their proof
+  and dispatch checks with credential-independent signing and earlier-end
+  suppression of an automatic payer claim.
+- O-F1 section 14/15 permanent-test work is complete: final focused VM 50 and
+  bare-metal 7 cases pass; servicing 48 and typing pass; all asserted domain
+  first-use examples pass. Architecture, fresh-wheelhouse packaging, locks,
+  comment hygiene and pinned strict OpenSpec validation pass. The complete
+  required chain, including shim-backed `make test`, passes in 8m44s: VM
+  storefront 1,196 unit (one optional collection skip), 520 integration;
+  bare-metal storefront 538; VM buyer 213; bare-metal buyer 16; e2e harness
+  316; release tooling and Helm structural/render checks. Final test-only
+  refinements pass the focused re-drive. No lock/dependency changed.
+  Promotion remains reviewed section 16 closeout, not part of this repair.
+- O-F18 remains a whole outstanding item: extend and run hosted VM commit,
+  servicing and an end with its case on a fresh owned stack with real local
+  payment/mediation, readiness-gated before pytest and fully torn down. An
+  early shim-backed image build succeeded, but predates the admin-ordering
+  repair and must be rebuilt from the committed branch before qualification.
+  No deployment, authority service or e2e stage was started.
+
 ## Design promotion record
 
 Planned destinations below; promotion is not performed during this design reconciliation.

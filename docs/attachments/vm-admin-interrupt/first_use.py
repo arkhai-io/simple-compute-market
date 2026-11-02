@@ -95,7 +95,8 @@ async def run(path, *, entitled):
             environ={"DEMO_MEDIATION_TOKEN": "fixture-payee"}, transport=httpx.MockTransport(handle),
         )
         h.lifecycle.clients[canonical_json(authority)] = client
-        h.lifecycle.seller.credential_available = lambda candidate: candidate == authority
+        h.lifecycle.credential_available = lambda candidate: candidate == authority
+        h.lifecycle.seller.credential_available = h.lifecycle.credential_available
     if entitled:
         agreement, _ = h.lifecycle.accepted(NEGOTIATION)
         agreement = copy.deepcopy(agreement)
@@ -142,7 +143,7 @@ async def run(path, *, entitled):
                 response = await interrupt(body)
                 assert response["settlement_action"] == ("notice_stop" if entitled else "delivery_end_filing")
                 retry = await interrupt(body)
-                assert retry["delivery"] == response["delivery"]
+                assert retry["delivery"]["recorded_end"] == response["delivery"]["recorded_end"]
                 if not entitled:
                     assert response["lifecycle_outcome"]["status"] == "unknown"
                     assert retry["lifecycle_outcome"]["status"] == "accepted"

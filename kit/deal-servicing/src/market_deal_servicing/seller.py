@@ -259,16 +259,24 @@ class SellerServicing:
     ) -> LifecycleOutcome:
         if command.at is not None or command.payload:
             return Rejected(reason="operator end uses durable receipt time, without at or payload")
-        # Bind the administrator and reason too, so retries cannot rewrite attribution.
-        digest = hashlib.sha256(canonical_json({
-            "command": command.model_dump(mode="json"), "actor": actor.model_dump(mode="json"), "reason": reason,
-        })).hexdigest()
-        prepared = await asyncio.to_thread(self._prepare_operator_end, command, actor, reason, digest)
+        prepared = await self.record_operator_end(command, actor=actor, reason=reason)
         if prepared is not None:
             return prepared
         results = await self.dispatch_filings(command.negotiation_id)
         priority = {"accepted": 0, "pending": 1, "unknown": 2, "rejected": 3}
         return max((item.outcome for item in results), key=lambda item: priority[item.status], default=Accepted())
+
+    async def record_operator_end(
+        self, command: LifecycleCommand, *, actor: Identity, reason: str,
+    ) -> LifecycleOutcome | None:
+        """Durably record a local end before independently driving physical work or filing."""
+        if command.kind != "delivery_end" or command.at is not None or command.payload:
+            return Rejected(reason="operator end uses durable receipt time, without at or payload")
+        # Bind the administrator and reason too, so retries cannot rewrite attribution.
+        digest = hashlib.sha256(canonical_json({
+            "command": command.model_dump(mode="json"), "actor": actor.model_dump(mode="json"), "reason": reason,
+        })).hexdigest()
+        return await asyncio.to_thread(self._prepare_operator_end, command, actor, reason, digest)
 
     def _prepare_operator_end(self, command, actor, reason, digest):
         now = self.clock()

@@ -211,9 +211,13 @@ class VmDealLifecycle:
             # Only a verified authority stop may set an entitled delivery end.
             return command.kind, outcome, self.seller.delivery_read(negotiation_id).delivery
 
+        # Journal before either task: off-loop preparation can yield before it
+        # writes, so racing submit with teardown alone can miss the new end.
+        refusal = await self.seller.record_operator_end(command, actor=actor, reason=reason)
+        if refusal is not None:
+            return command.kind, refusal, self.seller.delivery_read(negotiation_id).delivery
+
         async def physical():
-            # Seller submit records its end synchronously before its first I/O.
-            # Running both tasks lets teardown proceed even during authority loss.
             await self.end.drive_physical(negotiation_id)
 
         outcome, progress = await asyncio.gather(
