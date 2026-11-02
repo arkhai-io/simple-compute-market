@@ -11,12 +11,21 @@ from test_adapter import Scenario
 
 def test_online_recovery_and_reconstructed_caller_adopt_one_semantic_case():
     async def drive():
-        s = Scenario()
+        peer = MediationContractFake()
+        def handle(request):
+            if request.url.path == "/record" and not peer.cases:
+                return httpx.Response(404, json={
+                    "status": "error", "code": "invalid_request", "message": "Agreement not found",
+                })
+            return peer.handle(request)
+        s = Scenario(peer=peer, transport=httpx.MockTransport(handle))
         intent = DeliveryEndIntent(ended_at=1800000000, delivered=False, cause="payee")
         try:
+            assert (await s.adapter.read()).outcome.status == "rejected"
             first = await s.submit("delivery_end", "online", intent.model_dump(mode="json"))
             second = await s.submit("delivery_end", "operator", intent.model_dump(mode="json"))
             assert first.status == second.status == "accepted"
+            assert (await s.adapter.read()).outcome.status == "accepted"
             assert first.filing.case_ref == second.filing.case_ref
             assert len(s.peer.cases) == 1
             assert len([r for r in s.peer.requests if r.method == "POST"]) == 1

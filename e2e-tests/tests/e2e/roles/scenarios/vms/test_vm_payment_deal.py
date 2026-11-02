@@ -161,7 +161,9 @@ def test_commit_replay_and_servicing_keep_the_same_hosted_deal(
     advance_storefront(storefront_admin_client, "settlement-servicing")
     view = _read(negotiation_id)
     assert view.commitment_ref == transaction
-    assert view.authority.outcome.status == "accepted", view
+    # The authority does not know this Agreement until its first case is filed.
+    # Its absent record is not a verified empty case history.
+    assert view.authority.state == "running", view
     assert view.delivery.progress == "active", view
     assert storefront_client.get_settle_status(negotiation_id).fulfillment_id == hosted["fulfillment_id"]
 
@@ -184,6 +186,7 @@ def test_operator_end_files_one_case_without_a_local_payment_remedy(
     assert again["delivery"]["recorded_end"] == first["delivery"]["recorded_end"]
     advance_storefront(storefront_admin_client, "settlement-servicing")
     view = _read(negotiation_id)
+    assert view.authority.outcome.status == "accepted", view
     assert len(view.authority.cases) == 1, view
     assert any(event.kind == "filed" for event in view.authority.disputes), view
     assert len(view.delivery.site_reports) == 1, view

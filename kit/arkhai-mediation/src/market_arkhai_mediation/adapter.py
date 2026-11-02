@@ -253,7 +253,7 @@ class MediationAdapter:
                     "commitment": self.binding.commitment_ref, "agreement": self.agreement_digest,
                     "authority": self.binding.authority.model_dump(mode="json"),
                 })).hexdigest()
-                view = await self.read()
+                view = await self._read(unregistered_for_filing=True)
                 if not isinstance(view.outcome, Accepted):
                     return view.outcome
                 originals = [event for event in view.disputes if event.kind == "filed" and
@@ -316,6 +316,10 @@ class MediationAdapter:
         )
 
     async def read(self) -> AuthorityView:
+        return await self._read()
+
+    async def _read(self, *, unregistered_for_filing: bool = False) -> AuthorityView:
+        after = 0
         try:
             after = 0
             events = []
@@ -341,6 +345,13 @@ class MediationAdapter:
             # not a claim that a finite extension is still open.
             return AuthorityView(outcome=Accepted(), disputes=events, cases=list(cases.values()))
         except (RecordVerificationError, SchemaValidationError, ValidationError, MediationError, ValueError) as exc:
+            # The authority learns the Agreement from its first filing. A missing
+            # initial record may permit that write, not prove an empty history
+            # to watches or acknowledge a case without its signed filed entry.
+            if (unregistered_for_filing and after == 0 and not events
+                    and isinstance(exc, MediationAPIError)
+                    and exc.status == 404 and exc.code == "invalid_request"):
+                return AuthorityView(outcome=Accepted())
             if isinstance(exc, MediationError):
                 outcome = _boundary_failure(exc)
             else:
