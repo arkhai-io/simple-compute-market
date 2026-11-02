@@ -1103,7 +1103,7 @@ documentation only; a part needing code returns the change to implementation.
 - [x] 16.7 **Packaging.** Run `make check-packaging` and `make
       check-architecture-change CHANGE=agreed-evidence-and-early-termination` and resolve every
       failure; no architecture exception row may remain owned by this change.
-- [ ] 16.8 **End-to-end pipeline.** Record the pipeline run, its result, and that `e2e_deal`,
+- [x] 16.8 **End-to-end pipeline.** Record the pipeline run, its result, and that `e2e_deal`,
       `e2e_deal_buyer_cli`, `e2e_bare_metal_deal`, `e2e_bare_metal_mock_deal`,
       `e2e_non_erc20_settlement` and `e2e_credits_payment_deal` passed or were readiness-gated;
       record buyer delivery-only ends, site-report retrieval and subsequent proven capacity return
@@ -1202,6 +1202,14 @@ Once-only qualification is not rate/ruling-execution or real-host qualification.
   layout and layer/scope/dependency/kind checks); `make check-architecture-change
   CHANGE=agreed-evidence-and-early-termination` confirms no owned exception or
   override. `make check-agent-skills` also passes. No package or code edit required.
+
+- 16.8: full shim-backed `make test` passes in 7m55s on `0d861e80c` with
+  ALL_PROXY/all_proxy unset and NO_PROXY/no_proxy limited to loopback. Includes
+  package/application, harness unit, release-tooling and Helm checks (one existing
+  optional RL skip). Deployed scenario results and real-host readiness gate,
+  signed-report-before-teardown/proven-return evidence, reproduction and explicit
+  unrun checks: `docs/attachments/aeet-closeout/index.md`. No new deployment or
+  rate/ruling-execution qualification is claimed.
 
 ## Design promotion record
 
