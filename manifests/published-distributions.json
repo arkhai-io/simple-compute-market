@@ -17,6 +17,11 @@
       "dist": "arkhai-kit-deal-lifecycle"
     },
     {
+      "key": "kit-deal-lifecycle-client",
+      "path": "kit/deal-lifecycle-client",
+      "dist": "arkhai-kit-deal-lifecycle-client"
+    },
+    {
       "key": "kit-deal-lifecycle-buyer",
       "path": "kit/deal-lifecycle-buyer",
       "dist": "arkhai-kit-deal-lifecycle-buyer"

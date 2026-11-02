@@ -6,6 +6,9 @@ test: dist test-deal-lifecycle-buyer test-arkhai-mediation test-deal-lifecycle t
 
 .PHONY: test-deal-lifecycle-buyer dist-deal-lifecycle-buyer
 
+dist-deal-lifecycle-client: dist-deal-lifecycle-contracts
+	cd deal-lifecycle-client && $(MAKE) build DIST_DIR=$(abspath $(DIST_DIR))
+
 test-deal-lifecycle-buyer:
 	cd deal-lifecycle-buyer && $(MAKE) test
 
@@ -108,7 +111,7 @@ test-storefront:
 
 dist: dist-ci
 
-dist-ci: dist-deal-lifecycle-buyer dist-deal-servicing dist-arkhai-mediation dist-deal-lifecycle dist-deal-lifecycle-contracts dist-capability-shape dist-capability-pricing dist-capability-admissibility dist-capacity-publication dist-pool-overrides dist-contact-exchange dist-delivery dist-delivery-apprise dist-site dist-site-client dist-resource-pools-contracts dist-resource-pools dist-resource-pools-client dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-storefront dist-arkhai-payments
+dist-ci: dist-deal-lifecycle-client dist-deal-lifecycle-buyer dist-deal-servicing dist-arkhai-mediation dist-deal-lifecycle dist-deal-lifecycle-contracts dist-capability-shape dist-capability-pricing dist-capability-admissibility dist-capacity-publication dist-pool-overrides dist-contact-exchange dist-delivery dist-delivery-apprise dist-site dist-site-client dist-resource-pools-contracts dist-resource-pools dist-resource-pools-client dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-storefront dist-arkhai-payments
 
 dist-contact-exchange: dist-settlement-runtime
 	-mkdir -p $(DIST_DIR)

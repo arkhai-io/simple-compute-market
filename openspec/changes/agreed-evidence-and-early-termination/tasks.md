@@ -596,7 +596,7 @@ deals apart from EVM deals". Files: new `kit/deal-lifecycle-client`, `kit/deal-l
 `domains/vms/buyer/src/arkhai_vms_buyer/settlement_stages.py` and `settlement_composition.py`,
 and the bare-metal buyer's counterparts.
 
-- [ ] 7.1 Create `kit/deal-lifecycle-client` for the buyer `commit` and `hint` routes (section
+- [x] 7.1 Create `kit/deal-lifecycle-client` for the buyer `commit` and `hint` routes (section
       13 serves them), verifying signed responses. Verify: unit tests against recorded
       responses.
 - [ ] 7.2 Implement the buyer half in `kit/deal-lifecycle-buyer`: payment commands to the payment
