@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import json
 import re
 import time
 from collections.abc import Mapping
@@ -225,6 +226,10 @@ class PaymentsClient:
 
 def _validated(model: type[_ModelT], value: Any) -> _ModelT:
     try:
+        if model is SignedTransactionSnapshot:
+            # Signed state must not be normalized (for example text into a
+            # number) before the verifier reconstructs its exact signature frame.
+            return model.model_validate_json(json.dumps(value), strict=True)
         return model.model_validate(value)
     except ValidationError as exc:
         raise PaymentsProtocolError("payments service response violates the published schema") from exc

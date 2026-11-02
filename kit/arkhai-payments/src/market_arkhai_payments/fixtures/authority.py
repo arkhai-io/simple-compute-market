@@ -14,24 +14,21 @@ from datetime import datetime, timezone
 import math
 from typing import Any
 
-from market_identity import Signer, frame_fields
+from market_identity import Signer
 
 from market_arkhai_payments.canonical import jcs_bytes, jcs_sha256
 from market_arkhai_payments.errors import PaymentsAPIError
 from market_arkhai_payments.models import (
     EventRequest, Mandate, SignedReceipt, SignedTransactionSnapshot, StoredDealAttachment,
 )
-from market_arkhai_payments.receipts import transaction_id
+from market_arkhai_payments.receipts import snapshot_message, transaction_id
 from market_arkhai_payments.fixtures.receipts import build_signed_receipt
 from market_arkhai_payments.fixtures.arithmetic import add_duration, periods_through
 
 
 
 
-def snapshot_message(snapshot: Mapping[str, Any]) -> bytes:
-    """Frame a fixture snapshot with the published protocol and canonical hash."""
 
-    return frame_fields(("arkhai.payments.snapshot.v1", jcs_sha256(snapshot)))
 
 
 def sign_snapshot(signer: Signer, snapshot: Mapping[str, Any]) -> SignedTransactionSnapshot:

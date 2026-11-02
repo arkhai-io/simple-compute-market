@@ -48,6 +48,9 @@ from market_arkhai_payments.models import (
 from market_arkhai_payments.receipts import (
     agreement_hash,
     receipt_message,
+    snapshot_message,
+    ReceiptIdentity,
+    verify_snapshot,
     transaction_id,
     verify_receipt,
 )
@@ -135,6 +138,9 @@ __all__ = [
     "mandate_policy_for_agreement",
     "payments_client_for_owner",
     "receipt_message",
+    "snapshot_message",
+    "ReceiptIdentity",
+    "verify_snapshot",
     "reconcile_accepted_payments",
     "run_payment_reconciliation",
     "selected_payment_option",

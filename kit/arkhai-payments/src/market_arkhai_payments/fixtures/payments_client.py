@@ -88,6 +88,7 @@ class FakePaymentsClient:
 
         self.receipt = receipt
         if receipt is not None:
+            self.engine.livemode = receipt.receipt.livemode
             if mandate is None:
                 self.engine.load_receipt(receipt)
             else:

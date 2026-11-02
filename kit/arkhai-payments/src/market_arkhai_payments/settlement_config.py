@@ -38,6 +38,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from market_arkhai_payments.client import PaymentsClient
 from market_arkhai_payments.mandates import PaymentsOptionParams
 from market_arkhai_payments.models import AccountId, Asset
+from market_arkhai_payments.receipts import ReceiptIdentity
 
 ARKHAI_PAYMENTS_MECHANISM = "arkhai.payments.v1"
 ARKHAI_PAYMENTS_CONFIG_KEY = "arkhai_payments"
@@ -66,6 +67,7 @@ class ArkhaiPaymentsConfig(BaseModel):
     enabled: bool = False
     service_url: str | None = None
     service_identity: Identity | None = None
+    receipt_identities: list[ReceiptIdentity] = Field(default_factory=list)
     fee_bps: int | None = Field(default=None, ge=0, le=10_000)
     api_key_env: str | None = None
     development_auth: bool = False
@@ -76,6 +78,21 @@ class ArkhaiPaymentsConfig(BaseModel):
     # default because the Agreement discloses both parties and provision terms
     # to the payments service, and a deposit cannot be withdrawn.
     attach_agreement: bool = False
+
+    @property
+    def receipt_trust(self) -> tuple[ReceiptIdentity, ...]:
+        if self.receipt_identities:
+            return tuple(self.receipt_identities)
+        return (ReceiptIdentity(identity=self.service_identity),) if self.service_identity else ()
+
+    @model_validator(mode="after")
+    def current_receipt_identity(self) -> ArkhaiPaymentsConfig:
+        if self.receipt_identities and not any(
+            item.identity == self.service_identity and not item.retiring
+            for item in self.receipt_identities
+        ):
+            raise ValueError("receipt_identities must include the current service_identity")
+        return self
 
     @field_validator("service_url")
     @classmethod

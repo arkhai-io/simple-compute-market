@@ -1543,6 +1543,73 @@
                     }
                   ]
                 },
+                "^[rR][eE][cC][eE][iI][pP][tT]_[iI][dD][eE][nN][tT][iI][tT][iI][eE][sS]$": {
+                  "items": {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "patternProperties": {
+                      "^[iI][dD][eE][nN][tT][iI][tT][yY]$": {
+                        "additionalProperties": false,
+                        "type": [
+                          "object",
+                          "null"
+                        ],
+                        "patternProperties": {
+                          "^[sS][cC][hH][eE][mM][eE]$": {
+                            "anyOf": [
+                              {
+                                "enum": [
+                                  "eip191",
+                                  "ed25519"
+                                ],
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "^[iI][dD][eE][nN][tT][iI][fF][iI][eE][rR]$": {
+                            "maxLength": 128,
+                            "minLength": 1,
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        }
+                      },
+                      "^[vV][aA][lL][iI][dD]_[fF][rR][oO][mM]$": {
+                        "minimum": 0,
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      "^[vV][aA][lL][iI][dD]_[uU][nN][tT][iI][lL]$": {
+                        "anyOf": [
+                          {
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "^[rR][eE][tT][iI][rR][iI][nN][gG]$": {
+                        "type": [
+                          "boolean",
+                          "null"
+                        ]
+                      }
+                    }
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                },
                 "^[fF][eE][eE]_[bB][pP][sS]$": {
                   "anyOf": [
                     {

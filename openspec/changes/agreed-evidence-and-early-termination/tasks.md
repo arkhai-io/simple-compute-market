@@ -750,12 +750,27 @@ Implements the design's dependency item "Snapshot-proof verification in SCM" and
 (authority records verified). Files: `kit/arkhai-payments/src/market_arkhai_payments/receipts.py`,
 `test-vectors/`, the receipt-kit fixture.
 
-- [ ] 9.1 Verify snapshot proofs against configured current/retiring receipt identities with validity
+- [x] 9.1 Verify snapshot proofs against configured current/retiring receipt identities with validity
       windows, embedded-receipt attestation and a caller-supplied minimum sequence; refuse
       unverified, cross-deal, mode-changed or regressing snapshots. Current-key snapshots may
       attest an embedded old receipt without discarding its original bytes.
       Verify: unit tests with a new snapshot vector and receipt-kit fixture for a valid,
       tampered and wrongly signed snapshot.
+
+Implemented: the shared snapshot frame/verifier checks configured current and
+bounded retiring identity pins at their validity instants, exact receipt/deal/
+mandate/mode binding and the caller's minimum event sequence. Current snapshots
+can attest an embedded configured historical receipt, retaining its proof.
+Receipt history is operator-configurable as receipt_identities, with explicit
+current service_identity membership. Buyer approval, seller receipt admission and
+fully-reversed classification verify snapshots before consuming their state;
+HTTP snapshot parsing does not coerce signed values. Receipt fixtures reuse the
+production frame. Helm config schemas are regenerated. Payments' 97 existing
+cases, typing, resource drift and all producer vectors pass; temporary diagnostics
+cover tampered/wrong-key/mode/cursor and rotation paths, and the committed
+installed-wheel first-use script reproduces those observations. Permanent
+configuration docs describe the identity windows; normative promotion remains
+closeout. Final aggregate results are in the evidence packet.
 
 Verification point: `kit/arkhai-payments` unit and vector suites; `make test`. End-to-end: none.
 
@@ -1217,4 +1232,7 @@ The remaining D1–D15 destinations are listed in proposal.md and task 16.9.
 | D8 VM buyer end and second-precision lease effects | `openspec/specs/vm-storefront-fulfillment/spec.md` |
 | Ordered dispute preferences, local identity vetoes, identity-bound credential references and opt-in registry recommendations | `docs/development/DEPLOYMENT_AND_CONFIG.md#dispute-authority-preferences` and its registry descriptor section; payment kit README, seller quickstart and e2e runner guide. Normative settlement-configuration/registry-discovery spec deltas and lifecycle architecture promotion remain at reviewed closeout (16.9) |
 | Codec-owned common lifecycle query projections, absent-value semantics and same-option asset correlation | `openspec/specs/cli-query-language/spec.md` and `openspec/specs/settlement-configuration/spec.md` at closeout |
+| Per-part absolute ends, stop-relative dispute holds and exact rights-derived authority/cap derivation; setup once permissions remain independent of rate rights | `kit/arkhai-payments/README.md`; settlement-servicing spec/architecture and deal-lifecycle spec/architecture at reviewed closeout |
+| Hosted publication selects compatible offered authority projections; shared registry destinations use their ordered intersection; API-credit selection and approval check full accepted identities | `kit/arkhai-payments/README.md`; storefront-publication, settlement-configuration and buyer-orchestration spec deltas and lifecycle architecture at reviewed closeout |
+| Bounded current/retiring receipt identities and snapshot attestation/cursor verification before state consumption | `docs/development/DEPLOYMENT_AND_CONFIG.md#settlement-consumer-configuration-and-cutover`; settlement-servicing spec/architecture at reviewed closeout |
 | Lifecycle distributions participate in public publication with their declared dependency order | `docs/development/RELEASING.md` and `manifests/published-distributions.json` |

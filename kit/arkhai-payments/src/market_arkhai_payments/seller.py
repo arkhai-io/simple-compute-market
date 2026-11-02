@@ -26,7 +26,7 @@ from market_arkhai_payments.errors import (
     PaymentsUnavailable,
 )
 from market_arkhai_payments.models import SignedReceipt, StoredEvent
-from market_arkhai_payments.receipts import verify_receipt
+from market_arkhai_payments.receipts import verify_receipt, verify_snapshot
 from market_arkhai_payments.settlement_config import (
     ArkhaiPaymentsConfig,
     ArkhaiPaymentsConfigurationError,
@@ -206,7 +206,7 @@ class PaymentSellerStage:
         assert self.config.service_identity is not None
         return verify_receipt(
             receipt,
-            self.config.service_identity,
+            self.config.receipt_trust,
             mandate=data.mandate,
             agreement_json=dict(agreement),
             livemode=self.config.livemode,
@@ -232,10 +232,13 @@ class PaymentSellerStage:
             return ReceiptBlocked(txid, _reason(exc))
         if snapshot.snapshot.transaction.root != txid:
             return ReceiptBlocked(txid, "payments service returned another transaction")
-        receipt = snapshot.snapshot.receipt
-        if not self.receipt_matches(receipt, agreement, data):
-            return ReceiptInvalid(txid, "payments receipt does not prove the accepted Agreement")
-        return ReceiptVerified(txid, receipt)
+        assert self.config.service_identity is not None
+        if not verify_snapshot(
+            snapshot, self.config.receipt_trust, mandate=data.mandate,
+            agreement_json=agreement, livemode=self.config.livemode,
+        ):
+            return ReceiptInvalid(txid, "payments snapshot does not prove the accepted Agreement")
+        return ReceiptVerified(txid, snapshot.snapshot.receipt)
 
     async def check_receipt(
         self, agreement: Mapping[str, Any], data: PaymentSettlementData
@@ -294,7 +297,7 @@ class PaymentSellerStage:
             if exc.code == "transaction_not_found":
                 return NotPaid(txid, "no approved payment exists for this deal")
             if exc.code in _NOTHING_TO_REVERSE:
-                if self._fully_reversed(owner, txid):
+                if self._fully_reversed(owner, agreement, data):
                     return Refunded(txid, None)
                 return NothingToReverse(txid, _reason(exc))
             if _transient(exc):
@@ -306,12 +309,21 @@ class PaymentSellerStage:
             return RefundBlocked(txid, _reason(exc))
         return Refunded(txid, event)
 
-    def _fully_reversed(self, owner: str, txid: str) -> bool:
+    def _fully_reversed(
+        self, owner: str, agreement: Mapping[str, Any], data: PaymentSettlementData,
+    ) -> bool:
         try:
             with self._client_for_owner(owner) as client:
-                parts = client.get_transaction(txid).snapshot.parts
+                signed = client.get_transaction(data.transaction_id)
         except (PaymentsError, ArkhaiPaymentsConfigurationError):
             return False
+        assert self.config.service_identity is not None
+        if not verify_snapshot(
+            signed, self.config.receipt_trust, mandate=data.mandate,
+            agreement_json=agreement, livemode=self.config.livemode,
+        ):
+            return False
+        parts = signed.snapshot.parts
         return bool(parts) and all(part.status.value == "reversed" for part in parts)
 
     async def reverse(
