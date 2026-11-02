@@ -1093,7 +1093,7 @@ documentation only; a part needing code returns the change to implementation.
       requirements.
 - [x] 16.4 **Narrative compression.** Compress completed-task notes to final behaviour, evidence,
       deferred work and destinations.
-- [ ] 16.5 **Roadmap currency.** Update Goals 6 and 8's current state and remove or mark landed
+- [x] 16.5 **Roadmap currency.** Update Goals 6 and 8's current state and remove or mark landed
       this change's post-commitment lifecycle and buyer-end/report gaps in
       `docs/development/ROADMAP.md`; name both updates in the promotion record.
 - [ ] 16.6 **Campaign index currency.** Update this change's row in `openspec/changes/README.md`
@@ -1184,6 +1184,14 @@ Once-only qualification is not rate/ruling-execution or real-host qualification.
   current limitations. Deployment choices belong in the configuration guide;
   rollout chronology, rejected alternatives and review rationale remain in design.
   No external service implementation or SCM code is changed.
+
+- 16.4: completed checkpoint/disposition narratives compressed; evidence packets,
+  review IDs and final dispositions retained. Design keeps durable rationale and
+  rejected alternatives; stale intermediate remaining-work lists are removed.
+- 16.5: `docs/development/ROADMAP.md` Goals 6 and 8 now distinguish implemented
+  once-only lifecycle/buyer-end/site-report work from rate/delivery/deadline and
+  deployed qualification gaps. Known retention/cursor/domain/rotation limits remain
+  explicit; API-credit dispute servicing remains unowned.
 
 ## Design promotion record
 
