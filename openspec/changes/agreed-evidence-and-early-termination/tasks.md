@@ -1567,6 +1567,33 @@ documentation only; a part needing code returns the change to implementation.
   repair and must be rebuilt from the committed branch before qualification.
   No deployment, authority service or e2e stage was started.
 
+### O-F18 hosted VM continuation
+
+- `e2e_vm_payment_deal` extends the VM lane with hosted-only negotiation,
+  verified approval and canonical commit, same-key replay/servicing,
+  unentitled administrator end with one mediation case, then seller refund
+  and callback-proven release. The existing Alkahest journeys are unchanged.
+- The real authority exposed first-filing deadlock: the semantic-case read
+  received initial 404 before the authority knew the Agreement. `eac70ec3d`
+  permits that absence only to prepare the original filing, never as verified
+  empty history for ordinary reads or an acknowledgement without a signed
+  filed record. The kept semantic-recovery regression models that boundary;
+  the old-call-path diagnostic fails, repaired mediation 45 and typing pass.
+- Fresh shim-backed images from `eac70ec3d` include both that repair and the
+  admin-ordering repair. Owned Compose, host/seller/buyer payments, mediation
+  and signed dispute-bearing publication passed readiness before pytest.
+  All four deployed stages pass in 10.09s with zero skips. The authority
+  source remained read-only, every attempted deployment was torn down and
+  both exact leaked build children (#326) were stopped by their supervisor.
+- Harness 319, comment hygiene, fresh-wheelhouse packaging/architecture/locks
+  and pinned strict OpenSpec validation pass. Full shim-backed `make test`
+  passes in 7m51s on the final production source, including release tooling
+  and Helm structural/render checks (one existing optional Torch collection
+  skip; zero skips in the hosted journey). O-F18 is qualified. Setup, stage
+  observations and limits are in
+  `docs/attachments/aeet-vm-hosted/index.md`; no rate/funding or real-hardware
+  result is claimed. Permanent promotion remains reviewed section 16 closeout.
+
 ## Design promotion record
 
 Planned destinations below; promotion is not performed during this design reconciliation.
@@ -1574,6 +1601,7 @@ The remaining D1–D15 destinations are listed in proposal.md and task 16.9.
 
 | Accepted decision | Permanent location |
 |---|---|
+| Initial missing mediation history permits the first filing only, not a verified empty ordinary read or unproved case acknowledgement | `kit/arkhai-mediation/README.md` now; existing deal-lifecycle spec/architecture ownership at reviewed closeout (16.9) |
 | Mediation owns installed published schema/models/vectors and marketplace claim framing; its stateless adapter only communicates with the exact Agreement authority, preserving aggregate monetary answers without computing remedies | `openspec/specs/deal-lifecycle/spec.md` and `architecture.md`, and `docs/development/ARCHITECTURE.md` kit areas at closeout (16.9) |
 | D5 Alkahest release-model list, option-owned release conditions, undeliverable-model startup refusal and atomic legacy-flag migration | `docs/development/DEPLOYMENT_AND_CONFIG.md#alkahest-release-models` and `docs/development/ARCHITECTURE.md` readiness boundary; settlement-configuration delta promoted at 16.9 |
 | D5 price/settlement/lifecycle option envelope, canonical identity, selection mirror and forward-only registry paths | Settlement-configuration and negotiation-protocol spec deltas; lifecycle ownership in deal-lifecycle spec/architecture, promoted at reviewed closeout (16.9) |

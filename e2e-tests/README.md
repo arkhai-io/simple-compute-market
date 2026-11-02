@@ -186,6 +186,30 @@ running; `make e2e-<lane>-down` takes it down. `make test-e2e` runs all three in
 turn, taking each stack down before the next. The compute lanes' provisioning
 services run the mock profile unless `PROVISIONING_MODE=real`.
 
+### Hosted VM servicing
+
+`e2e_vm_payment_deal` runs in the VM lane, gated by the shared `PAYMENTS`
+configuration. It publishes a hosted-only one-hour VM option, approves the exact
+accepted mandate, commits through `LifecycleClient`, replays commitment and
+steps servicing. An administrator then ends delivery without payee stop rights;
+the seller files one mediation case while teardown is gated. Finally, a seller
+refund reverses the held payment, separately from callback-proven capacity return.
+The mock executor proves the service wiring, not a real guest or SSH access.
+
+Supply healthy payment and mediation authorities, exact signed-registry
+recommendations, seller recommendation consent and an identity-bound
+`[[DisputeCredential]]` for the accepted mediation authority. Its `api_key_env`
+names the seller bearer credential variable; forward that variable into the
+storefront. A running authority without a usable party credential is not enough.
+Development-auth adapters belong to the disposable authority setup, not SCM.
+Before pytest, check Compose health, payment health from host/seller/buyer,
+mediation health and an authenticated publication using
+`option["settlement"]["schema"]`, not the retired option-level mechanism key.
+The [VM readiness gate](../docs/attachments/vm-end-classification/readiness.py)
+and [hosted qualification packet](../docs/attachments/aeet-vm-hosted/index.md)
+provide the direct entry point and observed stages. Without a configured payment
+target all four stages report blocked skips; no Alkahest fallback is used.
+
 ### Real VM provisioning
 
 `e2e_vm_real_provisioning` runs the canonical compute deal against a real KVM
