@@ -8,6 +8,10 @@
 
 version = 1
 
+# Dispute interfaces register their identity, kit and vocabulary tokens just
+# like mechanisms. A dispute kit has kind "dispute" and no mechanism scope.
+disputes = []
+
 # Lowest first. A package may depend on its own layer or a lower one.
 [layers]
 order = ["core", "kit", "specialization", "composition"]
@@ -20,6 +24,16 @@ kind_words = ["contracts", "client"]
 role_words = ["storefront", "buyer", "service", "app"]
 # Tooling and test harness projects outside the package architecture.
 skip = ["e2e-tests", "tools", "scripts", "dev-env"]
+
+# Buyer-side libraries depend only on foundation libraries and contracts.
+# Only buyer compositions consume them; storefronts and sites never do.
+[kit_areas]
+foundation = [
+    "kit/identity", "kit/config", "kit/policy", "kit/capability-shape",
+    "kit/capability-pricing", "kit/capability-admissibility",
+    "kit/negotiation-runtime", "kit/settlement-runtime", "kit/deal-lifecycle",
+]
+buyer = ["kit/deal-lifecycle-buyer"]
 
 [[families]]
 name = "compute"
@@ -92,6 +106,12 @@ enforce = true
 layers = ["core"]
 kinds = ["contracts"]
 distributions = ["arkhai-kit-identity"]
+enforce = true
+
+[kind_allowlists.dispute]
+layers = ["core"]
+kinds = ["contracts"]
+areas = ["foundation"]
 enforce = true
 
 [vocabulary]

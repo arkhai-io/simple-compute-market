@@ -62,7 +62,7 @@ deal-lifecycle requirement "Dispute adapters resolve by dispute interface" (a di
 no payment mechanism). Files: `docs/development/ARCHITECTURE.toml`, `scripts/architecture.py`
 and its tests under `scripts/tests/`.
 
-- [ ] 1.1 Add the buyer-side area and the dispute-kit kind to `ARCHITECTURE.toml`: a
+- [x] 1.1 Add the buyer-side area and the dispute-kit kind to `ARCHITECTURE.toml`: a
       `[[disputes]]` table registering each dispute interface and its kit beside
       `[[mechanisms]]`, with no row yet (section 12 adds `arkhai.mediation.v1`), and the
       buyer-side area's dependency rule (foundation libraries and contracts only; composed by
