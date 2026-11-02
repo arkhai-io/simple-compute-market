@@ -32,9 +32,9 @@
       "dist": "arkhai-kit-deal-lifecycle-buyer"
     },
     {
-      "key": "kit-arkhai-mediation",
-      "path": "kit/arkhai-mediation",
-      "dist": "arkhai-kit-arkhai-mediation"
+      "key": "kit-deal-servicing",
+      "path": "kit/deal-servicing",
+      "dist": "arkhai-kit-deal-servicing"
     },
     {
       "key": "core",
