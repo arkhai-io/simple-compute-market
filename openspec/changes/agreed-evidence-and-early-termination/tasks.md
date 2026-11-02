@@ -1725,3 +1725,13 @@ or deployed monetary-ruling qualification is claimed by this kit repair.
   and all three cycle cases pass after repair, including reconstructed composition
   and unchanged admission revision. Permanent recovery rationale promotes with
   section 16 to VM fulfillment architecture; no owner decision changes.
+- E-N4 / O-F10 (domain half): site push/pull ingress, bounded cycle units,
+  VM interruption evidence/readback and capacity-return acknowledgement run on
+  database workers. Bare-metal terminal reconciliation, admission/disclosure and
+  VM verified-commit registration use the same off-loop boundary; no worker holds
+  a transaction across an authority or physical await. Busy independent SQLite
+  writers fail all four cycle/operator/local-end regressions before repair, and
+  injected site verifiers expose both old on-loop push/pull paths. Focused re-drive:
+  VM 11 and bare metal 14 pass. Borrowed-session methods remain synchronous for
+  transaction owners. Existing section 16 servicing architecture promotion owns
+  this execution rule; no new known limit is accepted.

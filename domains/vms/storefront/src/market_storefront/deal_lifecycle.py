@@ -184,7 +184,7 @@ class VmDealLifecycle:
         )
 
     async def interrupt(self, negotiation_id, *, actor, operation_key, reason, dry_run=False):
-        agreement, _ = self.accepted(negotiation_id)
+        agreement, _ = await asyncio.to_thread(self.accepted, negotiation_id)
         terms = decode_terms(agreement["settlement"].get("lifecycle"))
         entitled = bool(terms and terms.early_termination and "payee" in terms.early_termination.entitlements)
         command = LifecycleCommand(
@@ -194,28 +194,27 @@ class VmDealLifecycle:
         if not reason or not reason.strip():
             raise ValueError("administrator interruption requires a reason")
         if dry_run:
-            return command.kind, Pending(reason="dry run; no interruption submitted"), self.seller.delivery_read(negotiation_id).delivery
+            return command.kind, Pending(reason="dry run; no interruption submitted"), (await asyncio.to_thread(self.seller.delivery_read, negotiation_id)).delivery
         # Keep operator attribution for notice stops as well as exceptional ends.
         # The immutable evidence ID rejects a same-key retry changing its author.
-        with transaction(self.path) as conn:
-            EvidenceSession(conn).put(negotiation_id, EvidenceItem(
+        await in_transaction(self.path, lambda conn: EvidenceSession(conn).put(negotiation_id, EvidenceItem(
                 evidence_id="administrator-interrupt:" + operation_key,
                 kind="administrator_interrupt", classification="seller_assertion",
                 recorded_at=self.clock(), body=base64.b64encode(canonical_json({
                     "command": command.model_dump(mode="json"),
                     "administrator": actor.model_dump(mode="json"), "reason": reason,
                 })),
-            ))
+            )))
         if entitled:
             outcome = await self.seller.submit(command, actor=actor, reason=reason)
             # Only a verified authority stop may set an entitled delivery end.
-            return command.kind, outcome, self.seller.delivery_read(negotiation_id).delivery
+            return command.kind, outcome, (await asyncio.to_thread(self.seller.delivery_read, negotiation_id)).delivery
 
         # Journal before either task: off-loop preparation can yield before it
         # writes, so racing submit with teardown alone can miss the new end.
         refusal = await self.seller.record_operator_end(command, actor=actor, reason=reason)
         if refusal is not None:
-            return command.kind, refusal, self.seller.delivery_read(negotiation_id).delivery
+            return command.kind, refusal, (await asyncio.to_thread(self.seller.delivery_read, negotiation_id)).delivery
 
         async def physical():
             await self.end.drive_physical(negotiation_id)
@@ -229,7 +228,7 @@ class VmDealLifecycle:
         if isinstance(outcome, BaseException):
             logger.error("VM administrator filing awaits authority recovery: %s", outcome)
             outcome = Unknown(reason="delivery-end filing awaits authority recovery")
-        return command.kind, outcome, self.seller.delivery_read(negotiation_id).delivery
+        return command.kind, outcome, (await asyncio.to_thread(self.seller.delivery_read, negotiation_id)).delivery
 
     async def peer(self, message):
         if isinstance(message, CommitMessage):
@@ -252,10 +251,11 @@ class VmDealLifecycle:
         return SubmitResponse(outcome=Accepted())
 
     async def cycle(self, *, limit=100):
-        with transaction(self.path) as conn:
-            deals, self.continuation = SellerSession(conn).page(ListDealsRequest(
+        deals, self.continuation = await in_transaction(
+            self.path, lambda conn: SellerSession(conn).page(ListDealsRequest(
                 limit=limit, continuation=self.continuation,
-            ))
+            )),
+        )
         # Discovery precedes watch so both reuse the same prepared answer journal.
         for deal in deals:
             if deal.dispute is None or not self.credential_available(deal.dispute):
@@ -290,7 +290,7 @@ class VmDealLifecycle:
             except Exception:
                 logger.exception("VM respondent discovery awaits recovery")
         for deal in deals:
-            with transaction(self.path) as conn, atomic(conn):
+            def admit_deadline(conn):
                 end = EndSession(conn)
                 record = end.read(deal.negotiation_id)
                 # A recovery sweep observes missed delivery, not a new admission.
@@ -298,6 +298,7 @@ class VmDealLifecycle:
                 now = self.clock()
                 if now > record.deadline and (record.available_at is None or record.available_at > record.deadline):
                     end.admit(deal.negotiation_id, record.phase, record.revision, now=now)
+            await in_transaction(self.path, admit_deadline)
             try:
                 await self.recover_site_reports(deal.negotiation_id)
             except Exception:
@@ -312,8 +313,9 @@ class VmDealLifecycle:
             except Exception:
                 logger.exception("VM lifecycle watch awaits recovery for %s", deal.negotiation_id)
             try:
-                with transaction(self.path) as conn, atomic(conn):
-                    resolve_site_corrections(EndSession(conn), deal.negotiation_id, now=self.clock())
+                await in_transaction(self.path, lambda conn: resolve_site_corrections(
+                    EndSession(conn), deal.negotiation_id, now=self.clock(),
+                ))
             except Exception:
                 logger.exception("VM end classification awaits recovery for %s", deal.negotiation_id)
             try:

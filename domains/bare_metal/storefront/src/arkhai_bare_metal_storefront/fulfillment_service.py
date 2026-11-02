@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime, timedelta, timezone
@@ -78,10 +79,10 @@ class BareMetalFulfillmentService:
     read_verified_evidence: Callable[..., Awaitable[SettlementEvidence]]
     lifecycle: Any = None
 
-    def _admit(self, negotiation_id: str, phase: DeliveryPhase) -> None:
+    async def _admit(self, negotiation_id: str, phase: DeliveryPhase) -> None:
         if self.lifecycle is not None:
             try:
-                self.lifecycle.admit(negotiation_id, phase)
+                await asyncio.to_thread(self.lifecycle.admit, negotiation_id, phase)
             except ValueError as exc:
                 raise BareMetalFulfillmentError(str(exc)) from exc
 
@@ -246,7 +247,7 @@ class BareMetalFulfillmentService:
             )
         settlement_ref = evidence.settlement_ref
 
-        self._admit(negotiation_id, DeliveryPhase.RESERVE)
+        await self._admit(negotiation_id, DeliveryPhase.RESERVE)
         # Starting delivery is ordered against refund intent in one
         # transaction, so a refund recorded first stops delivery here.
         lifecycle = await self.db.ensure_bare_metal_fulfillment_lifecycle(
@@ -349,10 +350,10 @@ class BareMetalFulfillmentService:
         # returns. Committed until the fulfillment begins: the first commit
         # records the window and the deal's escrow, and a repeat returns the
         # window unchanged.
-        self._admit(negotiation_id, DeliveryPhase.COMMIT)
+        await self._admit(negotiation_id, DeliveryPhase.COMMIT)
         lease_start = datetime.now(timezone.utc)
         requested_start, requested_end = (
-            self.lifecycle.lease_window(negotiation_id) if self.lifecycle is not None
+            await asyncio.to_thread(self.lifecycle.lease_window, negotiation_id) if self.lifecycle is not None
             else (lease_start.isoformat(), (lease_start + timedelta(seconds=terms.duration_seconds)).isoformat())
         )
         committed_window = committed_lease_window(
@@ -403,7 +404,7 @@ class BareMetalFulfillmentService:
             raise BareMetalFulfillmentError(
                 "recorded materialization conflicts with accepted bare-metal terms"
             )
-        self._admit(negotiation_id, DeliveryPhase.DISPATCH)
+        await self._admit(negotiation_id, DeliveryPhase.DISPATCH)
         accepted = await self.fulfillment_client.begin_fulfillment(
             FulfillmentRequestBody(
                 capacity_reservation_id=str(reservation_id),
@@ -527,7 +528,7 @@ class BareMetalFulfillmentService:
         )
 
         if remote.state == "active":
-            self._admit(negotiation_id, DeliveryPhase.DISCLOSE)
+            await self._admit(negotiation_id, DeliveryPhase.DISCLOSE)
             delivery, endpoint = await self._active_delivery(
                 capacity_reservation_id=str(reservation_id),
                 fulfillment_id=str(fulfillment_id),
@@ -542,7 +543,7 @@ class BareMetalFulfillmentService:
             # The stored result names no endpoint: where to connect is served
             # live by ``access`` while the lease is active.
             if self.lifecycle is not None:
-                self.lifecycle.available(negotiation_id, self.lifecycle.clock())
+                await asyncio.to_thread(self.lifecycle.available, negotiation_id, self.lifecycle.clock())
             await self._record_result(
                 negotiation_id=negotiation_id,
                 result=BareMetalResult(
@@ -599,7 +600,7 @@ class BareMetalFulfillmentService:
         materialization = await self.db.load_bare_metal_materialization(
             negotiation_id=negotiation_id
         )
-        self._admit(negotiation_id, DeliveryPhase.DISCLOSE)
+        await self._admit(negotiation_id, DeliveryPhase.DISCLOSE)
         return {
             "negotiation_id": negotiation_id,
             "method": "ssh",

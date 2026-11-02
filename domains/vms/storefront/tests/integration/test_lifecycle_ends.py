@@ -5,6 +5,7 @@ a public network. State is invocation-owned SQLite and HTTP is in process.
 """
 
 import json
+import threading
 from datetime import datetime, timezone
 
 import httpx
@@ -53,6 +54,15 @@ SITE_ID = "site-test"
 @pytest.mark.asyncio
 async def test_hosted_buyer_commit_and_end_capture_signed_push_retry_and_pull(make, tmp_path):
     h = await make()
+    loop_thread = threading.get_ident()
+    verifier = h.lifecycle.ingress.verify_site
+    verification_threads = []
+
+    def verify(*args):
+        verification_threads.append(threading.get_ident())
+        return verifier(*args)
+
+    h.lifecycle.ingress.verify_site = verify
     h.serve()
     store = FileEvidenceStore(tmp_path / "buyer-evidence")
     agreement, _ = h.lifecycle.accepted(NEGOTIATION)
@@ -176,6 +186,7 @@ async def test_hosted_buyer_commit_and_end_capture_signed_push_retry_and_pull(ma
                 )
                 await h.lifecycle.recover_site_reports(NEGOTIATION)
                 await h.lifecycle.recover_site_reports(NEGOTIATION)
+            assert verification_threads and all(value != loop_thread for value in verification_threads)
             with transaction(h.db.db_path) as conn:
                 view = EndSession(conn).view(NEGOTIATION)
                 assert view.recorded_end.ended_at == now - 1

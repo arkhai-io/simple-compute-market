@@ -1,6 +1,7 @@
 """Signed site reports and surrender through the composed bare-metal app."""
 
 import asyncio
+import threading
 from types import SimpleNamespace
 
 import httpx
@@ -24,6 +25,15 @@ SITE = Ed25519Signer(bytes.fromhex("44" * 32))
 @pytest.mark.asyncio
 async def test_surrender_before_dispatch_correlates_direct_release_push_and_pull(harness, tmp_path):
     h = harness
+    loop_thread = threading.get_ident()
+    verifier = h.runtime.lifecycle.ingress.verify_site
+    verification_threads = []
+
+    def verify(*args):
+        verification_threads.append(threading.get_ident())
+        return verifier(*args)
+
+    h.runtime.lifecycle.ingress.verify_site = verify
     h.serve()
     started, release = asyncio.Event(), asyncio.Event()
     schedule = h.provisioning.schedule_resource
@@ -80,6 +90,7 @@ async def test_surrender_before_dispatch_correlates_direct_release_push_and_pull
             return SimpleNamespace(end_reports=[report], status="released")
         h.provisioning.get_lease = lease
         await h.runtime.lifecycle.recover_site(h.negotiation_id)
+        assert verification_threads and all(value != loop_thread for value in verification_threads)
         read = await buyer.read(h.negotiation_id)
         assert read.delivery.progress == "released"
         assert len(read.delivery.site_reports) == 1

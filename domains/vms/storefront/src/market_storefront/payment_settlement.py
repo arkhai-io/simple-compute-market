@@ -166,7 +166,7 @@ class VmPaymentsCoordinator:
         )
         await self._save(record)
         if self.lifecycle is not None:
-            self.lifecycle.register(agreement, data, receipt)
+            await asyncio.to_thread(self.lifecycle.register, agreement, data, receipt)
         return record
 
     async def start(self, negotiation_id: str, thread: dict[str, Any]) -> PaymentSettleResult:
@@ -180,7 +180,7 @@ class VmPaymentsCoordinator:
                 try:
                     entry.revalidate(evidence=record, thread=thread, verifier=self.stage)
                     if self.lifecycle is not None:
-                        self.lifecycle.register(agreement, data, SignedReceipt.model_validate(
+                        await asyncio.to_thread(self.lifecycle.register, agreement, data, SignedReceipt.model_validate(
                             record.evidence["source"]["receipt"]
                         ))
                 except ValueError as exc:

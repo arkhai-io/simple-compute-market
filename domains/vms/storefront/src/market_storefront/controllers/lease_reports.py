@@ -1,9 +1,10 @@
 """Authenticated site intent reports, separate from capacity-return callbacks."""
 
+import asyncio
 import logging
 
 from market_deal_servicing import EndSession
-from market_deal_servicing.evidence import transaction
+from market_deal_servicing.evidence import in_transaction
 from compute_provisioning_contracts import LEASE_ENDED_CALLBACK, LeaseEndedEvent, SignedLeaseEndedReport
 from fastapi import APIRouter, HTTPException, Request
 from market_deal_lifecycle_contracts.models import DeliveryView
@@ -27,8 +28,8 @@ async def lease_ended(capacity_reservation_id: str, request: Request) -> Deliver
         event = LeaseEndedEvent.model_validate_json(report.payload)
         if event.capacity_reservation_id != capacity_reservation_id:
             raise ValueError("report reservation differs from callback path")
-        negotiation_id = lifecycle.reservation_deal(capacity_reservation_id, event.site_id)
-        lifecycle.ingress.site_report(negotiation_id, body=body, headers=dict(request.headers))
+        negotiation_id = await asyncio.to_thread(lifecycle.reservation_deal, capacity_reservation_id, event.site_id)
+        await asyncio.to_thread(lifecycle.ingress.site_report, negotiation_id, body=body, headers=dict(request.headers))
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Unknown committed reservation") from exc
     except ValueError as exc:
@@ -39,5 +40,4 @@ async def lease_ended(capacity_reservation_id: str, request: Request) -> Deliver
         await lifecycle.end.drive_physical(negotiation_id)
     except Exception:
         logger.exception("VM report physical end awaits recovery for %s", negotiation_id)
-    with transaction(lifecycle.path) as conn:
-        return EndSession(conn).view(negotiation_id)
+    return await in_transaction(lifecycle.path, lambda conn: EndSession(conn).view(negotiation_id))

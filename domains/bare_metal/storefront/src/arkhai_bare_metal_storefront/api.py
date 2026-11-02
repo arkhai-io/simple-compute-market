@@ -1422,7 +1422,8 @@ async def lease_ended(capacity_reservation_id: str, request: Request) -> dict[st
         ), body=await _request_body(request), now=now,
     )
     try:
-        runtime.lifecycle.ingress.site_report(
+        await asyncio.to_thread(
+            runtime.lifecycle.ingress.site_report,
             row["negotiation_id"], body=await request.body(), headers=dict(request.headers),
         )
     except ValueError as exc:

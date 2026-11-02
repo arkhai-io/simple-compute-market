@@ -25,7 +25,7 @@ from market_deal_servicing import (
     PhysicalResult, SellerDeal, SellerServicing, SellerSession, SQLiteEvidenceStore, VerifiedSiteEnd,
     seller_retention,
 )
-from market_deal_servicing.evidence import EvidenceSession, transaction
+from market_deal_servicing.evidence import EvidenceSession, in_transaction, transaction
 from market_deal_servicing.journal import stable_ref
 from market_identity import Identity, canonical_json
 
@@ -177,12 +177,13 @@ class BareMetalLifecycle:
         )
 
     async def local_end(self, negotiation_id, *, cause):
-        self.binding(negotiation_id)
+        await asyncio.to_thread(self.binding, negotiation_id)
         now = self.clock()
-        with transaction(self.path) as conn:
+        def record(conn):
             session = EndSession(conn)
             if not any(request.source_ref == cause for request in session.requests(negotiation_id)):
                 self._record_local_end(session, negotiation_id, cause, now)
+        await in_transaction(self.path, record)
         await self.end.drive_physical(negotiation_id)
 
     def _record_local_end(self, session, negotiation_id, cause, now):
@@ -237,15 +238,14 @@ class BareMetalLifecycle:
             return
         lease = await self.runtime.fulfillment_client.get_lease(row["capacity_reservation_id"])
         for report in lease.end_reports:
-            self.ingress.site_report(negotiation_id, body=canonical_json(report), headers={})
+            await asyncio.to_thread(self.ingress.site_report, negotiation_id, body=canonical_json(report), headers={})
         # Intended ends never establish capacity return. The authenticated site
         # lease read uses the same release guard as its separate callback.
         if lease.status == "released":
             await self.runtime.db.update_bare_metal_fulfillment_lifecycle(
                 negotiation_id=negotiation_id, state="released",
             )
-            with transaction(self.path) as conn:
-                EndSession(conn).physical_progress(negotiation_id, "released")
+            await in_transaction(self.path, lambda conn: EndSession(conn).physical_progress(negotiation_id, "released"))
 
     def classify_site(self, event, session):
         row = session.conn.execute(
@@ -365,12 +365,13 @@ class BareMetalLifecycle:
     async def cycle(self):
         # One bounded page per cycle, with durable rotation even if one peer is
         # unavailable. A bad deal must not starve physical recovery of the rest.
-        with transaction(self.path) as conn:
+        def page(conn):
             row = conn.execute("SELECT continuation FROM bare_metal_lifecycle_cursor WHERE id=1").fetchone()
-            deals, continuation = SellerSession(conn).page(
+            return SellerSession(conn).page(
                 ListDealsRequest(limit=100, continuation=row[0] if row else None),
                 committed_only=False,
             )
+        deals, continuation = await in_transaction(self.path, page)
         authorities = {}
         for deal in deals:
             if deal.dispute and self.credential_available(deal.dispute):
@@ -409,10 +410,11 @@ class BareMetalLifecycle:
                 logger.exception("bare-metal site recovery failed for %s", deal.negotiation_id)
             try:
                 await self.end.drive_physical(deal.negotiation_id)
-                if self.reconcile_local(deal.negotiation_id):
+                if await asyncio.to_thread(self.reconcile_local, deal.negotiation_id):
                     await self.seller.read(deal.negotiation_id)
-                    with transaction(self.path) as conn:
-                        self.resolve_site_corrections(EndSession(conn), deal.negotiation_id, now=self.clock())
+                    await in_transaction(self.path, lambda conn: self.resolve_site_corrections(
+                        EndSession(conn), deal.negotiation_id, now=self.clock(),
+                    ))
                     await self.seller.dispatch_filings(deal.negotiation_id)
             except Exception:
                 logger.exception("bare-metal lifecycle recovery failed for %s", deal.negotiation_id)
@@ -421,8 +423,9 @@ class BareMetalLifecycle:
                     await self.end.drive_physical(deal.negotiation_id)
                 except Exception:
                     logger.exception("bare-metal physical recovery failed for %s", deal.negotiation_id)
-        with transaction(self.path) as conn:
-            conn.execute("INSERT OR REPLACE INTO bare_metal_lifecycle_cursor VALUES (1,?)", (continuation,))
+        await in_transaction(self.path, lambda conn: conn.execute(
+            "INSERT OR REPLACE INTO bare_metal_lifecycle_cursor VALUES (1,?)", (continuation,),
+        ).close())
         return len(deals)
 
     async def close(self):
