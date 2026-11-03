@@ -15,6 +15,7 @@ dependencies = [
     "arkhai-kit-fulfillment>=0.6.0",
     "cryptography>=42.0",
     "pydantic>=2",
+    # The host and relay definitions documents' YAML.
     "pyyaml>=6.0",
     # Imported to serialize a relay grant's header and claims.
     "rfc8785>=0.1.4",

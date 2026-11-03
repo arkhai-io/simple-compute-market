@@ -57,11 +57,13 @@ services:
       - PROVISIONING_DATABASE_URL=sqlite:////app/data/provisioning.db
       - REDIS_URL=redis://bare-metal-redis:6379
       - PROVISIONING_STOREFRONT_URL=http://bare-metal-storefront:8000
-      - PROVISIONING_INVENTORY_PATH=/run/config/bare-metal-hosts.ini
       - PROVISIONING_POOL_DEFINITIONS_PATH=/run/config/resource-pools.yaml
+      # The site's host definitions document, reconciled at startup whenever
+      # it changes, after the pool document whose pools its entries name.
+      - PROVISIONING_HOST_DEFINITIONS_PATH=/run/config/host-definitions.yaml
     volumes:
       - ./provisioning/iac:/opt/domains/bare_metal/provisioning/iac:ro
-      - ${BARE_METAL_PROVISIONING_INVENTORY_FILE:?set selected-site host inventory file}:/run/config/bare-metal-hosts.ini:ro
+      - ${BARE_METAL_PROVISIONING_HOST_DEFINITIONS_FILE:?set the selected site's host definitions document}:/run/config/host-definitions.yaml:ro
       - ${BARE_METAL_POOL_DEFINITIONS_FILE:?set explicit resource-pool definitions file}:/run/config/resource-pools.yaml:ro
       - ${BARE_METAL_PROVISIONING_SSH_PRIVATE_KEY_FILE:?set provisioning SSH private key file}:/home/appuser/.ssh/id_ed25519:ro
       - bare-metal-provisioning-data:/app/data

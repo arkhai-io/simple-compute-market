@@ -129,7 +129,6 @@ async def client_and_queue(
         frp_domain="",
         frp_dashboard_password="",
         resolved_vm_playbook_path=Path("/fake/playbook.yml"),
-        resolved_inventory_path=Path("/fake/hosts"),
         ssh_decryption_key="",
         database_url="sqlite:///:memory:",
     )

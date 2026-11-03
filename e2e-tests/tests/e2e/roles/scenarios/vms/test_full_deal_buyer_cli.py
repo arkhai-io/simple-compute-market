@@ -369,10 +369,9 @@ class TestStage00f1_ExecutorHostRegistry:
         incompatible with one declaration per executor, and previously let one
         scenario's GPU count decide another's reservation.
 
-        Registered through the admin API rather than a mounted inventory file:
-        `inventory_path` is docker-compose-specific while the canonical Helm
-        deployment supplies inventory as an inline secret, and a mount is shared
-        state no scenario declares. The storefront is then told to pull
+        Registered through the admin API rather than a mounted host definitions
+        document, which is deployment configuration every scenario on the stack
+        would share and no scenario declares. The storefront is then told to pull
         projections immediately and the pull is asserted, rather than sleeping
         out the poller interval.
         """

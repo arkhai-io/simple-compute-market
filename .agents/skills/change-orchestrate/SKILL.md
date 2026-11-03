@@ -179,7 +179,9 @@ run inside an ordinary command — `( make … & )`, `nohup`, `setsid`, or a tra
 opening the round view together: the call returns at once, the harness has
 nothing left to track, and a run that finishes is never reported, so the change
 waits on a step that ended long ago. Run the round view, and each of a pair of
-side-by-side runs, in calls of their own.
+side-by-side runs, in calls of their own. Give each run's background command the
+harness's longest timeout: an implementation session can outlast the default, and
+a run killed at it stops mid-step with its work uncommitted.
 
 For `round`, record the round the computation names, as it names it, just before
 starting its first session — copying the list is routing, not a reading of the
@@ -402,9 +404,15 @@ python3 scripts/run_change_step.py denials <change> <seq>
 
 Inspect each denial and the later calls it reports. After a deny-rule denial, a
 later call doing the denied work by another means is a workaround: do not trust
-the outcome until the owner has seen it. After a `mode` denial, the same work done
-by a tool the step's rules allow for it — the Edit tool for a denied shell write,
-Read or Grep for a shell read — is not a workaround; read it as the gap it is. A
+the outcome until the owner has seen it. The one exception is a rule that exists
+only to keep file writes on the Edit and Write tools — the step table's comments
+name those rules: sed's in-place forms, find's deleting, running, and writing
+actions, and the diff family's output-to-file forms. A shell write such a rule
+refused, made with the Edit or Write tool the step's rules allow, is the rule
+doing what it is for: read it as a gap, recorded `gap:`, and ask the owner for no
+ruling. After a `mode` denial, the same work done by a tool the step's rules
+allow for it — the Edit tool for a denied shell write, Read or Grep for a shell
+read — is not a workaround; read it as the gap it is. A
 denied chain retried as separate allowed commands alone does not establish a
 workaround. One denied call is not a denied tool.
 
@@ -419,6 +427,10 @@ Classify by the harness's `reason`:
   the rule; otherwise it is a gap, naming the part no allow rule matches.
 - No `reason`, from a record written before reasons were carried: match the call
   against the deny rules the same way; matched, it is forbidden.
+
+However the denial was classified, a forbidden denial by a rule that keeps file
+writes on the Edit and Write tools, whose write the run then made with one of
+them, is read as the gap the paragraph above describes.
 
 Take any other value, or a call you cannot place this way, to the owner. Never grant a deny-rule
 denial: an allow cannot override it. For a gap propose the narrowest matching

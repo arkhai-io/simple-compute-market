@@ -30,6 +30,8 @@ from compute_provisioning_contracts import (
     FulfillmentValidationResponse,
     HealthResponse,
     HostCreate,
+    HostDefinitionsImportRequest,
+    HostDefinitionsImportResponse,
     HostListResponse,
     HostResponse,
     HostUpdate,
@@ -236,6 +238,41 @@ def _set_host_enabled(host_id: str, enabled: bool) -> _Call:
 
 def _connectivity(host_id: str) -> _Call:
     return _Call("GET", f"/api/v1/hosts/{host_id}/connectivity", parse=_model(ConnectivityResult))
+
+
+def _text(payload: Any) -> str:
+    # A YAML document is never JSON in block style, so the transport hands it
+    # over as the text it was signed as.
+    if not isinstance(payload, str):
+        raise ComputeProvisioningError("expected a text response")
+    return payload
+
+
+def _export_hosts() -> _Call:
+    return _Call("GET", "/api/v1/hosts/definitions/export", parse=_text)
+
+
+def _host_definitions_import_response(payload: Any) -> HostDefinitionsImportResponse:
+    # A refused import answers 422 with the same response under ``detail``; a
+    # 422 whose detail is not that response is the service refusing the
+    # request itself, and is raised.
+    body = _object(payload)
+    if "detail" in body:
+        detail = body["detail"]
+        if not isinstance(detail, dict) or "applied" not in detail:
+            raise ComputeProvisioningError(str(detail), status_code=422)
+        body = detail
+    return HostDefinitionsImportResponse.model_validate(body)
+
+
+def _import_host_definitions(yaml_text: str, validate_only: bool) -> _Call:
+    return _Call(
+        "POST",
+        "/api/v1/hosts/definitions/import",
+        HostDefinitionsImportRequest(yaml_text=yaml_text, validate_only=validate_only),
+        parse=_host_definitions_import_response,
+        accepted_statuses=(422,),
+    )
 
 
 # Relays.
@@ -651,6 +688,18 @@ class ComputeProvisioningClient(SigningBase):
         """Whether the host's connection is reachable; an unreachable host is a result, not an error."""
         return await self._run(_connectivity(host_id), request_id)
 
+    async def export_hosts(self, *, request_id: str | None = None) -> str:
+        """The registry as a host definitions document's YAML text, with no secret."""
+        return await self._run(_export_hosts(), request_id)
+
+    async def import_host_definitions(
+        self, yaml_text: str, *, validate_only: bool = False, request_id: str | None = None
+    ) -> HostDefinitionsImportResponse:
+        """Reconcile a host definitions document, or with ``validate_only`` report
+        what it would do; a refused document is a response, not an error, so its
+        caller reads ``applied`` and ``problems``."""
+        return await self._run(_import_host_definitions(yaml_text, validate_only), request_id)
+
     # Relays.
 
     async def list_relays(self, *, request_id: str | None = None) -> RelayListResponse:
@@ -975,6 +1024,16 @@ class SyncComputeProvisioningClient(SigningBase):
     def check_connectivity(self, host_id: str, *, request_id: str | None = None) -> ConnectivityResult:
         """See ``ComputeProvisioningClient.check_connectivity``."""
         return self._run(_connectivity(host_id), request_id)
+
+    def export_hosts(self, *, request_id: str | None = None) -> str:
+        """See ``ComputeProvisioningClient.export_hosts``."""
+        return self._run(_export_hosts(), request_id)
+
+    def import_host_definitions(
+        self, yaml_text: str, *, validate_only: bool = False, request_id: str | None = None
+    ) -> HostDefinitionsImportResponse:
+        """See ``ComputeProvisioningClient.import_host_definitions``."""
+        return self._run(_import_host_definitions(yaml_text, validate_only), request_id)
 
     # Relays.
 

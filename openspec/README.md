@@ -18,6 +18,7 @@ Use `bunx @fission-ai/openspec@1.14.0 list` to inspect active changes, `show <na
 | Repository-wide dependency layers, authority boundaries, common vocabulary, and major flows | `docs/development/ARCHITECTURE.md` |
 | Testing methodology, test-level jurisdiction, and validation conventions | `docs/development/TESTING.md` |
 | Configuration resolution and Kubernetes deployment conventions | `docs/development/DEPLOYMENT_AND_CONFIG.md` |
+| Operating a deployment: document formats, procedures, upgrade and recovery steps | `docs/operator-handbook.md` |
 | Build, packaging, environment, lock, and image conventions, and the checks enforcing them | `docs/development/BUILD_AND_PACKAGING.md` |
 | Directional goals, the value each delivers, current state per goal, and which change owns each open gap | `docs/development/ROADMAP.md` |
 | Subsystem behavior, package ownership, lifecycle, identifiers, and errors | `openspec/specs/<subsystem>/spec.md` |

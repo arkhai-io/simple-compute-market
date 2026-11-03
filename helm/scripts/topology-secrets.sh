@@ -120,14 +120,16 @@ apply arkhai-bob-runtime \
     "config-seller-secret.yml=$work/config-seller-secret.yml"
 echo "  arkhai-bob-runtime: [Wallet].private_key and the smoke seller profile, Anvil account $DEV_ACCOUNT_BOB"
 
-# Provisioning's secrets profile: nothing mock provisioning needs. An empty
-# inventory_ini seeds hosts from the image's inventory, as the Compose lane does.
+# Provisioning's secrets profile: mock provisioning needs nothing from it, so it
+# is an empty mapping. The chart mounts the profile whatever it holds, and the
+# service refuses a retired setting it states, an empty one included; the
+# scenarios register the hosts they need through the API.
 cat >"$work/config-provisioning-secrets.yml" <<EOF
-inventory_ini: ""
+{}
 EOF
 apply arkhai-provisioning-runtime "config-provisioning-secrets.yml=$work/config-provisioning-secrets.yml"
 apply arkhai-provisioning-ssh "id_ed25519=$PROVISIONING_SSH_KEY_FILE"
-echo "  arkhai-provisioning-runtime, arkhai-provisioning-ssh: mock provisioning's (no inventory; $PROVISIONING_SSH_KEY_FILE)"
+echo "  arkhai-provisioning-runtime, arkhai-provisioning-ssh: mock provisioning's (an empty profile; $PROVISIONING_SSH_KEY_FILE)"
 
 # Release 1's Helm tests: the e2e-tests chart's deal test, whose
 # config-e2e-secret.yml the registry smoke test also layers for the buyer's

@@ -608,10 +608,10 @@ def _ensure_provisioning_host_registered(provisioning_client):
     The scenario's seeded resource row declares ``attribute.vm_host=kvm1``,
     so phase 08c's job evaluation (``vm_rules.evaluate_job``) requires a matching row
     in the provisioning ``hosts`` table. Compose-launched provisioning
-    starts with an empty inventory (no ``inventory_ini``/``inventory_path``
-    configured); production deployments seed the table via Helm secret
-    or a bind-mounted IaC inventory. Inserting the row here keeps the
-    e2e scenario hermetic and idempotent across re-runs.
+    starts with no host definitions document configured, so it registers no
+    host; a deployment declares its hosts in one, mounted through Compose or
+    the provisioning chart's ``definitions.hosts``. Registering the host here
+    keeps the e2e scenario hermetic and idempotent across re-runs.
 
     The credentials are stub values (path-type, fake path) - mock
     provisioning never SSHes into the host, so they never get used.
