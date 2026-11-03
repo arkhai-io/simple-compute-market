@@ -110,7 +110,10 @@ def _same_connection(built: ConnectionEnvelope, stored: ConnectionEnvelope) -> b
 
     Compared after the codec, so a field the codec defaults equals a stored
     default; protected values compare by scheme, since a kept value is carried
-    forward as it is and a resubmitted one is never equal ciphertext.
+    forward as it is and a resubmitted one is never equal ciphertext. So this
+    answers only for a submission carrying no secret: one that carries a secret
+    cannot be compared with what is stored, and its caller replaces the stored
+    connection instead.
     """
     return (
         built.kind == stored.kind
@@ -262,8 +265,12 @@ class HostAuthority:
         and unplaced unless a pool is stated.
 
         A host whose built connection, pool, and enabled state equal the stored
-        ones is written nothing and runs no hook. A pool move runs every
-        pool-change hook before anything about the host changes.
+        ones is written nothing and runs no hook. A connection submitted with a
+        secret never equals the stored one, since newly protected material
+        cannot be compared with stored ciphertext: an imported inventory
+        embedding a rotated key replaces the stored key rather than keeping it.
+        A pool move runs every pool-change hook before anything about the host
+        changes.
 
         Raises ``UnknownPoolError`` for a stated pool that does not exist and
         ``ValueError`` for a connection the codec refuses, both before writing,
@@ -290,7 +297,11 @@ class HostAuthority:
         # row stored before its codec's current normalization still equals an
         # entry stating it.
         canonical = self._codecs.canonical(stored)
-        same_connection = canonical is not None and _same_connection(built, canonical)
+        same_connection = (
+            not connection.secrets
+            and canonical is not None
+            and _same_connection(built, canonical)
+        )
         if (
             same_connection
             and target_pool == existing.pool_id

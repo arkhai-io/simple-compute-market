@@ -1241,6 +1241,16 @@ Section 6 notes:
   gives one. Unit (`test_change_workflow_stream.py`): the killed-run transcript
   gains a reasonless denial, returned with no `reason` key. The round's checks
   are under section 7's notes.
+- **Fixed at the pre-closeout triage (68 R1).** A subagent's denial the harness
+  also reports on the parent's stream was recorded once, as the stream's
+  unmarked entry, because the wrapper dropped the subagent reader's marked copy
+  by id: workflow log seq 82 carried the fresh-context check's two denials as
+  the main session's. `_denials` in `scripts/change_workflow/wrapper.py` now
+  gives such an entry the subagent its transcript names, keeping its place and
+  its own reason, or taking the transcript's where the stream gave none. Unit
+  (`test_change_workflow_subagents.py`): a run whose result lists a subagent's
+  denied call records it once, naming the subagent, with the transcript's
+  reason. The checks are under section 7's notes, with 71 F1's.
 
 ## 7. Operator documentation drafts
 
@@ -1604,6 +1614,34 @@ Section 7 notes:
   delta paragraph's wrapping; and this note, which the section 6 note pointed
   to. Left for 8.4: 7.4's fresh-context note counts "four added delta rules",
   true of that round.
+- **Fixed at the pre-closeout triage (71 F1).** Routing `apply_inventory`
+  through `put_host_in_session` gave the INI import route the document's no-op
+  comparison, which compares protected values by scheme: an INI reimport
+  embedding a rotated key, with no public field or pool changed, was reported
+  applied and kept the old key, where the route had always stored each entry's
+  connection. `put_host_in_session` now treats a connection submitted with a
+  secret as never equal to the stored one, so it is always written; a host
+  document carries no secret, so its no-op and the digest contract are
+  unchanged. Library integration in the compute family library
+  (`test_host_authority.py::test_an_inventory_resubmitting_a_secret_replaces_the_stored_one`):
+  a reimport changing only the secret stores the new protected value, and a
+  reimport submitting none keeps it. R1 (68): under section 6's notes.
+- **The pre-closeout triage's checks (71 F1, 68 R1).** `make
+  test-compute-provisioning` (unit and library integration, the new test
+  included): 337 passed. `make test-release-tooling` (`scripts/tests`, unit):
+  1821 passed. `make check-packaging` passed. `make test`: every suite passed,
+  the Helm render included. `make check-change`: all six checks passed.
+  End-to-end: none run here. The INI route's embedded-key path has no pipeline
+  scenario; the fix commit's validation runs the pipeline. The fresh-context
+  check of the diff against `02baf50` found no defect. It confirmed that the
+  only other caller of the session-scoped write, the host document, submits no
+  secret, and that no HTTP test depends on an embedded-key reimport being
+  unchanged. Fixed from it: the wrapper now also takes the transcript's reason
+  for a streamed subagent denial that has none, which the test asserts; this
+  note, which the section 6 note pointed to; a promotion-record row for F1.
+  Declined: noting that an equal key-path INI reimport no longer advances
+  `updated_at`. That came with section 2's session-scoped write, it is harmless,
+  and it is no part of the route's contract.
 
 ## 8. Closeout
 
@@ -1731,8 +1769,9 @@ and a clean `make check-change-index`.
 | The operator account of the host, pool, and capacity documents (D13, 47 O1) | `docs/operator-handbook.md`, its row in `openspec/README.md`'s placement table, and `AGENTS.md`'s "Documentation ownership" (7.4, 8.9) |
 | Rules `DEPLOYMENT_AND_CONFIG.md` stated that no spec did (D13, 47 O1, 7.4): a configured pool document fails startup when missing or invalid; the host export's order and stated pool and enabled state; the host import's 409; strict capacity document typing | `openspec/specs/resource-pool-management/spec.md`, "A configured pool document is imported at startup or fails it"; `openspec/specs/physical-provisioning/spec.md`, "The host registry exports a canonical host definitions document", "A host definitions document is validated whole and carries no credential", and "Capacity definitions are imported from a mounted document" (by the archive) |
 | A capacity declaration names at least one dimension (61 F1), stated by the handbook and enforced by the authority, unstated by the requirement accepting any set of dimensions | `openspec/specs/site-capacity/spec.md`, "A capacity declaration names no mandatory dimension", and its scenario "A declaration names no dimension" (by the archive) |
+| A connection submitted with a secret is always written, so an INI reimport embedding a rotated key replaces the stored key (71 F1) | Restores the INI import route's behaviour, which "Do not change the INI import route's semantics" keeps; stated in the host authority's docstrings (`provisioning/compute/src/compute_provisioning/hosts/service.py`); no permanent document |
 | A codec types a connection's public fields strictly, for every submission (D7, 45 F1) | `openspec/specs/physical-provisioning/spec.md`, "Host connections are typed by their implementation's codec" and "A host definitions document is validated whole and carries no credential" (by the archive) |
-| A run ended by a signal keeps its denials, with a reason or without one; step runs get the longest timeout (43 R5, 61 F2) | Workflow tooling itself (`scripts/change_workflow/stream.py`, `.agents/skills/change-orchestrate/SKILL.md`); no permanent document |
+| A run ended by a signal keeps its denials, with a reason or without one; step runs get the longest timeout (43 R5, 61 F2); a subagent's denial the stream also reports names its subagent (68 R1) | Workflow tooling itself (`scripts/change_workflow/stream.py`, `scripts/change_workflow/wrapper.py`, `.agents/skills/change-orchestrate/SKILL.md`); no permanent document |
 | Startup order with host definitions | `openspec/specs/resource-pool-management/architecture.md`, "Administrative reconciliation" (8.9) |
 | How hosts reach the registry | `docs/development/ARCHITECTURE.md`, "Resource pools" (8.9) |
 | No startup INI seeding | `docs/development/ROADMAP.md` Goal 1 (8.5); `openspec/specs/site-capacity/architecture.md` (8.9); both seller quickstarts and `domains/vms/provisioning/iac/README.md` (7.2, 8.9) |

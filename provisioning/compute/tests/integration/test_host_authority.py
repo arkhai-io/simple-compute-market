@@ -329,6 +329,24 @@ def test_an_inventory_upserts_its_hosts_and_leaves_the_rest(authority) -> None:
     assert authority.get_host("untouched") is not None
 
 
+def test_an_inventory_resubmitting_a_secret_replaces_the_stored_one(authority) -> None:
+    """A rotated embedded key changes no public field, pool, or scheme, yet the
+    reimport stores it; an entry submitting no secret keeps the stored one."""
+    authority.apply_inventory(
+        [InventoryHost(host_id="kvm1", connection=_connection(token="old"), pool_id="gpu")]
+    )
+
+    authority.apply_inventory(
+        [InventoryHost(host_id="kvm1", connection=_connection(token="new"), pool_id="gpu")]
+    )
+    assert authority.lookup("kvm1").connection.protected["token"].ciphertext == "wen"
+
+    authority.apply_inventory(
+        [InventoryHost(host_id="kvm1", connection=_connection(), pool_id="gpu")]
+    )
+    assert authority.lookup("kvm1").connection.protected["token"].ciphertext == "wen"
+
+
 def test_an_inventory_moving_a_host_runs_the_pool_change_hooks(authority, moves) -> None:
     """An imported inventory moves an existing host as an update does: the
     pool-change hooks see the move, so no subscriber's rule is bypassed."""
