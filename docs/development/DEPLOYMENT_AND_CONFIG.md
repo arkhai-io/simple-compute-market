@@ -79,7 +79,9 @@ first startup step refuses a configuration stating the retired `playbook_path`
 in any layer, environment included, naming `vm_playbook_path`, and the
 provisioning chart's values schema refuses `config.playbook_path`. The same step
 refuses the retired `inventory_ini` and `inventory_path`, whatever value either
-states, naming `host_definitions_path` (see "Host definitions"). A setting
+states, naming `host_definitions_path` (the operator handbook's
+["Upgrading from an INI inventory"](../operator-handbook.md#upgrading-from-an-ini-inventory)
+gives the upgrade). A setting
 retired because the service stopped needing it, such as
 `default_pool_inventory_group` and `default_host_id`, is not refused, since
 ignoring it changes nothing the service does.
@@ -909,11 +911,15 @@ or, on a fresh site with none, by the seed.
 
 ### The method a document kind follows
 
-This is the method a document kind is held to, and each kind's section below
-states only its own rules. The host document follows all of it, and a new kind
-follows it. The others diverge in part: the capacity document has no export,
-the relay document has no import route or export, and the pool document's
-import and export answer in their own shapes.
+This is the method a document kind is held to. The pool, host, and capacity
+kinds each have a paragraph below naming the setting and where the kind's own
+rules are: its specification, and the
+[operator handbook](../operator-handbook.md#definition-documents) for its
+format and the procedures around it. The host document follows all of the
+method, and a new kind follows it. The others diverge in part: the capacity
+document has no export, the relay document has no import route or export, and
+the pool document validates at its own route and its import and export answer
+in their own shapes.
 
 - **One path setting, derived by the chart.** `<kind>_definitions_path` is set
   by the provisioning chart from `definitions.<kind>`, rendered into its
@@ -931,8 +937,9 @@ import and export answer in their own shapes.
   applied, the planned or applied changes, and every problem with a path and a
   code. An applying request with any problem answers 422 and applies nothing;
   `validate_only` answers 200.
-- **Validate before the release.** Submit a changed document to its import
-  route with `validate_only` before the release that mounts it: the chart
+- **Validate before the release.** Submit a changed document to its validation
+  route — its import route with `validate_only`, or for pools
+  `POST /api/v1/pools/validate` — before the release that mounts it: the chart
   replaces the pod with `Recreate`, so a document the service refuses at
   startup leaves nothing serving, while the pre-flight reports the same
   problems against live state without applying anything.
@@ -945,68 +952,15 @@ import and export answer in their own shapes.
 
 ### Pool definitions
 
-Migration creates no pool, and no pool name is special: a pool document need
-not name `default`, and any pool may be disabled. A configured pool document
-creates the pools it declares, with their providers, before any host or
-declaration can name them; one that is missing or invalid fails startup, and
-the seed does not stand in for it.
-
-A site that configures no pool document and stores no pool, enabled or
-disabled, is seeded at startup from the document `pool_seed_path` names. The
-default, `seed/pools.yaml` packaged with the service beside its `settings.toml`
-(a relative path resolves against that directory), declares `vm-default`
-(`vm.ansible`) and `bare-metal-default` (`bare_metal.ansible`), each delivering
-and advertising its own mode, backed, and with no provider configuration, so a
-VM job in `vm-default` runs the service's `vm_playbook_path`. The seed is
-applied through the same validation and import as a pool document, in one
-transaction, records no digest, and is never applied again: a site holding pools
-is never seeded, and an edit to the seed reaches no existing site. The seed
-pools sell nothing until capacity is declared into them. An operator replaces
-the seed by pointing `pool_seed_path` at another pool document — under Helm,
-one supplied through the provisioning chart's `configFiles` — or disables
-seeding with an empty `pool_seed_path`, which starts a fresh site with no pool.
-A seed that applies and is missing or invalid fails startup; where it does not
-apply it is not read, so a dangling path never fails a serving site. One process
-initializes a database: two starting together on one fresh database can both
-find no pool, and the second fails its start, then skips the seed on restart.
-
-A pool's provider is fixed at creation. A changed pool document that names a
-different provider for an existing pool is refused whole: validate-only reports
-`provider_immutable` at that entry's `provider` path with no diff, import
-applies none of the document's entries or disablements, and at startup the
-service fails naming the entry and records no digest, so it retries on the next
-start. Moving a pool's inventory to another provider means declaring a second
-pool with that provider and reassigning the members to it.
-
-Every pool entry must declare `advertisable_modes` and `capacity_backing` in its
-`policy_tags`; nothing defaults either. A changed pool document with an entry
-lacking them is refused and nothing from it is applied. After the pool import,
-the service checks every stored pool and refuses to start, naming each pool, if
-any lacks valid declarations. An unchanged document is not re-applied, so it does
-not trip that refusal on its own; a pool rewritten by an older version is repaired
-by a changed document that declares it, which is imported before the check. The
-API-credits service seeds its own pool with both declarations and applies the same
-check at startup.
-
-A pool entry may also state, in `policy_tags`, the shapes its listings are sold
-in: `listing_shapes` maps an offering mode to a list of family-grouped shapes, as
-in `listing_shapes: {vm: [{gpu: {count: 1, model: H100}, memory: {gib: 32}}]}`.
-Structure is checked wherever the pool is written; whether a shape's families
-exist is judged by the storefront, which reports a shape it cannot read and holds
-that pool's listings. A pool that states no shapes publishes its domain's default
-shapes: for VM, one GPU-only shape per count, per GPU model, generated from the
-members that declare GPUs. A shape need not state GPUs: `{cpu: {count: 8},
-memory: {gib: 32}}` sells a VM without GPUs, on any member with the vCPUs and
-memory free, a GPU host included. The VM default generates no shape from a member
-declaring no GPUs, so a VM pool that has enabled members, none declaring GPUs,
-publishes nothing until it states `listing_shapes`, on its hint or a storefront
-override; the storefront reports such a pool once, by site and pool, in system
-status (`publication_derivation`, reason `listing_shapes_required`). A shape is a
-commitment: the reservation holds every quantity it states. A dimension it omits
-is outside the listing's and the reservation's commitment: fulfillment may supply
-it from the pool's configured VM defaults (`default_vm_ram`, `default_vm_vcpus`,
-`default_vm_disk_size`), where set, or leave it to the provisioning playbook.
-Keep enough capacity for every dimension a pool's shapes omit.
+`pool_definitions_path` names the pool document, a top-level `pools` list; the
+provisioning chart sets it from `definitions.pools`. A site that configures none
+and stores no pool is seeded once from the document `pool_seed_path` names,
+packaged as `seed/pools.yaml` beside the service's `settings.toml`; under Helm
+another seed is supplied through `configFiles`. The contract is
+[resource-pool management](../../openspec/specs/resource-pool-management/spec.md);
+the format, the seed, and the steps for moving a pool's members to another
+provider are in the operator handbook's
+["Pool definitions"](../operator-handbook.md#pool-definitions).
 
 ### Reconciliation follows the document, not the process
 
@@ -1062,179 +1016,27 @@ explicit `enabled: false`, in the document or through the API.
 
 ### Host definitions
 
-A host document holds a top-level `hosts` list. Each entry has the host
-registration API's field names: `host_id`, an optional `pool_id`, an optional
-`enabled`, and a `connection` of `kind`, a required `version`, and `public` —
-for `ssh`, `ssh_host`, `ssh_user`, `ssh_port`, `public_host`, `public_port`, and
-`key_path`:
-
-```yaml
-hosts:
-  - host_id: kvm1
-    pool_id: vm-default
-    connection:
-      kind: ssh
-      version: 2
-      public:
-        ssh_host: 10.0.0.5
-        public_host: 203.0.113.9
-        ssh_user: ubuntu
-        key_path: /home/appuser/.ssh/id_ed25519
-```
-
-- **An entry declares its whole host.** Applying it registers the host or
-  replaces all of its non-secret state: an omitted `pool_id`, or `pool_id:
-  null`, unplaces the host, and an omitted `enabled` enables it, so a host
-  disabled or moved through the API is restored to the document's statement by
-  the next change to the document unless the document restates it. A pool
-  change runs the host pool-change hooks, as an update through the API does.
-  `enabled: null` is a value of the wrong type, and `hosts: []` is a valid
-  document that applies nothing.
-- **The connection is replaced through its kind's codec.** An entry equal to the
-  stored host once the codec has filled in its defaults — `ssh_port` 22 and
-  `ssh_user` `root` for `ssh` — writes nothing, so an entry that omits them
-  equals a host stored with them. A version or kind the service does not serve
-  is refused, naming it.
-- **No credential.** An entry stating `connection.secrets` is refused. A key is
-  named by `key_path`, a file on the service's filesystem — under Helm a Secret
-  volume the operator mounts — or kept from the stored host by naming none: a
-  host holding a protected key keeps it. An entry naming no `key_path` for a
-  host whose key is a key file, or for a new host, is refused naming the entry.
-  Registering a host with key material stays an API act: `POST /api/v1/hosts`
-  with `secrets`, or the INI route's `embedded` mode.
-- **Any problem leaves the whole document unapplied.** Structural problems —
-  unparseable YAML, a root that is not a mapping (an empty file included), a
-  missing or non-list `hosts`, an unknown field, a missing `host_id`,
-  `connection`, or `connection.version`, a `host_id` named twice, a value of the
-  wrong type — are all reported with their locations, and a document with any is
-  checked no further. A structurally valid document reports every refusal stored
-  state decides: an unknown pool, a connection its codec refuses, and a pool
-  move a pool-change hook refuses (`pool_change_refused`). At startup a refused
-  document fails the start, naming each problem, and records no digest; a
-  configured path with no document fails startup too.
-- **A refused move keeps the service down.** The VM hook refuses moving a host
-  whose VM tunnel a buyer holds to a pool dialling another relay, or to no pool.
-  At startup that refusal fails the start, and the chart's `Recreate` leaves no
-  pod serving while the leases cannot drain; revert the edit to recover. Submit
-  a changed document with `validate_only` first, which reports the same refusal
-  against live state.
-
-`GET /api/v1/hosts/definitions/export` returns every registered host as a host
-document, `application/yaml`, ordered by `host_id`, stating each host's
-`pool_id` and `enabled` always and no secret; a host holding a protected key
-appears with no `key_path`. A host whose connection kind the service does not
-serve, or whose stored connection is at a version its codec does not serve,
-gets no entry; a document built from the export therefore does not name it, and
-importing it reports the host as not named. Importing an unedited export
-changes nothing.
-
-`POST /api/v1/hosts/definitions/import` submits a document with `yaml_text` and
-`validate_only`. It always reconciles, whatever digest startup recorded, and
-records none. Its response states whether it applied, the created, updated, and
-unchanged hosts (`diff`), the registered hosts not named (`not_named`), and
-every problem with a `path`, a `code`, and a message. An applying request with
-any problem answers 422 carrying that response under `detail` and applies
-nothing; `validate_only` answers 200 with the problems and the planned changes.
-An applying request whose commit meets a host another request registered at
-the same moment answers 409 and applies nothing.
-Both routes admit the administrator alone; the typed family client's
-`export_hosts()` and `import_host_definitions()` call them.
-
-Hosts are imported after pools and the stored-pool check, so every pool an entry
-names exists, and before capacity. A site with no recorded `hosts` digest
-applies its host document when one is first configured, exactly as any changed
-document; a site that configures none keeps its registered hosts as they are.
-
-**Upgrading from an INI inventory.** Startup reads no INI. `inventory_ini` and
-`inventory_path` are retired: a configuration stating either, in any layer and
-with any value, an empty one included, refuses to start, naming
-`host_definitions_path`. Before upgrading, drop both — including an empty
-`inventory_ini` from the provisioning-secrets Secret a Helm deployment mounts.
-The upgraded service keeps every registered host and, until a host document is
-configured, applies none. Then export the registry from it, edit the export into
-the site's host document, and mount it: under Helm as `definitions.hosts`, under
-Compose at the path `PROVISIONING_HOST_DEFINITIONS_PATH` names. The first start
-with it applies it.
-
-**The INI import route.** `POST /api/v1/hosts/import` keeps the Ansible
-implementation's INI format and its own rules; it is not reconciled and reads
-or records no digest. It upserts: an entry's `pool_id=<id>` places or moves the
-host, an empty `pool_id=` unplaces it, and an entry with no `pool_id` leaves an
-existing host's pool unchanged and a new host unplaced. An entry's
-`public_port=` names the port a buyer reaches the host on, read with
-`ansible_port=`'s rule: a value that is not a port from 1 to 65535 rejects its
-entry with a warning, while the others are imported. Beside `public_host=`, it
-is the tenant-facing route, each falling back to the connection's own address
-and port.
-
-Every `ssh` host connection, through the API, a document, or an INI import, is
-stored at version 2, and a request stating no version or another is refused. A
-host stored at version 1 runs nothing until it is moved forward explicitly: an
-update (`PUT /api/v1/hosts/{host_id}`) restating every stored public field,
-`key_path` included where the host has one, at version 2, or an import naming
-the same key. Execution renders its inventory only from the registered host
-record the work names; a host named only by a file or a refused document is
-refused at dispatch.
-
-No host write, from a document, either import route, or the host API, declares
-any of a host's capacity. A host record describes how to reach a machine, not
-its hardware: an INI entry's `gpus=` and `gpu_model=`, like every variable the
-parser does not read, are ignored without a warning, and the host API ignores
-`gpu_count` and `gpu_model` in a request body as it ignores any field it does
-not define. A machine's hardware is stated, and sold, only through a capacity
-declaration.
+`host_definitions_path` names the host document, a top-level `hosts` list whose
+entries have the host registration API's field names; the provisioning chart
+sets it from `definitions.hosts`, and the Compose stacks set
+`PROVISIONING_HOST_DEFINITIONS_PATH` to the document they mount. The retired
+`inventory_ini` and `inventory_path` are refused (see "Profile-based
+configuration"). The contract is the
+[`physical-provisioning` specification](../../openspec/specs/physical-provisioning/spec.md);
+the format, the export and import routes, and the upgrade from an INI inventory
+are in the operator handbook's
+["Host definitions"](../operator-handbook.md#host-definitions).
 
 ### Capacity definitions
 
-A capacity document holds a top-level `resources` list. Each entry is a whole
-declaration with the registration API's field names — `resource_id`, `pool_id`,
-`resource_type`, and a `capacity` map of at least one dimension, plus optional
-`resource_subtype`, `host_id`, `attributes`, and `enabled` — and applying it has
-exactly the effect of the same `PUT /api/v1/capacity/resources/{resource_id}`.
-
-- **An entry replaces the declaration it names.** A field it omits is cleared,
-  not kept, so an entry adopting a declaration the upgrade migration derived
-  from host inventory must restate its `host_id`, and an omitted `enabled` re-enables one disabled through
-  the API.
-- **Entries equal to the stored declaration write nothing** and emit no capacity
-  event, so reapplying a document — or one changed only in comments or layout —
-  does not make storefronts republish.
-- **Any problem leaves the whole document unapplied.** Validation is strict (a
-  quoted number is an error) and happens in two stages. Every structural problem
-  is reported with its location, and a document with any is not checked further.
-  Only a structurally valid document is checked against stored state, and every
-  refusal that stage finds is reported together: an unknown pool, a host another
-  declaration already names, or a move between pools while the resource holds a
-  live reservation. These are the rules a single registration meets too. A refused
-  document at startup fails startup and records no digest.
-- **Exchanging hosts between two declarations takes two imports**, because
-  entries apply in order and the first would briefly name a host the second
-  still holds.
-- **Every declared attribute is published to storefronts.** Attributes are the
-  categorical facts claims match (`gpu_model`, `region`); none may repeat a
-  declaration field such as `host_id`.
-- **For VM, state a region twice: on the pool, which listings advertise, and on
-  its declarations, which reservations match.** A VM listing's claim requests the
-  region and model it publishes, so a pool whose listings claim a region or model
-  no member declares publishes nothing and is reported per pool; a region stated
-  only on the pool publishes nothing, and a pool stating no region is held by
-  publication: nothing new publishes, its listings are neither refreshed nor
-  closed except for availability, and system status names it.
-- **A bare-metal declaration describes one whole machine.** Set
-  `capacity.units` to `1`, and state its hardware under the compute family's
-  capacity names: `gpu_count`, `vcpu_count`, `ram_gb`, and `disk_gb`, with
-  `attributes.gpu_model` naming its GPUs. `gpu_count` and `gpu_model` are stated
-  together or not at all: a machine without GPUs omits both, rather than declaring
-  `gpu_count: 0`, which is refused. A declaration must state at least one quantity
-  besides `units`, and the machine's pool must state a `region`. Do
-  not put authoritative hardware in `bare_metal_publication`. What a storefront
-  publishes and holds from these declarations is specified in the
-  [storefront publication specification](../../openspec/specs/storefront-publication/spec.md#requirement-a-bare-metal-listings-shape-is-derived-from-its-declaration).
-
-`POST /api/v1/capacity/definitions/import` submits a document: it always
-reconciles and records no startup digest. With `validate_only` it reports the
-problems and the planned creations, updates, and unchanged entries without
-applying anything.
+`capacity_definitions_path` names the capacity document, a top-level
+`resources` list whose entries are whole declarations with the capacity
+registration API's field names; the provisioning chart sets it from
+`definitions.capacity`. The contract is the `physical-provisioning` requirement
+["Capacity definitions are imported from a mounted document"](../../openspec/specs/physical-provisioning/spec.md#requirement-capacity-definitions-are-imported-from-a-mounted-document)
+with [`site-capacity`](../../openspec/specs/site-capacity/spec.md); the format
+and the rules for VM and bare-metal declarations are in the operator handbook's
+["Capacity definitions"](../operator-handbook.md#capacity-definitions).
 
 ### Secrets are named, not carried
 

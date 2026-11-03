@@ -1,3 +1,19 @@
+## ADDED Requirements
+
+### Requirement: A configured pool document is imported at startup or fails it
+
+The provisioning service MAY be configured with a pool definitions document through `pool_definitions_path`. At startup it MUST reconcile that document under the digest contract of "Atomic authoritative reconciliation", before the fresh-site seed is considered and before host and capacity definitions are imported, so every pool the document declares exists when a host or a capacity declaration names it. A configured document that is missing or cannot be applied MUST fail startup and record no digest, and the seed document MUST NOT be applied in its place.
+
+#### Scenario: A configured pool document is missing
+
+- **WHEN** the service starts on a database storing no pool, with a `pool_definitions_path` naming no document
+- **THEN** startup fails and no pool is created, from the seed or otherwise
+
+#### Scenario: A configured pool document cannot be applied
+
+- **WHEN** the service starts on a database storing no pool, with a `pool_definitions_path` whose document fails pool document validation
+- **THEN** startup fails, no pool is created, the seed is not applied, and no digest is recorded
+
 ## MODIFIED Requirements
 
 ### Requirement: Explicit valid host membership

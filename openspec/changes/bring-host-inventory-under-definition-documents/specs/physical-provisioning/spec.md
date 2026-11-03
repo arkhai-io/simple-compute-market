@@ -101,7 +101,7 @@ Host definitions validation MUST be strict and MUST run in two stages. It MUST r
 
 A host definitions document MUST NOT carry a credential: an entry stating connection secrets is a structural problem. A key is named by its file path.
 
-The import API MUST answer with one response: whether it applied, the created, updated, and unchanged hosts, the registered hosts the document does not name, and every problem, each with its location and a code; a hook's refusal is coded `pool_change_refused`. An applying import with any problem MUST answer 422 with that response and apply nothing. The import API MUST offer a validate-only mode that answers 200 with the problems and the planned creations, updates, and unchanged hosts, applying nothing.
+The import API MUST answer with one response: whether it applied, the created, updated, and unchanged hosts, the registered hosts the document does not name, and every problem, each with its location and a code; a hook's refusal is coded `pool_change_refused`. An applying import with any problem MUST answer 422 with that response and apply nothing. An applying import whose commit meets a host another request registered after the document was evaluated MUST answer 409 and apply nothing, as a duplicate registration through the host API does. The import API MUST offer a validate-only mode that answers 200 with the problems and the planned creations, updates, and unchanged hosts, applying nothing.
 
 #### Scenario: A document has several structural problems
 
@@ -150,9 +150,14 @@ The import API MUST answer with one response: whether it applied, the created, u
 - **THEN** the import answers 200, and the response reports the problems and the planned creations, updates, and unchanged hosts
 - **AND** nothing is applied
 
+#### Scenario: Another request registers a named host during an import
+
+- **WHEN** an applying import would create a host, and another request registers that host before the import commits
+- **THEN** the import answers 409 and applies nothing
+
 ### Requirement: The host registry exports a canonical host definitions document
 
-The host routes MUST offer an export at `GET /api/v1/hosts/definitions/export`, admitting the administrator, that returns every registered host as a host definitions document in a YAML body without any secret: a host holding a protected key appears with no key path. A host whose connection kind no composed codec serves, or whose stored connection is at a version its kind's codec does not serve, MUST NOT be stated as an entry. Importing an unedited export MUST change nothing.
+The host routes MUST offer an export at `GET /api/v1/hosts/definitions/export`, admitting the administrator, that returns every registered host as a host definitions document in a YAML body without any secret: a host holding a protected key appears with no key path. Its entries MUST be ordered by `host_id`, and each MUST state its host's pool and enabled state, so the export reads the same for the same registry and an entry never relies on the defaults an omitted pool or enabled state takes. A host whose connection kind no composed codec serves, or whose stored connection is at a version its kind's codec does not serve, MUST NOT be stated as an entry. Importing an unedited export MUST change nothing.
 
 #### Scenario: An operator exports the registry and imports it unedited
 
@@ -344,6 +349,8 @@ A document entry MUST state a declaration with the registration contract's own f
 and MUST replace the whole declaration it names, exactly as a registration request
 does. The document MUST NOT accept the legacy scalar unit total, MUST require each
 entry's resource type rather than defaulting it, and MUST reject unknown fields.
+Document validation MUST be strict: a value of the wrong type, such as a quoted
+number, MUST be reported as a structural problem rather than coerced.
 Document validation MUST report every structural problem it finds, each with its
 location, rather than stopping at the first. A document with any structural problem
 MUST NOT be evaluated against stored state.
@@ -409,6 +416,13 @@ without applying either.
 - **WHEN** a document carries an unknown field, a missing resource type, and two
   entries naming the same host
 - **THEN** the import reports all three with their locations and applies nothing
+
+#### Scenario: An entry quotes a quantity
+
+- **WHEN** a document entry states a capacity quantity as a quoted number, such as
+  `gpu_count: "8"`
+- **THEN** the import reports a structural problem at that quantity's location
+  and applies nothing
 
 #### Scenario: A document has structural and stored-state problems
 

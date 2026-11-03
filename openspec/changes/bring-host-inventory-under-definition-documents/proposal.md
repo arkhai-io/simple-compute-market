@@ -65,7 +65,9 @@ applies to relays.
 - `deployment-state`: the provisioning chart's `definitions.hosts` value and its
   refused keys.
 - `resource-pool-management`: a host definitions entry's rule for its host's
-  pool, beside the create, update, and INI rules of explicit host membership.
+  pool, beside the create, update, and INI rules of explicit host membership;
+  and the startup rule of a configured pool document, which
+  `DEPLOYMENT_AND_CONFIG.md` stated and no requirement did.
 - `change-workflow`: a shell write refused by a deny rule that exists only to
   keep file writes on the Edit and Write tools, and then made with the tool the
   step's rules allow, is a gap rather than a workaround.
@@ -158,7 +160,9 @@ None.
   connections are typed by their implementation's codec" (by the archive).
 - The operator account of the host, pool, and capacity documents (D13, 47 O1) →
   `docs/operator-handbook.md`, with its row in `openspec/README.md`'s placement
-  table and `AGENTS.md`'s documentation ownership.
+  table and `AGENTS.md`'s documentation ownership; the rules that account
+  stated and no spec did → the `resource-pool-management` and
+  `physical-provisioning` deltas (by the archive).
 - The chart's `definitions.hosts` value and refused keys, the relay path's
   refusal included (D3) → `openspec/specs/deployment-state/spec.md` (by the
   archive) and `DEPLOYMENT_AND_CONFIG.md`.

@@ -417,8 +417,12 @@ def test_an_unedited_export_imports_as_every_host_unchanged(authority, moves, ho
 
     exported = render_host_definitions(authority.host_definitions())
     outcome = _apply(authority, exported)
+    entries = yaml.safe_load(exported)["hosts"]
 
-    assert [entry["host_id"] for entry in yaml.safe_load(exported)["hosts"]] == ["bm1", "kvm1", "kvm2"]
+    assert [entry["host_id"] for entry in entries] == ["bm1", "kvm1", "kvm2"]
+    assert [(entry["pool_id"], entry["enabled"]) for entry in entries] == [
+        ("default", True), (None, False), ("gpu", True)
+    ]
     assert outcome.valid
     assert outcome.diff.unchanged == ["bm1", "kvm1", "kvm2"]
     assert (outcome.diff.created, outcome.diff.updated, outcome.not_named) == ([], [], ())

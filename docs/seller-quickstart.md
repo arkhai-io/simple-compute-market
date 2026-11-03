@@ -217,12 +217,11 @@ pools before host definitions are imported; no pool name, `default` included, is
 required. To start a fresh site with other pools while keeping pools
 administrable through the API, point `pool_seed_path` at your own pool
 document: under compose, mount the file into `seller-provisioning` and set
-`PROVISIONING_POOL_SEED_PATH` to its path in an override file; under Helm, put
-the document in the provisioning chart's `configFiles` (for example as
-`pool-seed.yaml`) and set `config.pool_seed_path` to
-`/app/config/pool-seed.yaml`. An empty `pool_seed_path` starts a fresh site with
-no pool. The seed is applied once, to a site storing no pool; a site that
-already holds pools is never seeded.
+`PROVISIONING_POOL_SEED_PATH` to its path in an override file. An empty
+`pool_seed_path` starts a fresh site with no pool. The seed is applied once, to
+a site storing no pool; a site that already holds pools is never seeded. The
+operator handbook's ["Pool definitions"](operator-handbook.md#pool-definitions)
+covers the pool document and the seed, under Helm too.
 
 A site sells what its capacity declarations say. A declaration names its Resource
 Pool, a `capacity` map of the dimensions it sells (`gpu_count`, `vcpu_count`,
@@ -251,8 +250,9 @@ There are two ways to declare, and they describe the same declaration:
 
 Every entry replaces the whole declaration it names, so restate everything you
 want to keep. Declarations a document does not name are left as they are. Every
-declared attribute is published to storefronts. `DEPLOYMENT_AND_CONFIG.md`'s
-"Capacity definitions" describes the document's rules in full.
+declared attribute is published to storefronts. The operator handbook's
+["Capacity definitions"](operator-handbook.md#capacity-definitions) describes the
+document's rules in full.
 
 A host record describes how to reach a machine, never its hardware: editing a
 host's entry leaves its declaration as it is. Change the declaration instead.
@@ -309,9 +309,9 @@ document declaring them before it starts.
    never carries a key. A document the service cannot apply, such as one naming
    a pool that does not exist, stops the service from starting, naming the
    problem; check a changed document first with `POST
-   /api/v1/hosts/definitions/import` and `"validate_only": true`.
-   `DEPLOYMENT_AND_CONFIG.md`'s "Host definitions" describes the document's
-   rules in full.
+   /api/v1/hosts/definitions/import` and `"validate_only": true`. The operator
+   handbook's ["Host definitions"](operator-handbook.md#host-definitions)
+   describes the document's rules in full.
 
    List only execution hosts. `ssh_host` is how the provisioning service
    reaches the host over SSH. If buyers reach that host on a **different**
@@ -353,12 +353,11 @@ document declaring them before it starts.
 
    **Upgrading a seller stack whose provisioning service already registers
    hosts.** The service refuses to start while `inventory_path` or
-   `inventory_ini` is stated, even empty, so remove either first. The upgraded
-   service keeps every registered host. Since `compose/seller.yml` requires a
-   document, mount one holding `hosts: []` for the first start, which applies
-   nothing and leaves every host as it is. Then export its registry with
-   `GET /api/v1/hosts/definitions/export`, save the export, edited as you need,
-   as your host definitions document, and mount it in place of the empty one.
+   `inventory_ini` is stated, even empty, and keeps every registered host once
+   upgraded: start it once with a document holding `hosts: []`, then turn its
+   export into your document. The operator handbook's
+   ["Upgrading from an INI inventory"](operator-handbook.md#upgrading-from-an-ini-inventory)
+   gives the steps.
 
 3. KVM host prerequisites: ansible user has passwordless sudo
    (`sudo -n true && echo ok`), is in the `libvirt` group, and

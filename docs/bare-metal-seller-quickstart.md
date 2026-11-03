@@ -74,8 +74,9 @@ document does not name is left as it is and logged as not named. A document the
 service cannot apply — one naming a pool that does not exist, say — stops it
 from starting, naming the problem. Registering a host declares none of its
 capacity: a machine is sold only once you register it as a Physical Resource,
-as "Start and inspect" below describes. `DEPLOYMENT_AND_CONFIG.md`'s "Host
-definitions" describes the document's rules in full.
+as "Start and inspect" below describes. The operator handbook's
+["Host definitions"](operator-handbook.md#host-definitions) describes the
+document's rules in full.
 
 Create a Resource Pool document outside the repository. The pool id must match
 the host entry's `pool_id`; executor connectivity remains service-owned:
@@ -100,9 +101,9 @@ replaces the provisioning service's seed. Without one, a fresh site storing no
 pool is seeded at startup with `vm-default` and `bare-metal-default`, which sell
 nothing until capacity is declared into them; set `pool_seed_path` to another
 pool document to seed different pools while administering them through the API,
-or to an empty value to start with none. Under Helm, supply that document through
-the provisioning chart's `configFiles` and name its path,
-`/app/config/<name>`, in `config.pool_seed_path`.
+or to an empty value to start with none. The operator handbook's
+["Pool definitions"](operator-handbook.md#pool-definitions) covers the pool
+document and the seed, under Helm too.
 
 Every pool must declare `advertisable_modes` — the offering modes its listings
 may name — and `capacity_backing`. A `backed` pool may advertise only modes it
@@ -131,11 +132,11 @@ The Ansible INI inventory remains Ansible's own host list for preparing hosts,
 and the input of `POST /api/v1/hosts/import`, which registers hosts from it on a
 running service; the service does not read it at startup. A site that stated
 `inventory_path` or `inventory_ini` must remove it before upgrading, since the
-service refuses to start while either is stated. The upgraded service keeps
-every registered host; the stack requires a document, so mount one holding
-`hosts: []` for that first start, which applies nothing. Then export its
-registry with `GET /api/v1/hosts/definitions/export`, edit the export as you
-need, and mount it in place of the empty one.
+service refuses to start while either is stated; the upgraded service keeps
+every registered host. The operator handbook's
+["Upgrading from an INI inventory"](operator-handbook.md#upgrading-from-an-ini-inventory)
+gives the steps, from a first start with `hosts: []` to a document made from
+the registry's export.
 
 The pool declaration is authoritative. Do not add `vm` merely to make a
 request pass; add it only if the same pool and executor can actually deliver

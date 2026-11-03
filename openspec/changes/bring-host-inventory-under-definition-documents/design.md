@@ -456,7 +456,8 @@ The method every kind follows:
   or applied changes, and every problem with a path and a code): an applying
   request with any problem answers 422 and applies nothing, and validate-only
   answers 200;
-- validating a changed document through its import route's validate-only mode
+- validating a changed document through its validation route (its import
+  route's validate-only mode, or the pool document's own validation route)
   before the release that mounts it;
 - a stated rule for what the document does to entries it stops naming;
 - no credential: secrets are named by profile key or file path;

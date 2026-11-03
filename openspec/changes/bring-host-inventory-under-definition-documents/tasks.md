@@ -1308,7 +1308,7 @@ Files: `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/seller-quickstart.md`;
   its checks): passed. Read against the code of sections 1–5: the setting,
   route, response field, status, chart value, and compose variable names
   match; see the fresh-context check below.
-- [ ] 7.4 The operator handbook (D13; the implementation round's triage, 47 O1).
+- [x] 7.4 The operator handbook (D13; the implementation round's triage, 47 O1).
   *Added at that triage, on the owner's note that `DEPLOYMENT_AND_CONFIG.md`
   holds configuration conventions, not an operator's handbook; implemented as an
   implementation round of its own, then read, validated, and reviewed.*
@@ -1358,6 +1358,135 @@ Files: `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/seller-quickstart.md`;
   `DEPLOYMENT_AND_CONFIG.md` still present or the citation updated; a read of the
   handbook against the code of sections 1–5 and the specs. End-to-end: none —
   documentation only. None is owed.
+  *Done.* `docs/operator-handbook.md` opens with "Definition documents": what
+  the method means for running a site, validating a changed document before
+  the release (a table of each kind's validate and apply routes; pools validate
+  at `POST /api/v1/pools/validate`), then "Pool definitions" (format, rules,
+  the seed, moving a pool's members to another provider), "Host definitions"
+  (format, rules, a refused move, export and import, the INI upgrade under Helm
+  and under Compose, the INI import route), and "Capacity definitions"
+  (format, rules, VM region, bare-metal machines). `DEPLOYMENT_AND_CONFIG.md`'s
+  three kind sections are one paragraph each — setting, chart value, spec, and
+  handbook section — and its opening, method, reconciliation, unnamed-entries,
+  and secrets sections and the retired-settings sentence stay; the method's
+  first paragraph now says where each kind's rules are. Every heading another
+  document cites there still exists. `openspec/README.md` gains the placement
+  row, `AGENTS.md`'s "Documentation ownership" a line naming both documents.
+  Both quickstarts' host-document, pool-seed, and upgrade passages point at the
+  handbook, keeping the first-setup steps; the VM quickstart's capacity pointer
+  too. *Beyond the listed files:* the IaC README's pointer, and the
+  `settings.toml` comments on `pool_definitions_path` and
+  `host_definitions_path`, now name the handbook's sections, where the format
+  is (the service wheel rebuilt; `make check-packaging` passed).
+
+  Where each removed sentence group went:
+  - **Hosts.** Fields, example, whole replacement, `enabled: null`,
+    `hosts: []`, codec-default equality, unserved kind or version, key rules,
+    whole-document failure and its structural and stored-state lists, the
+    missing path, retention, the export's omissions and round trip, the
+    import's response and 422/200, the startup order and first document → the
+    `physical-provisioning` delta, already, and the handbook. Two rules no spec
+    stated, both implemented and tested in sections 2–3, were **added to the
+    delta**: the export orders entries by `host_id` and states each host's pool
+    and enabled state ("The host registry exports a canonical host definitions
+    document"; `test_an_unedited_export_imports_as_every_host_unchanged` now
+    asserts the pool and enabled state of an unplaced, disabled host too), and
+    an applying import whose commit meets a host another request registered
+    answers 409 (a sentence and the scenario "Another request registers a named
+    host during an import" in "A host definitions document is validated whole
+    and carries no credential"; `test_host_route_service.py`). A refused move
+    keeping the service down under `Recreate`, validating first, registering key
+    material through `POST /api/v1/hosts` or the INI route's `embedded` mode,
+    the typed client's method names, and both upgrade procedures → the handbook
+    only: they are procedures and surfaces, not rules of the document (the
+    retirement itself is the delta's "Startup reads no INI inventory", and
+    `DEPLOYMENT_AND_CONFIG.md` keeps its refusal sentence). The INI route's
+    rules → resource-pool management's delta ("Explicit valid host membership",
+    the pool rules), the permanent "Host registry records the connection port"
+    (the port rule) and "The tenant-facing host address falls back to the
+    connection address", and the delta scenario "An operator imports an INI
+    inventory" (no digest); the handbook keeps them. Version 2 and the version-1
+    path → "Host registry records the connection port" and the codec
+    requirement's scenarios. Execution only from the registered record → the
+    modified "Execution inventory comes only from the registered host record".
+    No capacity from a host write and `gpus=` ignored → "Host writes declare no
+    capacity" and "A host record describes no hardware"; the host API ignoring
+    `gpu_count` → that spec only, since the handbook's host rules concern the
+    document.
+  - **Pools.** No pool from migration, no special name, any pool disabled → the
+    permanent "A fresh site is seeded from its seed document", "Strict lossless
+    YAML validation", and "Non-destructive pool lifecycle". A configured pool
+    document imported before hosts and capacity, failing startup when missing or
+    invalid with the seed not standing in, was stated by no requirement (only
+    the spec's evidence list) and was **added to the delta** as "A configured
+    pool document is imported at startup or fails it" (proved by
+    `test_pool_declaration_startup.py`, as that evidence entry says). The seed →
+    the seed requirement; "sells nothing until capacity is declared" → the
+    `site-capacity` requirement that the projection is built from
+    declarations; one process per fresh database → the
+    `resource-pool-management` companion, "One process initializes a
+    database"; replacing the seed under Helm and Compose → the handbook.
+    Provider immutability → "A pool's provider is fixed at creation" and
+    "Documents report immutable providers atomically"; moving the members → the
+    handbook's procedure, from that requirement's scenario. Required
+    declarations, the stored-pool check, the repair path, API credits →
+    "Required advertisement and backing declarations" and the seed
+    requirement's ordering. `listing_shapes` → "Listing-shape hint validation"
+    and `storefront-publication`'s "Every VM listing is a listing shape" and "A
+    listing shape is published only where a source member is feasible for it".
+  - **Capacity.** Fields, replacement, equality, two-stage validation and its
+    refusals, the import route → the delta's modified "Capacity definitions are
+    imported from a mounted document". Strict typing (a quoted number is an
+    error), implemented (`market_site/capacity_definitions.py`) and tested
+    (`kit/site/tests/unit/test_capacity_definitions.py::test_an_entry_is_validated_strictly`)
+    but stated by no spec, was **added to that requirement**, with the scenario
+    "An entry quotes a quantity". Attributes → `site-capacity`'s "Projected
+    inventory is internally consistent" and "A declaration's attributes cannot
+    restate its identity". VM region → `storefront-publication`'s feasibility
+    requirement and "A VM pool that states no region holds its listings".
+    Bare-metal declarations → its bare-metal shape requirements. Exchanging
+    hosts in two imports → the handbook only, an operator consequence of
+    ordered entries.
+  - **Corrected on the way:** `DEPLOYMENT_AND_CONFIG.md` said `gpu_count: 0`
+    "is refused"; the site accepts it, and the storefront treats the
+    declaration as unresolvable, holding its listing and reporting it
+    (`storefront-publication`, "A bare-metal listing's shape is derived from its
+    declaration"). The handbook says so.
+  - **Stated by no spec, kept in the handbook, not added (open for review):**
+    three facts belong to capabilities this change does not modify, so adding
+    them would add a delta capability, which is the round's triage to decide:
+    the storefront's `listing_shapes_required` report of a VM pool whose
+    members declare no GPUs (stated in `storefront-publication`'s companion,
+    not its spec); a VM pool's `default_vm_ram`, `default_vm_vcpus`, and
+    `default_vm_disk_size` supplying a dimension a shape omits (code only; the
+    spec says only that the site decides it); and a capacity declaration's
+    `capacity` needing at least one dimension (the registration model's rule;
+    `site-capacity` states no minimum).
+
+  *Evidence for the added rules, at its level:* the export's order and
+  stated pool and enabled state, library integration in the compute family
+  library (`provisioning/compute/tests/integration/test_host_definitions.py`);
+  the import's 409, a unit test whose mocked session's commit raises
+  `IntegrityError` (`provisioning/compute/tests/unit/test_host_route_service.py`),
+  so no real concurrent registration is exercised; strict capacity typing, a
+  unit test of the entry validator (`_validate_entry`), so that a quoted
+  quantity applies nothing follows from the structural-problem rule rather
+  than being exercised through an import; the pool document's startup rule,
+  persistence integration (`test_pool_declaration_startup.py`, the missing and
+  invalid documents with the seed not standing in and no digest).
+
+  Verify: `make check-change` (comment hygiene, agent skills, documentation
+  citations, task list, change index, strict OpenSpec validation) — passed,
+  the citations check no longer reporting `docs/operator-handbook.md`.
+  `make check-packaging` passed. The compute family library's suite (`make
+  test-compute-provisioning`, unit and library integration), with the export
+  assertion: 335 passed. `make test`: every suite passed, the Helm render
+  included. A search for the headings other documents cite in
+  `DEPLOYMENT_AND_CONFIG.md` ("Host definitions", "Definition documents", and
+  the rest) finds each still there. A read of the handbook against the code of
+  sections 1–5 and the specs: the fresh-context check traced its routes,
+  fields, chart and Compose wiring, codec rules, hook refusal, and reason codes
+  to the code, and found one contradiction, fixed (see the section notes).
 
 Section 7 notes:
 
@@ -1388,6 +1517,37 @@ Section 7 notes:
   saying the service never registers its entries, which the INI import route
   would. Earlier, before the check finished: exporting from a service that has
   no export route yet, and a forward-looking "yet".
+- **7.4's round.** The notes above are the drafting round's (7.1–7.3); 7.4 moved
+  their host account, with the pool and capacity accounts, into
+  `docs/operator-handbook.md`. End-to-end: none for 7.4 — documentation, two
+  `settings.toml` comments, and one test assertion; no scenario reads them, and
+  none is owed. No `Owed by validation:` line.
+- **For closeout (8.3, 8.9).** The handbook is the operator destination D13
+  names; 8.9 reconciles it, `DEPLOYMENT_AND_CONFIG.md`, and the quickstarts
+  with the final code. The three facts the 7.4 note lists as stated by no spec
+  wait on the round's triage; if it adds none, 8.3 records them as kept in the
+  handbook. The bare-metal quickstart still describes the fresh-site seed,
+  though its stack requires a pool document, so the seed never applies there;
+  that predates this change and was left.
+- **7.4's fresh-context check.** No layering, import, packaging, comment, or
+  test-level break; every handbook link resolves; no removed sentence group was
+  lost; the four added delta rules are backed by code and tests. Fixed:
+  `DEPLOYMENT_AND_CONFIG.md`'s "Validate before the release" sent a pool
+  document to `POST /api/v1/pools/import`, whose request has no
+  `validate_only` and would apply it (now names `POST /api/v1/pools/validate`,
+  as does D13's method list); the handbook's "an import always applies" (an
+  import reconciles; a refused or validate-only one applies nothing); the
+  method paragraph implying the relay kind has a paragraph; two passages that
+  pointed at each other for the INI upgrade (the retired-settings sentence now
+  links the handbook's upgrade section); the pool scenario's "naming the
+  problem", which its test does not assert (dropped); the note's evidence
+  levels (now stated per rule) and "the kit's suite" (the compute family
+  library's); a mis-wrapped `settings.toml` comment. Declined: adding a
+  capacity map's one-dimension minimum to the delta's capacity-document
+  requirement, which the check suggested — it is the registration contract's
+  rule, which `site-capacity` owns, and stating it for documents only would
+  leave registration's half unstated; it stays with the other two for triage.
+  Declined too: rewriting the bare-metal quickstart's seed passage (above).
 
 ## 8. Closeout
 
@@ -1512,6 +1672,7 @@ and a clean `make check-change-index`.
 | Why hosts are a reconciled, family-owned declaration (D1, D4, D5, D6, D8, D12) | `openspec/specs/physical-provisioning/architecture.md`, "Hosts are a reconciled declaration" (8.9) |
 | The general definition-document method (D13) | `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Definition documents" (7.1, 8.9) |
 | The operator account of the host, pool, and capacity documents (D13, 47 O1) | `docs/operator-handbook.md`, its row in `openspec/README.md`'s placement table, and `AGENTS.md`'s "Documentation ownership" (7.4, 8.9) |
+| Rules `DEPLOYMENT_AND_CONFIG.md` stated that no spec did (D13, 47 O1, 7.4): a configured pool document fails startup when missing or invalid; the host export's order and stated pool and enabled state; the host import's 409; strict capacity document typing | `openspec/specs/resource-pool-management/spec.md`, "A configured pool document is imported at startup or fails it"; `openspec/specs/physical-provisioning/spec.md`, "The host registry exports a canonical host definitions document", "A host definitions document is validated whole and carries no credential", and "Capacity definitions are imported from a mounted document" (by the archive) |
 | A codec types a connection's public fields strictly, for every submission (D7, 45 F1) | `openspec/specs/physical-provisioning/spec.md`, "Host connections are typed by their implementation's codec" and "A host definitions document is validated whole and carries no credential" (by the archive) |
 | A run ended by a signal keeps its denials; step runs get the longest timeout (43 R5) | Workflow tooling itself (`scripts/change_workflow/stream.py`, `.agents/skills/change-orchestrate/SKILL.md`); no permanent document |
 | Startup order with host definitions | `openspec/specs/resource-pool-management/architecture.md`, "Administrative reconciliation" (8.9) |
