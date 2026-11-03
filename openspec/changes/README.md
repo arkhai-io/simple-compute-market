@@ -483,6 +483,57 @@ seller relay's port; it belongs here if opened.
 The relay and host-key work also serves Goal 1: provisioning owns the physical
 facts and credentials that the storefront previously carried.
 
+## Lesser goal — Make the change workflow a tool any repository can adopt
+
+**What it adds up to.** The change workflow is what keeps agent-driven work designed, reviewed, validated, and documented rather than merely implemented. Today it exists only inside this repository. That has three costs. Other repositories cannot use it. Its improvements are entangled with market changes, so it cannot be versioned on its own. And general engineering guidance has no home outside this repository's documents, so another repository would have to restate it. As a separately versioned tool, the workflow gives every adopting repository the same discipline. Shared guidance is maintained once, and this repository's own documents shrink to what is specific to it.
+
+The goal also makes the workflow the easiest way to drive a change, not just the correct one. A change's state lives with whoever is running it, so handing it over or sharing it means passing around records and transcripts. A hosted runner keeps that state in one place. Anyone working on the change can watch it live or take it over, each person using their own credentials.
+
+The goal does not gate merges on the workflow. A patch made directly to `dev` remains legitimate where the workflow's overhead outweighs its value. What the goal provides is visibility into whether a change went through the workflow, not enforcement.
+
+This is a lesser goal because it changes how changes are made, not what the market can do. Unlike other lesser goals it carries a current state and open gaps, as a roadmap goal would, because no roadmap goal holds them. As changes open for its gaps, each is listed in a table here and linked from its row.
+
+**Current state.** The workflow lives entirely in this repository:
+
+- **Skills:** ten leaf skills under [`.agents/skills/`](../../.agents/skills/), linked into Claude Code's and Codex's project skill directories.
+- **Engine:** [`scripts/change_workflow/`](../../scripts/change_workflow/), [`scripts/run_change_step.py`](../../scripts/run_change_step.py), and [`scripts/change_next_step.py`](../../scripts/change_next_step.py).
+- **Entry points:** the make targets.
+- **Contract:** the [`change-workflow` specification](../specs/change-workflow/spec.md) and its [architecture companion](../specs/change-workflow/architecture.md).
+
+The workflow has no version of its own: a change to it ships with whichever commit of this repository carries it.
+
+Most skills are written in repository-neutral terms. Some are not:
+
+- **Validation and archive cleanup** build in this repository's Helm charts, end-to-end pipeline, per-change validation namespaces, and capacity record.
+- **The closeout task** mixes checks every repository would want, such as comment hygiene and citation resolution, with checks specific to this one, such as packaging and pipeline evidence.
+- **Repository assumptions are scattered.** Skills cite make targets and document paths directly, and no single file states what the workflow assumes about the repository it runs in.
+
+An unattended step is held to an allowlist of commands per step, in [`.claude/change-steps.toml`](../../.claude/change-steps.toml). The allowlist names this repository's make targets and scripts, in Claude Code's rule syntax. The guarded push is a deny rule the step's session is subject to, not a credential the session lacks.
+
+Unattended steps run headless in Claude Code. Reviews run in Codex's read-only sandbox first, falling back to Claude. No step that writes runs on any other harness.
+
+A change's records are untracked. They live in its clone and in the owner's workspace, and the transcripts of its sessions live on the machine that ran them. Helm validation runs against an explicitly named Kubernetes context.
+
+The guidance agents load is not layered. [`AGENTS.md`](../../AGENTS.md), [`ARCHITECTURE.md`](../../docs/development/ARCHITECTURE.md), [`TESTING.md`](../../docs/development/TESTING.md), [`DEPLOYMENT_AND_CONFIG.md`](../../docs/development/DEPLOYMENT_AND_CONFIG.md), and the [OpenSpec README](../README.md) each mix three kinds of material:
+
+- engineering conventions that would hold in any repository;
+- rules of the workflow itself;
+- this repository's own architecture and examples.
+
+| Open gap | Owned by |
+|---|---|
+| The engine is documented as this repository's contract, not as a tool in its own right. Its public surface — configuration schema, capabilities, extension points, and the record and outcome formats — is undefined, so nothing distinguishes a breaking change from an internal one | Unowned — needs a new change |
+| No single file states what the workflow assumes about a repository. Repository operations are make targets the skills name directly, not capabilities resolved through one standard configuration file under `.agents/`. A capability would resolve to the repository's declared command, else the workflow's default, else be absent, independent of the repository's implementation language | Unowned — needs a new change |
+| Unattended permissions are allowlists of this repository's commands, which cannot carry across repositories whose commands differ. What would carry across: per-step sandbox profiles; privileged actions such as push and outcome recording performed by the engine with credentials the step never holds; invariant checks after each step; and allow and deny rules a repository may add without loosening what the engine guarantees | Unowned — needs a new change, with the capability contract |
+| A skill can vary per repository only by being edited. Named extension points, each filled by a checked repository addendum that may add or narrow obligations but not silently remove them, would let a common baseline carry per-repository variation | Unowned — needs a new change |
+| Guidance is not separated into engineering, workflow, and repository layers, and is not tagged for loading. A repository cannot select guidance packs statically, a step cannot declare the topics it always needs, and how a permanent document cites guidance held outside its repository is undecided | Unowned — needs one or more new changes; the section-by-section layering comes first |
+| The workflow is not a separately versioned distribution. Extracting it to its own repository with its history means providing an installer for each harness's user skill directory, letting each adopting repository declare a compatible version range, and recording the workflow version in a change's records. This repository then consumes it like any other | Unowned — needs a new change, after the boundary is drawn here |
+| Writing steps run only on Claude Code. A harness adapter for launch, resume, sandbox-profile mapping, transcript location, and cost would let any step run on Claude Code, Codex, or a skills-capable harness serving open models | Unowned — needs a new change |
+| Model credentials have no common path. A gateway for API-key providers, with a credential backend that starts on the user's own machine and can later move to a secrets manager, would serve every harness through one interface. Subscription logins stay per user, completed through the provider's own sign-in flow | Unowned — needs a new change |
+| A change's live state and transcripts are tied to the machine running it. A hosted runner needs several parts: an environment contract it and a laptop both meet; a pod per user holding only that user's credentials, beside a shared volume for the change that holds none; read-only watching and takeover by resume; directions and waivers attributed to whoever gave them and kept as standing directions in the records; and an advisory status on the change's pull request | Unowned — needs one or more new changes; isolating each user's credentials from every other user of the runner is its first design constraint |
+
+Most of this goal's end state lives outside this repository. This section tracks it until the workflow has a repository of its own. After that, this repository keeps only its adoption of the workflow: its configuration, its extension addenda, and its own layer of guidance.
+
 ## Independent active changes
 
 Changes with no campaign; each stands alone.
