@@ -139,6 +139,41 @@ joins remain. Existing `e2e_bare_metal_mock_deal` proves the ordinary mock
 journey only. Native helper, deployed cleanup, and pipeline evidence remain
 separately scoped. Permanent promotion remains closeout work.
 
+### Whole-change implementation review 02 F1 fix (after archive)
+
+Review 02 F1: the helper's grant operations refused only a `complete`
+receipt, so after reclaim's `clean` (state `cleaned`, account possibly already
+deleted) a stale or replayed grant could recreate the account and reinstall the
+buyer's key while teardown was unproven, against the spec's "New execution
+SHALL remain excluded through cleanup". `reserve` on an existing receipt,
+`verify-identity` and `install-key` now accept only `reserved`; reclaim's
+`inspect`, `revoke-key`, `clean`, `remove-home` and `verify-complete` are
+unchanged, as is a grant from `reserved`, which the deployed 4.1–4.2 cycles
+ran. A grant arriving after reclaim starts but before `clean` still sees
+`reserved`; the activity barrier and the no-UID-process checks of `clean`,
+`remove-home` and `verify-complete` keep that interval failing closed. The
+permanent spec gained the scenario "A grant arrives after cleanup started"
+under the quiescence requirement, and
+`openspec/specs/physical-provisioning/architecture.md#bounded-bare-metal-working-data`
+states the rule and the per-call lock limit.
+
+Evidence: `make test-bare-metal-iac` (unit and library integration) passed 126
+with 10 native cases deselected, including the new library integration case for
+each grant operation after `clean` with the account still present, ledger
+bytes unchanged, then clean/remove-home/verify-complete retries. `make test`
+exited 0. `make check-packaging` and `make check-change` passed. The native gate
+`make test-bare-metal-iac-native` ran against the existing local provisioning
+image: its four helper cases (mounted fixed source) passed; the role cases,
+including the new `test_grant_after_cleanup_started_restores_no_account_or_key`
+regression, could not run because that image predates the shipped helper and
+rebuilding it was not permitted in the triage session — the native role
+regression remains unrun. The fresh-context compliance check found the library
+test did not register the account (so it proved the refusal only through its
+message), an inaccurate code comment, and an architecture sentence overstating
+coverage across the role's multi-step grant; all three were fixed, and an
+inline helper invocation was folded into the new native test helper. Nothing
+was declined.
+
 ## 4. Deployed cleanup qualification of the reviewed integration round
 
 ### Accepted Arkhai proof method on this branch

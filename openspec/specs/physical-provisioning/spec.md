@@ -2969,6 +2969,12 @@ Bounded cleanup SHALL independently verify no process references the recorded UI
 - **WHEN** an account is absent but a process still references its recorded UID
 - **THEN** bounded cleanup fails and the host's capacity remains held
 
+#### Scenario: A grant arrives after cleanup started
+
+- **WHEN** a grant for a reservation runs after reclaim cleaned that reservation's receipt and before completion
+- **THEN** the helper refuses the grant and no account, private group or SSH key is restored
+- **AND** reclaim's cleanup retries remain available
+
 ### Requirement: Bounded cleanup completes only after verified absence
 
 Bounded reclaim SHALL succeed only after verifying account, recorded private primary group, home, attributable covered scratch and IPC absence and committing a protected completion receipt. Retries SHALL resume safely after partial deletion, including an absent account, without recreating it or releasing consumed UIDs. Missing attribution SHALL fail closed. Receipt contents SHALL remain diagnostic; helper or role failure SHALL fail the reclaim job and retain capacity through ordinary lease release.

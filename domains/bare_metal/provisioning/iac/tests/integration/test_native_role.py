@@ -167,10 +167,30 @@ sys.exit(0 if found else 1)
         os.chown(foreign, self.receipt["uid"], self.receipt["gid"])
         self.reclaim()
 
+    def helper(self, operation):
+        request = {"version": 1, "operation": operation, "reservation_id": self.reservation, "account": self.account, "policy_id": self.policy["policy_id"]}
+        return subprocess.run(["/usr/bin/python3", "/usr/local/lib/arkhai-tenant-working-data.py", "--policy", "/etc/arkhai-working-data/policy.json"], input=json.dumps(request), capture_output=True, text=True, check=True)
+
+    def test_grant_after_cleanup_started_restores_no_account_or_key(self):
+        self.grant()
+        key = Path(self.receipt["home"]) / ".ssh/authorized_keys"
+        self.assertTrue(key.exists())
+        # Reclaim's own steps up to a failure after clean: the key is revoked,
+        # covered data cleaned, and the account deleted without its home.
+        self.helper("revoke-key")
+        self.assertEqual(json.loads(self.helper("clean").stdout)["state"], "cleaned")
+        subprocess.run(["userdel", self.account], check=True, capture_output=True)
+        run = self.role("node_grant_access")
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn("reservation in cleanup cannot grant", run.stdout + run.stderr)
+        self.assertIsNone(LinuxHost().user(self.account))
+        self.assertIsNone(LinuxHost().user(self.receipt["uid"]))
+        self.assertFalse(key.exists())
+        self.assertEqual(json.loads((self.root / "state/ledger.json").read_text())["receipts"][self.reservation]["state"], "cleaned")
+        self.reclaim()
+
     def test_partial_create_and_account_absent_reclaim_do_not_resurrect(self):
-        request = {"version": 1, "operation": "reserve", "reservation_id": self.reservation, "account": self.account, "policy_id": self.policy["policy_id"]}
-        run = subprocess.run(["/usr/bin/python3", "/usr/local/lib/arkhai-tenant-working-data.py", "--policy", "/etc/arkhai-working-data/policy.json"], input=json.dumps(request), capture_output=True, text=True, check=True)
-        self.receipt = json.loads(run.stdout)
+        self.receipt = json.loads(self.helper("reserve").stdout)
         subprocess.run(["groupadd", "--gid", str(self.receipt["gid"]), self.account], check=True)
         self.assertIsNone(LinuxHost().user(self.account))
         self.reclaim()
