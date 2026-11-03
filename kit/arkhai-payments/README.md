@@ -56,7 +56,7 @@ which the service refuses. The generated models also carry the contract's
 `rate` parts, which the kit never derives or settles. Either part's
 `maxHoldExtension` is required and may be null; models are generated so, and
 every wire form the kit produces keeps the null (see
-[`schema/SOURCE.md`](schema/SOURCE.md#required-nullable-durations)). The hold is the time from
+[`schema/SOURCE.md`](schema/SOURCE.md#required-nullable-durations-and-optional-values)). The hold is the time from
 acceptance to start, plus the service duration and the option window. The fixed
 nonce is `arkhai.payments.v1`; repeated derivation for the same inputs gives the
 same transaction ID. Mandate approval expires at `accepted_at + window`.
