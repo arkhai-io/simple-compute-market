@@ -310,14 +310,22 @@ validation driving Docker, the cluster, and the push.
 A denial is read from the run's own record, never from the step's message: the
 record names the call, while the message generalizes ("Bash is not allowed" for a
 chain missing one utility). The harness's reason classifies it: `mode` is a gap in
-the table, `rule` met a deny rule — a forbidden action — and `subcommandResults`
+the table, `rule` met a deny rule — a forbidden action, but for the one exception
+below — and `subcommandResults`
 refused a shell command by one of its parts without saying which way, so the
 command's parts are matched against the step's deny rules. A step that cannot go on without a
 denied call stops naming it; one that can goes on, and every denial is recorded on
 its outcome either way. After a `mode` denial, the same work done by a tool the
 step's rules allow for it — the Edit tool for a shell write — is the rules being
-used, not a workaround, and the orchestrating session reads it as a gap; after a
-deny-rule denial, no other tool may do the work. A gap is answered with the
+used, not a workaround, and the orchestrating session reads it as a gap. After a
+deny-rule denial, no other tool may do the work, except where the rule exists only
+to keep file writes on the Edit and Write tools — the step table's comments name
+those rules: sed's in-place forms, find's deleting, running, and writing actions,
+and the diff family's output-to-file forms. Such a rule's refused shell write, made
+with the Edit or Write tool the step's rules allow, is the rule doing what it is
+for: the orchestrating session reads it as a gap and asks the owner for no ruling.
+Every other deny rule forbids the work itself, `git stash` or a push other than
+the guarded one, and the denial stands whatever tool attempts it. A gap is answered with the
 narrowest rule that matches the call. A deny rule is matched against the command as
 typed, so it holds the plain and quoted forms of an option but not a word a shell
 assembles from pieces: the deny rules stop a step's mistakes, and its skill stops
@@ -502,8 +510,9 @@ revision with the context that led to its findings; it still reads the triage fr
 the records. A reviewer's raw session is kept as a transcript, but no review or
 triage step reads one: a transcript carries the session context the file exchange
 exists to keep out. The reviewer runs read-only and never writes the record itself;
-its answer is published only when it has the review format, so an error or a
-truncated answer never becomes history, and a run that published nothing is a
+its answer is published, from its first title line, only when it has the review
+format, so an error or a truncated answer never becomes history, while narration
+before the title is left to the transcript; a run that published nothing is a
 failed run however many earlier records exist.
 
 `reviews/` is untracked: it is working history, and anything durable in it reaches

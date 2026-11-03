@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 from pathlib import Path
@@ -110,6 +111,36 @@ def test_real_tree_cleanup_preserves_symlink_targets_and_external_hardlinks(clea
     assert run(installation, "verify-complete")["state"] == "complete"
     with pytest.raises(Refusal, match="completed"):
         run(installation, "reserve")
+
+
+@pytest.mark.parametrize("operation", ["reserve", "verify-identity", "install-key"])
+def test_grant_refuses_once_cleanup_started_and_cleanup_still_retries(cleanup_installation, operation):
+    installation = cleanup_installation
+    receipt = installation.receipt
+    home = Path(receipt["home"])
+    home.mkdir(mode=0o700)
+    (home / "data").write_text("home")
+    # The account still exists between clean and its deletion, so only the
+    # receipt state stands between a grant and a reinstalled key.
+    installation.host.user("tenant_a", receipt["uid"], home=receipt["home"])
+    installation.host.group("tenant_a", receipt["gid"])
+    assert run(installation, "clean")["state"] == "cleaned"
+    ledger = installation.root / "state/ledger.json"
+    before = ledger.read_bytes()
+    grant = request(operation=operation)
+    if operation == "install-key":
+        blob = len(b"ssh-ed25519").to_bytes(4, "big") + b"ssh-ed25519" + (32).to_bytes(4, "big") + bytes(32)
+        grant["ssh_public_key"] = "ssh-ed25519 " + base64.b64encode(blob).decode()
+    with pytest.raises(Refusal, match="in cleanup cannot grant"):
+        installation.store.execute(grant)
+    assert ledger.read_bytes() == before
+    assert not (home / ".ssh").exists()
+    assert run(installation, "clean")["state"] == "cleaned"
+    installation.host.user_rows.clear()
+    installation.host.group_rows.clear()
+    run(installation, "remove-home")
+    assert not home.exists()
+    assert run(installation, "verify-complete")["state"] == "complete"
 
 
 def test_missing_paths_reserved_account_and_complete_retry(cleanup_installation):

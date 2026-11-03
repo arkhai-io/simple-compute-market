@@ -22,7 +22,7 @@ import pytest
 from compute_provisioning_ansible import ssh_connection
 from compute_provisioning_client import ComputeProvisioningError
 from compute_provisioning_contracts import HostCreate, HostUpdate, RelayCreate, RelayUpdate
-from market_resource_pools_contracts import PoolCreate
+from market_resource_pools_contracts import PoolCreate, PoolUpdate
 
 from compute_provisioning_service import container as _container_module
 from compute_provisioning.relays import RelayPortLease
@@ -243,6 +243,100 @@ async def test_a_relay_is_not_moved_onto_a_placed_hosts_address(client_and_queue
     assert refused.value.status_code == 409
     assert "kvm1" in str(refused.value) and "site-a" in str(refused.value)
     assert (await clients.family.get_relay("site-a")).relay_addr == "203.0.113.9"
+
+
+async def test_a_placed_hosts_connection_is_not_moved_onto_its_pools_relay(client_and_queue):
+    """A host already in a relay-backed pool loses its management route as
+    surely by a connection edit as by a move: an update and an inventory
+    giving it the relay's address are each refused, naming the host and the
+    relay, and it keeps its previous connection."""
+    clients, _ = client_and_queue
+    await _relay_and_pools(clients)
+    await clients.host_import.import_hosts_from_text(_inventory(_RELAY_POOL, address="10.0.0.1"))
+
+    with pytest.raises(ComputeProvisioningError) as refused:
+        await clients.family.update_host(
+            "kvm1",
+            HostUpdate(connection=ssh_connection(ssh_host="203.0.113.9", key_path="/keys/id")),
+        )
+    assert refused.value.status_code == 409
+    assert "kvm1" in str(refused.value) and "site-a" in str(refused.value)
+
+    with pytest.raises(ComputeProvisioningError) as refused:
+        await clients.host_import.import_hosts_from_text(
+            _inventory(_RELAY_POOL, address="203.0.113.9")
+        )
+    assert refused.value.status_code == 409
+    assert "kvm1" in str(refused.value) and "site-a" in str(refused.value)
+
+    host = await clients.family.get_host("kvm1")
+    assert (host.pool_id, host.connection.public["ssh_host"]) == (_RELAY_POOL, "10.0.0.1")
+
+
+async def test_a_host_in_a_pool_without_a_relay_takes_the_relays_address(client_and_queue):
+    """The rule constrains a host in the relay's pools only: a host in a pool
+    with no relay may be managed through that relay's address."""
+    clients, _ = client_and_queue
+    await _relay_and_pools(clients)
+    await clients.host_import.import_hosts_from_text(_inventory(_PLAIN_POOL, address="10.0.0.1"))
+
+    updated = await clients.family.update_host(
+        "kvm1",
+        HostUpdate(connection=ssh_connection(ssh_host="203.0.113.9", key_path="/keys/id")),
+    )
+
+    assert (updated.pool_id, updated.connection.public["ssh_host"]) == (
+        _PLAIN_POOL,
+        "203.0.113.9",
+    )
+
+
+async def test_a_pool_is_not_pointed_at_the_relay_its_host_is_managed_through(
+    client_and_queue,
+):
+    """Pointing a pool at a relay checks the hosts it already holds, for both
+    providers: each write is refused, naming the host and the relay, and the
+    pool keeps its previous relay reference."""
+    clients, _ = client_and_queue
+    await _relay_and_pools(clients)
+    await clients.pools.create_pool(
+        PoolCreate(
+            id="bare-metal-pool",
+            label="bare-metal-pool",
+            provider="bare_metal.ansible",
+            policy_tags={"advertisable_modes": [], "capacity_backing": "backed"},
+            provider_config={},
+        )
+    )
+    await clients.host_import.import_hosts_from_text(
+        "[kvm_hosts]\n"
+        "kvm1  ansible_host=203.0.113.9  ansible_user=ubuntu  "
+        f"ansible_ssh_private_key_file=/keys/id  pool_id={_PLAIN_POOL}\n"
+        "bm1  ansible_host=203.0.113.9  ansible_user=ubuntu  "
+        "ansible_ssh_private_key_file=/keys/id  pool_id=bare-metal-pool\n"
+    )
+
+    with pytest.raises(ComputeProvisioningError) as refused:
+        await clients.pools.patch_pool(
+            _PLAIN_POOL,
+            PoolUpdate(
+                provider_config={
+                    "playbook_path": "playbooks/vm-operations.yaml",
+                    "relay_id": "site-a",
+                }
+            ),
+        )
+    assert refused.value.status_code == 409
+    assert "kvm1" in str(refused.value) and "site-a" in str(refused.value)
+    assert (await clients.pools.get_pool(_PLAIN_POOL)).provider_config.get("relay_id") is None
+
+    with pytest.raises(ComputeProvisioningError) as refused:
+        await clients.pools.patch_pool(
+            "bare-metal-pool", PoolUpdate(provider_config={"relay_id": "site-a"})
+        )
+    assert refused.value.status_code == 409
+    assert "bm1" in str(refused.value) and "site-a" in str(refused.value)
+    assert (await clients.pools.get_pool("bare-metal-pool")).provider_config == {}
 
 
 async def _absent(clients, host_id: str) -> bool:

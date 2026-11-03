@@ -20,7 +20,7 @@ global:
 mockMode: false
 
 # ---------------------------------------------------------------------------
-# Declarative relays, pools, and capacity.
+# Declarative relays, pools, hosts, and capacity.
 #
 # Each value is a whole definition document, rendered verbatim into the
 # ConfigMap and mounted into the application container; the service reads a
@@ -28,7 +28,10 @@ mockMode: false
 # resource entirely through the API. They carry no credentials: a relay entry
 # names *which keys* of the provisioning-secrets profile hold its admission
 # token (`token_secret_key`) and its grant-signing key (`grant_key_secret_key`,
-# required), never the values.
+# required), never the values, and a host entry names its key by the `key_path`
+# of a file mounted into the pod, never the key. Editing a document changes the
+# ConfigMap, whose checksum rolls the pod, so a release that edits one applies
+# it.
 #
 # Reconciled when the document's content changes, not on every start: import is
 # authoritative over the document it is given, so applying one nobody submitted
@@ -38,14 +41,22 @@ mockMode: false
 #   relays   - retained. Disabling one would break every pool referencing it
 #              and every live tunnel on it.
 #   pools    - disabled. The pool document is authoritative for the whole set.
+#   hosts    - retained, as relays are, and reported. A host entry declares its
+#              whole host: an omitted `pool_id` unplaces it and an omitted
+#              `enabled` enables it.
 #   capacity - retained, as relays are. A capacity entry replaces the whole
 #              declaration it names, and every declared attribute is published
 #              to storefronts.
 #
-# A capacity declaration names its pool, so a pool it names must exist when
-# capacity is imported, after pools: one from `pools`, or, on a fresh site with
-# no `pools` document, one from the service's seed (the packaged seed holds
-# `vm-default` and `bare-metal-default`; `configFiles` below replaces it).
+# A host entry and a capacity declaration each name a pool, so a pool they name
+# must exist when they are imported, after pools: one from `pools`, or, on a
+# fresh site with no `pools` document, one from the service's seed (the
+# packaged seed holds `vm-default` and `bare-metal-default`; `configFiles`
+# below replaces it). Hosts are imported before capacity. A document that
+# cannot be applied keeps the service from starting, and the Recreate strategy
+# leaves no pod serving, so submit a changed document to its import route with
+# `validate_only` first: a host document to POST /api/v1/hosts/definitions/import,
+# a capacity document to POST /api/v1/capacity/definitions/import.
 #
 #   pools:
 #     pools:
@@ -53,6 +64,17 @@ mockMode: false
 #         label: Default Pool
 #         provider: vm.ansible
 #         provider_config: {playbook_path: playbooks/vm-operations.yaml}
+#   hosts:
+#     hosts:
+#       - host_id: kvm1
+#         pool_id: default
+#         connection:
+#           kind: ssh
+#           version: 2
+#           public:
+#             ssh_host: 10.0.0.5
+#             ssh_user: ubuntu
+#             key_path: /home/appuser/.ssh/id_ed25519
 #   capacity:
 #     resources:
 #       - resource_id: compute-kvm1
@@ -65,6 +87,7 @@ mockMode: false
 definitions:
   relays: {}
   pools: {}
+  hosts: {}
   capacity: {}
 
 # ---------------------------------------------------------------------------
@@ -117,8 +140,9 @@ server:
 # ---------------------------------------------------------------------------
 # Provisioning credentials are always operator-managed Kubernetes Secrets.
 # sshKey.secretName must expose `id_ed25519`; sshDecryptionKey.secretName must
-# expose `config-provisioning-secrets.yml`. The chart never accepts credential,
-# inventory, or callback-token contents as values.
+# expose `config-provisioning-secrets.yml`. The chart never accepts credential
+# or callback-token contents as values; hosts are declared in
+# `definitions.hosts`, which names each key by its file path.
 # ---------------------------------------------------------------------------
 sshKey:
   createSecret: false
@@ -171,19 +195,20 @@ storefront:
 config:
   database_url: "sqlite:////app/data/provisioning.db"
 
-  # relay_definitions_path, pool_definitions_path, and
+  # relay_definitions_path, pool_definitions_path, host_definitions_path, and
   # capacity_definitions_path are NOT set here. The chart derives each from
   # its `definitions` value above, so the mount and the path cannot disagree —
   # a rendered-and-mounted document that the service skips because its path is
   # unset is a silent no-op that looks like configuration. The schema refuses
-  # the pool and capacity paths here for that reason.
+  # every one of them here for that reason.
 
   # Ansible paths — set to the IaC tree location inside the container.
   # Override here for environments that mount the IaC at a different path.
-  # The schema refuses the retired `playbook_path`, as the service does.
+  # The schema refuses the retired `playbook_path`, as the service does, and
+  # the retired `inventory_ini` and `inventory_path`: the service reads no INI
+  # inventory at startup, and hosts are declared in `definitions.hosts`.
   vm_playbook_path: "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml"
   bare_metal_playbook_path: "/opt/domains/bare_metal/provisioning/iac/ansible/playbooks/node-access.yaml"
-  inventory_path: "/opt/domains/vms/provisioning/iac/ansible/inventory/provisioning-hosts.ini"
   management_vars_path: "/opt/domains/vms/provisioning/iac/ansible/inventory/management-vars.yaml"
 
   # Ansible runtime
@@ -235,9 +260,10 @@ affinity: {}
 # state (vm_leases, hosts, ansible inventory snapshots).
 #
 # Without persistence the SQLite DB lives on emptyDir — pod restarts
-# lose all known leases, host registrations seeded from the secret-
-# overlay reseed but anything created via the API is gone. With
-# persistence enabled, restarts are transparent.
+# lose all known leases and every recorded document digest, so the
+# hosts `definitions.hosts` declares are registered again but anything
+# created via the API is gone. With persistence enabled, restarts are
+# transparent.
 #
 # enabled: false keeps the existing emptyDir for kind/CI/local-only
 # setups without a StorageClass. database_url in config above should

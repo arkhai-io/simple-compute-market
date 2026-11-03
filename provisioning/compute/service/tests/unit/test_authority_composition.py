@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import timedelta
 from types import SimpleNamespace
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -68,8 +69,20 @@ def test_the_host_authority_carries_the_relays_pool_change_hooks():
 
     assert relay_host_pool_change in host_authority._pool_change_hooks
     assert len(host_authority._pool_change_hooks) == 2
+    assert len(host_authority._connection_change_hooks) == 1
     assert host_authority._codecs is container.connection_codecs()
     assert container.relay_service()._connection_codecs is container.connection_codecs()
+
+
+def test_both_pool_configurations_check_hosts_through_the_authoritys_codecs():
+    """Pointing a pool at a relay checks its hosts' management routes, so each
+    domain's pool configuration holds the codecs the host authority stores
+    connections with."""
+    container = _container()
+    codecs = container.connection_codecs()
+
+    assert container.vm_runtime().pool_config_handler._connection_codecs is codecs
+    assert container.bare_metal_runtime().pool_config_handler._connection_codecs is codecs
 
 
 def test_the_allocator_reads_the_grant_grace_and_the_reuse_margin():
@@ -81,6 +94,41 @@ def test_the_allocator_reads_the_grant_grace_and_the_reuse_margin():
 
     assert allocator._grant_expiry_grace == timedelta(seconds=120)
     assert allocator._reuse_margin == timedelta(seconds=45)
+
+
+@pytest.mark.parametrize(
+    ("grace", "margin", "setting"),
+    [
+        (-1, 300, "relay_grant_expiry_grace_seconds"),
+        (3600, 0, "relay_port_reuse_margin_seconds"),
+        (3600, -60, "relay_port_reuse_margin_seconds"),
+    ],
+)
+def test_the_allocator_refuses_a_timing_setting_that_defeats_its_protection(
+    grace, margin, setting
+):
+    container = _container()
+    container.config.override(
+        SimpleNamespace(
+            relay_grant_expiry_grace_seconds=grace, relay_port_reuse_margin_seconds=margin
+        )
+    )
+
+    with pytest.raises(ValueError, match=setting):
+        container.relay_port_allocator()
+
+
+def test_the_allocator_accepts_no_grace_and_the_smallest_margin():
+    """A zero grace still expires a grant no earlier than its lease's end, and
+    any positive margin can exceed some skew; both are the operator's call."""
+    container = _container()
+    container.config.override(
+        SimpleNamespace(relay_grant_expiry_grace_seconds=0, relay_port_reuse_margin_seconds=1)
+    )
+    allocator = container.relay_port_allocator()
+
+    assert allocator._grant_expiry_grace == timedelta(0)
+    assert allocator._reuse_margin == timedelta(seconds=1)
 
 
 def test_the_relays_are_composed_once_for_every_domain():

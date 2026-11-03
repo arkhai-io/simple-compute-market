@@ -19,6 +19,24 @@ Do not add a payment mechanism, funding UI, cash client, rate-part marketplace p
 5. Refresh the kit version and only affected dependent constraints/locks through repository tooling. Validate rebuilt consumers against BOTH the currently deployed server contract and the selected publication before deploying affected buyers/storefronts or changing an endpoint. Bind each check explicitly; if both contracts are identical, one check may satisfy both with that identity proven. If they differ, establish a compatible rollout order before mutation. Historical signed-byte verification remains additional evidence, not a substitute for current response parsing. Do not deploy or downgrade the external authority merely to match the consumer.
 6. The owner-approved cadence applies: focused checks and packaging before intermediate commits; one combined full-suite/independent-review/CI/E2E/Helm round for the frozen candidate. Reuse unchanged evidence. No per-edit full suite.
 
+### Settled at the whole-change implementation triage
+
+**02 F1 — explicit null for an optional, non-nullable property.** The generated
+models accept `null` for an optional property whose schema forbids it, such as a
+part's `end` or a receipt part's `rate`, and `wire_json` omits it before hashing or
+framing a signature. The owner kept this normalization, decided earlier for
+mandates, and extended it explicitly to receipts and snapshots: an inserted null
+changes no value the kit checks or stores, because the kit computes transaction
+identity and verifies receipt signatures over the parsed model's canonical JSON, not
+received bytes.
+Refusing such nulls through generation was rejected: it would reverse the earlier
+decision, retype the generated optional fields and refuse counterparty data that
+parses today, for schema exactness with no change in meaning. It would be
+reconsidered if any path hashes, stores or forwards raw received payment JSON after
+verification. Specified in `openspec/specs/market-composition/spec.md` and
+documented in `kit/arkhai-payments/schema/SOURCE.md`; pinned by
+`kit/arkhai-payments/tests/test_receipt_fixture.py`.
+
 ## Risks / Trade-offs
 
 A wider schema can expose assumptions beyond the two reproduced failures; producer vectors, existing kit tests and dependent settlement suites cover these seams. Generator formatting or model names may change, so review the generated diff and imports. A published vector proves the wire contract, not live funding or physical delivery. Historical server reads prove only their observed response shapes.
@@ -42,4 +60,5 @@ None affecting implementation. Live deployment compatibility remains an evidence
 | Strict published contract and current/historical conformance | `openspec/specs/market-composition/spec.md#requirement-arkhai-payments-authority-remains-external` | Delta merged at archive |
 | Publication selection and compatibility boundary | `openspec/specs/market-composition/architecture.md#agreement-based-payment-composition` | Promoted in this closeout |
 | Published source identity, deterministic generation and nullable/optional serialization | `kit/arkhai-payments/schema/SOURCE.md`; `kit/arkhai-payments/README.md` | Existing implementation documentation confirmed current; no duplicate edit |
+| Explicit null for optional properties normalized in mandates, receipts and snapshots (02 F1) | `openspec/specs/market-composition/spec.md#requirement-arkhai-payments-authority-remains-external`; `kit/arkhai-payments/schema/SOURCE.md#required-nullable-durations-and-optional-values` | Promoted at the whole-change implementation triage |
 | No new repository-wide authority or dependency layer | `docs/development/ARCHITECTURE.md#authority-boundaries` | No-impact disposition confirmed; no edit |

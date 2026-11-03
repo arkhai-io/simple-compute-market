@@ -89,6 +89,16 @@ It verified their retained receipt and snapshot signatures without financial
 mutation. It does not establish new hosted funding, complete endpoint coverage,
 or hardware qualification. Formal review/triage and closeout remain separate.
 
+The whole-change implementation triage (E2, `reviews/02-implementation.triage.md`) found that this record does not
+say how the deployed contract was established as identical to the selected
+publication, and the owner cannot confirm it, so that identity is not taken as
+proven. The live read shows only that the 0.5 typed client parsed those two
+historical transaction snapshots and that their receipt and snapshot signatures
+verified. Design decision 5's check of the deployed service against the
+selected publication, covering approval and the new response shapes (effective
+ends, zero gross), remains owed before affected buyers or storefronts are
+deployed or an endpoint is changed.
+
 No existing E2E marker proves hosted payment-provider funding. Existing Arkhai settlement scenarios cover buyer/seller integration; live funding and physical delivery remain separate acceptance evidence. Record precise exercised markers and push-only workflow/job obligations once implementation identifies the affected suites.
 
 ## 3. Closeout
@@ -102,3 +112,44 @@ No existing E2E marker proves hosted payment-provider funding. Existing Arkhai s
 - [x] 3.4 Run `make check-packaging` and `make check-architecture-change CHANGE=refresh-current-payments-wire`; resolve owned exceptions and confirm recorded E2E evidence exercises the actual consumer boundary.
 - [x] 3.5 Promote accepted explanation to `openspec/specs/market-composition/architecture.md#agreement-based-payment-composition`, finalize kit README/SOURCE and this design-promotion record; normative promotion is the spec delta at archival. Confirm no repository-wide architecture change, or promote one if implementation actually required it.
 - [x] 3.6 `make check-doc-citations CHANGE=refresh-current-payments-wire` and pinned strict OpenSpec validation passed; archive merged the delta into `market-composition`, the index now points to the dated archive, and archived-change checks passed. Closeout review and triage follow; archive cleanup may advance dependents only after that triage.
+
+### Whole-change implementation review and triage (2026-11-03)
+
+The archived change was reviewed as a whole (`reviews/02-implementation.md`) and
+validated at `893bd93cf` (`reviews/03-validation.md`: local, Helm, pipeline and CI
+passed, no failures). Dispositions are in `reviews/02-implementation.triage.md`.
+
+- **E2E evidence (E1).** 3.4's confirmation that recorded E2E evidence exercises
+  the consumer boundary was not met. All six payment-deal cases
+  (`e2e_bare_metal_payment_deal`, `e2e_credits_payment_deal`) skipped in both the
+  frozen validation and validation 03, because the pipeline configures no payments
+  target, so no pipeline run can provide them. No E2E scenario exercises the
+  refreshed wire. Its evidence is the kit unit suite with producer vectors, the
+  three storefront integration suites with a fake payments client, and the live
+  read in 2.2 within the limits section 2 records.
+- **Testing guidance (02 F2).** `docs/development/TESTING.md` "Payment Receipts in
+  Tests" and its Arkhai current example now describe the current producer vectors
+  and the separate historical raw-framing vectors, not a previous-wire publication
+  pinned by a synthetic fixture.
+- **Explicit null for optional properties (02 F1, design.md).** The owner kept the
+  normalization: an optional property stated as `null`, which the schema forbids,
+  is accepted and omitted from the wire form. `kit/arkhai-payments/schema/SOURCE.md`
+  now states that receipts and snapshots parse the same way and that a receipt
+  signature verifies against the normalized body, and a `market-composition`
+  scenario specifies it. `kit/arkhai-payments/tests/test_receipt_fixture.py` pins
+  it with the current producer receipt carrying an inserted `rate: null`, trusted
+  through the vector's service key. The kit README's link to that SOURCE.md
+  section now uses the section's current anchor.
+- **Checks.** `make -C kit/arkhai-payments test`: typing (16 source files), vector
+  check, generated-model check and the kit's unit suite, 146 passed (unit level:
+  controlled transports, no service). `make test` passed (exit 0).
+  `make check-packaging` passed, including the layers, scope, dependencies and
+  kinds rules. `make check-comment-hygiene` and
+  `make check-change CHANGE=refresh-current-payments-wire` passed. A
+  fresh-context compliance check found nothing blocking and confirmed that no kit
+  or storefront path hashes, stores or forwards raw received receipt JSON. Its
+  wording points were applied: SOURCE.md says the kit verifies over the parsed
+  model rather than that signatures are defined there; TESTING.md says "vector
+  publications" and fully describes the historical checks; the decision was
+  promoted to the spec; the test's trust anchor was tightened; and the README
+  anchor was fixed.

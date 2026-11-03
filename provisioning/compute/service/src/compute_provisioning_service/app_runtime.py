@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import os
 
-from compute_provisioning_ansible import parse_inventory_ini
 from compute_provisioning.startup import (
     ComputeProvisioningBackgroundTask,
     ComputeProvisioningShutdownStep,
@@ -105,67 +104,6 @@ def resolve_request_path_services() -> None:
     )
 
 
-def seed_inventory_if_empty() -> None:
-    # ------------------------------------------------------------------
-    # Inventory seeding — runs once at startup if the hosts table is empty.
-    #
-    # Source priority:
-    #   1. inventory_ini setting (non-empty string) — used by the Helm chart,
-    #      injected via the provisioning-secrets config profile.
-    #   2. inventory_path on disk — used by the Docker profile, which points
-    #      at the IAC hosts file baked into the image.
-    #
-    # Seeding is skipped when the hosts table already has rows, so that
-    # operator changes made via the API (POST /hosts, PUT /hosts/{host}, etc.)
-    # are not overwritten on pod restart.  To force a re-seed, use
-    # POST /api/v1/hosts/import which always upserts regardless of table state.
-    #
-    # Seeding registers hosts and declares no capacity: an entry's GPUs
-    # describe its host, and an entry stating no pool registers its host
-    # unplaced. Capacity is declared through the capacity surface.
-    # ------------------------------------------------------------------
-    host_service = _container_module.resolved_host_authority
-    existing_hosts = host_service.list_hosts(enabled_only=False)
-    if existing_hosts:
-        logger.info(
-            "Inventory seeding: skipped — %d host(s) already registered",
-            len(existing_hosts),
-        )
-        return
-
-    inventory_ini = str(getattr(settings, "inventory_ini", "") or "").strip()
-    inventory_path = getattr(settings, "resolved_inventory_path", None)
-
-    ini_text: str | None = None
-    source: str | None = None
-
-    if inventory_ini:
-        ini_text = inventory_ini
-        source = "inventory_ini setting (provisioning-secrets profile)"
-    elif inventory_path and inventory_path.exists():
-        try:
-            ini_text = inventory_path.read_text(encoding="utf-8")
-            source = str(inventory_path)
-        except OSError as exc:
-            logger.warning("Inventory seeding: could not read %s: %s", inventory_path, exc)
-
-    if ini_text:
-        try:
-            seeded = host_service.apply_inventory(parse_inventory_ini(ini_text))
-            logger.info(
-                "Inventory seeding: registered %d host(s) from %s",
-                len(seeded),
-                source,
-            )
-        except Exception as exc:
-            logger.error("Inventory seeding failed (source: %s): %s", source, exc)
-    else:
-        logger.info(
-            "Inventory seeding: no inventory source configured — "
-            "starting with empty host registry"
-        )
-
-
 def import_contributed_definitions_if_configured() -> None:
     _definition_importer(contributed=_definition_documents()).import_contributed_definitions()
 
@@ -201,6 +139,17 @@ def verify_pool_declarations() -> None:
     logger.info("Resource-pool declaration and provider check passed")
 
 
+def import_host_definitions_if_configured() -> None:
+    """Reconcile the host definitions document ``host_definitions_path`` names.
+
+    Runs after the declaration check, so every pool an entry names exists and
+    is servable, and before capacity definitions, which may name a host. A
+    document that cannot be applied fails the start whole, naming each problem,
+    and records no digest; startup reads no INI inventory.
+    """
+    _definition_importer().import_host_definitions()
+
+
 def import_capacity_definitions_if_configured() -> None:
     _definition_importer().import_capacity_definitions()
 
@@ -220,6 +169,7 @@ def _definition_importer(contributed=()) -> DefinitionDocumentImporter:
         pool_service=_container_module.resolved_resource_pool_service,
         contributed=contributed,
         capacity_ledger=_container_module.resolved_capacity_ledger_service,
+        host_authority=_container_module.resolved_host_authority,
     )
 
 
@@ -256,7 +206,9 @@ def startup_steps() -> tuple[ComputeProvisioningStartupStep, ...]:
         ComputeProvisioningStartupStep(
             "verify-pool-declarations", verify_pool_declarations
         ),
-        ComputeProvisioningStartupStep("seed-inventory", seed_inventory_if_empty),
+        ComputeProvisioningStartupStep(
+            "import-host-definitions", import_host_definitions_if_configured
+        ),
         ComputeProvisioningStartupStep(
             "import-capacity-definitions", import_capacity_definitions_if_configured
         ),

@@ -7,6 +7,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from compute_provisioning.hosts import ConnectionCodecs
 from compute_provisioning.hosts.service import HostAuthority
 from compute_provisioning.job_fulfillment import JobFulfillmentProvider
 from compute_provisioning.jobs.engine import JobEngine
@@ -90,6 +91,7 @@ def build_vm_runtime(
     job_submission: JobSubmissionService,
     relay_port_allocator: RelayPortAllocator,
     relay_resolver: RelayExecutionResolver,
+    connection_codecs: ConnectionCodecs,
 ) -> VmProvisioningRuntime:
     active = [
         profile.strip()
@@ -119,7 +121,9 @@ def build_vm_runtime(
         ansible_service=ansible_service,
         codec=codec,
         host_authority=host_authority,
-        pool_config_handler=AnsiblePoolConfigHandler(settings=config),
+        pool_config_handler=AnsiblePoolConfigHandler(
+            settings=config, connection_codecs=connection_codecs
+        ),
         job_engine=job_engine,
         job_submission=job_submission,
         vm_operations_service=VmOperationsService(submission=job_submission),

@@ -103,6 +103,12 @@ spec:
               subPath: pool-definitions.yaml
               readOnly: true
             {{- end }}
+            {{- if .Values.definitions.hosts }}
+            - name: config
+              mountPath: /app/config/host-definitions.yaml
+              subPath: host-definitions.yaml
+              readOnly: true
+            {{- end }}
             {{- if .Values.definitions.capacity }}
             - name: config
               mountPath: /app/config/capacity-definitions.yaml

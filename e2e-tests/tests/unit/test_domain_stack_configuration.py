@@ -71,7 +71,10 @@ def test_bare_metal_stack_requires_real_selected_site_inputs():
     # The storefront's sites, registries, and terms are its mounted configuration.
     assert "${BARE_METAL_STOREFRONT_CONFIG_FILE:?" in domain_compose
     assert "${BARE_METAL_POOL_DEFINITIONS_FILE:?" in domain_compose
-    assert "${BARE_METAL_PROVISIONING_INVENTORY_FILE:?" in domain_compose
+    assert "${BARE_METAL_PROVISIONING_HOST_DEFINITIONS_FILE:?" in domain_compose
+    assert "PROVISIONING_HOST_DEFINITIONS_PATH=/run/config/host-definitions.yaml" in domain_compose
+    # The service refuses either retired inventory setting at startup.
+    assert "INVENTORY" not in rendered
     assert "${BARE_METAL_PROVISIONING_SSH_PRIVATE_KEY_FILE:?" in domain_compose
 
 

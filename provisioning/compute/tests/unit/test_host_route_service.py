@@ -5,7 +5,12 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from compute_provisioning_contracts import ConnectivityResult, HostCreate, HostUpdate
+from compute_provisioning_contracts import (
+    ConnectivityResult,
+    HostCreate,
+    HostDefinitionsImportRequest,
+    HostUpdate,
+)
 from sqlalchemy.exc import IntegrityError
 
 from compute_provisioning.hosts import ConnectionEnvelope, ExecutionHost
@@ -56,6 +61,24 @@ def test_a_refused_pool_move_is_a_conflict_carrying_the_subscriber_s_reason():
     )
 
     assert (refusal.status_code, refusal.detail) == (409, "drain the relay first")
+
+
+def test_an_import_whose_commit_meets_a_concurrent_create_is_a_conflict():
+    """A host the document creates, registered by another request first, fails
+    the commit; the document may be submitted again, so it is a conflict."""
+    hosts = MagicMock()
+    hosts.host_ids_in_session.return_value = []
+    session = hosts.session.return_value.__enter__.return_value
+    session.commit.side_effect = IntegrityError("INSERT", {}, Exception("UNIQUE"))
+
+    refusal = _refusal(
+        lambda: HostRouteService(hosts, {}).import_definitions(
+            HostDefinitionsImportRequest(yaml_text="hosts: []\n")
+        )
+    )
+
+    assert refusal.status_code == 409
+    session.rollback.assert_called_once()
 
 
 def test_an_unknown_host_is_not_found_on_every_read_and_write():

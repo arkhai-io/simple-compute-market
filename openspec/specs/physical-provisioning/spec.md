@@ -454,8 +454,8 @@ For an Ansible-backed VM pool, provider configuration identifies both the playbo
 ### Requirement: Bare-metal inventory binds an existing provider pool
 
 The compute provisioner MUST import configured Resource Pool definitions before
-seeding inventory. A bare-metal inventory host MAY name its exact pool through
-`pool_id`; the seed MUST reject an unknown pool and MUST preserve that binding
+importing host definitions. A bare-metal host MAY name its exact pool through
+`pool_id`; the host import MUST reject an unknown pool and MUST preserve that binding
 on create and update. A capacity declaration's explicit `bare_metal_publication`
 view MUST carry the declaration's own pool. The `bare_metal.ansible` provider accepts no pool-local
 playbook, inventory-group, credential, or executor-target configuration; the one
@@ -466,14 +466,14 @@ Resource, and a bare-metal job's stored parameters carry the service's
 `bare_metal_publication` view through the authenticated capacity administration
 surface before the host is publishable.
 
-#### Scenario: Fresh selected-site inventory binds to a bare-metal pool
+#### Scenario: A fresh site's host document binds to a bare-metal pool
 
-- **WHEN** startup imports a `bare_metal.ansible` pool and then seeds a host whose inventory row names that pool
-- **THEN** the durable host row retains the exact pool id and an unknown pool id fails the seed rather than leaving the host unplaced or assigning another pool
+- **WHEN** startup imports a `bare_metal.ansible` pool and then a host definitions document whose entry names that pool
+- **THEN** the durable host row retains the exact pool id, and an unknown pool id fails the import and startup rather than leaving the host unplaced or assigning another pool
 
 #### Scenario: Publication retains the inventory pool binding
 
-- **GIVEN** a bare-metal inventory host is bound to a configured provider pool
+- **GIVEN** a bare-metal host is bound to a configured provider pool
 - **AND** the capacity declaration naming that host is in the same pool
 - **WHEN** the compute service projects its explicit `bare_metal_publication` view
 - **THEN** the view's `pool_id` is that pool, taken from the declaration
@@ -826,7 +826,7 @@ callers that own no acceptance transaction.
 
 A port lease MUST be unique on the relay and the remote port. The host is recorded as an attribute of the lease and MUST NOT form part of its uniqueness, because the listening socket is bound on the relay rather than on the host, and two hosts sharing a relay share one port namespace.
 
-Only released lease rows may be reused, and a released port MUST NOT be reissued until the expiry of the grant signed for its last lease plus the configured reuse margin has passed, so that a copied grant cannot register a port another host now holds. The margin MUST be read when a port is selected, so that a changed margin applies to leases already released. A relay checks a grant's expiry on its own clock with no leeway, so the relay's and the provisioning service's clocks MUST be kept synchronised, with skew below the margin. A stale free-port observation MUST NOT reassign an active lease; allocation MUST retry a conflicting claim without rolling back other writes in the caller's transaction.
+Only released lease rows may be reused, and a released port MUST NOT be reissued until the expiry of the grant signed for its last lease plus the configured reuse margin has passed, so that a copied grant cannot register a port another host now holds. The margin MUST be read when a port is selected, so that a changed margin applies to leases already released. A relay checks a grant's expiry on its own clock with no leeway, so the relay's and the provisioning service's clocks MUST be kept synchronised, with skew below the margin. The provisioning service MUST refuse to start with a reuse margin that is not positive, which no clock skew can stay below, or with a negative grant expiry grace, which would expire a grant before its lease's scheduled end. A stale free-port observation MUST NOT reassign an active lease; allocation MUST retry a conflicting claim without rolling back other writes in the caller's transaction.
 
 A lease MUST be released with its reservation's capacity, in the transaction that releases it, whatever path releases it, and MUST NOT be released on a fulfillment state alone. A failed creation may leave a guest running with its tunnel bound, so its port is held with its capacity: until a compensating teardown reaches `torn_down` and the capacity is released, or until an operator verifies the host and forces the release. A periodic reconciliation MUST release leases whose reservation has been released beyond a grace period, as a backstop rather than as the primary mechanism.
 
@@ -885,6 +885,11 @@ A pool whose referenced relay has no usable allocation window MUST be rejected b
 
 - **WHEN** the reuse margin is raised after a lease was released
 - **THEN** that lease's port is held until its grant expiry plus the raised margin
+
+#### Scenario: A timing setting would defeat the protection it configures
+
+- **WHEN** the provisioning service is configured with a reuse margin of zero or less, or a negative grant expiry grace
+- **THEN** it refuses to start, naming the setting
 
 ### Requirement: Relay definitions are imported from a mounted document
 
@@ -1079,10 +1084,10 @@ capacity declaration only where its connection is used: at dispatch.
 The inventory an execution path hands to its executor SHALL be rendered from the
 registered host record named by the selected settlement resource, and from no
 other source. A host name with no registered host record SHALL fail the operation
-before any playbook or executor command runs. A configured inventory file SHALL be
-used only as a startup seed input that populates host records; no execution path
-SHALL read it as an inventory, and no execution path SHALL target a host named only
-by a request or a capacity declaration.
+before any playbook or executor command runs. A host definitions document SHALL
+only populate host records; no execution path SHALL read a document or a file as an
+inventory, and no execution path SHALL target a host named only by a request, a
+capacity declaration, or a document entry that was not applied.
 
 #### Scenario: Dispatch names an unregistered host
 
@@ -1093,16 +1098,16 @@ by a request or a capacity declaration.
 
 #### Scenario: A static inventory file names the host
 
-- **GIVEN** a configured inventory file naming a host that has no registered host
-  record
+- **GIVEN** a file, or a host definitions document that was refused, naming a host
+  that has no registered host record
 - **WHEN** an execution path runs for that host name
-- **THEN** it fails exactly as it would with no inventory file present
+- **THEN** it fails exactly as it would with no such file or document present
 
-#### Scenario: The inventory file seeds the host registry
+#### Scenario: A changed host definitions document registers its hosts
 
-- **WHEN** the provisioning service starts with a configured inventory file
-- **THEN** the hosts it names are seeded into the host registry, and later
-  execution renders from those records
+- **WHEN** the provisioning service starts with a changed host definitions document
+- **THEN** the hosts it names are registered, and later execution renders from
+  those records
 
 ### Requirement: The tenant-facing host address falls back to the connection address
 
@@ -1137,7 +1142,7 @@ its host's tenant-facing address and port with the tenant account its job create
 
 ### Requirement: Host writes declare no capacity
 
-A compute provisioner MUST NOT create a capacity declaration from a host record on any host write: not when host inventory is applied from an INI document, whether seeded at startup or submitted through the host import API, and not when a host is created or updated through the individual host API. Capacity MUST be declared only through capacity registration, a capacity-definitions document, or capacity import. The ordered migration derived a declaration once for host records with a positive legacy GPU count present at upgrade.
+A compute provisioner MUST NOT create a capacity declaration from a host record on any host write: not when a host definitions document is applied, at startup or through its import API, not when an INI inventory is submitted through the host import API, and not when a host is created or updated through the individual host API. Capacity MUST be declared only through capacity registration, a capacity-definitions document, or capacity import. The ordered migration derived a declaration once for host records with a positive legacy GPU count present at upgrade.
 
 A host MUST be treated as already declared when any declaration names it as its
 `host_id`, which is also the only rule the capacity projection uses to correlate
@@ -1145,8 +1150,9 @@ declarations to hosts.
 
 #### Scenario: Deployment configured only through host inventory
 
-- **WHEN** a provisioner applies host inventory from an INI document, at startup or through
-  the host import API, and no capacity declarations exist
+- **WHEN** a provisioner applies a host definitions document, at startup or through its
+  import API, or an INI inventory through the host import API, and no capacity
+  declarations exist
 - **THEN** the hosts are registered, no capacity declaration is created for them, and
   the capacity projection contains no entry for them
 
@@ -1166,7 +1172,7 @@ declarations to hosts.
 
 #### Scenario: A host has no GPUs
 
-- **WHEN** host inventory is applied for a machine without GPUs
+- **WHEN** a host is registered for a machine without GPUs
 - **THEN** no declaration is created for it, as for any host
 
 #### Scenario: A declaration's resource id differs from its host
@@ -1199,12 +1205,14 @@ declaration the document does not name unchanged. A declaration naming a resourc
 pool that does not exist MUST fail the whole import, naming the pool, with nothing
 applied. A configured document that cannot be read or applied MUST fail startup
 rather than be skipped silently, and the startup import MUST run after resource-pool
-definitions and host inventory seeding.
+definitions and host definitions.
 
 A document entry MUST state a declaration with the registration contract's own fields
 and MUST replace the whole declaration it names, exactly as a registration request
 does. The document MUST NOT accept the legacy scalar unit total, MUST require each
 entry's resource type rather than defaulting it, and MUST reject unknown fields.
+Document validation MUST be strict: a value of the wrong type, such as a quoted
+number, MUST be reported as a structural problem rather than coerced.
 Document validation MUST report every structural problem it finds, each with its
 location, rather than stopping at the first. A document with any structural problem
 MUST NOT be evaluated against stored state.
@@ -1270,6 +1278,13 @@ without applying either.
 - **WHEN** a document carries an unknown field, a missing resource type, and two
   entries naming the same host
 - **THEN** the import reports all three with their locations and applies nothing
+
+#### Scenario: An entry quotes a quantity
+
+- **WHEN** a document entry states a capacity quantity as a quoted number, such as
+  `gpu_count: "8"`
+- **THEN** the import reports a structural problem at that quantity's location
+  and applies nothing
 
 #### Scenario: A document has structural and stored-state problems
 
@@ -1366,10 +1381,17 @@ service's composition root MUST build exactly one job authority and one host aut
 and supply both to every adapter runtime; no adapter runtime builds or owns either. The
 root supplies the connection codecs a deployment supports, and a domain contributes its
 host pool-change hooks as declarations the root merges. Every change of a registered host's
-pool MUST go through those hooks, whether it arrives as a host update or in an imported
-inventory, and assigning a host the pool it already has is not a move. A hook MAY refuse a
+pool MUST go through those hooks, whether it arrives as a host update, in an imported
+inventory, or in a host definitions document, and assigning a host the pool it already has
+is not a move. A hook MAY refuse a
 move; a refused move MUST leave every host the operation names unchanged, and a provisioning
-route MUST answer it as a conflict (409).
+route MUST answer it as a conflict (409). A placed host given a new connection without a
+move, by a host update, an imported inventory, or a host definitions document, MUST likewise
+go through the connection-change hooks the root merges; a refused connection change MUST leave every host the operation names
+unchanged, and a provisioning route MUST answer it as a conflict (409). The host definitions
+import route instead reports either refusal among its document's problems, coded
+`pool_change_refused`, as "A host definitions document is validated whole and carries no
+credential" states.
 
 #### Scenario: A host changes pool
 
@@ -1419,6 +1441,10 @@ fields; it validates an envelope through its codec. An executor MUST receive an 
 execution-host value, not the persistence record, and MUST refuse a connection kind it
 does not support.
 
+A codec MUST validate the public fields it defines strictly, for every submission alike
+— the host API, an INI import, and a host definitions document: a value of the wrong
+type, such as a quoted number, MUST be refused rather than coerced.
+
 A deployment MUST register one codec per kind, and each codec serves one version;
 composition MUST refuse two codecs for one kind. A connection MUST be built by the codec
 of its own kind, at the version that codec serves. A connection at a kind no codec
@@ -1437,6 +1463,12 @@ nothing upgrades a stored connection on its own.
 - **WHEN** a domain's executor reaches its targets by a means other than SSH
 - **THEN** an implementation distribution adds a codec for that kind, and neither the host
   authority's model nor the executor contract changes
+
+#### Scenario: A connection quotes a number
+
+- **WHEN** a host is submitted through the host API with an `ssh` connection whose
+  `ssh_port` is the string `"2222"`
+- **THEN** the submission is refused naming the field, and nothing is stored
 
 #### Scenario: A connection states a version no codec serves
 
@@ -2763,12 +2795,22 @@ Fulfillment preparation MUST refuse a pool whose referenced relay holds no activ
 
 ### Requirement: A host's management route does not use its pool's buyer relay
 
-A host MUST NOT be placed in a relay-backed pool when its connection address equals that relay's address, and a relay's address MUST NOT be set to the connection address of a host placed in a pool referencing it. Management proxies carry no grant, and a relay enforcing admission would refuse them; admitting them by a static list would let a token holder bind a dropped host's management port. The comparison is of normalized addresses and does not detect aliases.
+A write MUST NOT leave a host in a relay-backed pool with a connection address equal to that relay's address: a host MUST NOT be placed in such a pool, by registration, inventory import, a host definitions document, or a move; a placed host's connection MUST NOT be changed, by an update, an inventory import, or a host definitions document, to its pool's relay's address; a pool MUST NOT be pointed at a relay whose address is the connection address of a host the pool holds; and a relay's address MUST NOT be set to the connection address of a host placed in a pool referencing it. Each refusal MUST leave every row the write named as it was. Management proxies carry no grant, and a relay enforcing admission would refuse them; admitting them by a static list would let a token holder bind a dropped host's management port. The comparison is of normalized addresses and does not detect aliases.
 
 #### Scenario: A host reached through the buyer relay is placed
 
 - **WHEN** an operator places a host whose connection address is the address of the relay its new pool references
 - **THEN** the placement is refused, naming the host and the relay
+
+#### Scenario: A placed host's connection is moved onto its pool's relay
+
+- **WHEN** an operator updates, or imports, the connection of a host placed in a relay-backed pool to that relay's address
+- **THEN** the write is refused, naming the host and the relay, and the host keeps its previous connection
+
+#### Scenario: A pool is pointed at the relay one of its hosts is managed through
+
+- **WHEN** an operator sets a pool's relay reference to a relay whose address is the connection address of a host the pool holds
+- **THEN** the write is refused, naming the host and the relay, and the pool keeps its previous relay reference
 
 ### Requirement: Relay holdings are readable by the administrator
 
@@ -2951,6 +2993,12 @@ Bounded cleanup SHALL independently verify no process references the recorded UI
 - **WHEN** an account is absent but a process still references its recorded UID
 - **THEN** bounded cleanup fails and the host's capacity remains held
 
+#### Scenario: A grant arrives after cleanup started
+
+- **WHEN** a grant for a reservation runs after reclaim cleaned that reservation's receipt and before completion
+- **THEN** the helper refuses the grant and no account, private group or SSH key is restored
+- **AND** reclaim's cleanup retries remain available
+
 ### Requirement: Bounded cleanup completes only after verified absence
 
 Bounded reclaim SHALL succeed only after verifying account, recorded private primary group, home, attributable covered scratch and IPC absence and committing a protected completion receipt. Retries SHALL resume safely after partial deletion, including an absent account, without recreating it or releasing consumed UIDs. Missing attribution SHALL fail closed. Receipt contents SHALL remain diagnostic; helper or role failure SHALL fail the reclaim job and retain capacity through ordinary lease release.
@@ -2980,6 +3028,210 @@ Bounded reclaim SHALL succeed only after verifying account, recorded private pri
 - **WHEN** helper cleanup refuses a remaining object or cannot verify an absence
 - **THEN** the reclaim job fails, teardown is not proven, and capacity remains unavailable until successful retry or a separately audited operator override
 
+### Requirement: Host definitions are imported from a mounted document
+
+The provisioning service MAY be configured with a host definitions document through `host_definitions_path`. At startup it MUST reconcile that document under the definition-document digest contract, with the document kind `hosts`: it applies the document only when it differs from the one last reconciled, and records the digest in the same transaction as the apply. An import through the host-definitions import API MUST reconcile regardless of the recorded digest and MUST NOT record one.
+
+The startup import MUST run after resource-pool definitions, the fresh-site pool seed, and the stored-pool declaration check, and before capacity definitions. A configured document that is missing or cannot be applied MUST fail startup and record no digest.
+
+#### Scenario: An operator adds a host to the document and restarts
+
+- **WHEN** an operator adds an entry to the configured host definitions document and restarts the provisioner
+- **THEN** the host is registered as the entry states, and work can be dispatched to it
+
+#### Scenario: An unchanged document is present at restart
+
+- **GIVEN** a host has been changed through the API since the last reconciliation
+- **WHEN** the provisioner restarts with the same host definitions document
+- **THEN** no reconciliation occurs and the API change survives
+
+#### Scenario: An operator explicitly imports an unchanged document
+
+- **WHEN** an operator submits through the import API a document whose digest matches the recorded one
+- **THEN** the document is reconciled anyway
+- **AND** the recorded startup digest is unchanged
+
+#### Scenario: The document names a pool the pool document creates
+
+- **WHEN** a fresh site starts with a pool document and a host document whose entry names one of its pools
+- **THEN** the pool exists when the host is applied, and the host is registered in it
+
+#### Scenario: Configured document is missing
+
+- **WHEN** a host definitions path is configured but no document exists there
+- **THEN** startup fails
+
+#### Scenario: No host definitions are configured
+
+- **WHEN** no host definitions path is configured
+- **THEN** startup proceeds and leaves the registered hosts as they are
+
+### Requirement: A host definitions entry declares the whole host
+
+A host definitions document MUST hold a top-level `hosts` list whose entries use the host registration contract's field names: `host_id`, an optional `pool_id`, an optional `enabled`, and a `connection` of `kind`, a required `version`, and `public`. An explicit `null` `pool_id` MUST be read as an omitted one; an explicit `null` `enabled` is a value of the wrong type. An empty `hosts` list is a valid document that applies nothing. Applying an entry MUST register the host it names or replace that host's whole non-secret state: an omitted `pool_id` unplaces the host, an omitted `enabled` enables it, and the connection is replaced through its kind's codec, which keeps a stored protected key when the entry names no key path. An entry naming no key path for a host whose key is a key file MUST be refused naming the entry. A change of pool MUST go through the host pool-change hooks.
+
+Each entry MUST be built through its kind's codec with the stored connection as the previous one, and the result compared with the stored host on connection kind, version, canonical public fields, and protected-value schemes, and on pool and enabled state. An entry equal to the stored host MUST write nothing, run no hook, and leave the host's update time unchanged.
+
+#### Scenario: An entry omits the pool of a placed host
+
+- **WHEN** a reconciled entry names a host placed in a pool and states no `pool_id`
+- **THEN** the host is unplaced, through the pool-change hooks
+
+#### Scenario: An entry omits `enabled` for a disabled host
+
+- **WHEN** a reconciled entry names a host disabled through the API and states no `enabled`
+- **THEN** the host is enabled
+
+#### Scenario: An entry equals the stored host
+
+- **WHEN** a document is reconciled whose entry states exactly the stored host's pool, enabled state, and connection
+- **THEN** nothing is written for that host, no hook runs, and the host is reported unchanged
+
+#### Scenario: An entry omits a field its codec defaults
+
+- **GIVEN** a host stored with an `ssh` connection whose port is 22 and whose user is `root`
+- **WHEN** a document is reconciled whose entry for that host states its pool, enabled state, and connection but omits `ssh_port` and `ssh_user`
+- **THEN** the host is reported unchanged, nothing is written for it, and no hook runs
+
+#### Scenario: An entry names no key for a host holding a key file
+
+- **WHEN** a reconciled entry names a host whose key is a key file and its connection names no `key_path`
+- **THEN** the document is refused naming that entry, and nothing from it is applied
+
+#### Scenario: A document lists no hosts
+
+- **WHEN** a document whose `hosts` list is empty is reconciled
+- **THEN** nothing is written, and every registered host is reported as registered and not named
+
+#### Scenario: An entry names no key for a host holding a protected key
+
+- **WHEN** a reconciled entry names a host that holds a protected private key and its connection names no `key_path`
+- **THEN** the host keeps its protected key unchanged
+
+#### Scenario: An entry names no key for a new host
+
+- **WHEN** a document entry names an unregistered host whose connection names no `key_path`
+- **THEN** the document is refused naming that entry, and nothing from it is applied
+
+### Requirement: A host definitions document retains the hosts it does not name
+
+A reconciliation MUST leave every registered host the document does not name unchanged, its enabled state included, and MUST report those hosts: in the startup log, and in the import API's response. Hosts are never deleted.
+
+#### Scenario: A document stops naming a host
+
+- **WHEN** a document is reconciled that omits a host an earlier document or the API registered
+- **THEN** that host remains as it was, enabled or not
+- **AND** the reconciliation reports it as registered and not named
+
+### Requirement: A host definitions document is validated whole and carries no credential
+
+Host definitions validation MUST be strict and MUST run in two stages. It MUST report every structural problem with its location — unparseable YAML, a root that is not a mapping (an empty document included), a missing or non-list `hosts`, an unknown field, a missing `host_id`, `connection`, or connection `version`, a `host_id` named twice, or a value of the wrong type — and MUST NOT check a document with any structural problem against stored state. For a structurally valid document it MUST report every refusal stored state decides: a pool that does not exist, a connection its kind's codec refuses — a quoted number among its public fields included, since the codec types them strictly — and a pool move a pool-change hook refuses. The apply MUST continue past a refusal so that every refusal is reported. Any problem MUST leave the whole document unapplied with no digest recorded.
+
+A host definitions document MUST NOT carry a credential: an entry stating connection secrets is a structural problem. A key is named by its file path.
+
+The import API MUST answer with one response: whether it applied, the created, updated, and unchanged hosts, the registered hosts the document does not name, and every problem, each with its location and a code; a hook's refusal is coded `pool_change_refused`. An applying import with any problem MUST answer 422 with that response and apply nothing. An applying import whose commit meets a host another request registered after the document was evaluated MUST answer 409 and apply nothing, as a duplicate registration through the host API does. The import API MUST offer a validate-only mode that answers 200 with the problems and the planned creations, updates, and unchanged hosts, applying nothing.
+
+#### Scenario: A document has several structural problems
+
+- **WHEN** a document carries an unknown field, an entry with no connection, and two entries naming the same host
+- **THEN** all three are reported with their locations and nothing is applied
+
+#### Scenario: A document has no hosts list
+
+- **WHEN** a document is empty, or has no `hosts` key
+- **THEN** it is refused as structurally invalid, and nothing is applied
+
+#### Scenario: A document has structural and stored-state problems
+
+- **WHEN** a document has an unknown field in one entry and names an unknown pool in another
+- **THEN** the unknown field is reported and the unknown pool is not
+- **AND** nothing is applied
+
+#### Scenario: A pool-change hook refuses a move at startup
+
+- **WHEN** a changed document moves a host whose VM tunnels a buyer holds to a pool dialling another relay
+- **THEN** startup fails naming the host, no entry from the document is applied, and no digest is recorded
+
+#### Scenario: A pool-change hook refuses a move on import
+
+- **WHEN** an operator imports a document whose entry makes a move a hook refuses
+- **THEN** the import answers 422 with the refusal among its problems, coded `pool_change_refused`, and no host the document names is created or changed
+
+#### Scenario: A document has a hook refusal and another stored-state problem
+
+- **WHEN** an operator imports a document one of whose entries names an unknown pool while another makes a move a hook refuses
+- **THEN** the import answers 422 reporting both problems, and nothing is applied
+
+#### Scenario: An entry quotes its SSH port
+
+- **WHEN** an operator imports a document one of whose entries states `ssh_port: "2222"` beside a valid entry
+- **THEN** the import answers 422 reporting a connection the codec refuses at that entry's connection, and neither entry is applied
+
+#### Scenario: An entry carries key material
+
+- **WHEN** a document entry states `connection.secrets`
+- **THEN** the document is refused naming that entry's location, and nothing is applied
+
+#### Scenario: An operator validates a document
+
+- **WHEN** an operator submits a document to the import API in validate-only mode
+- **THEN** the import answers 200, and the response reports the problems and the planned creations, updates, and unchanged hosts
+- **AND** nothing is applied
+
+#### Scenario: Another request registers a named host during an import
+
+- **WHEN** an applying import would create a host, and another request registers that host before the import commits
+- **THEN** the import answers 409 and applies nothing
+
+### Requirement: The host registry exports a canonical host definitions document
+
+The host routes MUST offer an export at `GET /api/v1/hosts/definitions/export`, admitting the administrator, that returns every registered host as a host definitions document in a YAML body without any secret: a host holding a protected key appears with no key path. Its entries MUST be ordered by `host_id`, and each MUST state its host's pool and enabled state, so the export reads the same for the same registry and an entry never relies on the defaults an omitted pool or enabled state takes. A host whose connection kind no composed codec serves, or whose stored connection is at a version its kind's codec does not serve, MUST NOT be stated as an entry. Importing an unedited export MUST change nothing.
+
+#### Scenario: An operator exports the registry and imports it unedited
+
+- **WHEN** an operator exports the host registry and imports the result without editing it
+- **THEN** every host is reported unchanged, and nothing is written
+
+#### Scenario: A host holds a protected key
+
+- **WHEN** the registry holds a host registered with embedded key material
+- **THEN** its exported entry carries no key path and no secret, and importing it keeps the protected key
+
+#### Scenario: A host is stored at an unserved connection version
+
+- **WHEN** the registry holds a host stored at `ssh` version 1
+- **THEN** the export emits no entry for that host
+- **AND** importing that export leaves the host unchanged and reports it as registered and not named
+
+#### Scenario: A host's connection kind is not served
+
+- **WHEN** the registry holds a host whose connection kind no composed codec serves
+- **THEN** the export emits no entry for that host, and states every other host
+
+### Requirement: Startup reads no INI inventory
+
+The provisioning service MUST NOT read an INI inventory at startup. `inventory_ini` and `inventory_path` are retired settings: a configuration stating either in any layer MUST refuse startup, naming `host_definitions_path`, whatever value it states, an empty one included. No packaged configuration states either. The INI inventory format MUST remain only the input of the Ansible implementation's host import route.
+
+#### Scenario: A configuration states a retired inventory setting
+
+- **WHEN** the provisioning service starts with a configuration stating `inventory_ini` or `inventory_path`
+- **THEN** it refuses to start, naming the setting and `host_definitions_path`
+
+#### Scenario: A configuration states an empty `inventory_ini`
+
+- **WHEN** the provisioning service starts with a profile stating `inventory_ini: ""`
+- **THEN** it refuses to start, naming `inventory_ini` and `host_definitions_path`
+
+#### Scenario: The packaged configuration is started unchanged
+
+- **WHEN** the provisioning service starts with its packaged settings and any packaged profile, and no operator configuration
+- **THEN** no retired inventory setting is refused
+
+#### Scenario: An operator imports an INI inventory
+
+- **WHEN** an operator submits an INI inventory to `POST /api/v1/hosts/import`
+- **THEN** the Ansible implementation's route applies it as before, and no startup digest is read or recorded
+
 ## Evidence
 
 - Bare-metal obligation servicing resolved from the accepted Agreement: `domains/bare_metal/storefront/tests/test_obligation_servicing.py` and `test_app_composition.py`.
@@ -2991,7 +3243,8 @@ Bounded reclaim SHALL succeed only after verifying account, recorded private pri
 - VM sizing precedence (committed reservation, pool default, unset), relay access-path selection, and teardown from the lease: `domains/vms/provisioning/adapter/tests/unit/test_vm_fulfillment_plan.py` (`TestSizingPrecedence`, `TestRelayAccessPath`, `TestTeardown`); the delivered credentials and endpoint: `provisioning/compute/service/tests/integration/test_fulfillment_api.py::TestStatusAndResultQueries`.
 - Relay administration, token confidentiality, rebinding, and definition-document reconciliation: `provisioning/compute/tests/integration/test_relay_administration.py`, `test_relay_port_allocator.py`, and `test_relay_port_leases.py`, over the family's own schema; VM's pool configuration's relay reference, `domains/vms/provisioning/adapter/tests/integration/test_relay_pool_configuration.py`; through the canonical client, `provisioning/compute/service/tests/integration/test_relays_api.py`; the service's importer and migrations, `provisioning/compute/service/tests/integration/test_definition_document_digest.py` and `test_relay_migrations.py`, plus `provisioning/compute/service/tests/unit/services/test_definition_document_restart_safety.py`.
 - Relay ports held through fulfillment convergence, including a failed creation, and the reservation-released predicate reconciliation is given: `provisioning/compute/service/tests/integration/test_fulfillment_convergence.py`; their return with a reservation's capacity: `provisioning/compute/tests/integration/test_release.py` and `kit/site/tests/integration/test_ledger.py`.
-- Host writes declaring no capacity — an INI import and the startup inventory seed, placed and unplaced, an inventory line carrying `gpus=` and `gpu_model=`, a host created and updated through the host API, and an operator's declaration surviving a re-import: `provisioning/compute/service/tests/integration/test_host_writes_declare_no_capacity_api.py` and `test_capacity_api.py`; the upgrade derivation: `provisioning/compute/service/tests/unit/test_legacy_host_capacity_migration.py`.
+- Host writes declaring no capacity — an INI import, a host definitions document applied at startup and through its import route, placed and unplaced, an inventory line carrying `gpus=` and `gpu_model=`, a host created and updated through the host API, and an operator's declaration surviving a re-import: `provisioning/compute/service/tests/integration/test_host_writes_declare_no_capacity_api.py` and `test_capacity_api.py`; the upgrade derivation: `provisioning/compute/service/tests/unit/test_legacy_host_capacity_migration.py`.
+- Host definitions documents — structural validation: `provisioning/compute/tests/unit/test_host_definitions.py`; stored-state evaluation, whole-entry replacement, codec-normalized equality, retention, the export and its round trip, and an import meeting a concurrent registration: `provisioning/compute/tests/integration/test_host_definitions.py`; the import and export routes through the typed client, a refused hook move, validate-only, and a quoted SSH port: `provisioning/compute/service/tests/integration/test_host_definitions_api.py`; the startup import, its order, a missing or refused document, the first document on a site with registered hosts, and a bare-metal pool binding: `provisioning/compute/service/tests/integration/test_host_definitions_startup.py`; the `hosts` digest kind: `provisioning/compute/service/tests/integration/test_definition_document_digest.py`; the retired inventory settings: `provisioning/compute/service/tests/unit/test_config.py` and `provisioning/compute/service/tests/integration/test_retired_settings_startup.py`; the chart's `definitions.hosts`: `helm/charts/provisioning/tests/test_render.py`.
 - A host record describing no hardware — the host models ignoring `gpu_count` and `gpu_model` and serializing neither: `provisioning/compute/contracts/tests/unit/test_contracts.py`; the INI parser ignoring `gpus=` and `gpu_model=`: `provisioning/compute/ansible/tests/unit/test_inventory.py`; no write recording a GPU field: `provisioning/compute/tests/integration/test_host_authority.py`; a host created and updated with GPU fields through the typed client, its stored row holding no GPU column: `provisioning/compute/service/tests/integration/test_hosts_api.py`; the column drop keeping every other value, leaving declarations and a fresh database alone, and rerunning as a no-op: `provisioning/compute/service/tests/integration/test_host_gpu_columns_drop_migration.py`.
 - A VM job's playbook frozen at preparation, the pool's own or the service's `vm_playbook_path`, for create and teardown, and refused with neither: `domains/vms/provisioning/adapter/tests/unit/test_vm_fulfillment_plan.py`; through the typed client for a pool stating none: `provisioning/compute/service/tests/integration/test_fulfillment_api.py`; an omitted or null pool playbook stored and a blank one refused: `domains/vms/provisioning/adapter/tests/integration/test_ansible_pool_config_handler.py` and `provisioning/compute/service/tests/integration/test_pools_api.py`; the `ansible_pool_configs` rebuild: `provisioning/compute/service/tests/integration/test_vm_pool_config_migration.py`.
 - A bare-metal grant and reclaim carrying the configured playbook, and the codec passing it to the plan: `domains/bare_metal/provisioning/adapter/tests/test_bare_metal_fulfillment_plan.py` and `test_bare_metal_codec.py`; through the composed service: `provisioning/compute/service/tests/integration/test_bare_metal_mock_profile.py`.

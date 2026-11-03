@@ -23,6 +23,7 @@ from compute_provisioning_contracts import ConnectionSubmission, HostCreate, Hos
 from compute_provisioning.hosts.db import Base as HostsBase
 from compute_provisioning.hosts.db import Host
 from compute_provisioning.hosts.service import (
+    ConnectionChangeRefusedError,
     HostAuthority,
     HostNotFoundError,
     InventoryHost,
@@ -321,6 +322,67 @@ def test_assigning_a_host_its_current_pool_is_not_a_move(authority, moves) -> No
     assert moves == [("h1", None, "gpu")]
 
 
+def test_a_placed_hosts_new_connection_runs_the_connection_change_hooks(
+    session_factory,
+) -> None:
+    """An update or an inventory giving a placed host a new connection in
+    place runs the connection-change hooks with its pool and the new
+    connection in the session; an unplaced host, and a write that also moves
+    the host, run none, since the pool-change hooks see a move."""
+    seen = []
+
+    def record(db, host_id, pool_id):
+        address = db.get(Host, host_id).connection().public["address"]
+        seen.append((host_id, pool_id, address))
+
+    hooked = HostAuthority(
+        session_factory,
+        codecs=ConnectionCodecs([_Codec()]),
+        connection_change_hooks=(record,),
+    )
+    hooked.register_host(HostCreate(host_id="h1", connection=_connection(), pool_id="gpu"))
+    hooked.register_host(HostCreate(host_id="h2", connection=_connection()))
+
+    hooked.update_host("h1", HostUpdate(connection=_connection("198.51.100.1")))
+    hooked.apply_inventory([InventoryHost(host_id="h1", connection=_connection("198.51.100.2"))])
+    hooked.update_host("h2", HostUpdate(connection=_connection("198.51.100.3")))
+    hooked.update_host(
+        "h1", HostUpdate(connection=_connection("198.51.100.4"), pool_id="default")
+    )
+    hooked.update_host("h1", HostUpdate(enabled=False))
+
+    assert seen == [
+        ("h1", "gpu", "198.51.100.1"),
+        ("h1", "gpu", "198.51.100.2"),
+    ]
+
+
+def test_a_refused_connection_change_leaves_the_host_and_the_import(session_factory) -> None:
+    """A connection-change hook's refusal rolls back the whole update, or the
+    whole import with every host it names."""
+
+    def refuse(db, host_id, pool_id):
+        raise ConnectionChangeRefusedError(f"{host_id} refused in {pool_id}")
+
+    guarded = HostAuthority(
+        session_factory,
+        codecs=ConnectionCodecs([_Codec()]),
+        connection_change_hooks=(refuse,),
+    )
+    guarded.register_host(HostCreate(host_id="h1", connection=_connection(), pool_id="gpu"))
+
+    with pytest.raises(PoolChangeRefusedError, match="h1 refused in gpu"):
+        guarded.update_host("h1", HostUpdate(connection=_connection("198.51.100.1")))
+    with pytest.raises(ConnectionChangeRefusedError):
+        guarded.apply_inventory([
+            InventoryHost(host_id="h2", connection=_connection()),
+            InventoryHost(host_id="h1", connection=_connection("198.51.100.2")),
+        ])
+
+    assert guarded.get_host("h1").connection.public["address"] == "192.0.2.10"
+    assert guarded.get_host("h2") is None
+
+
 def test_listing_filters_disabled_hosts_and_searches_by_id(authority) -> None:
     for host_id in ("kvm1", "kvm2", "bm1"):
         authority.register_host(HostCreate(host_id=host_id, connection=_connection()))
@@ -350,6 +412,24 @@ def test_an_inventory_upserts_its_hosts_and_leaves_the_rest(authority) -> None:
     assert again[0].connection.public["address"] == "192.0.2.99"
     assert again[0].pool_id == "gpu"
     assert authority.get_host("untouched") is not None
+
+
+def test_an_inventory_resubmitting_a_secret_replaces_the_stored_one(authority) -> None:
+    """A rotated embedded key changes no public field, pool, or scheme, yet the
+    reimport stores it; an entry submitting no secret keeps the stored one."""
+    authority.apply_inventory(
+        [InventoryHost(host_id="kvm1", connection=_connection(token="old"), pool_id="gpu")]
+    )
+
+    authority.apply_inventory(
+        [InventoryHost(host_id="kvm1", connection=_connection(token="new"), pool_id="gpu")]
+    )
+    assert authority.lookup("kvm1").connection.protected["token"].ciphertext == "wen"
+
+    authority.apply_inventory(
+        [InventoryHost(host_id="kvm1", connection=_connection(), pool_id="gpu")]
+    )
+    assert authority.lookup("kvm1").connection.protected["token"].ciphertext == "wen"
 
 
 def test_an_inventory_moving_a_host_runs_the_pool_change_hooks(authority, moves) -> None:
@@ -394,6 +474,113 @@ def test_a_hook_refusing_an_inventory_move_applies_nothing(
     assert kvm1.pool_id is None
     assert kvm1.connection.public["address"] == "192.0.2.10"
     assert authority.get_host("kvm2") is None
+
+
+@pytest.fixture
+def file_session_factory(tmp_path):
+    """Sessions on separate connections to one file, so a session sees only
+    what another has committed."""
+    engine = create_engine(f"sqlite:///{tmp_path / 'hosts.db'}")
+    PoolsBase.metadata.create_all(engine)
+    HostsBase.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    with factory() as db:
+        for pool_id in ("default", "gpu"):
+            db.add(ResourcePool(id=pool_id, label=pool_id, provider="test", policy_tags={}))
+        db.commit()
+    yield factory
+    engine.dispose()
+
+
+def test_a_session_scoped_write_is_seen_only_once_its_caller_commits(file_session_factory) -> None:
+    authority = HostAuthority(file_session_factory, codecs=ConnectionCodecs([_Codec()]))
+
+    with authority.session() as db:
+        assert authority.put_host_in_session(db, "h1", _connection(), pool_id="gpu") == "created"
+        db.flush()
+        assert authority.get_host("h1") is None
+        db.commit()
+
+    assert authority.get_host("h1").pool_id == "gpu"
+
+
+def test_a_hook_refusing_a_session_scoped_move_commits_nothing(file_session_factory) -> None:
+    def refuse(db, host_id, current, new):
+        # Registration places a host as a move from no pool, so only the move
+        # under test is refused.
+        if current is not None:
+            raise PoolChangeRefusedError("move refused")
+
+    authority = HostAuthority(
+        file_session_factory, codecs=ConnectionCodecs([_Codec()]), pool_change_hooks=(refuse,)
+    )
+    authority.register_host(HostCreate(host_id="h1", connection=_connection(), pool_id="gpu"))
+
+    with authority.session() as db:
+        authority.put_host_in_session(db, "h2", _connection())
+        with pytest.raises(PoolChangeRefusedError, match="move refused"):
+            authority.put_host_in_session(db, "h1", _connection("192.0.2.99"), pool_id="default")
+
+    h1 = authority.get_host("h1")
+    assert (h1.pool_id, h1.connection.public["address"]) == ("gpu", "192.0.2.10")
+    assert authority.get_host("h2") is None
+
+
+def test_a_session_scoped_write_states_only_what_it_is_given(authority, moves) -> None:
+    """``enabled`` and the pool are replaced only when stated; an equal host is
+    reported unchanged and runs no hook."""
+    authority.register_host(HostCreate(host_id="h1", connection=_connection(), pool_id="gpu", enabled=False))
+    moves.clear()
+
+    with authority.session() as db:
+        assert authority.put_host_in_session(db, "h1", _connection()) == "unchanged"
+        assert authority.put_host_in_session(db, "h1", _connection(), pool_id="gpu", enabled=False) == "unchanged"
+        assert authority.put_host_in_session(db, "h1", _connection(), enabled=True) == "updated"
+        db.commit()
+
+    h1 = authority.get_host("h1")
+    assert (h1.pool_id, h1.enabled) == ("gpu", True)
+    assert moves == []
+
+
+def test_a_session_scoped_write_runs_the_hooks_on_the_host_as_it_will_be(session_factory) -> None:
+    """A new host stating a pool is placed as a move from no pool, a moved
+    host's new connection is in the session when the pool-change hooks run,
+    and a placed host given a new connection in place runs the
+    connection-change hooks: the checks a host definitions document's entries
+    meet are the ones a registration, a move, and an update meet."""
+    seen = []
+
+    def on_move(db, host_id, current, new):
+        address = db.get(Host, host_id).connection().public["address"]
+        seen.append(("move", host_id, current, new, address))
+
+    def on_connection(db, host_id, pool_id):
+        address = db.get(Host, host_id).connection().public["address"]
+        seen.append(("connection", host_id, pool_id, address))
+
+    hooked = HostAuthority(
+        session_factory,
+        codecs=ConnectionCodecs([_Codec()]),
+        pool_change_hooks=(on_move,),
+        connection_change_hooks=(on_connection,),
+    )
+
+    with hooked.session() as db:
+        assert hooked.put_host_in_session(db, "h1", _connection(), pool_id="gpu") == "created"
+        assert hooked.put_host_in_session(db, "h2", _connection()) == "created"
+        db.commit()
+    with hooked.session() as db:
+        hooked.put_host_in_session(db, "h1", _connection("198.51.100.1"), pool_id="gpu")
+        hooked.put_host_in_session(db, "h1", _connection("198.51.100.2"), pool_id="default")
+        hooked.put_host_in_session(db, "h2", _connection("198.51.100.3"))
+        db.commit()
+
+    assert seen == [
+        ("move", "h1", None, "gpu", "192.0.2.10"),
+        ("connection", "h1", "gpu", "198.51.100.1"),
+        ("move", "h1", "gpu", "default", "198.51.100.2"),
+    ]
 
 
 def test_an_inventory_naming_an_unknown_pool_applies_nothing(authority, session_factory) -> None:

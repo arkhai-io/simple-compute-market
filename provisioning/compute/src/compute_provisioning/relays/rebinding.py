@@ -9,7 +9,7 @@ says nothing about 6142 on another, which may already be leased to a different
 host. Repointing a host's client does not migrate its deliveries; it strands
 every buyer on that host and asks the new relay for ports that may not be free.
 
-So there is one rule, applied at three write paths:
+So there is one rebinding rule, applied at three write paths:
 
     A host's pool, a pool's relay reference, and a relay's address or port may
     each change only while no affected host holds an active lease — unless the
@@ -30,7 +30,12 @@ from sqlalchemy.orm import Session
 
 from ..hosts.connection import ConnectionCodecs
 from ..hosts.db import Host
-from ..hosts.service import PoolChangeHook, PoolChangeRefusedError
+from ..hosts.service import (
+    ConnectionChangeHook,
+    ConnectionChangeRefusedError,
+    PoolChangeHook,
+    PoolChangeRefusedError,
+)
 from .allocator import RelayPortAllocator
 from .db import PoolRelay, Relay, RelayPortLease
 
@@ -220,6 +225,26 @@ def check_management_route(
         )
 
 
+def _check_host_in_pool(
+    db: Session, codecs: ConnectionCodecs, host_id: str, pool_id: str | None
+) -> None:
+    """Refuse a host, as the session holds it, in a pool whose relay it is
+    reached through."""
+    relay_id = pool_relay_id(db, pool_id)
+    if relay_id is None:
+        return
+    relay = db.get(Relay, relay_id)
+    host = db.query(Host).filter(Host.host_id == host_id).one_or_none()
+    if relay is None or host is None:
+        return
+    check_management_route(
+        relay_id=relay.id,
+        relay_addr=relay.relay_addr,
+        host_id=host.host_id,
+        address=codecs.address(host.connection()),
+    )
+
+
 def relay_host_pool_change_hooks(codecs: ConnectionCodecs) -> tuple[PoolChangeHook, ...]:
     """The host pool-change checks the relays contribute to the host authority.
 
@@ -232,24 +257,45 @@ def relay_host_pool_change_hooks(codecs: ConnectionCodecs) -> tuple[PoolChangeHo
     def management_route(
         db: Session, host_id: str, current_pool_id: str | None, new_pool_id: str | None
     ) -> None:
-        relay_id = pool_relay_id(db, new_pool_id)
-        if relay_id is None:
-            return
-        relay = db.get(Relay, relay_id)
-        host = db.query(Host).filter(Host.host_id == host_id).one_or_none()
-        if relay is None or host is None:
-            return
         try:
-            check_management_route(
-                relay_id=relay.id,
-                relay_addr=relay.relay_addr,
-                host_id=host.host_id,
-                address=codecs.address(host.connection()),
-            )
+            _check_host_in_pool(db, codecs, host_id, new_pool_id)
         except ManagementRouteRefused as exc:
             raise PoolChangeRefusedError(str(exc)) from exc
 
     return (relay_host_pool_change, management_route)
+
+
+def relay_host_connection_change_hooks(
+    codecs: ConnectionCodecs,
+) -> tuple[ConnectionChangeHook, ...]:
+    """The checks the relays run when a placed host's connection changes.
+
+    The management-route rule constrains a host's connection as much as its
+    pool: a host already in a relay-backed pool, given that relay's address as
+    its connection, would lose its management route as surely as one moved
+    there.
+    """
+
+    def management_route(db: Session, host_id: str, pool_id: str) -> None:
+        try:
+            _check_host_in_pool(db, codecs, host_id, pool_id)
+        except ManagementRouteRefused as exc:
+            raise ConnectionChangeRefusedError(str(exc)) from exc
+
+    return (management_route,)
+
+
+def check_pool_hosts_against_relay(
+    db: Session, *, relay: Relay, pool_id: str, codecs: ConnectionCodecs
+) -> None:
+    """Refuse pointing a pool at a relay one of its hosts is reached through."""
+    for host in db.query(Host).filter(Host.pool_id == pool_id).order_by(Host.host_id):
+        check_management_route(
+            relay_id=relay.id,
+            relay_addr=relay.relay_addr,
+            host_id=host.host_id,
+            address=codecs.address(host.connection()),
+        )
 
 
 def check_relay_address_against_hosts(
@@ -276,11 +322,13 @@ __all__ = [
     "RelayRebindingRefused",
     "check_host_pool_change",
     "check_management_route",
+    "check_pool_hosts_against_relay",
     "check_pool_relay_change",
     "check_relay_address_against_hosts",
     "check_relay_endpoint_change",
     "check_relay_token_rotation",
     "pool_relay_id",
+    "relay_host_connection_change_hooks",
     "relay_host_pool_change",
     "relay_host_pool_change_hooks",
 ]

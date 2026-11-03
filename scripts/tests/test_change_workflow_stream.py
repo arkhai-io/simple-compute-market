@@ -3,11 +3,12 @@ its denials."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
-from change_workflow.stream import Stream
-from change_workflow_fixtures import (CHANGE, DENIED, VALID, FakeClaude, clock, event_lines,
-                                      make_wrapper, two_turn_lines)
+from change_workflow.stream import Stream, transcript_denials
+from change_workflow_fixtures import (CHANGE, DENIED, SESSION, VALID, FakeClaude, clock,
+                                      event_lines, make_wrapper, two_turn_lines)
 
 
 def test_the_stream_is_kept_as_a_numbered_transcript_with_progress(tmp_path: Path) -> None:
@@ -74,3 +75,43 @@ def test_denials_are_gathered_over_every_turn_with_the_harness_reason(tmp_path: 
 
     assert line["outcome"] == "finished"
     assert line["denials"] == [{**DENIED, "reason": "mode"}]
+
+
+def _killed_run_events() -> list[dict]:
+    """A run denied a call and was then ended by a signal: no `result` event."""
+    return [
+        {"type": "system", "subtype": "init", "session_id": SESSION},
+        {"type": "assistant", "session_id": SESSION,
+         "message": {"content": [{"type": "tool_use", "id": "t1", "name": "Bash",
+                                  "input": DENIED["tool_input"]}]}},
+        {"type": "system", "subtype": "permission_denied", "session_id": SESSION,
+         "tool_use_id": "t1", "decision_reason_type": "rule"},
+        {"type": "system", "subtype": "permission_denied", "session_id": SESSION,
+         "tool_use_id": "t9", "decision_reason_type": "mode", "tool_name": "Write"},
+        {"type": "system", "subtype": "permission_denied", "session_id": SESSION,
+         "tool_use_id": "t10", "decision_reason_type": "mode"},
+        {"type": "system", "subtype": "permission_denied", "session_id": SESSION,
+         "tool_use_id": "t11", "tool_name": "Edit"},
+    ]
+
+
+def test_a_run_ended_without_a_result_keeps_the_denials_its_events_name(tmp_path: Path) -> None:
+    transcript = tmp_path / "01-implement.jsonl"
+    transcript.write_text("".join(json.dumps(e) + "\n" for e in _killed_run_events()), "utf-8")
+
+    assert transcript_denials(transcript) == [
+        {**DENIED, "reason": "rule"},
+        {"tool_name": "Write", "tool_use_id": "t9", "tool_input": {}, "reason": "mode"},
+        {"tool_name": "?", "tool_use_id": "t10", "tool_input": {}, "reason": "mode"},
+        {"tool_name": "Edit", "tool_use_id": "t11", "tool_input": {}},
+    ]
+
+
+def test_a_denial_a_result_lists_is_listed_once(tmp_path: Path) -> None:
+    stream = Stream(tmp_path / "01-validate.jsonl", tmp_path / "01-validate.progress", clock)
+
+    for line in two_turn_lines(VALID["stopped"], VALID["finished"]):
+        stream.feed(line)
+    stream.close()
+
+    assert stream.denials == [{**DENIED, "reason": "mode"}]

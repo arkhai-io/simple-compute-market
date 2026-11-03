@@ -20,6 +20,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from compute_provisioning_service import container as _container_module
 from compute_provisioning_service.db.database import run_migrations
 from compute_provisioning_service.db.models import DefinitionDocumentImport
 from compute_provisioning_service.services.definition_documents import (
@@ -99,3 +100,43 @@ class TestTheDigestGate:
         with session_factory() as db:
             assert importer._recorded_digest(db, "relays") is None
             assert importer._recorded_digest(db, "pools") is not None
+
+    def test_host_definitions_are_recorded_under_their_own_kind(
+        self, session_factory, settings, tmp_path
+    ):
+        """A host document's digest is recorded as ``hosts``, apart from every
+        other kind: neither gates the other, and recording one leaves the
+        others as they were."""
+        document = tmp_path / "host-definitions.yaml"
+        document.write_text(
+            "hosts:\n"
+            "  - host_id: kvm1\n"
+            "    connection:\n"
+            "      kind: ssh\n"
+            "      version: 2\n"
+            "      public: {ssh_host: 10.0.0.1, key_path: /keys/id}\n",
+            encoding="utf-8",
+        )
+        others = {kind: f"{kind}-doc" for kind in ("pools", "relays", "capacity")}
+        importer = DefinitionDocumentImporter(
+            session_factory=session_factory,
+            settings=SimpleNamespace(resolved_host_definitions_path=document),
+            pool_service=None,
+            host_authority=_container_module._make_host_authority(
+                session_factory, _container_module._make_connection_codecs(settings)
+            ),
+        )
+        with session_factory() as db, db.begin():
+            for kind, text in others.items():
+                importer._record_digest(db, kind, importer.digest_of(text))
+
+        outcome = importer.import_host_definitions()
+
+        assert (outcome.kind, outcome.reconciled) == ("hosts", True)
+        with session_factory() as db:
+            assert importer._recorded_digest(db, "hosts") == importer.digest_of(
+                document.read_text(encoding="utf-8")
+            )
+            for kind, text in others.items():
+                assert importer._recorded_digest(db, kind) == importer.digest_of(text)
+        assert importer.import_host_definitions().reconciled is False

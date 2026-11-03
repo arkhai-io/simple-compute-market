@@ -24,6 +24,9 @@ data:
     {{- if .Values.definitions.pools -}}
       {{- $_ := set $config "pool_definitions_path" "/app/config/pool-definitions.yaml" -}}
     {{- end -}}
+    {{- if .Values.definitions.hosts -}}
+      {{- $_ := set $config "host_definitions_path" "/app/config/host-definitions.yaml" -}}
+    {{- end -}}
     {{- if .Values.definitions.capacity -}}
       {{- $_ := set $config "capacity_definitions_path" "/app/config/capacity-definitions.yaml" -}}
     {{- end -}}
@@ -51,6 +54,15 @@ data:
     is disabled. Imported before capacity, whose declarations name pools.
   */}}
   pool-definitions.yaml: |
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.definitions.hosts }}
+  {{- /*
+    Hosts. Each entry declares its whole host and names its key by file path,
+    never carrying one; a host this document stops naming is retained.
+    Imported after pools, which an entry names, and before capacity.
+  */}}
+  host-definitions.yaml: |
     {{- toYaml . | nindent 4 }}
   {{- end }}
   {{- with .Values.definitions.capacity }}

@@ -53,13 +53,16 @@ deny = [
   "Bash(git stash*)", "Bash(git clean*)", "Bash(git rebase*)",
   "Bash(make round-view)", "Bash(make round-view *)", "Bash(make round-done*)",
   "Edit(.claude/**)", "Write(.claude/**)",
-  # find reads unless an action deletes, runs, or writes.
+  # A rule marked "Write-steering" refuses only a shell form that writes a file,
+  # so the write goes through the Edit or Write tool; such a write is a gap, not
+  # a workaround. Every other deny rule forbids the work itself.
+  # Write-steering: find reads unless an action deletes, runs, or writes.
   "Bash(find * -delete*)", "Bash(find * -exec*)", "Bash(find * -ok*)",
   "Bash(find * -fprint*)", "Bash(find * -fls*)",
-  # The diff family writes its output to a file with --output.
+  # Write-steering: the diff family writes its output to a file with --output.
   "Bash(git diff*--output*)", "Bash(git show*--output*)", "Bash(git log*--output*)",
   "Bash(git -C *--output*)",
-  # sed reads only with -n; its in-place forms edit the file.
+  # Write-steering: sed reads only with -n; its in-place forms edit the file.
   "Bash(sed -i*)", "Bash(sed * -i*)", "Bash(sed *--in-place*)",
 ]
 
@@ -89,12 +92,16 @@ allow = [
   "Bash(python3 -c \"import sys,json; print(sorted({json.loads(l)['lens'] for l in sys.stdin if l.strip()}))\")",
   "Bash(bunx @fission-ai/openspec@1.14.0 *)",
   "Bash(npx --yes @fission-ai/openspec@1.14.0 *)", "Bash(npx -y @fission-ai/openspec@1.14.0 *)", "Bash(make check-*)",
-  "Bash(git worktree add ../*-proposal -b propose-* dev)",
+  "Bash(git worktree add ../*-proposal -b propose-* origin/dev)",
   "Bash(make -C ../*-proposal check-change-index)",
   # A prerequisite's or follow-up's proposal is new files in a new directory of
-  # the worktree, so the step creates them as well as editing them.
+  # the sibling worktree, so the step creates them as well as editing them.
+  # Claude Code allows a Write only by an Edit rule, and touches a file outside
+  # the checkout only by a Read rule as well. It never matches a pattern holding
+  # `..`; the wrapper resolves it when anchoring the rule.
   "Bash(mkdir -p ../*-proposal/openspec/changes/*)",
-  "Edit(../*-proposal/openspec/**)", "Write(../*-proposal/openspec/**)",
+  "Read(../*-proposal/**)",
+  "Edit(../*-proposal/openspec/**)", "Edit(../*-proposal/docs/development/ROADMAP.md)",
   "Bash(helm version*)",
   "Bash(git add *)", "Bash(git commit *)", "Bash(make push-branch)",
 ]

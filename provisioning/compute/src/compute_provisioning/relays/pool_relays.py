@@ -2,9 +2,10 @@
 
 Every provider whose deliveries may use a relay accepts ``provider_config.relay_id``
 and hands it here: it is validated by one rule, stored in ``pool_relays``, and
-changed only through ``set_pool_relay``, which runs the rebinding refusal. So the
-rule that a pool's relay is fixed while its hosts hold leases governs a VM pool
-and a bare-metal pool alike, and no provider can write the reference around it.
+changed only through ``set_pool_relay``, which runs the rebinding refusal and the
+management-route check. So the rules that a pool's relay is fixed while its hosts
+hold leases, and is never a relay its hosts are managed through, govern a VM pool
+and a bare-metal pool alike, and no provider can write the reference around them.
 """
 
 from __future__ import annotations
@@ -17,8 +18,10 @@ from market_fulfillment import ProviderConfigInvalidError
 from market_resource_pools import PoolConfigValidationProblem, PoolValidationError
 from sqlalchemy.orm import Session
 
+from ..hosts.connection import ConnectionCodecs
+from ..hosts.db import Host
 from .db import PoolRelay, Relay
-from .rebinding import check_pool_relay_change, pool_relay_id
+from .rebinding import check_pool_hosts_against_relay, check_pool_relay_change, pool_relay_id
 
 #: The pool-configuration field naming a pool's relay.
 RELAY_ID_FIELD = "relay_id"
@@ -47,23 +50,48 @@ def validate_relay_reference(
     return relay_id, ()
 
 
-def set_pool_relay(db: Session, pool_id: str, relay_id: str | None) -> None:
-    """Point a pool at a relay, or at none, refusing a change its leases forbid.
+def set_pool_relay(
+    db: Session,
+    pool_id: str,
+    relay_id: str | None,
+    *,
+    codecs: ConnectionCodecs | None,
+) -> None:
+    """Point a pool at a relay, or at none, refusing a change its leases or
+    its hosts' management routes forbid.
 
     An unknown relay is refused here rather than left to the foreign key: the
     service's SQLite connections do not enforce foreign keys, and a reference
     to no relay would fail every later table rebuild's whole-database
     foreign-key check. The rebinding check runs next, against the reference
-    stored now, so a refused change writes nothing.
+    stored now, then the management-route check of every host the pool holds,
+    so a refused change writes nothing.
+
+    ``codecs`` read a host's connection address. Without them no host can be
+    checked, so a pool holding hosts cannot be pointed at a new relay: the
+    write is refused rather than let through unchecked.
     """
-    if relay_id is not None and db.get(Relay, relay_id) is None:
-        raise PoolValidationError(
-            f"provider_config.relay_id names relay {relay_id!r}, which does not exist"
-        )
+    relay = None
+    if relay_id is not None:
+        relay = db.get(Relay, relay_id)
+        if relay is None:
+            raise PoolValidationError(
+                f"provider_config.relay_id names relay {relay_id!r}, which does not exist"
+            )
     current = pool_relay_id(db, pool_id)
     check_pool_relay_change(
         db, pool_id=pool_id, current_relay_id=current, new_relay_id=relay_id
     )
+    if relay is not None and relay_id != current:
+        if codecs is None:
+            if db.query(Host).filter(Host.pool_id == pool_id).first() is not None:
+                raise RuntimeError(
+                    f"pool {pool_id!r} holds hosts whose management routes must be "
+                    f"checked against relay {relay_id!r}, and this pool "
+                    "configuration was built without connection codecs"
+                )
+        else:
+            check_pool_hosts_against_relay(db, relay=relay, pool_id=pool_id, codecs=codecs)
     row = db.get(PoolRelay, pool_id)
     if relay_id is None:
         if row is not None:

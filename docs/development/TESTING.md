@@ -847,8 +847,8 @@ proves its own check:
   clients:
   - admission and scheduling refusals with the executor boundary asserted
     never reached;
-  - dispatch to an unregistered host failing before any playbook, even with a
-    configured inventory file naming the host.
+  - dispatch to an unregistered host failing before any playbook, even after a
+    host definitions document naming the host was submitted and refused.
 
 ## Multi-Domain Storefront Composition
 
@@ -970,22 +970,24 @@ signature = service.sign(_frame(("arkhai.payments.receipt.v1", jcs_sha256(receip
 ```
 
 The fixture is trustworthy because it uses the same framing function as the
-kit's verifier. The published vectors pin the previous wire: the current models
-refuse their receipt's parts. The framing and the signature cover a receipt's
-JSON whatever its parts say, so the kit's unit suite reproduces the vector's
-message and signature from the raw published body, byte for byte, and then
-signs and verifies a current-wire receipt through the same framing:
+kit's verifier, and that framing is pinned by the producer's own vectors. The
+kit vendors two vector publications. The current producer vectors' receipt passes the
+strict models and verifies. The historical vectors are a separate raw-framing
+regression whose receipt the current models refuse. The framing and the
+signature cover a receipt's JSON whatever its parts say, so the kit's unit
+suite reproduces each publication's message and signature from its raw
+published body, byte for byte, and then signs and verifies a receipt for a
+mandate the marketplace derives through the same framing:
 
 ```python
 assert receipt_message(vector_body).hex() == vectors["receipt"]["message"]
 assert signer.sign(receipt_message(vector_body)) == vector_signature
-assert sign_receipt(SERVICE, current_wire_body) == build_signed_receipt(signer=SERVICE, mandate=mandate)
+assert sign_receipt(SERVICE, derived_body) == build_signed_receipt(signer=SERVICE, mandate=mandate)
 ```
 
-Current-wire producer vectors were not supplied with the vendored schema, so the
-current wire is pinned by an explicit synthetic fixture that is not producer
-provenance; `kit/arkhai-payments/schema/SOURCE.md` says how to replace both when
-the service publishes them.
+The fixture exists to supply receipts for mandates the marketplace derives.
+`kit/arkhai-payments/schema/SOURCE.md` records the schema's and both vector
+publications' content hashes and how to select newer ones.
 
 The fixture takes its signer as an argument and ships no key material.
 Integration tests replace `PaymentsClient`, the code that wraps the payments
@@ -1247,7 +1249,7 @@ only the named payments table, not domain configuration or payer selection.
 See [shared payment-scenario configuration](../../e2e-tests/README.md#shared-payment-scenario-configuration)
 for environment and runner setup.
 
-**Current example:** complete deals settled through the Arkhai payments service are qualified by that service's own suite. Here, `kit/arkhai-payments` generates its models from the service's published schema and checks the published vectors' canonical framing, both vendored and identified by content hash in `kit/arkhai-payments/schema/SOURCE.md`. The vectors are of the previous wire, so the current wire is pinned by a synthetic fixture, as "Payment Receipts in Tests" describes.
+**Current example:** complete deals settled through the Arkhai payments service are qualified by that service's own suite. Here, `kit/arkhai-payments` generates its models from the service's published schema and checks the published vectors, all vendored and identified by content hash in `kit/arkhai-payments/schema/SOURCE.md`: the current producer vectors through the strict models, signatures and transaction identities, and the historical vectors as raw transaction identities, receipt framing, signatures and attachment hashes only, which the current models refuse, as "Payment Receipts in Tests" describes. Neither proves live service responses, provider funding or physical delivery.
 
 ## Offline Review Validation
 

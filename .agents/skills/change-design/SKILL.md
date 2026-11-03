@@ -39,11 +39,15 @@ the session, and every turn ends with an outcome matching
   the denial on the outcome whatever it is, and the orchestrating session reads it
   before the change moves on. One denied call is not a denied tool: never report
   the tool as not allowed. A call a deny rule refused is forbidden: no other tool
-  does it. A call denied because no rule allows it — the harness reports it as
-  don't ask mode — may be done instead by a tool this step's rules allow for the
-  same work, such as the Edit tool for a shell write or Read or Grep for a shell
-  read; name the substitute in your message. Never ask about a denial as a
-  question.
+  does it, except where the rule exists only to keep file writes on the Edit and
+  Write tools — the step table's comments name those rules: sed's in-place forms,
+  find's deleting, running, and writing actions, and the diff family's
+  output-to-file forms — whose refused shell write may be made with the Edit or
+  Write tool this step's rules allow. A call denied because no rule allows it —
+  the harness reports it as don't ask mode — may be done instead by a tool this
+  step's rules allow for the same work, such as the Edit tool for a shell write or
+  Read or Grep for a shell read. Either way, name the substitute in your message.
+  Never ask about a denial as a question.
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
   to stop and report — a repository guard refusing, `HEAD` moving under you — end
   with `stopped`, `reason` saying why, and `denials` empty.
@@ -280,7 +284,7 @@ through dev, never written here:
 1. With the owner, shape the prerequisite: its requirements and an initial
    `proposal.md` only. Its design is its own workflow's, started by the owner.
 2. Write it in a worktree on a new branch from dev, never on this branch:
-   `git worktree add ../<prerequisite>-proposal -b propose-<prerequisite> dev`,
+   `git worktree add ../<prerequisite>-proposal -b propose-<prerequisite> origin/dev`,
    then, in that worktree, its directory under `openspec/changes/` and its
    `ready for design` row in that worktree's `openspec/changes/README.md`. Run
    `make -C ../<prerequisite>-proposal check-change-index`.

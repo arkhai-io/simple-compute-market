@@ -928,6 +928,59 @@ the service's `migrations.py` and `settings.toml`, the contracts' `relays.py`;
     lease), and driving a whole fulfillment in a VM-route test would test
     fulfillment.
 
+- **Implementation triage of the whole change (reviews 65 and 70, validations 67
+  and 71, owner's notes 68), made with the change archived.**
+  - 65 F1 / 70 F1, closing 5.9's "Not covered" paths. `HostAuthority` gains
+    connection-change hooks, run when a placed host gets a new connection by an
+    update or an inventory without a move; a move runs the pool-change hooks,
+    which see the new connection. Their refusal, `ConnectionChangeRefusedError`,
+    is a `PoolChangeRefusedError`, so every host route and the import answer 409.
+    The relays contribute `relay_host_connection_change_hooks`. `set_pool_relay`
+    takes the connection codecs and checks every host the pool holds against a
+    newly referenced relay. The composition root hands them through both
+    runtimes to both pool-config handlers. A handler built without codecs
+    refuses a relay for a pool holding hosts rather than skipping the check. The
+    pools routes answer `ManagementRouteRefused` with 409. The spec's
+    management-route requirement names all four writes, with two new scenarios,
+    and the host-authority requirement names the connection-change hooks.
+  - 65 F2 / 70 F2. `RelayPortAllocator` refuses a negative grant grace and a
+    reuse margin that is not positive, naming the setting, so the service does
+    not start with either. The settings comments, `DEPLOYMENT_AND_CONFIG.md`
+    (with the grace's intended floor, stated rather than enforced) and the
+    port-lease requirement say so, with a new scenario.
+  - S16 (section 16's evidence against D9, the owner's item). Each D9 row is
+    evidenced. `ROADMAP.md`'s Goal 1 no longer says the real lanes ran. An
+    unowned gap row records that both real-provisioning modules have never run
+    against a target.
+  - 68 O1 and O2 were already fixed before this triage.
+  - Checks:
+    - `make test-compute-provisioning` passed (463): unit, plus library
+      integration covering the hook mechanics, the pool-relay host check and the
+      allocator refusals;
+    - `make test-provisioning` passed (542): application integration through the
+      typed clients, covering the update, import and both providers' pool writes
+      refused with 409 and prior state kept; the composition unit tests cover the
+      wiring and the settings refusals and boundaries;
+    - `make test-provisioning-adapter` (284), `make -C domains test-bare-metal`
+      and `make test-compute-provisioning-ansible` passed;
+    - `make test` passed twice, the second time after the fresh-context fixes;
+    - `make check-packaging` and `make check-comment-hygiene` passed;
+    - `make check-change` fails only its `openspec validate` of an active change,
+      because the untracked `reviews/` still sit at the unarchived path. Strict
+      validation of the permanent specs (`openspec validate --specs --strict`)
+      passed, as did `make check-doc-citations`.
+  - Fresh-context check: nothing blocking. Fixed: the host-authority
+    requirement did not name the new hooks; two overclaiming comments; a stale
+    module docstring; an unneeded package export; the allocator refusal tested
+    only through the container (now also directly); a repeated comment clause;
+    and a paragraph's wrap. Recorded, not fixed:
+    - Two concurrent writes, a connection edit and a pool relay change, can
+      still reach the forbidden state on a database without row locks, as the
+      existing relay-address and placement pair could. The spec makes no
+      concurrency claim.
+    - Re-importing an inventory now refuses one whose existing placed host
+      already breaks the rule.
+
 ## 6. The family relay roles: one verified frp, the admin API locked down, and a relay that discloses nothing
 
 Delivers D3 (the family project, the role search path, 28 F5, and `relay-server`

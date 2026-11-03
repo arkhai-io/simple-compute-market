@@ -88,12 +88,18 @@ def test_an_update_without_the_secret_keeps_the_stored_one() -> None:
         ({"key_path": "/k"}, {}),
         ({"ssh_host": " ", "key_path": "/k"}, {}),
         ({**_PATH_KEY, "ssh_port": 0}, {}),
+        ({**_PATH_KEY, "ssh_port": "22"}, {}),
+        ({**_PATH_KEY, "ssh_port": 22.0}, {}),
+        ({**_PATH_KEY, "public_port": "2222"}, {}),
         ({**_PATH_KEY, "gpu_count": 2}, {}),
         ({"ssh_host": "10.0.0.1"}, {}),
         (_PATH_KEY, {"private_key": _PEM}),
         (_PATH_KEY, {"password": "x"}),
     ],
-    ids=["no host", "blank host", "port", "unknown field", "no key", "two keys", "unknown secret"],
+    ids=[
+        "no host", "blank host", "port", "quoted port", "fractional port",
+        "quoted public port", "unknown field", "no key", "two keys", "unknown secret",
+    ],
 )
 def test_an_invalid_connection_is_refused(public, secrets) -> None:
     with pytest.raises(ValueError, match="ssh connection"):

@@ -66,8 +66,15 @@ def _load_bootstrap(environ: Mapping[str, str]) -> DynaconfBootstrapResult:
 
 # Each setting the service no longer reads, with the setting that replaced it.
 # A retired key is refused rather than ignored: a profile still stating the old
-# VM playbook name would otherwise run the default playbook without a word.
-RETIRED_SETTINGS: Mapping[str, str] = {"playbook_path": "vm_playbook_path"}
+# VM playbook name would otherwise run the default playbook without a word, and
+# one still stating an INI inventory would start with none of its hosts
+# registered. Any statement is refused, an empty one included, so no packaged
+# layer may state one.
+RETIRED_SETTINGS: Mapping[str, str] = {
+    "playbook_path": "vm_playbook_path",
+    "inventory_ini": "host_definitions_path",
+    "inventory_path": "host_definitions_path",
+}
 
 
 class RetiredSettingsError(RuntimeError):
@@ -127,10 +134,6 @@ class Settings:
         return Path(str(self._source.bare_metal_playbook_path)).resolve()
 
     @property
-    def resolved_inventory_path(self) -> Path:
-        return Path(str(self._source.inventory_path)).resolve()
-
-    @property
     def resolved_pool_definitions_path(self) -> Path | None:
         raw = str(getattr(self._source, "pool_definitions_path", "") or "").strip()
         return Path(raw).resolve() if raw else None
@@ -148,6 +151,11 @@ class Settings:
             return None
         path = Path(raw)
         return (path if path.is_absolute() else _SRC_DIR / path).resolve()
+
+    @property
+    def resolved_host_definitions_path(self) -> Path | None:
+        raw = str(getattr(self._source, "host_definitions_path", "") or "").strip()
+        return Path(raw).resolve() if raw else None
 
     @property
     def resolved_capacity_definitions_path(self) -> Path | None:

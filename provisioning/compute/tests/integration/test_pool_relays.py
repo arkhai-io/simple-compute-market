@@ -14,8 +14,10 @@ import pytest
 from cryptography.fernet import Fernet
 from market_resource_pools import ResourcePool
 
-from compute_provisioning.hosts import ConnectionCodecs
+from compute_provisioning.hosts import ConnectionCodecs, ConnectionEnvelope
+from compute_provisioning.hosts.db import Host
 from compute_provisioning.relays import (
+    ManagementRouteRefused,
     PoolRelay,
     RelayPortLease,
     RelayRebindingRefused,
@@ -59,9 +61,36 @@ def pools(session_factory):
         db.add(ResourcePool(id="bm-other", label="bm2", provider="bare_metal.ansible", enabled=True))
 
 
-def _set(session_factory, pool_id, relay_id):
+class _AddressCodec:
+    """A connection kind whose only field is the address the host is reached at."""
+
+    kind, version = "addr", 1
+
+    def build(self, public, secrets, *, previous=None):
+        return ConnectionEnvelope(kind="addr", version=1, public=dict(public), protected={})
+
+    def validate(self, envelope):
+        return envelope
+
+    def address(self, envelope):
+        return envelope.public["address"]
+
+
+_CODECS = ConnectionCodecs([_AddressCodec()])
+
+
+def _set(session_factory, pool_id, relay_id, codecs=_CODECS):
     with session_factory() as db, db.begin():
-        set_pool_relay(db, pool_id, relay_id)
+        set_pool_relay(db, pool_id, relay_id, codecs=codecs)
+
+
+def _place(session_factory, host_id, pool_id, address):
+    with session_factory() as db, db.begin():
+        host = Host(host_id=host_id, enabled=True, pool_id=pool_id)
+        host.set_connection(
+            ConnectionEnvelope(kind="addr", version=1, public={"address": address}, protected={})
+        )
+        db.add(host)
 
 
 def _read(session_factory, pool_id):
@@ -152,6 +181,42 @@ class TestTheWriteRunsTheRebindingRule:
         _set(session_factory, "bm-pool", "site-b")
 
         assert _read(session_factory, "bm-pool") == "site-b"
+
+
+class TestTheWriteChecksTheHostsManagementRoutes:
+    def test_a_pool_is_not_pointed_at_the_relay_a_host_is_reached_through(
+        self, session_factory, relays, pools
+    ):
+        _place(session_factory, "bm-host-1", "bm-pool", "10.0.0.9")
+
+        with pytest.raises(ManagementRouteRefused) as excinfo:
+            _set(session_factory, "bm-pool", "site-a")
+
+        assert "bm-host-1" in str(excinfo.value) and "site-a" in str(excinfo.value)
+        assert _read(session_factory, "bm-pool") is None
+
+    def test_a_relay_its_hosts_are_not_reached_through_is_accepted(
+        self, session_factory, relays, pools
+    ):
+        _place(session_factory, "bm-host-1", "bm-pool", "10.0.0.9")
+
+        _set(session_factory, "bm-pool", "site-b")
+
+        assert _read(session_factory, "bm-pool") == "site-b"
+
+    def test_without_codecs_a_pool_holding_hosts_is_not_pointed_at_a_relay(
+        self, session_factory, relays, pools
+    ):
+        """No host can be checked, so the write is refused rather than let
+        through unchecked; a pool holding no host has nothing to check."""
+        _place(session_factory, "bm-host-1", "bm-pool", "192.0.2.1")
+
+        with pytest.raises(RuntimeError, match="connection codecs"):
+            _set(session_factory, "bm-pool", "site-a", codecs=None)
+        _set(session_factory, "vm-pool", "site-a", codecs=None)
+
+        assert _read(session_factory, "bm-pool") is None
+        assert _read(session_factory, "vm-pool") == "site-a"
 
 
 class TestAHostMoveReadsTheFamilysReference:

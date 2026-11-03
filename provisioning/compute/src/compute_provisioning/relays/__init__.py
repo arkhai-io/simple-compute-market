@@ -45,6 +45,7 @@ from .rebinding import (
     check_relay_endpoint_change,
     check_relay_token_rotation,
     pool_relay_id,
+    relay_host_connection_change_hooks,
     relay_host_pool_change_hooks,
 )
 from .pool_relays import (
@@ -134,6 +135,7 @@ __all__ = [
     "relay_contribution",
     "relay_definitions_document",
     "relay_execution_fields",
+    "relay_host_connection_change_hooks",
     "relay_host_pool_change_hooks",
     "release_reservation_ports",
     "reservation_lease_end",

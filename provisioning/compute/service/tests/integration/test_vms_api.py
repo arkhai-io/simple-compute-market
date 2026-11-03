@@ -315,24 +315,23 @@ class TestCreateVmViaClient:
 
 class TestDispatchRequiresARegisteredHost:
     async def test_a_job_for_an_unregistered_host_is_refused_before_it_is_recorded(
-        self, client_and_queue, fake_ansible, tmp_path, monkeypatch
+        self, client_and_queue, fake_ansible
     ):
-        """Dispatch renders only from the host registry. A configured inventory
-        file naming the host changes nothing: it is a seed input, not an
-        execution source."""
-        inventory = tmp_path / "hosts"
-        inventory.write_text(
-            "[kvm_hosts]\n"
-            "unregistered-kvm  ansible_host=198.51.100.7  ansible_user=root\n"
-        )
-
-        # Service-internal state setup: no API configures the inventory path.
-        monkeypatch.setattr(
-            app.container.vm_runtime().config,
-            "resolved_inventory_path",
-            inventory,
-        )
+        """Dispatch renders only from the host registry. A host definitions
+        document naming the host that was refused changes nothing: a document
+        only populates host records, and is never an execution source."""
         client, _ = client_and_queue
+        refused_document = await client.family.import_host_definitions(
+            "hosts:\n"
+            "  - host_id: unregistered-kvm\n"
+            "    pool_id: no-such-pool\n"
+            "    connection:\n"
+            "      kind: ssh\n"
+            "      version: 2\n"
+            "      public: {ssh_host: 198.51.100.7, ssh_user: root, key_path: /keys/id}\n"
+        )
+        assert refused_document.applied is False
+        assert [problem.code for problem in refused_document.problems] == ["unknown_pool"]
 
         # Refused at submission: every job needs a registered host, so none is
         # recorded or run for this one.

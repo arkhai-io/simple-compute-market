@@ -1,15 +1,17 @@
 """VM's tables over a real embedded database, built from VM's own models.
 
 The schema is the resource-pool and relay tables, which ``ansible_pool_configs``
-references, and VM's: what VM's metadata declares, constraints and indexes
-included, and nothing a composing service adds. File-backed SQLite with a
-connection per session, so independent sessions contend as they do in a
-deployment.
+references, the family's host registry, which a pool's relay write reads to
+check its hosts' management routes, and VM's: what VM's metadata declares,
+constraints and indexes included, and nothing a composing service adds.
+File-backed SQLite with a connection per session, so independent sessions
+contend as they do in a deployment.
 """
 
 from __future__ import annotations
 
 import pytest
+from compute_provisioning.hosts.db import Base as HostsBase
 from compute_provisioning.relays.db import Base as RelaysBase
 from market_resource_pools.db import Base as PoolsBase
 from sqlalchemy import Engine, create_engine
@@ -19,10 +21,12 @@ from vm_provisioning_adapter.db import Base as VmBase
 
 
 def create_vm_schema(engine: Engine) -> None:
-    """Create the resource-pool and relay tables, then VM's, which reference them."""
+    """Create the resource-pool, relay, and host tables, then VM's, which
+    reference them."""
 
     PoolsBase.metadata.create_all(bind=engine)
     RelaysBase.metadata.create_all(bind=engine)
+    HostsBase.metadata.create_all(bind=engine)
     VmBase.metadata.create_all(bind=engine)
 
 

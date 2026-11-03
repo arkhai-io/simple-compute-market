@@ -650,7 +650,6 @@ async def client_and_queue(
         frp_domain="",
         frp_dashboard_password="",
         resolved_vm_playbook_path=Path("/fake/playbook.yml"),
-        resolved_inventory_path=Path("/fake/hosts"),
         # A real Fernet key, not an empty string: the at-rest encryption used
         # by embedded host keys and relay tokens fails closed without one, and
         # a harness that supplies nothing can only exercise the unencrypted
@@ -702,16 +701,24 @@ async def client_and_queue(
     host_authority = HostAuthority(
         session_factory,
         codecs=connection_codecs,
-        # The pool-change hooks exactly as the production container composes
-        # them, so a move refused there is refused here, by every host route.
+        # The pool- and connection-change hooks exactly as the production
+        # container composes them, so a write refused there is refused here,
+        # by every host route.
         pool_change_hooks=_container_module.host_pool_change_hooks(connection_codecs),
+        connection_change_hooks=_container_module.host_connection_change_hooks(
+            connection_codecs
+        ),
     )
 
     from market_resource_pools import ResourcePoolService
     from vm_provisioning_adapter.services.ansible_pool_config_handler import AnsiblePoolConfigHandler
     resource_pool_service_handlers = {
-        "vm.ansible": AnsiblePoolConfigHandler(settings=mock_settings),
-        "bare_metal.ansible": BareMetalPoolConfigHandler(settings=mock_settings),
+        "vm.ansible": AnsiblePoolConfigHandler(
+            settings=mock_settings, connection_codecs=connection_codecs
+        ),
+        "bare_metal.ansible": BareMetalPoolConfigHandler(
+            settings=mock_settings, connection_codecs=connection_codecs
+        ),
     }
     resource_pool_service = ResourcePoolService(
         session_factory=session_factory,
@@ -876,7 +883,7 @@ async def client_and_queue(
         # token and grant are filled in, and its grant signed, as it runs.
         codec=VmAnsibleCodec(relay_resolver=relay_resolver),
         host_authority=host_authority,
-        pool_config_handler=AnsiblePoolConfigHandler(settings=mock_settings),
+        pool_config_handler=resource_pool_service_handlers["vm.ansible"],
         job_engine=job_engine,
         job_submission=job_submission,
         vm_operations_service=VmOperationsService(submission=job_submission),
