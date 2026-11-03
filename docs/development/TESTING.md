@@ -817,8 +817,8 @@ proves its own check:
   clients:
   - admission and scheduling refusals with the executor boundary asserted
     never reached;
-  - dispatch to an unregistered host failing before any playbook, even with a
-    configured inventory file naming the host.
+  - dispatch to an unregistered host failing before any playbook, even after a
+    host definitions document naming the host was submitted and refused.
 
 ## Multi-Domain Storefront Composition
 

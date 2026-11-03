@@ -575,11 +575,12 @@ host.
 
 ### Requirement: A capacity declaration names no mandatory dimension
 
-A capacity authority MUST accept a declaration expressing any set of dimensions and
-MUST NOT write a dimension the caller did not declare. Where a legacy scalar unit
-mirror is maintained, the dimension it mirrors MUST be supplied by the composition
-root, the way domain-specific claim aliases already are, rather than fixed in the
-shared capacity module.
+A capacity authority MUST accept a declaration expressing any non-empty set of
+dimensions, MUST refuse a declaration expressing none, and MUST NOT write a
+dimension the caller did not declare. Where a legacy scalar unit mirror is
+maintained, the dimension it mirrors MUST be supplied by the composition root, the
+way domain-specific claim aliases already are, rather than fixed in the shared
+capacity module.
 
 Where a caller declares capacity explicitly, the authority MUST NOT add a mirror
 dimension to that declaration. The legacy scalar unit total MUST be optional, and
@@ -594,6 +595,12 @@ for example a credit balance with no compute dimension — MUST be stored as dec
 - **WHEN** an operator declares capacity consisting only of a domain's own unit dimension
 - **THEN** the stored declaration contains exactly that dimension
 - **AND** no GPU or other compute dimension is manufactured
+
+#### Scenario: A declaration names no dimension
+
+- **WHEN** a declaration names no dimension: its `capacity` map is empty or absent,
+  and no legacy scalar total stands in for it
+- **THEN** the declaration is refused, and no declaration is written or changed
 
 #### Scenario: A declaration has no mirror dimension to total
 

@@ -145,111 +145,21 @@ test_host_definitions.py`; the `pyproject.toml` of `provisioning/compute/contrac
   (comment hygiene, skills, citations, task list, index, strict OpenSpec
   validation): passed. End-to-end: none, as planned; none owed.
 
-Section 1 notes:
+Section 1 notes (compressed at closeout):
 
-- **The plan is wrong: task 1.2 cannot land before section 3.** The service's
-  unit suite holds every contract in the composed route table to a mounted
-  route:
-  `provisioning/compute/service/tests/unit/test_route_binding.py::test_every_contract_resolves_to_a_mounted_route`
-  fails for `provisioning_host_definitions_export` and
-  `provisioning_host_definitions_import` ("no mounted GET route serves
-  /api/v1/hosts/definitions/export", and the same for the POST). The family's
-  contracts reach that table through `assemble_provisioning_route_table`, so a
-  family route contract and its controller binding must land in one commit.
-  Section 1's premise, "route contracts … with no behaviour behind them yet",
-  does not hold for the routes; it does for the models (1.1), which nothing
-  binds. Recommended amendment: move 1.2's route contracts and their unit
-  assertions into section 3, beside 3.1's binding, and keep 1.1 in section 1.
-  Merging sections 1–3 into one commit would also pass, at the cost of
-  per-section review. The work-in-progress commit carries 1.1 and 1.2 as
-  implemented here.
-- **Section 2 work begun in the same commit, untested beyond the existing
-  suites.** `compute_provisioning/hosts/service.py` gained
-  `HostAuthority.put_host_in_session` (the session-scoped write 2.2 asks for,
-  with the codec-normalized equality 2.3 needs), `UnknownPoolError` (a
-  `ValueError`, so existing callers keep catching it), `HostChange`,
-  `serves_connection`, `host_ids_in_session`, and `session()`; `apply_inventory`
-  is rebuilt on `put_host_in_session` with no change of behaviour; and
-  `hosts/connection.py`'s `ConnectionCodecs` gained `serves(kind, version)`. No
-  test of the new methods exists yet. `make test-compute-provisioning`: 281
-  passed; `make test-compute-provisioning-ansible`: 134 passed — the existing
-  `apply_inventory` tests hold on the rebuilt path.
-- **Section 2 needs a relock this session could not make.** `hosts/definitions.py`
-  imports `yaml`, so `provisioning/compute/pyproject.toml` must declare `pyyaml`
-  (AGENTS.md, "Package and dependency discipline"); it is already in that
-  project's lock, through `arkhai-kit-site`. Declaring it changes the project's
-  requirements, so its lock must be rewritten by `make lock`, which refuses this
-  session's uv, 0.11.32: the locks need uv 0.12 or newer, and updating uv
-  (`uv self update 0.12.19`) was not permitted. Running a project's `make
-  reinit` after the declaration would rewrite the lock with the older uv, which
-  the repository refuses, so the next session declares `pyyaml` and relocks
-  only with uv 0.12 or newer.
-- **No version bump yet, and no task owns one.** RELEASING.md's policy gives a
-  minor bump to each package these sections change, against its version on
-  `dev`: contracts 0.12.0 → 0.13.0, the kit (`provisioning/compute`) 0.23.0 →
-  0.24.0, the client 0.9.1 → 0.10.0, and the service 0.21.0 → 0.22.0, each
-  dependent's lower bound raised to the version whose API it uses. A bump moves
-  every exact pin, so `make lock` must rewrite the locks (`make check-locks`
-  refused the contracts bump alone in eleven projects), and this session's uv,
-  0.11.32, cannot. The bump is reverted here; without it every lock matches its
-  project and `make check-packaging` passes. Recommended for the plan's
-  amendment: a task owning the bumps, the `pyyaml` declaration below, `make
-  lock`, and `make check-packaging`, in the first section that runs with uv 0.12
-  or newer.
-- **Fresh-context check.** Run on this section's diff before these notes were
-  rewritten. It found the `make test` failure above and the missing task for the
-  version bump, both now recorded; a response docstring that gave a structurally
-  invalid document a diff (corrected: its `diff` and `not_named` are empty); a
-  version rationale that assumed a default served version (corrected to D2's
-  reason); two accounts of how `secrets` is refused (the docstring now names the
-  model's refusal and the document's code); an uncommented `INVALID_VALUE`
-  (commented); and that strictness rested on each caller's `strict=True` flag
-  (the models now carry it, and the tests pass no flag). It found the models and
-  routes consistent with D2, D8, D9, D12, D14 and the deltas, and nothing in
-  layering, comments, or test level.
-- **Amended by the replan.** Recorded at the top of this section: the route
-  contracts move to 3.1; 1.2 carries the bumps, the `pyyaml` declaration, and the
-  relock; 1.3 takes the route contracts out of this section's commit; 1.4 is the
-  checkpoint.
-- **Second run: the notes above are the first run's.** Their "task 1.2" is the
-  former route-contracts task, now 3.1. The relock and the bumps they describe as
-  owed are done (1.2): `pyyaml` is declared and every lock rewritten with uv
-  0.12.19. The kit declares `pyyaml` one commit before it imports `yaml`, in
-  section 2's `hosts/definitions.py`.
-- **Second run's fresh-context check.** It found no layering, comment, test-level,
-  placement, or packaging break. Fixed: the overstated strictness docstring and
-  the narrow model evidence (1.1); a test named for applying nothing, which a
-  wire model cannot do (renamed to
-  `test_a_refused_response_parses_with_every_problem`); 1.4 checked without
-  saying `make test` was incomplete (now said); these stale notes (this entry).
-- **Open for review: the `ssh` codec coerces a quoted number in `public`.** D7
-  says a document's validation is strict, "a quoted number is an error". The
-  entry model is strict for its own fields, but `public` is the kind's mapping,
-  and `SshConnection` (`provisioning/compute/ansible/.../connection.py`) is not
-  strict, so `ssh_port: "22"` in a document is accepted as 22. Making it strict
-  would change `POST /api/v1/hosts` and the INI route too, which this change does
-  not plan. Left as it is for the round's triage to decide.
-- **Settled and fixed at the implementation round's triage (45 F1, option a).**
-  The note above was wrong about the INI route: its parser reads ports as
-  integers before the codec, so only a hand-written host API body with a quoted
-  number changes. `SshConnection` is now `strict=True` for every submission; a
-  quoted number in a document is a connection its codec refuses
-  (`invalid_connection` at the entry's connection), and the host API answers 400
-  for one (D7; the `physical-provisioning` delta gains a MODIFIED "Host
-  connections are typed by their implementation's codec" and the scenario "An
-  entry quotes its SSH port"). The Ansible distribution is bumped once, minor,
-  against `dev`: `arkhai-compute-provisioning-ansible` 0.6.0 → 0.7.0, the
-  service's lower bound raised to `>=0.7.0` (it relies on the strictness; the VM
-  and bare-metal adapters do not, so theirs stay), and `make lock` rewrote the
-  four locks holding it. Unit (`ansible/tests/unit/test_ssh_connection.py`): a
-  quoted `ssh_port`, a fractional one, and a quoted `public_port` refused — the
-  Ansible suite, 137 passed. Application integration (the service suite): a
-  document quoting `ssh_port` beside a valid entry answers 422 with
-  `invalid_connection` at `hosts[1].connection` and applies neither
-  (`test_host_definitions_api.py`); a host API registration quoting `ssh_port`
-  answers 400 naming it and stores nothing (`test_hosts_api.py`) — 620 unit and
-  527 integration passed. `make check-packaging` and `make test` passed, the
-  Helm render included; see the section 6 note on the triage fixes' checks.
+- **Replanned once.** A family route contract must land with the binding that
+  serves it, since the service suite holds every contract to a mounted route, so
+  the route contracts moved to 3.1, and 1.2 took the version bumps, the `pyyaml`
+  declaration, and the relock (uv 0.12.19).
+- **The `ssh` codec is strict for every submission** (45 F1; D7). A quoted
+  number in a document's connection is `invalid_connection` at the entry's
+  connection; the host API answers 400 for one; the INI parser reads ports as
+  integers, so the INI route is unaffected. `arkhai-compute-provisioning-ansible`
+  0.6.0 → 0.7.0, the service's bound `>=0.7.0`. Evidence: the Ansible suite's
+  quoted and fractional port cases; the service's document (422) and host API
+  (400) cases. Destination: the `physical-provisioning` delta's MODIFIED "Host
+  connections are typed by their implementation's codec".
+- **Fresh-context checks** ran on both runs; their fixes are in the tasks above.
 
 ## 2. The family host document
 
@@ -445,45 +355,17 @@ is checked until then.
   the kit now importing the `yaml` its `pyyaml` declaration names. `make
   check-change` (comment hygiene among its checks): passed.
 
-Section 2 notes:
+Section 2 notes (compressed at closeout):
 
-- **The kit's `tests/integration` is now a package** (an empty `__init__.py`),
-  as `TESTING.md`'s "Test File Layout" describes and the other kits' are, so
-  `test_host_definitions.py` exists in both `unit/` and `integration/`.
-- **For section 3.** The import's refusal reaches the binding as
-  `ProvisioningRouteError(422, detail)`, so the binding is `routed(lambda:
-  service.import_definitions(body))` with `response_model=
-  HostDefinitionsImportResponse`, and the 422 body is `{"detail": <response>}`:
-  the client's `import_host_definitions` reads `body["detail"]` for 422 and the
-  body itself for 200. The export route must answer `application/yaml`: the
-  service's response signer signs a non-JSON body over its decoded text
-  (`middleware/auth.py`, `_response_body`), and the client's `finish` falls back
-  to `response.text` when the body is not JSON, which a block-style YAML
-  document never is; the client method should still not rely on that guess
-  where the content type says YAML.
-- **A section-1 note overstated "no change of behaviour"** in `apply_inventory`
-  on the session-scoped write. Two things differ, neither against a scenario:
-  an INI entry equal to its stored host now writes nothing, so its `updated_at`
-  is no longer bumped; and on a move, the hooks run before the connection is
-  replaced rather than after, both inside the one transaction.
-- **Fresh-context check.** No layering, import, packaging, or placement break.
-  Fixed: 2.6 checked without its results (now recorded); the route service
-  leaving the 422 to the binding (now raised, see 2.5); an `IntegrityError` at
-  commit answering 500 (now 409); equality against raw rather than canonical
-  stored fields (now canonical, see 2.3); test docstrings citing "the delta"
-  (now the `physical-provisioning` scenario); the fake codec's description and
-  two thin assertions (no hook run in the defaults case). Declined: none.
-  Still open from section 1: the `ssh` codec coerces a quoted number in
-  `public` (since settled: the codec is strict, 45 F1; see the section 1 notes).
-- **Second fresh-context check, on those fixes.** No layering, import, comment,
-  or test-level break; the 422/409 handling and canonical equality hold. Fixed:
-  `canonical` had widened the export's omissions to a stored connection its
-  codec refuses, beyond D12's two (now stated as stored; see 2.4), with a
-  docstring claiming such a host runs no work, which holds only for an unserved
-  kind or version; a host with an empty id, which `POST /api/v1/hosts` accepts,
-  failed the whole export (now stated, and refused on import); an ambiguous
-  scenario citation in a test docstring (now names its requirement). Declined:
-  none.
+- **The kit's `tests/integration` is a package** (an empty `__init__.py`), as
+  `TESTING.md`'s "Test File Layout" describes, so `test_host_definitions.py`
+  exists in both `unit/` and `integration/`.
+- **Consequences recorded in `design.md`,** "Consequences found in
+  implementation": the INI route's shared write (an equal entry writes nothing;
+  hooks run before the connection is replaced), the route service raising the
+  422 and answering a concurrent registration 409, and the export stating what
+  it can read.
+- **Fresh-context checks** ran twice; their fixes are in 2.3–2.6.
 
 ## 3. Host definitions routes and typed client
 
@@ -624,43 +506,19 @@ test_provisioning_client_contract.py}` as the route table requires.
   (comment hygiene among its checks): passed. A search of `e2e-tests/` finds nothing calling either route, so
   the end-to-end "none" holds.
 
-Section 3 notes:
+Section 3 notes (compressed at closeout):
 
 - **Status observed at a transport seam.** The typed import reads a 422 and a
-  200 alike by design (D14), so the status a scenario names cannot be seen
-  through it. `test_host_definitions_api.py` builds the administrator's client
-  on `_Recording`, an `httpx` transport over the in-process app that records
-  each response's status and content type, and reads them there; no test sends
-  a hand-built request except the 401 rejection-path case.
-- **The export's body is read as text by the shared transport's fallback.**
-  `SigningBase.finish` parses JSON and falls back to text, so `export_hosts`
-  receives the YAML as signed only because a block-style document is never
-  JSON; `_text` refuses anything else. Making `finish` choose by content type,
-  as the service's signer does, would change every client's reading of every
-  response, so it is left for a change that wants it; the integration test
-  proves the route answers `application/yaml`.
-- **Fresh-context check.** No layering, import, packaging, or placement break;
-  the controller is thin and D12 and D14 hold in the code. Fixed: a status test
-  that called the client's transport with a hand-written route and body,
-  against the "no raw calls" rule (replaced by the recording transport, which
-  now also shows the 422 for both hook scenarios); the module docstring that
-  claimed every import went through the typed method; a 422 with a mapping
-  detail of another shape raising a pydantic error rather than the client's
-  (now `ComputeProvisioningError`); the export's content type unproved (now
-  asserted); validate-only never asserting `unchanged` (now does); docstrings
-  saying the import reconciles "whatever startup last applied", which no
-  startup step records yet (now "regardless of any document applied before");
-  the middleware note's "both schemes" (only the seller's varies). Declined:
-  the client still relies on `finish`'s text fallback for the export, as the
-  note above says; and importing the pool-move module's private helpers, which
-  has precedent (`test_capacity_definitions_api.py` imports from
-  `test_capacity_api`) and keeps one copy of the relay fixture.
-- **For section 4.** The kit's `reconcile_host_definitions_in_session(db,
-  hosts, yaml_text)` is what the importer's `hosts` applier calls inside its own
-  session; it returns `HostDefinitionsOutcome` with `valid`, `diff`,
-  `not_named`, and `problems`, and never commits, so the importer raises on an
-  invalid outcome and its transaction rolls back with no digest. The host
-  authority is `container.resolved_host_authority`.
+  200 alike (D14), so `test_host_definitions_api.py` builds the administrator's
+  client on `_Recording`, an `httpx` transport over the in-process app recording
+  each response's status and content type; only the 401 rejection-path case
+  sends a hand-built request.
+- **Left as it is:** the client reads the export through the shared transport's
+  text fallback (recorded in `design.md`, "Consequences found in
+  implementation"). The test imports the pool-move module's private relay
+  helpers, as `test_capacity_definitions_api.py` imports from
+  `test_capacity_api`, keeping one copy of the fixture.
+- **Fresh-context check** ran; its fixes are in 3.3 and 3.4.
 
 ## 4. Startup reconciliation and the retired inventory settings
 
@@ -839,54 +697,23 @@ test_test_controller.py,test_vms_api.py}` and any other the search finds); new
   seller stack still depend on retired settings until section 5 changes them,
   so the pipeline is evidence only for sections 4 and 5 together. None is owed.
 
-Section 4 notes:
+Section 4 notes (compressed at closeout):
 
-- **Sections 4 and 5 are one unit for the pipeline.** Section 4 makes any
-  statement of `inventory_ini` or `inventory_path` refuse startup, and three
-  deployment-side statements remain until section 5: `domains/bare_metal/compose.yml`
-  sets `PROVISIONING_INVENTORY_PATH`, the provisioning chart's `values.yaml`
-  states `config.inventory_path`, and `helm/scripts/topology-secrets.sh`
-  writes `inventory_ini: ""`. At this commit alone the bare-metal lane and any
-  Helm deployment therefore refuse to start, while the VM lane, whose compose
-  states neither, starts. `compose/seller.yml` starts but registers no host:
-  it relied on `settings.toml`'s removed `inventory_path` default naming the
-  INI baked into its image, and section 5 mounts a host document in its place.
-  The round's validation reads HEAD, after section 5.
+- **Sections 4 and 5 are one unit for the pipeline:** at section 4's commit
+  alone the bare-metal lane and Helm still stated retired settings, so every
+  validation read `HEAD` after section 5.
 - **The importer takes the host authority by injection,** like the capacity
-  ledger, and the applier calls the kit's session-scoped reconciliation with
-  the gate's own session, so the digest and every host write commit or roll
-  back together. A hook's writes in a refused document roll back with it.
-- **Retired-key detection relies on Dynaconf's `exists`,** which reports an
-  empty value, from a profile or from the environment, as stated; the unit
-  tests pin both, so a loader change that dropped empty values would fail
-  them.
-- **Left for later sections:** the e2e docstrings in
-  `e2e-tests/tests/e2e/roles/scenarios/vms/` (`host_registry.py`,
-  `conftest.py`, and three scenario modules) still explain registering hosts
-  through the API by `inventory_path` being "docker-compose-specific"; and
-  `e2e-tests/tests/unit/test_domain_stack_configuration.py` pins the
-  bare-metal compose's `BARE_METAL_PROVISIONING_INVENTORY_FILE`. Section 5
-  changes that compose file, so it takes both. Permanent documents that still
-  describe startup INI seeding, each owned by a later task:
-  `DEPLOYMENT_AND_CONFIG.md`'s "Definition documents" (7.1; the new
-  `settings.toml` comment points there for the host format), the quickstarts
-  and IaC README (7.2), `TESTING.md`'s "Host Requirement Enforcement" and
-  `resource-pool-management/architecture.md` (8.9), the
-  `physical-provisioning` spec's scenario titles and evidence paragraph
-  (8.11), and the roadmap (8.5).
-- **Fresh-context check.** No layering, import, raw-call, or packaging
-  structure break; D1, D2, D6, D7, D8 hold. Fixed: the rejection docstring
-  claiming every problem names its host (structural ones name a location);
-  a unit test pinning the removed step's names, like a tombstone (removed);
-  the packaged-configuration case labelled application integration while it
-  only loads configuration (now a unit test, with dotenv off); the
-  dispatch-case note not saying the file half is untestable; "End-to-end:
-  confirmed" reading as a run; the seller stack's interim loss of hosts not
-  disclosed; `make check-packaging` not run (now run, passed); this list of
-  stale documents being incomplete. Declined: creating the hook test's relay
-  through the contributed relay-definitions step instead of a direct row —
-  the step needs the VM contribution composed, a row is the precondition the
-  hook reads, and the pool-move tests set it up the same way.
+  ledger, and the applier reconciles in the gate's own session, so the digest
+  and every host write, a refusing hook's included, commit or roll back
+  together.
+- **Retired-key detection relies on Dynaconf's `exists`** (recorded in
+  `design.md`, "Consequences found in implementation").
+- **Handed on and done:** the e2e docstrings and stack-configuration test (5.2);
+  the operator documents (7.1, 7.2, 7.4); `TESTING.md`, the companions, and the
+  roadmap (8.5, 8.9); the spec's scenario titles and evidence paragraph (8.11).
+- **Fresh-context check** ran; its fixes are in 4.2–4.4. Declined: creating the
+  hook test's relay through the contributed relay step rather than a direct row,
+  which the pool-move tests also seed directly.
 
 ## 5. Chart, compose, and deployment scripts
 
@@ -1007,29 +834,15 @@ templates/configmap.yaml,templates/deployment.yaml,tests/test_render.py}`;
   test-deployment-packaging` — `make -C helm test-render` passes, including the
   chart's new render tests and the umbrella refusal loop.
 
-Section 5 notes:
+Section 5 notes (compressed at closeout):
 
-- **The chart render tests have never run.** Written against the templates by
-  reading, and traced by the fresh-context check, but not executed:
-  validation's `test-deployment-packaging` job is their first run. TESTING.md's
-  "break the template once" step was not done, for the same reason.
-- **Section 4's commit was pushed with this one.** `make push-branch` refuses a
-  dirty worktree, and this section's edits were already in it when section 4
-  was committed.
-- **Still stale until section 7:** `docs/seller-quickstart.md`'s "Bring it up"
-  runs `compose/seller.yml` without the now-required `SELLER_HOST_DEFINITIONS`,
-  and `docs/bare-metal-seller-quickstart.md` exports the retired
-  `BARE_METAL_PROVISIONING_INVENTORY_FILE`; 7.2 owns both.
-- **Fresh-context check.** No comment-hygiene, packaging, or compose-wiring
-  break; every `deployment-state` scenario has a render case, and it found no
-  render assertion likely to fail. Fixed: the umbrella loop passing on any
-  failure (it now requires the error to name the key, and no longer claims the
-  umbrella's own schema is what refused, which the subchart's also would); the
-  host-document cut that never matched (now the manifest's end); the values
-  comment pointing every document at the host import route; a mis-wrapped
-  `Makefile` comment; `hosts.yaml` saying the lane always runs mock;
-  `dev-env/identities/README.md`'s "empty host inventory". Disclosed rather
-  than fixed: the service-parser check (5.1).
+- **The chart render tests first ran in validation**, where `make -C helm
+  test-render` passed (CI `test · test-deployment-packaging`, and every later
+  validation's Helm part, 78 included); the implementation container had no
+  `helm`. They check the host document's text, not its parse (recorded in
+  `design.md`).
+- **The quickstarts' stale passages** were 7.2's, and are corrected.
+- **Fresh-context check** ran; its fixes are in 5.1 and 5.2.
 
 ## 6. Change-workflow tooling fixes
 
@@ -1182,75 +995,28 @@ the eight step skills' `SKILL.md` under `.agents/skills/` (`change-archive-clean
   full: the section changes only `scripts/` and documentation, which
   `test-release-tooling` covers. End-to-end: none, as planned.
 
-Section 6 notes:
+Section 6 notes (compressed at closeout):
 
-- **Left for the owner's local run:** 6.1 whole, and the markings in
-  `.claude/change-steps.toml` of the rules that keep file writes on the Edit
-  and Write tools. Until they are made, the delta's "the step table marks such
-  rules" is not yet true, and 8.9 must confirm it before the archive merges the
-  delta, or record that it was not done (the plan already says so).
-- **The comment-hygiene check matches `design.md` in a test's text,** as in a
-  path ending `-design.md`; the new test asserts the reviews directory holds
-  only the transcripts instead.
-- **Fresh-context check.** No comment, test-level, or placement break; 6.2's
-  behaviour and the deny-rule wording match the delta across every place.
-  Fixed: the orchestrate skill's `subcommandResults` and no-reason
-  classifications contradicting the exception (the exception now applies
-  however the denial was classified), and the companion's "a forbidden action"
-  now pointing at it; an undefined "write-steering" term; the companion's
-  "Reviews are files" not saying narration before the title is dropped; an
-  indented title found and then refused; `harness.py` not recorded (above and
-  in the promotion record); three wrapping slips. Declined: rewording the
-  delta's "marks" — the owner settled that the markings come with the local
-  run, so the requirement states what the table will say.
-- **Fixed at the implementation round's triage (43 R5), on the owner's word
-  that each is too small for a change of its own.** A run ended by a signal
-  emits no `result`, so its main session's denials were lost from its line
-  (workflow log seq 54). `scripts/change_workflow/stream.py` now also keeps
-  every call a `permission_denied` event names that no result lists, shaped
-  from the `tool_use` that made it (or the event's tool name, or `?`); a
-  finished run's denials are unchanged, since its results list every such call.
-  `.agents/skills/change-orchestrate/SKILL.md` gives each step run's background
-  command the harness's longest timeout. Unit (`scripts/tests/
-  test_change_workflow_stream.py`): a transcript with no `result` yields its
-  denials with their reasons, shaped from the call or the event; a denial a
-  result lists is listed once — `make test-release-tooling`, 1820 passed. `make
-  check-agent-skills` passed.
-- **The triage fixes' checks (45 F1, 43 R5).** `make check-packaging` and `make
-  test` (every suite, the Helm render included) passed. `make check-change`
-  passed five of its six checks; the documentation citations check reports only
-  `docs/operator-handbook.md`, cited by `design.md`, `proposal.md`, and this
-  file, which task 7.4 creates in the next round. The fresh-context check of the fix diff against `7549f5b` found no
-  break in the codec change, the stream change, the versions, or the MODIFIED
-  requirement (the permanent text plus only the added paragraph and scenario),
-  and no stored or packaged connection the strict codec refuses. Fixed: the
-  quoted-port API test moved into `TestConnectionVersions`; a "numeric user"
-  case that proved nothing new dropped; the stream's fallback for a call it
-  never saw now takes the tool the event names; D11 and the proposal said
-  "main session's" denials where subagents' are kept too (subagent
-  `permission_denied` events appear in the parent stream, and the wrapper drops
-  their duplicate from the subagent transcript by id); stale notes under
-  sections 1 and 2 and the missing record of the Ansible bump (now in the
-  section 1 notes); the proposal's capability bullet. Declined: a wrapper-level
-  test of a killed run's line — the stream unit tests prove the denials, and
-  the wrapper already records `stream.denials` on a stopped line.
-- **Fixed at section 7's round triage (61 F2).** The stream kept a result-less
-  run's denials only from `permission_denied` events giving a reason, since it
-  read their ids from the reasons it recorded; it now records every id such an
-  event names, in order, and attaches a reason or tool name only when the event
-  gives one. Unit (`test_change_workflow_stream.py`): the killed-run transcript
-  gains a reasonless denial, returned with no `reason` key. The round's checks
-  are under section 7's notes.
-- **Fixed at the pre-closeout triage (68 R1).** A subagent's denial the harness
-  also reports on the parent's stream was recorded once, as the stream's
-  unmarked entry, because the wrapper dropped the subagent reader's marked copy
-  by id: workflow log seq 82 carried the fresh-context check's two denials as
-  the main session's. `_denials` in `scripts/change_workflow/wrapper.py` now
-  gives such an entry the subagent its transcript names, keeping its place and
-  its own reason, or taking the transcript's where the stream gave none. Unit
-  (`test_change_workflow_subagents.py`): a run whose result lists a subagent's
-  denied call records it once, naming the subagent, with the transcript's
-  reason. The checks are under section 7's notes, with 71 F1's.
+- **The owner's local run completed 6.1 and the table's markings:** the design
+  step's worktree rule names `origin/dev`, and `.claude/change-steps.toml` marks
+  sed's, find's, and the diff family's deny rules "Write-steering", so the
+  delta's "the step table marks such rules" holds at the archive.
+- **The comment-hygiene check matches `design.md` in a test's text,** so 6.2's
+  test asserts the reviews directory holds only the transcripts instead.
+- **Workflow tooling fixed in triage, on the owner's word that each is too small
+  for a change of its own:**
+  - a run ended by a signal keeps every denial its stream's `permission_denied`
+    events name, with a reason or without one (43 R5, 61 F2;
+    `scripts/change_workflow/stream.py`, `test_change_workflow_stream.py`);
+  - each step run's background command gets the harness's longest timeout
+    (43 R5; `.agents/skills/change-orchestrate/SKILL.md`);
+  - a subagent's denial the stream also reports names its subagent, with the
+    transcript's reason where the stream gave none (68 R1;
+    `scripts/change_workflow/wrapper.py`, `test_change_workflow_subagents.py`).
+- **Fresh-context checks** ran on the section and on each triage fix; their
+  fixes are in 6.2, 6.3, and the items above. Declined: rewording the delta's
+  "marks", which the owner's run made true; a wrapper-level test of a killed
+  run's line, since the stream's unit tests prove the denials.
 
 ## 7. Operator documentation drafts
 
@@ -1524,124 +1290,31 @@ Files: `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/seller-quickstart.md`;
   fields, chart and Compose wiring, codec rules, hook refusal, and reason codes
   to the code, and found one contradiction, fixed (see the section notes).
 
-Section 7 notes:
+Section 7 notes (compressed at closeout):
 
-- **Drafts, reconciled at closeout.** 8.9 reconciles these with the final code
-  and writes the permanent documents these drafts do not touch: `TESTING.md`'s
-  "Host Requirement Enforcement", the architecture companions, and
-  `ARCHITECTURE.md`'s "Resource pools".
-- **Correction to a section 4 note.** That note said `compose/seller.yml`
-  relied on `settings.toml`'s `inventory_path` default naming an INI baked into
-  the image. The provisioning image never contained it:
-  `provisioning/compute/service/Dockerfile.dockerignore` excludes
-  `provisioning-hosts*` but the example. So the seller stack registered no host
-  from the INI before section 4 either, and the quickstart's former "rebuild
-  after edits" and in-container `-i …/provisioning-hosts.ini` smoke test were
-  already false; 7.2 corrected both.
 - **The upgrade under Compose needs an empty document first.** Both compose
-  stacks require a host document, so the quickstarts tell an upgrading operator
-  to start once with `hosts: []`, which applies nothing and keeps every host,
-  then export, edit, and mount — the export route exists only in the upgraded
-  service.
-- **Fresh-context check.** No startup INI seeding left in the changed
-  documents, no placement or citation problem, and 7.1 complete with D13's
-  method first. Fixed: the INI-in-image claim and smoke test (above); the
-  bare-metal upgrade path that could not start; the method heading claiming
-  every kind follows it, and capacity "following all of it" though it has no
-  export; "predate" reading as history; pools a document may name that are
-  already stored; the import's 409 on a concurrent registration; `hosts.example`
-  saying the service never registers its entries, which the INI import route
-  would. Earlier, before the check finished: exporting from a service that has
-  no export route yet, and a forward-looking "yet".
-- **7.4's round.** The notes above are the drafting round's (7.1–7.3); 7.4 moved
-  their host account, with the pool and capacity accounts, into
-  `docs/operator-handbook.md`. End-to-end: none for 7.4 — documentation, two
-  `settings.toml` comments, and one test assertion; no scenario reads them, and
-  none is owed. No `Owed by validation:` line.
-- **For closeout (8.3, 8.9).** The handbook is the operator destination D13
-  names; 8.9 reconciles it, `DEPLOYMENT_AND_CONFIG.md`, and the quickstarts
-  with the final code. Of the three facts the 7.4 note lists as stated by no
-  spec, the round's triage added the capacity minimum to a `site-capacity`
-  delta (61 F1); 8.3 records the other two as kept in the handbook. The bare-metal quickstart still describes the fresh-site seed,
-  though its stack requires a pool document, so the seed never applies there;
-  that predates this change and was left.
-- **7.4's fresh-context check.** No layering, import, packaging, comment, or
-  test-level break; every handbook link resolves; no removed sentence group was
-  lost; the four added delta rules are backed by code and tests. Fixed:
-  `DEPLOYMENT_AND_CONFIG.md`'s "Validate before the release" sent a pool
-  document to `POST /api/v1/pools/import`, whose request has no
-  `validate_only` and would apply it (now names `POST /api/v1/pools/validate`,
-  as does D13's method list); the handbook's "an import always applies" (an
-  import reconciles; a refused or validate-only one applies nothing); the
-  method paragraph implying the relay kind has a paragraph; two passages that
-  pointed at each other for the INI upgrade (the retired-settings sentence now
-  links the handbook's upgrade section); the pool scenario's "naming the
-  problem", which its test does not assert (dropped); the note's evidence
-  levels (now stated per rule) and "the kit's suite" (the compute family
-  library's); a mis-wrapped `settings.toml` comment. Declined: adding a
-  capacity map's one-dimension minimum to the delta's capacity-document
-  requirement, which the check suggested — it is the registration contract's
-  rule, which `site-capacity` owns, and stating it for documents only would
-  leave registration's half unstated; it stays with the other two for triage.
-  Declined too: rewriting the bare-metal quickstart's seed passage (above).
-- **Fixed at section 7's round triage (61 F1, F2, F3).** F1: the
-  `site-capacity` delta (`specs/site-capacity/spec.md`) and the proposal, 7.4's
-  note, 8.3, 8.9, 8.11, and the promotion record name it; the deltas are now
-  five. F2: under section 6's notes. F3: library integration in the compute
-  family library,
-  `test_host_definitions.py::test_an_import_meeting_a_concurrent_registration_is_a_conflict_and_can_be_resubmitted`,
-  over a file SQLite database so the sessions have their own connections: an
-  authority whose session-scoped write lets another request register the host
-  the entry creates, in its own session, before the import commits; the import
-  answers 409, the competitor's host stands, and the same document submitted
-  again updates it. The unit test of the translation stays. No production code
-  changed.
-- **The round triage's checks (61 F1–F3).** `make test-compute-provisioning`
-  (unit and library integration): 336 passed. `make test-release-tooling`
-  (`scripts/tests`, unit, the stream's killed-run test included): 1820 passed.
-  `make check-packaging` passed. `make test`: every suite passed, the Helm
-  render included. `make check-change`: all six checks passed. End-to-end:
-  none — a spec delta, a workflow tooling fix, and a test; no scenario reads
-  them, and none is owed. The fresh-context check of the diff against
-  `75dc4c4` found no defect in the code or tests, the delta faithful to the
-  permanent requirement, and comments clean. Fixed: 7.4's note read "refusing
-  none"; the scenario's WHEN, since the registration route's `capacity: {}`
-  beside `total_units` declares the mirror dimension (now "empty or absent,
-  and no legacy scalar total stands in"), and "nothing is stored" (now "no
-  declaration is written or changed"); the note's evidence, which now cites the
-  declaration and document unit tests of an empty map beside the ledger test;
-  the file engine, now a fixture disposed of whatever the test's result; a
-  delta paragraph's wrapping; and this note, which the section 6 note pointed
-  to. Left for 8.4: 7.4's fresh-context note counts "four added delta rules",
-  true of that round.
-- **Fixed at the pre-closeout triage (71 F1).** Routing `apply_inventory`
-  through `put_host_in_session` gave the INI import route the document's no-op
-  comparison, which compares protected values by scheme: an INI reimport
-  embedding a rotated key, with no public field or pool changed, was reported
-  applied and kept the old key, where the route had always stored each entry's
-  connection. `put_host_in_session` now treats a connection submitted with a
-  secret as never equal to the stored one, so it is always written; a host
-  document carries no secret, so its no-op and the digest contract are
-  unchanged. Library integration in the compute family library
-  (`test_host_authority.py::test_an_inventory_resubmitting_a_secret_replaces_the_stored_one`):
-  a reimport changing only the secret stores the new protected value, and a
-  reimport submitting none keeps it. R1 (68): under section 6's notes.
-- **The pre-closeout triage's checks (71 F1, 68 R1).** `make
-  test-compute-provisioning` (unit and library integration, the new test
-  included): 337 passed. `make test-release-tooling` (`scripts/tests`, unit):
-  1821 passed. `make check-packaging` passed. `make test`: every suite passed,
-  the Helm render included. `make check-change`: all six checks passed.
-  End-to-end: none run here. The INI route's embedded-key path has no pipeline
-  scenario; the fix commit's validation runs the pipeline. The fresh-context
-  check of the diff against `02baf50` found no defect. It confirmed that the
-  only other caller of the session-scoped write, the host document, submits no
-  secret, and that no HTTP test depends on an embedded-key reimport being
-  unchanged. Fixed from it: the wrapper now also takes the transcript's reason
-  for a streamed subagent denial that has none, which the test asserts; this
-  note, which the section 6 note pointed to; a promotion-record row for F1.
-  Declined: noting that an equal key-path INI reimport no longer advances
-  `updated_at`. That came with section 2's session-scoped write, it is harmless,
-  and it is no part of the route's contract.
+  stacks require a host document, and the export exists only in the upgraded
+  service, so an upgrading operator starts once with `hosts: []`, then exports,
+  edits, and mounts (`docs/operator-handbook.md`, "Upgrading from an INI
+  inventory").
+- **Recorded in `design.md`,** "Consequences found in implementation": the
+  provisioning image never held the INI; the bare-metal quickstart's seed
+  passage, left as found (a deferral, predating this change).
+- **Fixed in triage:** the `site-capacity` delta's one-dimension minimum
+  (61 F1); a real concurrent registration answered 409 and resubmittable,
+  library integration in the compute family library (61 F3,
+  `test_host_definitions.py::test_an_import_meeting_a_concurrent_registration_is_a_conflict_and_can_be_resubmitted`);
+  an INI reimport embedding a rotated key replaces the stored key (71 F1,
+  `test_host_authority.py::test_an_inventory_resubmitting_a_secret_replaces_the_stored_one`).
+  F2 and 68 R1 are under section 6's notes.
+- **Checks of the last fix commit (71 F1, 68 R1),** at `78f412a4c`: `make
+  test-compute-provisioning` 337 passed; `make test-release-tooling` 1821
+  passed; `make check-packaging`, `make test` (the Helm render included), and
+  `make check-change` passed. Validation 78 then passed at the merged
+  `6b69b79f1` (8.8).
+- **Fresh-context checks** ran on 7.1–7.3, 7.4, and each triage fix; their fixes
+  are in the tasks above. 7.4's note counts "four added delta rules", true of
+  that round; the capacity minimum (61 F1) made five.
 
 ## 8. Closeout
 
@@ -1651,7 +1324,7 @@ delta requirement). The eleven parts follow
 code: a part needing a code, lock, or test change returns the change to
 implementation.
 
-- [ ] 8.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene` and read
+- [x] 8.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene` and read
   every comment and docstring sections 1–7 added or rewrote — the new
   `hosts/definitions.py`, the importer's applier and docstrings, `settings.toml`'s
   `host_definitions_path` comment, `RETIRED_SETTINGS`, the chart's values comments,
@@ -1659,20 +1332,69 @@ implementation.
   and `Stream` docstrings — for current-system rationale with no
   change, review, or migration narration. A needed correction returns to
   implementation.
-- [ ] 8.2 **Import placement — confirm.** Check that every import sections 1–6
+  *Confirmed.* `make check-comment-hygiene`: both scans OK. Every comment and
+  docstring line the diff against `origin/dev` adds was searched for change,
+  review, triage, migration, and before-and-after narration: none. "Retired"
+  appears only where the service refuses a retired setting, which is current
+  behaviour, as `playbook_path`'s refusal is stated. Not hygiene, left for
+  review to weigh: one `settings.toml` comment line about `pool_definitions_path`
+  runs past the wrap, which is a code edit closeout does not make.
+- [x] 8.2 **Import placement — confirm.** Check that every import sections 1–6
   added or touched is at module level unless a verified cycle or a recorded
   lazy-load reason keeps it local. A needed move returns to implementation.
-- [ ] 8.3 **Documentation compliance.** Check D1–D14 against
+  *Confirmed.* A search of the diff against `origin/dev` for added indented
+  `import`/`from … import` lines finds none: every added import is at module
+  level.
+- [x] 8.3 **Documentation compliance.** Check D1–D14 against
   `openspec/README.md`'s placement rules and the promotion record: normative
   behaviour in the five deltas, rationale in the companions, repository shape in
   `ARCHITECTURE.md`, configuration conventions in `DEPLOYMENT_AND_CONFIG.md`,
   operator behaviour in `docs/operator-handbook.md` (7.4) and the quickstarts,
   test ownership in `TESTING.md`. Record a disposition for every
   decision, and check every promoted statement against the code.
-- [ ] 8.4 **Narrative compression.** Compress section notes to final behaviour,
+  *Dispositions.*
+  - D1, D2, D4, D5, D6, D7, D9, D12, D14: normative in the
+    `physical-provisioning` delta, merged by the archive; rationale in that
+    companion's "Hosts are a reconciled declaration"; operator account in the
+    handbook's "Host definitions".
+  - D3: the `deployment-state` delta; the convention in `DEPLOYMENT_AND_CONFIG.md`,
+    "Definition documents".
+  - D5's pool rule: the `resource-pool-management` delta, "Explicit valid host
+    membership".
+  - D8: the companion's section, the startup order in `resource-pool-management`'s
+    companion, "Administrative reconciliation", and `ARCHITECTURE.md`, "Resource
+    pools".
+  - D10: `design.md`'s Open Questions and the roadmap's unowned Goal 1 gap (8.5).
+  - D11: workflow tooling itself; fix 4 is in the `change-workflow` delta and
+    companion, the step skills, and `docs/agents/change-workflow.md`.
+  - D13: `DEPLOYMENT_AND_CONFIG.md`, "The method a document kind follows"; the
+    handbook, with its rows in `openspec/README.md` and `AGENTS.md`.
+  - Test ownership: `TESTING.md`, "Host Requirement Enforcement" (8.9).
+
+  The two facts 7.4 found stated by no spec and the triage left out of the
+  deltas are kept in the handbook, since `storefront-publication` already states
+  them: the scenario "A pool whose members declare no GPUs states no shapes", and
+  its shape requirement leaving an omitted dimension to the site, which the
+  `default_vm_*` settings configure. Checked against the code: the startup order
+  in `app_runtime.startup_steps()` (contributed definitions, pools, seed, stored
+  pool check, hosts, capacity), as the companions and `DEPLOYMENT_AND_CONFIG.md`
+  state it; the handbook's INI route, which upserts and so agrees with 71 F1's
+  fix. No placement violation was found.
+- [x] 8.4 **Narrative compression.** Compress section notes to final behaviour,
   validation evidence, deferred work (the two open questions), and destinations,
   moving any durable rationale into `design.md` first.
-- [ ] 8.5 **Roadmap currency.** In `docs/development/ROADMAP.md`, Goal 1 —
+  *Done.* What the notes held that is worth keeping went first to `design.md`'s
+  new "Consequences found in implementation": the INI route's shared write and
+  71 F1, the route service's 422 and 409, the export stating what it can read,
+  the client's text fallback, Dynaconf's `exists`, the render tests' text-only
+  check, the INI never in the image, and the bare-metal quickstart's seed
+  passage, left as found. D10's outcome went to its open question. Each section's
+  notes are then cut to final behaviour, evidence, deferrals, and destinations,
+  with fresh-context checks summarized by where their fixes went. Completed task
+  notes are left as written, as the closeout rules require. The two open
+  questions stay in `design.md`: D4's revisit when
+  `keep-new-deliveries-off-disabled-hosts` lands, and D10's, now a roadmap gap.
+- [x] 8.5 **Roadmap currency.** In `docs/development/ROADMAP.md`, Goal 1 —
   "Consolidate physical-resource authority in the provisioning service": remove
   the open-gap row this change owns ("Host inventory seeds the host registry only
   when it is empty…"), and replace the current-state sentence "An inventory file
@@ -1683,22 +1405,68 @@ implementation.
   landed on this branch by now, add the relay-pool mismatch (a declaration in a
   relay-backed pool naming a host placed under another relay) to Goal 1's open
   gaps as unowned; if they have landed, record which and whether they settled it.
-- [ ] 8.6 **Campaign index currency.** Set this change's Goal 1 row in
+  *Done.* Goal 1's open-gap row this change owned is removed, and its
+  current-state sentence now says hosts are declared in a host definitions
+  document reconciled at startup when its digest changes, after pools and before
+  capacity, exported and imported through the provisioning API, with the INI
+  read only by the import route. `admit-relay-proxies-by-grant` has landed
+  (archived 2026-11-01) and did not settle the relay-pool mismatch;
+  `prove-relay-provisioning` has not landed, and its design does not address it.
+  So the mismatch is added to Goal 1's open gaps as unowned, citing this
+  change's archived Open Questions.
+- [x] 8.6 **Campaign index currency.** Set this change's Goal 1 row in
   `openspec/changes/README.md` to `in closeout`, its notes naming the validation
   and the destinations; keep its graph line. Leave other rows' `Depends on` for
   archive cleanup. Run `make check-change-index`.
-- [ ] 8.7 **Packaging.** Confirm `make check-packaging` and `make
+  *Done.* The row is `in closeout`, its notes naming validation 78 and the
+  destinations, and it links the archive directory (8.11). The graph line's
+  marker reads `(closeout)`. No other row's `Depends on` or status is touched.
+  `make check-change-index` passed after the edit.
+- [x] 8.7 **Packaging.** Confirm `make check-packaging` and `make
   check-architecture-change CHANGE=bring-host-inventory-under-definition-documents`
   pass against the last implementation commit; the change touched `.claude/` and
   `.agents/` (section 6), so run `make check-agent-skills` too.
-- [ ] 8.8 **End-to-end pipeline.** Confirm the pipeline passes at the last
+  *Passed* at `6b69b79f1`, the merged `HEAD` closeout starts from: `make
+  check-packaging` (every rule held, among them dependencies and kinds); `make
+  check-architecture-change`: the change owns no architecture row; `make
+  check-agent-skills`: every skill is loaded from its one shared source.
+- [x] 8.8 **End-to-end pipeline.** Confirm the pipeline passes at the last
   implementation commit and record the run, its result, and the scenarios that
   exercise this change: every VM lane scenario (packaged configuration with no
   host document and no retired setting) and every bare-metal lane scenario (an
   empty host document mounted through compose). If the pipeline cannot run for a
   reason unrelated to the change, record the blocker and its owner and treat the
   validations it gates as unrun.
-- [ ] 8.9 **Promotion.** Write the permanent documents and the design-promotion
+  *Passed.* Validation 78 (`reviews/78-validation.md`) ran at `6b69b79f1`, the
+  merge of `origin/dev` that followed the pre-closeout triage's fix commit
+  `78f412a4c`; no commit has been made since. Pipeline run 41632231282 passed:
+  lanes `e2e-vm`, `e2e-bare-metal`, and `e2e-apicredits`, with the VM lane's
+  native Ansible gate. The scenarios exercising this change:
+  - VM lane: `e2e_deal`, `e2e_deal_buyer_cli`, `e2e_buy`, `e2e_listing_shapes`,
+    `e2e_compute_dynamic_listings`, `e2e_pool_declared_modes`, `multi_registry`,
+    and `e2e_vm_introduction`, all on packaged configuration with no host
+    document and no retired setting;
+  - bare-metal lane: `e2e_bare_metal_publication`, `e2e_bare_metal_mock_deal`,
+    `e2e_bare_metal_introduction`, `e2e_bare_metal_unbacked_introduction`, and
+    `e2e_bare_metal_payment_deal`, each with the empty host document mounted
+    through compose.
+
+  No scenario applies a non-empty document; persistence and application
+  integration own that. Local (`check-packaging`, `test`) and Helm
+  (`test-render`, deploy, the `e2e-scenarios` pod, exit 0) passed too.
+
+  CI owed by validation, tests.yml run 41632237934, all 23 jobs passed:
+  - every `test · <target>` job installs from the relocked environments and
+    passes (1.4);
+  - `test · test-deployment-packaging`: `make -C helm test-render` passes with
+    the `definitions.hosts` render, mount, path, and every refused key (5.3);
+    its `test-release-tooling` step passes `scripts/tests`, 1826 passed (6.4).
+
+  No job failed, so nothing was compared with the baseline, `dev`'s tests.yml
+  run 41630898702 at `aa521868c`, also 23 of 23. Closeout changes no code, so
+  these runs describe the code the closeout commit carries. They name the
+  pre-closeout commit's merge, not an earlier waived one.
+- [x] 8.9 **Promotion.** Write the permanent documents and the design-promotion
   record below:
   - `openspec/specs/physical-provisioning/architecture.md`: a section after "The
     host registry owns the connection", "Hosts are a reconciled declaration": why
@@ -1732,12 +1500,43 @@ implementation.
     deny-rule markings were completed by the owner's local run. If they were not,
     record that in the promotion record and the index notes, and do not invent
     the markings here.
-- [ ] 8.10 **Documentation citations.** Run `make check-doc-citations
+
+  *Done.* Written:
+  - `physical-provisioning/architecture.md`: "Hosts are a reconciled
+    declaration" after "The host registry owns the connection" (D1, D2, D4, D5,
+    D6, D7, D8, D9, D12), and "Selected-resource execution" now names the host
+    definitions document and the INI import route as what may register hosts;
+  - `resource-pool-management/architecture.md`, "Administrative
+    reconciliation": the startup order names host definitions, then capacity,
+    and the one-process paragraph the host-document import;
+  - `site-capacity/architecture.md`: no host write declares capacity, naming the
+    host definitions document and the INI submitted to the import route;
+  - `ARCHITECTURE.md`, "Resource pools": hosts reach the registry through the
+    host API, the INI import route, or a host definitions document reconciled
+    like the pool and capacity documents;
+  - `TESTING.md`, "Host Requirement Enforcement": dispatch fails even after a
+    host document naming the host was submitted and refused.
+
+  Section 7's operator documents (`DEPLOYMENT_AND_CONFIG.md`, the handbook, both
+  quickstarts, the IaC README) were reconciled with the final code. The only
+  code change after their review, 71 F1, agrees with the handbook's INI route
+  ("it upserts"), and none needed a content change; one mis-wrapped paragraph in
+  `DEPLOYMENT_AND_CONFIG.md` was rewrapped. `openspec/specs/README.md` needs no
+  edit, since the change adds no capability or companion. The change-workflow
+  companion, the step skills, and `docs/agents/change-workflow.md` match the
+  delta. The owner's local run completed 6.1 and the table's "Write-steering"
+  markings, so the delta's "the step table marks such rules" holds. The five
+  deltas' specs are written by the archive (8.11).
+- [x] 8.10 **Documentation citations.** Run `make check-doc-citations
   CHANGE=bring-host-inventory-under-definition-documents` after promotion and
   resolve every match; `keep-new-deliveries-off-disabled-hosts` is cited by name
   and exists on this branch once `dev` is merged in. Then run `openspec validate
   bring-host-inventory-under-definition-documents --strict`.
-- [ ] 8.11 **Archival.** Archive last with `openspec archive
+  *Passed* after promotion: `make check-change` reported every check passing —
+  comment hygiene, agent skills, documentation citations, task list, change
+  index, and `openspec validate --strict` with the pinned validator.
+  `keep-new-deliveries-off-disabled-hosts` exists on this branch.
+- [x] 8.11 **Archival.** Archive last with `openspec archive
   bring-host-inventory-under-definition-documents -y`, which merges the five
   deltas into `openspec/specs/`. Then, in the same commit, make the edits the
   merged text cannot carry: retitle the two scenarios a modified requirement
@@ -1749,6 +1548,22 @@ implementation.
   cite the host definitions startup and import tests. Run `bunx
   @fission-ai/openspec@1.14.0 validate --specs --strict` afterwards. The change
   row then links its archive directory.
+  *Done.* No delta had been synchronized by hand (none of the added requirements
+  or new scenarios was in a permanent spec), so the archive merged them:
+  `npx --yes @fission-ai/openspec@1.14.0 archive … -y` (no `bunx` here; `npx` is
+  the fallback `scripts/check_change.py` uses), applying + 8 and ~ 8 across the
+  five specs, and moving the change to
+  `openspec/changes/archive/2026-11-03-bring-host-inventory-under-definition-documents/`.
+  The archive's one incomplete task was this one. A read of each merged spec's
+  diff found every added and modified requirement there once, as its delta
+  states it, and nothing else changed; `change-workflow`'s modified requirement
+  keeps the relative-rule paragraph and scenario the `dev` merge brought in.
+  Then, by hand in `physical-provisioning/spec.md`: the two scenarios retitled
+  as planned; the evidence paragraph's "startup inventory seed" now names the
+  host definitions document, and a new evidence entry cites the host
+  definitions tests at each level. The row links the archive directory, and no
+  other link to the change's old directory remains. `make check-change`, which
+  for an archived change runs `openspec validate --specs --strict`, passed (below).
 
 **Closeout verification:** the eleven recorded outcomes, valid synchronized specs,
 and a clean `make check-change-index`.
@@ -1764,17 +1579,20 @@ and a clean `make check-change-index`.
 | Startup INI seeding retired (D2) | `openspec/specs/physical-provisioning/spec.md`, "Startup reads no INI inventory" (by the archive) |
 | The chart's `definitions.hosts` and refused keys (D3) | `openspec/specs/deployment-state/spec.md`, "The provisioning chart renders a host definitions document" (by the archive) |
 | Export and import routes (D12, D14) | `openspec/specs/physical-provisioning/spec.md`, "The host registry exports a canonical host definitions document" and "A host definitions document is validated whole and carries no credential" (by the archive) |
-| Why hosts are a reconciled, family-owned declaration (D1, D4, D5, D6, D8, D12) | `openspec/specs/physical-provisioning/architecture.md`, "Hosts are a reconciled declaration" (8.9) |
-| The general definition-document method (D13) | `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Definition documents" (7.1, 8.9) |
-| The operator account of the host, pool, and capacity documents (D13, 47 O1) | `docs/operator-handbook.md`, its row in `openspec/README.md`'s placement table, and `AGENTS.md`'s "Documentation ownership" (7.4, 8.9) |
+| Why hosts are a reconciled, family-owned declaration (D1, D2, D4, D5, D6, D7, D8, D9, D12) | `openspec/specs/physical-provisioning/architecture.md#hosts-are-a-reconciled-declaration` (8.9); "Selected-resource execution" corrected |
+| The general definition-document method (D13) | `docs/development/DEPLOYMENT_AND_CONFIG.md#definition-documents` and `#the-method-a-document-kind-follows` (7.1, 7.4) |
+| The operator account of the host, pool, and capacity documents (D13, 47 O1) | `docs/operator-handbook.md#definition-documents`, its row in `openspec/README.md`'s placement table, and `AGENTS.md`'s "Documentation ownership" (7.4) |
 | Rules `DEPLOYMENT_AND_CONFIG.md` stated that no spec did (D13, 47 O1, 7.4): a configured pool document fails startup when missing or invalid; the host export's order and stated pool and enabled state; the host import's 409; strict capacity document typing | `openspec/specs/resource-pool-management/spec.md`, "A configured pool document is imported at startup or fails it"; `openspec/specs/physical-provisioning/spec.md`, "The host registry exports a canonical host definitions document", "A host definitions document is validated whole and carries no credential", and "Capacity definitions are imported from a mounted document" (by the archive) |
 | A capacity declaration names at least one dimension (61 F1), stated by the handbook and enforced by the authority, unstated by the requirement accepting any set of dimensions | `openspec/specs/site-capacity/spec.md`, "A capacity declaration names no mandatory dimension", and its scenario "A declaration names no dimension" (by the archive) |
 | A connection submitted with a secret is always written, so an INI reimport embedding a rotated key replaces the stored key (71 F1) | Restores the INI import route's behaviour, which "Do not change the INI import route's semantics" keeps; stated in the host authority's docstrings (`provisioning/compute/src/compute_provisioning/hosts/service.py`); no permanent document |
 | A codec types a connection's public fields strictly, for every submission (D7, 45 F1) | `openspec/specs/physical-provisioning/spec.md`, "Host connections are typed by their implementation's codec" and "A host definitions document is validated whole and carries no credential" (by the archive) |
 | A run ended by a signal keeps its denials, with a reason or without one; step runs get the longest timeout (43 R5, 61 F2); a subagent's denial the stream also reports names its subagent (68 R1) | Workflow tooling itself (`scripts/change_workflow/stream.py`, `scripts/change_workflow/wrapper.py`, `.agents/skills/change-orchestrate/SKILL.md`); no permanent document |
-| Startup order with host definitions | `openspec/specs/resource-pool-management/architecture.md`, "Administrative reconciliation" (8.9) |
-| How hosts reach the registry | `docs/development/ARCHITECTURE.md`, "Resource pools" (8.9) |
-| No startup INI seeding | `docs/development/ROADMAP.md` Goal 1 (8.5); `openspec/specs/site-capacity/architecture.md` (8.9); both seller quickstarts and `domains/vms/provisioning/iac/README.md` (7.2, 8.9) |
-| D10 (no same-pool rule) and the D4 revisit trigger | `design.md` Open Questions; `docs/development/ROADMAP.md` Goal 1 if the relay changes have not landed (8.5) |
+| Startup order with host definitions (D8) | `openspec/specs/resource-pool-management/architecture.md#administrative-reconciliation` (8.9); `docs/development/DEPLOYMENT_AND_CONFIG.md#definition-documents` (7.1) |
+| How hosts reach the registry | `docs/development/ARCHITECTURE.md#resource-pools` (8.9) |
+| Dispatch to an unregistered host is refused even after a refused host document names it (test ownership) | `docs/development/TESTING.md#host-requirement-enforcement` (8.9) |
+| No startup INI seeding | `docs/development/ROADMAP.md`, Goal 1's current state (8.5); `openspec/specs/site-capacity/architecture.md` (8.9); `openspec/specs/physical-provisioning/spec.md`'s retitled scenarios and evidence paragraph (8.11); both seller quickstarts and `domains/vms/provisioning/iac/README.md` (7.2, 7.4) |
+| D10 (no same-pool rule) and the D4 revisit trigger | `design.md` Open Questions; `docs/development/ROADMAP.md`, Goal 1's open gaps, as unowned: `admit-relay-proxies-by-grant` landed without settling it and `prove-relay-provisioning` has not landed (8.5) |
+| Consequences found in implementation: the INI route's shared write, the route service's 422 and 409, the export stating what it can read, the client's text fallback, Dynaconf's `exists`, the render tests' text check | `design.md`, "Consequences found in implementation" (8.4); the behaviour is in the code's docstrings and the deltas; no further permanent document |
+| Left as found: the bare-metal quickstart describes the fresh-site seed its stack never applies | `design.md`, "Consequences found in implementation"; predates this change, no owner |
 | D11 tooling fixes 1–3 | Workflow tooling itself (`.claude/change-steps.toml`, `.agents/skills/change-design/SKILL.md`, `scripts/change_workflow/review.py`); no permanent document |
 | D11 fix 4: a write-steering deny rule's denial redone with Edit or Write is a gap | `openspec/specs/change-workflow/spec.md`, "Unattended runs are held to their step's permissions" (by the archive); `openspec/specs/change-workflow/architecture.md`, "Restrictions bind unattended runs only", the eight step skills, `.agents/skills/change-orchestrate/SKILL.md`, `docs/agents/change-workflow.md`, and the unattended prompt in `scripts/change_workflow/harness.py` (6.3); the table's markings in `.claude/change-steps.toml` (the owner's local run) |

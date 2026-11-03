@@ -44,7 +44,7 @@ Two limits follow. An operator's VM password reset runs as its own job, whose ne
 
 Concrete providers operate on the Settlement Resource selected by fulfillment scheduling. The VM Ansible adapter resolves pool/provider configuration, validates it, and snapshots prepared inputs at dispatch. Administrative pool edits therefore affect later operations rather than rewriting the accepted execution.
 
-Operational inventory is authoritative service state, not a checked-in Ansible inventory. Bootstrap inventory may import hosts, and an adapter may render transient execution inventory, but operator mutations and job-history references remain tied to persisted resources.
+Operational inventory is authoritative service state, not a checked-in Ansible inventory. A host definitions document or an INI submitted to the import route may register hosts, and an adapter may render transient execution inventory, but operator mutations and job-history references remain tied to persisted resources.
 
 ### Bare-metal storefront pull boundary
 
@@ -307,6 +307,67 @@ what the registry holds rather than leaving the default implied by an absent
 one. A malformed port fails its entry rather than degrading to a default: an
 unreachable host is not a degraded host, and a substituted value turns an
 operator's typo into a failure that resembles a network fault.
+
+## Hosts are a reconciled declaration
+
+Hosts reach the registry through the host API, the Ansible INI import route, or
+a host definitions document. The document follows the rule every definition
+document follows: a process start is not a submission and a changed document
+is. Startup applies it only when its digest differs from the one recorded under
+the kind `hosts`, recording the digest in the apply's own transaction, so an
+edited and rolled document is applied and a restart against an unchanged one
+leaves API edits alone. A site must be establishable from configuration alone,
+since a deployment applies a chart with no operator API call in it, which is why
+hosts keep a startup document at all. Seeding only an empty registry was
+rejected because an edit to the file then did nothing and said nothing.
+
+The document is YAML with the registration API's field names, not the Ansible
+INI. The INI cannot state `enabled` or a connection's kind or version, always
+names a key path, and reads an absent pool as "leave it", so reconciling it
+would be a merge rather than a declaration. The YAML form is format-neutral:
+the compute family library owns its parsing, validation, equality, session-scoped
+apply, and export beside the host authority, and the service gates it as it
+gates capacity, after the stored-pool check so every pool a host names exists.
+The Ansible distribution keeps the INI parser and its import route, which
+upserts as it always has; an operator who prepares hosts with Ansible keeps that
+INI as a separate list.
+
+An entry declares its whole host. Omitting `pool_id` unplaces the host and
+omitting `enabled` enables it, so deleting a line from an entry means what it
+says, as it does for capacity and relay entries; merging would bring back the
+omitted-versus-null distinction a declaration exists to avoid. The cost is the
+capacity document's: a host disabled or moved through the API is restored by the
+next change to the document unless the document restates it. Equality is taken
+after the connection's codec, with the stored connection as `previous`, so an
+entry omitting a field the codec defaults equals a host stored with the default,
+and an equal entry writes nothing and runs no pool-change hook. The codec types
+the public fields strictly for every submission, because they are the values an
+operator types by hand.
+
+A host the document does not name is retained and reported, not disabled. Hosts
+registered through the API, as every end-to-end lane registers them, must
+coexist with the document, and disabling a host does not keep new deliveries off
+it today, so a removed line would become capacity that cannot be delivered.
+
+A document that cannot be applied fails whole. The apply writes into the
+caller's session and continues past a pool-change hook's refusal so that every
+refusal is reported, then rolls back on any problem; whatever a refusing hook
+wrote is discarded with the rest, so the hook contract needs no savepoint. A
+refused move at startup keeps the service down until the edit is reverted,
+because the leases that refuse it cannot drain while it is down; validating a
+changed document through the import route before the release reports the same
+refusal against live state without an outage.
+
+The document names key material by `key_path`, or keeps a stored protected key
+by naming none, and never carries it: registering key material stays an API act.
+
+An existing site's first document comes from the canonical export, which
+reproduces pools and enabled states set through the API, where converting an INI
+would reproduce the file rather than the site. A site with no recorded `hosts`
+digest applies its first document like any changed one. The export omits a host
+it cannot state as an entry, one whose connection kind or stored version no
+codec serves; such a host already runs nothing until it is submitted again, and
+a document built from the export retains it and reports it as not named.
 
 ## Related contracts
 

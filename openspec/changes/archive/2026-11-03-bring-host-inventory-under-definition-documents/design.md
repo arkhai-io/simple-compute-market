@@ -484,6 +484,47 @@ typed family client gains `import_host_definitions`.
 a surface in the document's own format, and it completes the export's round
 trip.
 
+## Consequences found in implementation
+
+Recorded at closeout from the implementation notes, so the notes can be
+compressed without losing them.
+
+- **The INI route shares the session-scoped write.** `apply_inventory` is built
+  on the same write as the document, so an INI entry equal to its stored host
+  writes nothing and keeps its `updated_at`, and on a move the hooks run before
+  the connection is replaced, inside the one transaction. A connection submitted
+  with a secret is never equal to the stored one, so an INI reimport embedding a
+  rotated key replaces the stored key, as the route always did (71 F1); a host
+  document carries no secret, so its no-op is unchanged.
+- **The route service raises the import's refusal.** `ARCHITECTURE.md`, "Route
+  contracts and their HTTP binding", has a route service report a refusal as
+  `ProvisioningRouteError` and the binding only translate it, so an applying
+  request with a problem raises `ProvisioningRouteError(422, <response>)` and the
+  422 body carries the response under `detail`, as capacity's does. A commit that
+  meets a host another request registered first is rolled back and answered 409,
+  as a duplicate `POST /api/v1/hosts` is.
+- **The export states what it can read.** Entries are built without
+  re-validation, so a host stored at a served version its codec now refuses, or
+  under an id no entry can name, is exported as stored and refused on import,
+  rather than failing the whole export or being dropped silently. Only D12's two
+  omissions apply.
+- **The typed client reads the export through the shared transport's text
+  fallback.** `SigningBase.finish` parses JSON and falls back to text, and a
+  block-style YAML document is never JSON; making `finish` choose by content
+  type would change every client's reading of every response, so it is left.
+- **Retired-key detection relies on Dynaconf's `exists`,** which reports an
+  empty value, from a profile or the environment, as stated; unit tests pin both.
+- **The chart's render tests check the rendered host document's text,** as the
+  pool and capacity cases do, rather than parsing it with the service's parser:
+  `helm/scripts/test-render.sh` runs without `compute_provisioning`.
+- **The provisioning image never held the INI.** Its dockerignore excludes
+  `provisioning-hosts*`, so the seller stack registered no host from an INI
+  before this change either; the quickstart's former rebuild advice and smoke
+  test were already false, and were corrected.
+- **Left as found.** `docs/bare-metal-seller-quickstart.md` describes the
+  fresh-site seed though its stack requires a pool document, so the seed never
+  applies there; that predates this change.
+
 ## Risks / Trade-offs
 
 - [Operators lose startup INI seeding] → Startup refuses a stated
@@ -519,3 +560,6 @@ trip.
   land, or when shape derivation from host facts is designed. If those relay
   changes have not landed by this change's closeout, record the relay-pool
   mismatch as unowned Goal 1 work in `docs/development/ROADMAP.md`.
+  *At closeout:* `admit-relay-proxies-by-grant` had landed without settling it,
+  and `prove-relay-provisioning` had not landed and does not address it, so the
+  mismatch is an unowned open gap in Goal 1 of `docs/development/ROADMAP.md`.

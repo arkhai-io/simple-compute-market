@@ -704,8 +704,11 @@ operator replaces the seed or disables it; a site that already holds pools is
 never seeded. See the
 [resource-pool management architecture](../../openspec/specs/resource-pool-management/architecture.md#administrative-reconciliation).
 
-No host write places a host in a pool or declares its capacity, whatever its entry
-point. A host names its pool, or is unplaced; a host's pool is placement intent,
+Hosts reach the registry through the host API, the Ansible INI import route, or a
+host definitions document, which startup reconciles when its digest changes, as it
+does the pool and capacity documents, and which the host routes also export and
+import. No host write places a host in a pool it does not name or declares its
+capacity, whatever its entry point. A host names its pool, or is unplaced; a host's pool is placement intent,
 read by the pool-change hooks and host reads, and nothing that admits, schedules,
 dispatches, or sells reads it. A host sells only through capacity an operator has
 explicitly declared, and a declaration names its own pool. So a host an

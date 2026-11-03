@@ -1001,8 +1001,8 @@ the API is one relay, not two.
 
 A capacity declaration absent from the document is **retained**, as a relay is.
 An unnamed declaration may have been registered through the API, derived from a
-host's inventory by the upgrade migration, or be backing a live reservation, and none of those is what an
-operator editing an unrelated entry means to switch off. A capacity document
+host's inventory by the upgrade migration, or be backing a live reservation, and
+none of those is what an operator editing an unrelated entry means to switch off. A capacity document
 therefore adds and updates declarations and never removes one; disabling is an
 explicit `enabled: false`, in the document or through the API.
 
