@@ -172,7 +172,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal"
-version = "0.14.0"
+version = "0.15.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-compute" },
@@ -180,9 +180,10 @@ dependencies = [
     { name = "arkhai-kit-capability-shape" },
     { name = "arkhai-kit-resource-pools-contracts" },
     { name = "pydantic" },
+    { name = "pydantic-core" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal-0.14.0-py3-none-any.whl" },
+    { path = "arkhai_bare_metal-0.15.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -468,7 +469,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-arkhai-payments"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -479,7 +480,7 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_kit_arkhai_payments-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_kit_arkhai_payments-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -832,14 +833,14 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-provisioning-operator-client"
-version = "0.10.0"
+version = "0.11.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_vms_provisioning_operator_client-0.10.0-py3-none-any.whl" },
+    { path = "arkhai_vms_provisioning_operator_client-0.11.0-py3-none-any.whl" },
 ]
 
 [[package]]

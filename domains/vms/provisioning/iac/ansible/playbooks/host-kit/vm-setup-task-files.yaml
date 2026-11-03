@@ -78,11 +78,6 @@
         name: ../../roles/vm-setup
         tasks_from: ssh-authorized-keys
 
-    - name: Parse the tunnel client tasks
-      import_role:
-        name: ../../roles/vm-setup
-        tasks_from: frp-client
-
     - name: Parse the golden image build tasks
       import_role:
         name: ../../roles/vm-setup

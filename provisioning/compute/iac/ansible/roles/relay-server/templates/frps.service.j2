@@ -1,0 +1,19 @@
+[Unit]
+Description=Buyer relay server
+After=network-online.target frp-grant-admission.service
+Wants=network-online.target frp-grant-admission.service
+
+[Service]
+Type=simple
+User=root
+ExecStart={{ frp_binary_path }} -c /etc/frp/frps.toml
+Restart=always
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/frp
+
+[Install]
+WantedBy=multi-user.target

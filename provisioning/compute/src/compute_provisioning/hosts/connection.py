@@ -95,6 +95,13 @@ class ConnectionCodec(Protocol):
     def validate(self, envelope: ConnectionEnvelope) -> ConnectionEnvelope:
         """Return the canonical form of a stored envelope, or raise ``ValueError``."""
 
+    def address(self, envelope: ConnectionEnvelope) -> str | None:
+        """The network address the service reaches the host at, if the kind has one.
+
+        Lets a rule that compares addresses read one without learning the
+        kind's fields.
+        """
+
 
 class ConnectionCodecs:
     """The connection codecs a deployment supports, by kind."""
@@ -150,6 +157,10 @@ class ConnectionCodecs:
         if previous is not None and previous.kind != kind:
             previous = None
         return codec.build(public, secrets, previous=previous)
+
+    def address(self, envelope: ConnectionEnvelope) -> str | None:
+        """The address a host's connection reaches it at, by its kind's codec."""
+        return self.codec(envelope.kind).address(envelope)
 
 
 __all__ = [

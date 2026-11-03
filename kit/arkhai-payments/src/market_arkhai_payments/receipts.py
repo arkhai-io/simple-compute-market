@@ -99,8 +99,8 @@ def verify_receipt(
         verify_receipt_signature(signed, trusted_service_identity)
         and receipt.livemode is livemode
         and receipt.transaction.root == expected_transaction
-        and receipt.deal.root == expected_deal
-        and receipt.deal.root == mandate_values["deal"]
+        and wire_json(receipt.deal) == expected_deal
+        and wire_json(receipt.deal) == mandate_values["deal"]
         and receipt.from_.root == mandate_values["from"]
         and receipt.to.root == mandate_values["to"]
     )

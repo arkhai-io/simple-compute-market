@@ -35,7 +35,11 @@ from compute_provisioning.hosts.definitions import (
     render_host_definitions,
 )
 from compute_provisioning.hosts.route_service import HostRouteService
-from compute_provisioning.hosts.service import HostAuthority, PoolChangeRefusedError
+from compute_provisioning.hosts.service import (
+    ConnectionChangeRefusedError,
+    HostAuthority,
+    PoolChangeRefusedError,
+)
 from compute_provisioning.route_errors import ProvisioningRouteError
 
 _PUBLIC_FIELDS = frozenset({"address", "port", "user", "key_path"})
@@ -175,6 +179,7 @@ def _codes(outcome) -> list[tuple[str, str]]:
 
 def test_an_entry_omitting_the_pool_unplaces_a_placed_host_through_the_hooks(authority, moves) -> None:
     _register(authority, "kvm1", pool_id="gpu")
+    moves.clear()
 
     outcome = _apply(authority, _document(_entry("kvm1", key_path="/keys/id")))
 
@@ -198,6 +203,7 @@ def test_an_entry_equal_to_the_stored_host_writes_nothing_and_runs_no_hook(
     _register(authority, "kvm1", pool_id="gpu")
     assert host_writes, "the recorder sees the registration's insert"
     host_writes.clear()
+    moves.clear()
     document = _document(_entry("kvm1", pool_id="gpu", enabled=False, key_path="/keys/id"))
     assert _apply(authority, document).diff.updated == ["kvm1"]
     assert host_writes, "the recorder sees the update an unequal entry issues"
@@ -217,6 +223,7 @@ def test_an_entry_omitting_fields_its_codec_defaults_equals_the_stored_defaults(
 ) -> None:
     _register(authority, "kvm1", pool_id="gpu", port=22, user="root")
     host_writes.clear()
+    moves.clear()
 
     outcome = _apply(authority, _document(_entry("kvm1", pool_id="gpu", key_path="/keys/id")))
 
@@ -276,7 +283,8 @@ def test_a_new_host_is_registered_as_its_entry_states(authority, moves) -> None:
     host = authority.get_host("kvm1")
     assert (host.pool_id, host.enabled) == ("gpu", False)
     assert host.connection.public == {"address": "192.0.2.10", "port": 22, "user": "root", "key_path": "/keys/id"}
-    assert moves == []
+    # Placed as a move from no pool, as a registration is.
+    assert moves == [("kvm1", None, "gpu")]
 
 
 # --- "A host definitions document retains the hosts it does not name" ----------
@@ -356,6 +364,27 @@ def test_a_refused_unplacing_leaves_every_host_the_document_names(authority, ref
     assert authority.get_host("kvm2").connection.public["address"] == "192.0.2.10"
 
 
+def test_a_refused_connection_change_is_reported_as_a_refused_pool_change(engine) -> None:
+    """A placed host given a new connection in place meets the
+    connection-change hooks, and their refusal is one of the document's
+    problems, coded as a pool-change hook's is."""
+    def refuse(db, host_id, pool_id):
+        raise ConnectionChangeRefusedError(f"{host_id} may not be reached there from {pool_id}")
+
+    guarded = HostAuthority(
+        sessionmaker(bind=engine), codecs=ConnectionCodecs([_KeyedCodec()]), connection_change_hooks=(refuse,)
+    )
+    _register(guarded, "kvm1", pool_id="gpu")
+
+    outcome = _apply(
+        guarded, _document(_entry("kvm1", pool_id="gpu", address="198.51.100.1", key_path="/keys/id"))
+    )
+
+    assert _codes(outcome) == [("hosts[0].pool_id", "pool_change_refused")]
+    assert "kvm1" in outcome.problems[0].message
+    assert guarded.get_host("kvm1").connection.public["address"] == "192.0.2.10"
+
+
 def test_an_unserved_kind_or_version_is_a_connection_refusal(authority) -> None:
     document = _document(
         {"host_id": "a", "connection": {"kind": "redfish", "version": 1, "public": {}}},
@@ -418,6 +447,7 @@ def test_an_unedited_export_imports_as_every_host_unchanged(authority, moves, ho
     _register(authority, "kvm1", enabled=False)
     _register(authority, "bm1", pool_id="default", token="s3cret")
     host_writes.clear()
+    moves.clear()
 
     exported = render_host_definitions(authority.host_definitions())
     outcome = _apply(authority, exported)
@@ -610,3 +640,42 @@ def test_an_import_meeting_a_concurrent_registration_is_a_conflict_and_can_be_re
 
     assert (response.applied, response.diff.updated) == (True, ["kvm1"])
     assert authority.get_host("kvm1").connection.public["address"] == "192.0.2.10"
+
+
+class _RacedCodec(_KeyedCodec):
+    """Another request registers a host while an entry creating it is being
+    built: after the import found no such host, and before it flushes one."""
+
+    def __init__(self) -> None:
+        self.rival: HostAuthority | None = None
+
+    def build(self, public, secrets, *, previous=None):
+        if previous is None and self.rival is not None:
+            rival, self.rival = self.rival, None
+            _register(rival, "kvm1", address="192.0.2.99", key_path="/keys/other")
+        return super().build(public, secrets, previous=previous)
+
+
+def test_an_import_placing_a_host_registered_meanwhile_is_a_conflict(file_engine) -> None:
+    """A new host stating a pool is flushed during reconciliation, so the
+    hooks can read it; meeting a concurrent registration there is the same
+    conflict as meeting it at commit."""
+    codec = _RacedCodec()
+    factory = sessionmaker(bind=file_engine)
+    authority = HostAuthority(factory, codecs=ConnectionCodecs([codec]))
+    codec.rival = HostAuthority(factory, codecs=ConnectionCodecs([_KeyedCodec()]))
+    service = HostRouteService(authority, {})
+    request = HostDefinitionsImportRequest(
+        yaml_text=_document(_entry("kvm1", pool_id="gpu", key_path="/keys/id"))
+    )
+
+    with pytest.raises(ProvisioningRouteError) as refused:
+        service.import_definitions(request)
+
+    assert refused.value.status_code == 409
+    assert authority.get_host("kvm1").connection.public["address"] == "192.0.2.99"
+
+    response = service.import_definitions(request)
+
+    assert (response.applied, response.diff.updated) == (True, ["kvm1"])
+    assert authority.get_host("kvm1").pool_id == "gpu"

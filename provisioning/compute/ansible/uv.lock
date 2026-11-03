@@ -40,12 +40,15 @@ source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
     { name = "arkhai-core" },
+    { name = "arkhai-kit-config" },
     { name = "arkhai-kit-fulfillment" },
     { name = "arkhai-kit-resource-pools" },
     { name = "arkhai-kit-resource-pools-contracts" },
     { name = "arkhai-kit-site" },
+    { name = "cryptography" },
     { name = "pydantic" },
     { name = "pyyaml" },
+    { name = "rfc8785" },
     { name = "sqlalchemy" },
 ]
 wheels = [

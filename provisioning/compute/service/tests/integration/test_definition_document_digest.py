@@ -122,7 +122,9 @@ class TestTheDigestGate:
             session_factory=session_factory,
             settings=SimpleNamespace(resolved_host_definitions_path=document),
             pool_service=None,
-            host_authority=_container_module._make_host_authority(session_factory, settings, ()),
+            host_authority=_container_module._make_host_authority(
+                session_factory, _container_module._make_connection_codecs(settings)
+            ),
         )
         with session_factory() as db, db.begin():
             for kind, text in others.items():

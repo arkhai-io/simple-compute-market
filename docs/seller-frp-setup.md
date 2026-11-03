@@ -1,6 +1,6 @@
-# Seller relay setup (optional)
+# Seller relay setup
 
-How to run a tunnel relay so buyer VMs are reachable when your KVM host has no
+How to run a tunnel relay so buyer VMs and whole hosts are reachable when your KVM host has no
 inbound route of its own.
 
 The default seller flow ([`seller-quickstart.md`](./seller-quickstart.md)) uses
@@ -46,7 +46,8 @@ is the defensible default.
 
 **No DNS name for an admin interface,** and no certificate for one.
 
-**No dashboard password.** The relay's admission token is the only credential.
+**No public admin interface.** The relay token authenticates clients; the admission
+plugin separately checks each proxy's signed port grant. Both are required.
 
 ## Prerequisites
 
@@ -91,15 +92,28 @@ allowPorts = [{ start = 6100, end = 6199 }]
 log.to = "/var/log/frp/frps.log"
 log.level = "info"
 log.maxDays = 30
+
+[[httpPlugins]]
+name = "grant-admission"
+addr = "127.0.0.1:7300"
+path = "/"
+ops = ["NewProxy"]
 ```
 
-Generate the token with something like `openssl rand -base64 32`. It is the
-whole of the relay's admission control: anyone holding it can register a proxy
-within `allowPorts`.
+Generate a distinct token with `openssl rand -base64 32` and keep it in private
+configuration. Run frps and frpc **0.61.1**, the verified family pin. The plugin
+must run on loopback in frps's network namespace, with an issuer whose audience
+is the registered relay id, public keys from that relay's grant-key read, and a
+port range containing the registered allocation window. A token alone must not
+admit a proxy.
 
-Run a `frps` version compatible with the tunnel client the fleet installs.
-`frps` and `frpc` negotiate a protocol version, so a large gap between them is a
-real mismatch rather than a cosmetic one.
+Use one buyer-only relay per operator. Put management tunnels on a different
+relay, with their client admin API disabled or authenticated. A shared buyer
+relay uses one token across all operators' hosts; token rotation touches them
+all, and an frps restart to end one operator's sessions interrupts everyone.
+Each operator needs a distinct issuer/key and nonoverlapping assigned range.
+See the [relay operations runbook](development/VALIDATION_RUNBOOK.md#28-prepare-and-operate-buyer-relays)
+for native/container setup and the mandatory deployed admission check.
 
 ## Registering the relay
 
@@ -118,19 +132,27 @@ POST /api/v1/relays/
 }
 ```
 
-Then point a resource pool at it; hosts in that pool dial that relay.
+This is a signed administrator request, sent through the canonical provisioning
+client; the block illustrates its body rather than an unauthenticated shell command.
+Then set the resource pool's `provider_config.relay_id`; hosts in that pool dial that relay.
+Creation generates a grant key. Read `grant_keys.active.public_key` and configure
+it in the plugin before enabling buyer admission. For reinstallable definitions,
+use an operator-retained `grant_key_secret_key` as the runbook describes.
 
 The token is encrypted at rest and is never returned by any read. Relay and pool
 responses report *whether* a token is configured, not what it is.
 
-To change it, rotate on both sides: update `frps.toml` and restart `frps`, then
+To rotate the token, first stop new admissions and drain every lease on the
+relay; a disable or listing pause alone does not drain existing work. Update
+`frps.toml`, restart frps, update every host client baseline and send the signed
+rotation request with body `{"token": "<replacement>"}`:
 
 ```console
 POST /api/v1/relays/site-a/token
 ```
 
-The new value takes effect on the next VM created, including a retry of one
-accepted before the rotation. VMs already running keep their existing tunnels.
+Verify the new client baselines and ungranted-proxy refusal before reopening
+admission. Token rotation is refused while the relay has unreleased leases.
 
 ## Storefront configuration
 
@@ -169,13 +191,20 @@ Nothing a buyer holds changes.
 On the KVM host, after a VM has been created:
 
 ```console
-systemctl status frpc-vms
-curl -s http://127.0.0.1:7400/api/status | jq '.tcp[].name'
-tail -f /var/log/frp/frpc-vms.log
+systemctl status frpc-buyers
+tail -f /var/log/frp/frpc-buyers.log
 ```
 
-That loopback admin API is what the provisioning path itself reads to confirm a
-proxy came up.
+The admin API binds loopback on privileged port 740 by default and requires a
+generated per-host password stored only in root-owned mode-0600
+`/etc/frp/frpc-buyers.toml`. Do not expose it or copy the password into command
+arguments/logs. Provisioning reads this protected configuration to authenticate
+its status/reload requests. The host's unprivileged-port boundary must still make
+the chosen port privileged; preparation checks that condition.
+
+The client executes `/usr/local/lib/frp/0.61.1/frpc`. Drain before changing its
+connection baseline or version: those changes restart the client. Per-proxy
+changes reload it and preserve unrelated buyer sessions.
 
 On the relay:
 
@@ -186,7 +215,7 @@ journalctl -u frps -f
 A proxy registering outside the window is refused here, naming the port. That is
 the log to check when a VM is created successfully but a buyer cannot reach it.
 
-Note the unit name: `frpc-vms`. If your host also runs a management tunnel that
+Note the unit name: `frpc-buyers`. If your host also runs a management tunnel that
 lets an operator reach the host itself, that is a separate unit and a separate
-configuration file, established when the host was prepared. No VM operation
+configuration file, established when the host was prepared. No buyer provisioning operation
 touches it, and it is not what this document describes.

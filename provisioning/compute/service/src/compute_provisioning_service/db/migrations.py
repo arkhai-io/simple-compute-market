@@ -16,7 +16,7 @@ from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import Engine, MetaData, inspect, text
+from sqlalchemy import Column, Engine, MetaData, String, inspect, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.schema import CreateTable
 
@@ -32,6 +32,7 @@ from market_resource_pools_contracts.hints import (
 from market_site.db import Base as SiteBase
 from market_site.db import CapacityBucket
 
+from compute_provisioning.relays.db import PoolRelay, RelayRetiredGrantKey
 from compute_provisioning_service.db.models import (
     DEFAULT_POOL_ID,
     Host,
@@ -479,7 +480,7 @@ def _migrate_relay_reachable_hosts(engine: Engine) -> None:
         # port. Partial rather than plain: release is soft, so a released lease
         # keeps its row and an unconditional constraint would stop an owner
         # ever holding a second lease across its whole history. Both SQLite
-        # (3.8+) and PostgreSQL support the partial form. VM's model declares
+        # (3.8+) and PostgreSQL support the partial form. The lease model declares
         # the same index, so a schema created from the models already has it
         # and this statement changes nothing there; it creates the index only on
         # a lease table that lacks it.
@@ -3399,6 +3400,10 @@ def _migrate_vm_pool_playbook_optional(engine: Engine) -> None:
     model's current definition, which drops the column in the same step, by the
     procedure ``_migrate_capacity_declaration_contract`` follows. A table
     already in that shape, as a fresh database creates it, is left alone.
+
+    A stored ``relay_id`` is kept through the rebuild although the model no
+    longer has it: ``_migrate_pool_relays``, later in the chain, copies each
+    pool's reference from it into ``pool_relays`` before dropping it.
     """
     if not _table_exists(engine, "ansible_pool_configs"):
         return
@@ -3407,18 +3412,33 @@ def _migrate_vm_pool_playbook_optional(engine: Engine) -> None:
     }
     if columns["playbook_path"]["nullable"] and "inventory_group" not in columns:
         return
+    _rebuild_ansible_pool_configs(engine, set(columns), keep=("relay_id",))
 
+
+def _rebuild_ansible_pool_configs(
+    engine: Engine, stored_columns: set[str], *, keep: tuple[str, ...] = ()
+) -> None:
+    """Rebuild ``ansible_pool_configs`` as the model defines it.
+
+    The columns the stored table and the model share are copied; a stored
+    column the model no longer defines is dropped with the old table, unless
+    ``keep`` names it, in which case it is carried as a nullable string for a
+    later migration to read. Foreign keys are off for the swap and the whole
+    rebuild is one transaction.
+    """
     model = AnsiblePoolConfig.__table__
     rebuild_name = "ansible_pool_configs__rebuild"
-    # The tables its foreign keys name ride along, so its DDL can render them;
+    # The table its foreign key names rides along, so its DDL can render it;
     # only the rebuild itself is created.
     metadata = MetaData()
     ResourcePool.__table__.to_metadata(metadata)
-    VmBase.metadata.tables["relays"].to_metadata(metadata)
     rebuild = model.to_metadata(metadata, name=rebuild_name)
     for index in list(rebuild.indexes):
         rebuild.indexes.discard(index)
-    shared = [c.name for c in model.columns if c.name in columns]
+    for name in keep:
+        if name in stored_columns and name not in rebuild.columns:
+            rebuild.append_column(Column(name, String, nullable=True))
+    shared = [c.name for c in rebuild.columns if c.name in stored_columns]
     column_list = ", ".join(_validate_sql_identifier(name) for name in shared)
 
     with _schema_transaction(engine, foreign_keys_off=True) as connection:
@@ -3517,6 +3537,68 @@ def _rebuild_hosts_from_model(engine: Engine, stored_columns: set[str]) -> None:
         connection.execute(text(f"ALTER TABLE {rebuild_name} RENAME TO hosts"))
         for index in model.indexes:
             index.create(connection, checkfirst=True)
+
+
+def _migrate_pool_relays(engine: Engine) -> None:
+    """Hold every pool's relay reference in ``pool_relays``, and drop VM's column.
+
+    A pool's relay is a fact about where its hosts are, not provider
+    configuration, so it moves from ``ansible_pool_configs.relay_id`` to the
+    compute family's table, which any provider's pool writes. Each stored
+    reference is copied, then the column is dropped by rebuilding the table
+    from its model. A database whose table no longer has the column, or has
+    no such table, only gains ``pool_relays``.
+
+    The upgrade is fail-forward. An older provisioner maps the column on every
+    VM pool read and cannot read the rebuilt table, and this migration is
+    recorded as applied, so rolling the service back past it means restoring
+    the database backup taken before the upgrade.
+    """
+    PoolRelay.__table__.create(bind=engine, checkfirst=True)
+    if not _table_exists(engine, "ansible_pool_configs"):
+        return
+    columns = {c["name"] for c in inspect(engine).get_columns("ansible_pool_configs")}
+    if "relay_id" not in columns:
+        return
+    with engine.begin() as connection:
+        connection.execute(text(
+            "INSERT INTO pool_relays (pool_id, relay_id) "
+            "SELECT pool_id, relay_id FROM ansible_pool_configs "
+            "WHERE relay_id IS NOT NULL "
+            "AND pool_id NOT IN (SELECT pool_id FROM pool_relays)"
+        ))
+    _rebuild_ansible_pool_configs(engine, columns)
+
+
+def _migrate_relay_grant_keys(engine: Engine) -> None:
+    """Give each relay its grant-signing key state, and a table of retired keys.
+
+    Additive: the active and staged keys' encrypted private halves, ids, and
+    public halves, and the active key's activation time, are nullable columns
+    on ``relays``. A relay stored before this has no active key, so fulfillment
+    preparation refuses its pools until the operator stages and activates one.
+    """
+    for column in (
+        "grant_key_encrypted",
+        "grant_key_id",
+        "grant_key_public",
+        "staged_grant_key_encrypted",
+        "staged_grant_key_id",
+        "staged_grant_key_public",
+    ):
+        _add_column_if_missing(engine, "relays", column, "VARCHAR")
+    _add_column_if_missing(engine, "relays", "grant_key_activated_at", "TIMESTAMP")
+    RelayRetiredGrantKey.__table__.create(bind=engine, checkfirst=True)
+
+
+def _migrate_relay_lease_grants(engine: Engine) -> None:
+    """Give each port lease its grants' expiry and the key that signed the latest.
+
+    Additive and nullable. A lease stored before this records no expiry, so its
+    port, once released, is free at once, as it was.
+    """
+    _add_column_if_missing(engine, "relay_port_leases", "grant_expires_at", "TIMESTAMP")
+    _add_column_if_missing(engine, "relay_port_leases", "grant_key_id", "VARCHAR")
 
 
 MIGRATIONS: tuple[Migration, ...] = (
@@ -3651,4 +3733,7 @@ MIGRATIONS: tuple[Migration, ...] = (
         _migrate_retired_reservation_states,
     ),
     Migration("20261028_002_hosts_drop_gpu_columns", _migrate_hosts_drop_gpu_columns),
+    Migration("20261101_001_pool_relays", _migrate_pool_relays),
+    Migration("20261101_002_relay_grant_keys", _migrate_relay_grant_keys),
+    Migration("20261101_003_relay_lease_grants", _migrate_relay_lease_grants),
 )

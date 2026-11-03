@@ -50,6 +50,14 @@ from compute_provisioning_contracts import (
     LeaseView,
     PrincipalRotationResponse,
     ProvisioningRouteContract,
+    RelayCreate,
+    RelayGrantKeyStage,
+    RelayLeaseListResponse,
+    RelayListResponse,
+    RelayResponse,
+    RelayStagedGrantKey,
+    RelayTokenRotate,
+    RelayUpdate,
     SystemStatusResponse,
     VersionResponse,
     WorkerPauseResponse,
@@ -264,6 +272,65 @@ def _import_host_definitions(yaml_text: str, validate_only: bool) -> _Call:
         HostDefinitionsImportRequest(yaml_text=yaml_text, validate_only=validate_only),
         parse=_host_definitions_import_response,
         accepted_statuses=(422,),
+    )
+
+
+# Relays.
+
+
+def _list_relays() -> _Call:
+    return _Call("GET", "/api/v1/relays/", parse=_model(RelayListResponse))
+
+
+def _create_relay(body: RelayCreate) -> _Call:
+    return _Call("POST", "/api/v1/relays/", body, parse=_model(RelayResponse))
+
+
+def _get_relay(relay_id: str) -> _Call:
+    return _Call("GET", f"/api/v1/relays/{relay_id}", parse=_model(RelayResponse))
+
+
+def _update_relay(relay_id: str, body: RelayUpdate) -> _Call:
+    # An update sends exactly the fields its caller set: an explicit
+    # ``label=None`` clears the label, so it must reach the service as
+    # ``null``, where the shared serialization drops every null as unset.
+    payload = body.model_dump(mode="json", exclude_unset=True)
+    return _Call("PATCH", f"/api/v1/relays/{relay_id}", payload, parse=_model(RelayResponse))
+
+
+def _rotate_relay_token(relay_id: str, body: RelayTokenRotate) -> _Call:
+    return _Call("POST", f"/api/v1/relays/{relay_id}/token", body, parse=_model(RelayResponse))
+
+
+def _set_relay_enabled(relay_id: str, enabled: bool) -> _Call:
+    action = "enable" if enabled else "disable"
+    return _Call("POST", f"/api/v1/relays/{relay_id}/{action}", {}, parse=_model(RelayResponse))
+
+
+def _relay_leases(relay_id: str) -> _Call:
+    return _Call("GET", f"/api/v1/relays/{relay_id}/leases", parse=_model(RelayLeaseListResponse))
+
+
+def _stage_relay_grant_key(relay_id: str, body: RelayGrantKeyStage) -> _Call:
+    # The supplied key is a secret value, which a model serialization masks,
+    # so the body is built from the value itself.
+    payload: dict[str, Any] = {}
+    if body.private_key is not None:
+        payload["private_key"] = body.private_key.get_secret_value()
+    return _Call(
+        "POST",
+        f"/api/v1/relays/{relay_id}/grant-keys/stage",
+        payload,
+        parse=_model(RelayStagedGrantKey),
+    )
+
+
+def _activate_relay_grant_key(relay_id: str) -> _Call:
+    return _Call(
+        "POST",
+        f"/api/v1/relays/{relay_id}/grant-keys/activate",
+        {},
+        parse=_model(RelayResponse),
     )
 
 
@@ -633,6 +700,57 @@ class ComputeProvisioningClient(SigningBase):
         caller reads ``applied`` and ``problems``."""
         return await self._run(_import_host_definitions(yaml_text, validate_only), request_id)
 
+    # Relays.
+
+    async def list_relays(self, *, request_id: str | None = None) -> RelayListResponse:
+        return await self._run(_list_relays(), request_id)
+
+    async def create_relay(self, body: RelayCreate, *, request_id: str | None = None) -> RelayResponse:
+        return await self._run(_create_relay(body), request_id)
+
+    async def get_relay(self, relay_id: str, *, request_id: str | None = None) -> RelayResponse:
+        return await self._run(_get_relay(relay_id), request_id)
+
+    async def update_relay(
+        self, relay_id: str, body: RelayUpdate, *, request_id: str | None = None
+    ) -> RelayResponse:
+        return await self._run(_update_relay(relay_id, body), request_id)
+
+    async def rotate_relay_token(
+        self, relay_id: str, body: RelayTokenRotate, *, request_id: str | None = None
+    ) -> RelayResponse:
+        """Replace a relay's admission token; separate from ``update_relay`` deliberately."""
+        return await self._run(_rotate_relay_token(relay_id, body), request_id)
+
+    async def set_relay_enabled(
+        self, relay_id: str, enabled: bool, *, request_id: str | None = None
+    ) -> RelayResponse:
+        return await self._run(_set_relay_enabled(relay_id, enabled), request_id)
+
+    async def list_relay_leases(
+        self, relay_id: str, *, request_id: str | None = None
+    ) -> RelayLeaseListResponse:
+        """The ports a relay holds and has released; the administrator's alone."""
+        return await self._run(_relay_leases(relay_id), request_id)
+
+    async def stage_relay_grant_key(
+        self,
+        relay_id: str,
+        body: RelayGrantKeyStage | None = None,
+        *,
+        request_id: str | None = None,
+    ) -> RelayStagedGrantKey:
+        """Stage a relay's next grant key, supplied or generated; it is not yet active."""
+        return await self._run(
+            _stage_relay_grant_key(relay_id, body or RelayGrantKeyStage()), request_id
+        )
+
+    async def activate_relay_grant_key(
+        self, relay_id: str, *, request_id: str | None = None
+    ) -> RelayResponse:
+        """Make the relay's staged grant key its active one, retiring the active one."""
+        return await self._run(_activate_relay_grant_key(relay_id), request_id)
+
     # The service's system and identity routes.
 
     async def get_health(self) -> HealthResponse:
@@ -916,6 +1034,57 @@ class SyncComputeProvisioningClient(SigningBase):
     ) -> HostDefinitionsImportResponse:
         """See ``ComputeProvisioningClient.import_host_definitions``."""
         return self._run(_import_host_definitions(yaml_text, validate_only), request_id)
+
+    # Relays.
+
+    def list_relays(self, *, request_id: str | None = None) -> RelayListResponse:
+        return self._run(_list_relays(), request_id)
+
+    def create_relay(self, body: RelayCreate, *, request_id: str | None = None) -> RelayResponse:
+        return self._run(_create_relay(body), request_id)
+
+    def get_relay(self, relay_id: str, *, request_id: str | None = None) -> RelayResponse:
+        return self._run(_get_relay(relay_id), request_id)
+
+    def update_relay(
+        self, relay_id: str, body: RelayUpdate, *, request_id: str | None = None
+    ) -> RelayResponse:
+        return self._run(_update_relay(relay_id, body), request_id)
+
+    def rotate_relay_token(
+        self, relay_id: str, body: RelayTokenRotate, *, request_id: str | None = None
+    ) -> RelayResponse:
+        """See ``ComputeProvisioningClient.rotate_relay_token``."""
+        return self._run(_rotate_relay_token(relay_id, body), request_id)
+
+    def set_relay_enabled(
+        self, relay_id: str, enabled: bool, *, request_id: str | None = None
+    ) -> RelayResponse:
+        return self._run(_set_relay_enabled(relay_id, enabled), request_id)
+
+    def list_relay_leases(
+        self, relay_id: str, *, request_id: str | None = None
+    ) -> RelayLeaseListResponse:
+        """See ``ComputeProvisioningClient.list_relay_leases``."""
+        return self._run(_relay_leases(relay_id), request_id)
+
+    def stage_relay_grant_key(
+        self,
+        relay_id: str,
+        body: RelayGrantKeyStage | None = None,
+        *,
+        request_id: str | None = None,
+    ) -> RelayStagedGrantKey:
+        """See ``ComputeProvisioningClient.stage_relay_grant_key``."""
+        return self._run(
+            _stage_relay_grant_key(relay_id, body or RelayGrantKeyStage()), request_id
+        )
+
+    def activate_relay_grant_key(
+        self, relay_id: str, *, request_id: str | None = None
+    ) -> RelayResponse:
+        """See ``ComputeProvisioningClient.activate_relay_grant_key``."""
+        return self._run(_activate_relay_grant_key(relay_id), request_id)
 
     # The service's system and identity routes.
 

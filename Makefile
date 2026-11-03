@@ -217,6 +217,7 @@ test-provisioning:
 	cd provisioning/compute/service && make test
 
 test-provisioning-iac:
+	$(MAKE) -C provisioning/compute/iac test
 	$(MAKE) -C domains test-provisioning-iac
 
 test-registry:
@@ -520,19 +521,23 @@ build-bare-metal-storefront:
 build-provisioning:
 	cd provisioning/compute/service && make build IMAGE_SUFFIX=$(IMAGE_SUFFIX)
 
-# The VM IaC's native Ansible gate, with the Ansible, collections, and PyYAML the
-# provisioning image installs: the image `build-provisioning` built, running the
-# checkout's VM IaC tree, mounted read-only, with no network but loopback. It
-# syntax-checks every playbook and runs the tests that drive a shipped task through
-# ansible-playbook, and fails where the default IaC suite would skip them.
+# Native gates run the Ansible, collections, playbooks and tests packaged in the
+# candidate image, with loopback networking only. A separate parse pass uses the
+# shared service configuration and image role path, as service jobs do.
 PROVISIONING_IMAGE ?= arkhai:compute-provisioning$(IMAGE_SUFFIX)
-test-provisioning-iac-native: ## Run the VM IaC's syntax checks and native Ansible tests in the built provisioning image
+test-provisioning-iac-native: ## Run family and VM IaC native Ansible tests in the built provisioning image
 	@docker image inspect $(PROVISIONING_IMAGE) >/dev/null 2>&1 || { \
 		echo "no $(PROVISIONING_IMAGE) image: build it first, with make build-provisioning" >&2; exit 1; }
 	docker run --rm --network none \
-		-v "$(CURDIR)/domains/vms/provisioning/iac:/iac:ro" -w /iac \
+		-w /opt/domains/vms/provisioning/iac \
 		-e PYTHON=/home/appuser/ansible-venv/bin/python \
 		$(PROVISIONING_IMAGE) bash scripts/native_ansible_gate.sh
+	docker run --rm --network none \
+		-w /opt/provisioning/compute/iac \
+		-e PYTHON=/home/appuser/ansible-venv/bin/python \
+		$(PROVISIONING_IMAGE) bash scripts/native_ansible_gate.sh
+	docker run --rm --network none -e ANSIBLE_LOG_PATH=/dev/null \
+		$(PROVISIONING_IMAGE) bash /opt/provisioning/compute/iac/scripts/image_syntax_gate.sh
 
 # API-credits domain images (item 6). Built from the repo root so each
 # Dockerfile's `COPY .dist/` + `COPY domains/` resolve. The api-credits
@@ -987,9 +992,9 @@ ALLOW ?=
 STEP_RUN = python3 scripts/run_change_step.py run
 STEP_GRANTS = $(if $(strip $(ALLOW)), --allow '$(subst ;,' --allow ',$(subst ','\'',$(ALLOW)))')
 
-design: ## Open a Claude Code design session for an OpenSpec change (CHANGE=<change> [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
+design: ## Open a Claude Code design session for an OpenSpec change; unattended, ARGUMENTS follows the change in the skill's invocation, as the owner's direction to the design (CHANGE=<change> [UNATTENDED=1 [ARGUMENTS=<text>] [ALLOW='<rule>;<rule>']])
 	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
-	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) design "$(CHANGE)"$(STEP_GRANTS),claude "/change-design $(CHANGE)")
+	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) design "$(CHANGE)"$(if $(strip $(ARGUMENTS)), --arguments '$(subst ','\'',$(ARGUMENTS))')$(STEP_GRANTS),claude "/change-design $(CHANGE)")
 
 # The orchestrating session relays and routes rather than judging, so it needs a
 # large context for a change's relayed turns, not a high effort.
@@ -997,9 +1002,9 @@ orchestrate: ## Open the orchestrating Claude Code session for one OpenSpec chan
 	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
 	@claude --model claude-opus-5-5 --effort medium "/change-orchestrate $(CHANGE)"
 
-plan: ## Open a Claude Code planning session for an OpenSpec change; unattended, it resumes the design session (CHANGE=<change> [UNATTENDED=1 [FRESH=1] [ALLOW='<rule>;<rule>']])
+plan: ## Open a Claude Code planning session for an OpenSpec change; unattended, it resumes the design session, and ARGUMENTS follows the change in the skill's invocation, as the owner's direction to the plan (CHANGE=<change> [UNATTENDED=1 [FRESH=1] [ARGUMENTS=<text>] [ALLOW='<rule>;<rule>']])
 	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
-	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) plan "$(CHANGE)"$(if $(filter 1,$(FRESH)), --fresh)$(STEP_GRANTS),claude "/change-plan $(CHANGE)")
+	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) plan "$(CHANGE)"$(if $(filter 1,$(FRESH)), --fresh)$(if $(strip $(ARGUMENTS)), --arguments '$(subst ','\'',$(ARGUMENTS))')$(STEP_GRANTS),claude "/change-plan $(CHANGE)")
 
 implement: round-view-closed ## Open a fresh Claude Code session implementing an OpenSpec change; unattended, ARGUMENTS follows the change in the skill's invocation, as a merge's conflicts to resolve, and SESSION_ID continues that implementation session instead (CHANGE=<change> [SECTION=<n>] [SECTIONS=<n-m>] [UNATTENDED=1 [ARGUMENTS=<text>] [SESSION_ID=<id>] [ALLOW='<rule>;<rule>']])
 	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
@@ -1127,3 +1132,23 @@ fetch-e2e-logs: ## Wait for an E2E run, fetch its logs, and zip the resulting di
 
 prune-tombstones: ## Delete every file whose contents are a tombstone comment
 	@python3 scripts/prune_tombstones.py
+
+.PHONY: test-bare-metal-iac
+test-bare-metal-iac:
+	$(MAKE) -C domains test-bare-metal-iac
+
+.PHONY: test-bare-metal-iac-native
+test-bare-metal-iac-native: ## Native helper account/IPC/mount checks in a disposable private container
+	@docker image inspect $(PROVISIONING_IMAGE) >/dev/null 2>&1 || { \
+		echo "no $(PROVISIONING_IMAGE) image: build it first, with make build-provisioning" >&2; exit 1; }
+	docker run --rm --user 0 --network none --pid="" --ipc private \
+		--cap-add SYS_ADMIN --security-opt apparmor=unconfined \
+		--tmpfs /work:rw,nosuid,nodev,mode=0755 \
+		-v "$(CURDIR)/domains/bare_metal/provisioning/iac:/iac:ro" -w /iac \
+		-e BARE_METAL_DISPOSABLE_NATIVE=private-container-v1 \
+		-e PYTHON=/home/appuser/ansible-venv/bin/python \
+		$(PROVISIONING_IMAGE) bash scripts/native_cleanup_gate.sh
+
+.PHONY: check-public-content
+check-public-content: ## Scan staged changes for recognizable private content
+	@python3 scripts/check_public_content.py --staged

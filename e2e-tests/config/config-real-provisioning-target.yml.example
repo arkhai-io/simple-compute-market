@@ -1,0 +1,46 @@
+# EXAMPLE ONLY: RFC 5737 documentation addresses and invented names below are
+# deterministic development examples. Never use them on a public network.
+# Render config-real-provisioning-target.yml locally (Git ignores it), then use
+# ACTIVE_PROFILES=local,real-provisioning-target. Service-side key paths are
+# references only; no private key, relay token or grant key belongs in this file.
+REAL_PROVISIONING_TARGET:
+  version: 2
+  hosts:
+    - host_id: example-kvm-1
+      domain: vm
+      connection:
+        ssh_host: 198.51.100.20
+        ssh_user: provisioner
+        ssh_port: 6001
+        ssh_key_path: /run/secrets/example-host-key
+      access:
+        mode: direct
+        public_host: 192.0.2.10
+      capacity: {vcpu_count: 4, ram_gb: 8, disk_gb: 60}
+      listing_shape: {vcpu_count: 2, ram_gb: 3, disk_gb: 25}
+    - host_id: example-bm-1
+      domain: bare_metal
+      physical_host_id: example-machine-1
+      connection:
+        ssh_host: 198.51.100.20
+        ssh_user: provisioner
+        ssh_port: 6002
+        ssh_key_path: /run/secrets/example-host-key
+      access:
+        mode: relay
+        relay_id: example-bm-relay
+      capacity: {vcpu_count: 2, ram_gb: 4, disk_gb: 40}
+      # RFC8032 TEST1 public key: deterministic offline fixture, never use on any network.
+      # Replace with the operator-verified machine key before running a real lane.
+      ssh_host_public_key: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINdamAGCsQq31Uv+08lkBzoO4XLz2qYjJa8CGmj3B1Ea'
+      # Optional destructive cleanup qualification. The key path below is
+      # harness-local, separate from connection.ssh_key_path inside the service.
+      # Select e2e_bare_metal_bounded_cleanup only after reviewing the configured
+      # disposable host, established bounded policy and operator route.
+      # cleanup_qualification:
+      #   policy_id: example-bounded-policy
+      #   operator:
+      #     host: 192.0.2.20
+      #     port: 22
+      #     user: operator
+      #     key_path: /run/secrets/example-observer-key

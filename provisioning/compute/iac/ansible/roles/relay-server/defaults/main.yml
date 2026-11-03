@@ -1,0 +1,10 @@
+---
+frp_server_port: 7000
+frp_proxy_ports:
+  - start: 7002
+    end: 8000
+
+frp_grant_admission_python: python3
+frp_grant_admission_root: /opt/frp-grant-admission
+frp_grant_admission_user: frp-grant-admission
+frp_grant_admission_config_directory: /etc/frp-grant-admission

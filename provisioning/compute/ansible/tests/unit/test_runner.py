@@ -430,7 +430,7 @@ def test_a_field_the_caller_names_is_redacted_in_every_form(text) -> None:
 
 
 def test_identity_files_and_sshpass_are_always_redacted() -> None:
-    text = "ssh -i /home/u/.ssh/id_ed25519 host; sshpass -p hunter2 ssh host"
+    text = "ssh -i /home/example-user/.ssh/id_ed25519 host; sshpass -p hunter2 ssh host"
 
     redacted = redact_ansible_output(text)
 

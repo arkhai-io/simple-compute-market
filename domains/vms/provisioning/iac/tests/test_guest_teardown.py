@@ -15,8 +15,9 @@ Then the role's structure: every rule a create adds for a guest carries its
 marker, the subnet-wide masquerade carries none, every teardown path includes
 the one implementation, and none keeps a prefix match.
 
-None of this runs a playbook against a host; a real partial create's teardown
-is the live VM lane's evidence.
+All addresses and admin passwords here are deterministic development fixtures
+and must never be used on a public network. None of this runs a playbook against
+a host; a real partial create's teardown is the live VM lane's evidence.
 """
 
 from __future__ import annotations
@@ -36,6 +37,8 @@ from shell_harness import assert_bash_syntax_valid, fake_binaries, run_bash
 ROOT = Path(__file__).resolve().parents[1]
 ROLE = ROOT / "ansible/roles/vm-management"
 LIBRARY = (ROLE / "files/guest_teardown.sh").read_text(encoding="utf-8")
+FAMILY = ROOT.parents[3] / "provisioning/compute/iac/ansible/roles/relay-proxy"
+RELAY_LIBRARY = (FAMILY / "files/remove_proxy.sh").read_text(encoding="utf-8")
 VM_CREATE = ROLE / "tasks/vm-create.yml"
 VM_REMOVE = ROLE / "tasks/vm-remove.yml"
 VM_UNDEFINE = ROLE / "tasks/vm-undefine.yml"
@@ -70,7 +73,11 @@ def _render(text: str, name: str) -> str:
         "vm_image_type": "scratch",
         "target_host": "kvm-test",
         "vm_root_ssh_filename": f"{name}_root_ed25519",
-        "frp_admin_port | default(7400)": "7400",
+        "relay_proxy_teardown_library | quote": "/usr/local/lib/arkhai-relay/remove_proxy.sh",
+        "relay_client_config | quote": "/etc/frp/frpc-buyers.toml",
+        "relay_proxy_name | quote": f"vm-{name}",
+        "relay_proxy_name": f"vm-{name}",
+        "vm_relay_required | default(true) | bool | ternary('true', 'false')": "true",
     }
 
     def resolve(match: re.Match) -> str:
@@ -118,9 +125,9 @@ def _others_rules() -> dict[str, list[str]]:
 
 def _proxy_block(name: str, port: int) -> str:
     return (
-        f"# BEGIN ANSIBLE MANAGED BLOCK FOR VM {name}\n"
+        f"# BEGIN ANSIBLE MANAGED RELAY PROXY vm-{name}\n"
         f'[[proxies]]\nname = "vm-{name}"\nremotePort = {port}\n'
-        f"# END ANSIBLE MANAGED BLOCK FOR VM {name}\n"
+        f"# END ANSIBLE MANAGED RELAY PROXY vm-{name}\n"
     )
 
 
@@ -131,11 +138,13 @@ class _Teardown(unittest.TestCase):
         self.root = Path(tempfile.mkdtemp(prefix="guest-teardown-"))
         self.host = FakeHost(self.root)
         for directory in ("etc/frp", "var/lib/libvirt/images", "var/lib/libvirt/qemu/nvram",
-                          "usr/local/bin", "var/log", "tmp", "home/.ssh"):
+                          "usr/local/bin", "usr/local/lib/arkhai-relay", "var/log", "tmp", "home/.ssh"):
             (self.root / directory).mkdir(parents=True, exist_ok=True)
+        self.relay_helper = self.root / "usr/local/lib/arkhai-relay/remove_proxy.sh"
+        self.relay_helper.write_text(RELAY_LIBRARY, encoding="utf-8")
         self.images = self.root / "var/lib/libvirt/images"
         self.nvram = self.root / "var/lib/libvirt/qemu/nvram"
-        self.config = self.root / "etc/frp/frpc-vms.toml"
+        self.config = self.root / "etc/frp/frpc-buyers.toml"
         self.b_files = [self.images / f"{B}.qcow2", self.images / f"{B}-init.iso",
                         self.nvram / f"{B}_VARS.fd", self.root / f"home/.ssh/{B}_root_ed25519"]
         for path in self.b_files:
@@ -161,14 +170,15 @@ class _Teardown(unittest.TestCase):
             hosts.insert(0, {"mac": A_MAC, "name": A, "ip": A_IP})
         self.host.set_virsh(domains=domains, hosts=hosts)
         self.config.write_text(
-            'serverAddr = "203.0.113.9"\n'
+            'serverAddr = "203.0.113.9"\nwebServer.port = 740\n'
+            + 'webServer.password = "' + 'a' * 64 + '"\n'
             + (_proxy_block(A, 6001) if a_proxy else "")
             + _proxy_block(B, 6012),
             encoding="utf-8",
         )
 
     def _run(self, script: str, binaries: dict[str, str] | None = None):
-        for prefix in ("/etc/frp/", "/var/lib/libvirt/", "/usr/local/bin/", "/var/log/",
+        for prefix in ("/etc/frp/", "/var/lib/libvirt/", "/usr/local/bin/", "/usr/local/lib/arkhai-relay/", "/var/log/",
                        "/etc/iptables", "/etc/sysconfig", "/tmp/cloudinit_", "find /tmp "):
             rooted = f"find {self.root}/tmp " if prefix == "find /tmp " else f"{self.root}{prefix}"
             script = script.replace(prefix, rooted)
@@ -192,7 +202,7 @@ class _Teardown(unittest.TestCase):
         state = self.host.virsh()
         self.assertNotIn(A, state["domains"])
         self.assertNotIn(A, [h["name"] for h in state["hosts"]])
-        self.assertNotIn(f"FOR VM {A}\n", self.config.read_text(encoding="utf-8"))
+        self.assertNotIn(f"RELAY PROXY vm-{A}\n", self.config.read_text(encoding="utf-8"))
 
     def reloads(self) -> int:
         """How many times the VM tunnel client was asked to reload."""
@@ -211,6 +221,18 @@ class _ReloadFailures:
     guest's proxy removal, then recovering. A teardown fails while the running
     client may still hold the proxy, and a retry reloads before it succeeds,
     though the configuration no longer names the guest."""
+
+    def test_missing_required_configuration_refuses_cleanup(self):
+        self._host(a_rules=True, a_proxy=True, a_reservation=True,
+                   a_domain={"state": "shut off", "mac": A_MAC})
+        self.config.unlink()
+        disk = self.images / f"{A}.qcow2"
+        disk.write_text("guest A")
+        result = self._run(self._script())
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn(A, self.host.virsh()["domains"])
+        self.assertTrue(disk.exists())
+        self.assertEqual(self.reloads(), 0)
 
     def test_a_refused_reload_fails_and_a_retry_reloads_before_succeeding(self) -> None:
         self._failing_then_recovering([22])
@@ -337,6 +359,16 @@ class TheCleanupScriptACreateWrites(_ReloadFailures, _Teardown):
         self.assertIn(A, self.host.virsh()["domains"])
         self.assertTrue(installed.exists())
 
+    def test_a_missing_required_helper_fails_before_any_guest_is_changed(self) -> None:
+        self._a_fully_present()
+        self.relay_helper.unlink()
+        result = self._run(self._script())
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(A, self.host.virsh()["domains"])
+        self.assertTrue((self.images / f"{A}.qcow2").exists())
+        self.assertIn(_proxy_block(A, 6001), self.config.read_text())
+        self.assertEqual(self.reloads(), 0)
+
     def test_storage_and_a_reservation_left_without_a_domain_are_removed_by_name(self) -> None:
         """A retry after an undefine that removed the definition and not all its
         storage: no domain, so no MAC, but the guest's name still finds them."""
@@ -371,10 +403,9 @@ class TheCleanupScriptACreateWrites(_ReloadFailures, _Teardown):
                    a_domain={"state": "running", "address": A_IP, "mac": A_MAC})
         self.config.unlink()
 
-        result = self._run(self._script())
+        result = self._run(self._script().replace("if true; then", "if false; then"))
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("STEP_STATUS|remove_relay_proxy|skipped", result.stdout)
         self.assertEqual(self.reloads(), 0)
         self.assertNotIn(A, self.host.virsh()["domains"])
 
@@ -443,6 +474,7 @@ class ARemoveWithNoCleanupScript(_ReloadFailures, _Teardown):
             self.assertNotEqual(result.returncode, 0, result.stdout)
             self.assertEqual(self.reloads(), attempt)
             self.assertNotIn("GUEST_PRESENT=", result.stdout)
+            self.assertIn(A, self.host.virsh()["domains"])
             self.assertIn(_proxy_block(B, 6012), self.config.read_text(encoding="utf-8"))
             self.assertEqual(self.host.virsh()["domains"][B], self.b_domain)
 
@@ -505,7 +537,7 @@ class ARemoveWithNoCleanupScript(_ReloadFailures, _Teardown):
                    a_domain={"state": "shut off", "mac": A_MAC})
         self.config.unlink()
 
-        result = self._run(self._script())
+        result = self._run(self._script().replace("if true; then", "if false; then"))
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("GUEST_PRESENT=true", result.stdout)
@@ -596,7 +628,7 @@ class ARemoveWithNoCleanupScript(_ReloadFailures, _Teardown):
         self.assertIn("nothing was removed", result.stderr)
         self.assertIn(A, self.host.virsh()["domains"])
         self.assertTrue((self.images / f"{A}.qcow2").exists())
-        self.assertIn(f"FOR VM {A}\n", self.config.read_text(encoding="utf-8"))
+        self.assertIn(f"RELAY PROXY vm-{A}\n", self.config.read_text(encoding="utf-8"))
         self.assertEqual(self.host.rules("nat")[0], orphan)
         self.assertEqual([c for c in self.host.calls() if " -D " in c], [])
 
@@ -666,7 +698,7 @@ class AnUndefine(_Teardown):
         self.assertEqual(self.host.rules("nat"), others["nat"])
         self.assertEqual(self.host.rules("filter"), others["filter"])
 
-    PROXY_TASK = "Remove this VM's proxy from the VM tunnel client and apply the removal"
+    PROXY_TASK = "Remove this VM's proxy from the buyer tunnel client"
 
     def test_a_running_guest_is_refused_before_its_proxy_or_rules_are_removed(self) -> None:
         """An undefine refuses a running guest and changes nothing of it: the
@@ -680,10 +712,10 @@ class AnUndefine(_Teardown):
         self._host(a_rules=False, a_proxy=True, a_reservation=False,
                    a_domain={"state": "shut off", "mac": A_MAC})
 
-        result = self._run(_render(_task(VM_UNDEFINE, self.PROXY_TASK)["shell"], A))
+        result = self._run(_render(yaml.safe_load((FAMILY / "tasks/remove.yml").read_text())[0]["ansible.builtin.shell"], A))
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertNotIn(f"FOR VM {A}\n", self.config.read_text(encoding="utf-8"))
+        self.assertNotIn(f"RELAY PROXY vm-{A}\n", self.config.read_text(encoding="utf-8"))
         self.assertIn(_proxy_block(B, 6012), self.config.read_text(encoding="utf-8"))
         self.assertEqual(self.reloads(), 1)
         self.assert_relay_settled()
@@ -697,7 +729,7 @@ class AnUndefine(_Teardown):
         task = _task(VM_UNDEFINE, self.PROXY_TASK)
         self.assertNotIn("ignore_errors", task)
 
-        failed = self._run(_render(task["shell"], A))
+        failed = self._run(_render(yaml.safe_load((FAMILY / "tasks/remove.yml").read_text())[0]["ansible.builtin.shell"], A))
         removal = self._run(_render(
             _task(VM_REMOVE, "Remove what the guest left without a cleanup script")["shell"], A))
 
@@ -752,7 +784,6 @@ class EveryTeardownPathSharesOneImplementation(unittest.TestCase):
         (VM_CREATE, "Create VM cleanup script on target host"),
         (VM_REMOVE, "Remove what the guest left without a cleanup script"),
         (VM_UNDEFINE, "Get external port before cleanup (for firewall rule removal)"),
-        (VM_UNDEFINE, "Remove this VM's proxy from the VM tunnel client and apply the removal"),
         (VM_UNDEFINE, "Clean up iptables port forwarding rules"),
         (VM_UNDEFINE, "Clean up firewall rules for external ports"),
     )

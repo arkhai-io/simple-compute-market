@@ -643,6 +643,26 @@ A domain MUST compose only mechanism stages it supports, and each stage MUST und
 - **WHEN** a marketplace domain composes `arkhai.payments.v1`
 - **THEN** it uses the external payments API and signed receipt as authority and keeps no local ledger, payment-provider integration, or settlement daemon
 
+#### Scenario: Published payment snapshots contain an effective end or zero gross
+
+- **WHEN** the selected published contract permits an effective part end or a zero gross amount in a payment snapshot or receipt
+- **THEN** the generated consumer accepts those fields and values without accepting unknown fields or weakening unrelated constraints
+
+#### Scenario: A contract publication is refreshed
+
+- **WHEN** the payment consumer selects a newer standalone JSON Schema and producer conformance vectors
+- **THEN** it records their content hashes, regenerates reproducible strict models, verifies current producer signatures and transaction identities, and preserves historical raw signed-byte verification separately
+
+#### Scenario: Nullable required values remain distinct from optional omissions
+
+- **WHEN** a published mandate includes a required nullable duration or an omitted optional end
+- **THEN** serialization retains the required null and omits an unset optional end consistently for the approval body, canonical transaction identity and receipt verification
+
+#### Scenario: An explicit null for an optional property is normalized away
+
+- **WHEN** a mandate, receipt or snapshot states `null` for an optional property whose schema does not allow null, such as a part's `end` or a receipt part's `rate`
+- **THEN** the generated consumer accepts it and treats it as omitted, so the transaction identity and receipt signature verification use the normalized body, and settlement data pairing such a mandate with the hash of its raw JSON is refused
+
 ### Requirement: Marketplace roles hold no payment ledger
 
 Marketplace roles MUST NOT own ledger state or implement cash movement, Stripe top-ups, payouts, or provider recovery. The kit MUST keep no settlement servicing state or daemon; headless callers supply owner-scoped credentials per request and verify service-signed receipts through the identity kit.

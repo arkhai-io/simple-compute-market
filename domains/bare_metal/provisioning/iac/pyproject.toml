@@ -1,0 +1,17 @@
+[project]
+name = "arkhai-bare-metal-provisioning-iac"
+version = "0.1.0"
+description = "Bare-metal Ansible assets and host-local helper tests"
+requires-python = ">=3.13"
+dependencies = []
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+pythonpath = ["ansible/roles/bare-metal-access/files", "tests"]
+addopts = "-ra"
+markers = ["native: requires a disposable private account, PID, IPC, network and mount namespace"]

@@ -27,6 +27,7 @@ from typing import Any, Protocol
 
 from compute_provisioning_contracts import CredentialEnvelope, ResultEnvelope
 from compute_provisioning.jobs import JobRun
+from compute_provisioning.relays.variables import RELAY_JOB_RESERVED_VARIABLES
 
 from .runner import AnsibleResult, InventoryTarget
 
@@ -102,9 +103,11 @@ def render_extra_vars(
     Each value is written as JSON, which is YAML, so a string is always a
     string whatever it contains. A job's own variables are authoritative: an
     extra variable with the same name is a configuration error, refused here
-    rather than silently overriding the job.
+    rather than silently overriding the job. Family role controls are also
+    reserved when absent from the emitted variables: global extra-vars would
+    override include_role inputs and registered results.
     """
-    colliding = sorted(set(variables) & set(extra_variables))
+    colliding = sorted((set(variables) | RELAY_JOB_RESERVED_VARIABLES) & set(extra_variables))
     if colliding:
         raise ValueError(
             "extra variables collide with the job's own variables: "

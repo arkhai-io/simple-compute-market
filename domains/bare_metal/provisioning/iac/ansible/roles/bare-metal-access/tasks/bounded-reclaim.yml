@@ -1,0 +1,54 @@
+---
+- name: Clean attributable bounded scratch and IPC after verified termination
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - /usr/local/lib/arkhai-tenant-working-data.py
+      - --policy
+      - /etc/arkhai-working-data/policy.json
+    stdin: "{{ {'version': 1, 'operation': 'clean', 'reservation_id': bare_metal_capacity_reservation_id, 'account': bare_metal_ssh_user, 'policy_id': bare_metal_working_data_policy_id} | to_json }}"
+  become: true
+  delegate_to: "{{ target_host }}"
+
+- name: Delete the bounded tenant account without recursive home removal
+  ansible.builtin.user:
+    name: "{{ bare_metal_ssh_user }}"
+    state: absent
+    remove: false
+  become: true
+  delegate_to: "{{ target_host }}"
+  register: bare_metal_delete_result
+
+- name: Remove the descriptor-verified bounded tenant home
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - /usr/local/lib/arkhai-tenant-working-data.py
+      - --policy
+      - /etc/arkhai-working-data/policy.json
+    stdin: "{{ {'version': 1, 'operation': 'remove-home', 'reservation_id': bare_metal_capacity_reservation_id, 'account': bare_metal_ssh_user, 'policy_id': bare_metal_working_data_policy_id} | to_json }}"
+  become: true
+  delegate_to: "{{ target_host }}"
+
+- name: Remove the recorded unused bounded private group
+  ansible.builtin.group:
+    name: "{{ bare_metal_ssh_user }}"
+    state: absent
+  become: true
+  delegate_to: "{{ target_host }}"
+
+- name: Verify every bounded absence and commit completion
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - /usr/local/lib/arkhai-tenant-working-data.py
+      - --policy
+      - /etc/arkhai-working-data/policy.json
+    stdin: "{{ {'version': 1, 'operation': 'verify-complete', 'reservation_id': bare_metal_capacity_reservation_id, 'account': bare_metal_ssh_user, 'policy_id': bare_metal_working_data_policy_id} | to_json }}"
+  register: bare_metal_cleanup_result
+  become: true
+  delegate_to: "{{ target_host }}"
+
+- name: Record bounded cleanup diagnostics
+  ansible.builtin.set_fact:
+    bare_metal_cleanup_detail: "{{ bare_metal_cleanup_result.stdout | from_json }}"

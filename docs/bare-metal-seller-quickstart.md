@@ -124,7 +124,8 @@ the API survive it. Check a changed document first with `POST
 against registered hosts, never against the file. A host's `public_host` and
 `public_port` are the endpoint a buyer is given: the route a tenant takes to the
 machine, each falling back to the connection's own address and port when the
-entry states none. The provisioning service's own route stays `ssh_host` and
+entry states none. For a relay-backed pool, the buyer receives the leased relay
+endpoint instead. The provisioning service's own route stays `ssh_host` and
 `ssh_port`. Every host is stored as an `ssh` connection at version 2; a host
 stored at version 1 runs nothing until it is submitted again at version 2.
 
@@ -137,6 +138,51 @@ every registered host. The operator handbook's
 ["Upgrading from an INI inventory"](operator-handbook.md#upgrading-from-an-ini-inventory)
 gives the steps, from a first start with `hosts: []` to a document made from
 the registry's export.
+
+For a relay-backed pool, set `provider_config.relay_id` to the registered
+buyer relay id. Keep the host's management connection independent of its
+buyer route. The relay must already have its token, active grant key and checked
+admission plugin; follow [seller relay setup](seller-frp-setup.md). Grant creates
+a per-lease proxy through `frpc-buyers`, carrying the signed port grant; the
+result names the relay endpoint rather than the management SSH address.
+
+Prepare a relay-backed host with
+`domains/bare_metal/provisioning/iac/ansible/playbooks/host-kit/host-setup.yaml`
+from `domains/bare_metal/provisioning/iac` with
+`ANSIBLE_CONFIG=ansible/ansible.cfg`, the operator-owned inventory and relay
+connection variables `frp_server_addr`, `frp_server_port` and `frp_auth_token`.
+This prepares `frpc-buyers`; granting a relayed lease also ensures that client
+is prepared. If a bounded working-data policy is selected, supply its separate
+`bare_metal_working_data_policy` during host preparation. Do not put relay
+tokens or grant keys in pool provider extras. A host reached through a management tunnel in a pool without a
+buyer relay must explicitly set a tenant-reachable `public_host` and `public_port`;
+the management tunnel's endpoint is not an implicit buyer route.
+
+Reclaim removes the lease's proxy, terminates tenant processes and sessions,
+checks activity has ended, and applies the configured key/account policy. It does
+not merely remove an SSH key while leaving an established tenant session alive.
+A relay port remains quarantined until its grant expiry plus the reuse margin;
+released capacity does not imply immediate port reuse. Working-data deletion is
+an additional configured policy, not a promise implied by key revocation.
+
+### Bounded working-data policy
+
+Use the operator-only `bare-metal-working-data` host-preparation role to
+install the protected helper and policy. Create the required protected state
+and cleanup roots in the host's actual mount namespace before initialization.
+Initialize only through the explicit host-preparation option; normal grant and
+reclaim never initialize, reset, adopt or rebuild the UID/GID ledger. Select the
+bounded policy and its policy ID in provisioning configuration before new
+grants. Existing grants retain their selected policy through reclaim, and
+existing grants cannot be adopted into bounded cleanup.
+
+The helper removes only attributable data under its configured roots and
+refuses unknown activity or ownership rather than widening its scope. A refusal
+keeps the teardown failed and capacity held for recovery. On rollback, disable
+new bounded grants and preserve the host ledger; a structurally valid older
+ledger cannot identify itself as rolled back. Quarantine a host after known or
+suspected ledger rollback until its history is verified or the host is
+decommissioned. Do not restore the host ledger from a service database backup.
 
 The pool declaration is authoritative. Do not add `vm` merely to make a
 request pass; add it only if the same pool and executor can actually deliver

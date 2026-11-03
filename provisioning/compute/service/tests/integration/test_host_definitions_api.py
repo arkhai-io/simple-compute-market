@@ -8,7 +8,7 @@ transport that records each response it carries, and the status and content
 type are read there. Connections are the real ``ssh`` codec's, composed by the
 service.
 
-A refused move is VM's pool-change hook refusing to move a host whose VM tunnel
+A refused move is the relays' pool-change hook refusing to move a host whose VM tunnel
 a buyer holds, seeded as a port-lease row as the pool-move tests seed it.
 """
 
@@ -134,6 +134,33 @@ async def test_a_move_a_hook_refuses_answers_422_and_changes_no_host(client_and_
     assert "kvm1" in refused.problems[0].message
     kvm1 = await clients.family.get_host("kvm1")
     assert (kvm1.pool_id, kvm1.connection.public["ssh_host"]) == (_RELAY_POOL, "10.0.0.1")
+    assert "kvm2" not in {host.host_id for host in (await clients.family.list_hosts(include_disabled=True)).hosts}
+
+
+async def test_a_document_cannot_reach_a_host_through_its_pools_buyer_relay(client_and_queue, recorded):
+    """The management-route rule holds for a document as for the host API: an
+    entry placing a new host reached at its pool's relay's address, and one
+    moving a placed host's connection onto it, are refused, and nothing applies."""
+    clients, _ = client_and_queue
+    admin, transport = recorded
+    await _relay_and_pools(clients)
+    await clients.family.import_host_definitions(_document(_entry("kvm1", pool_id=_RELAY_POOL)))
+
+    refused = await admin.import_host_definitions(
+        _document(
+            _entry("kvm2", pool_id=_RELAY_POOL, ssh_host="203.0.113.9"),
+            _entry("kvm1", pool_id=_RELAY_POOL, ssh_host="203.0.113.9"),
+        )
+    )
+
+    assert transport.responses[-1][0] == 422
+    assert refused.applied is False
+    assert [(p.path, p.code) for p in refused.problems] == [
+        ("hosts[0].pool_id", "pool_change_refused"),
+        ("hosts[1].pool_id", "pool_change_refused"),
+    ]
+    assert all("site-a" in problem.message for problem in refused.problems)
+    assert (await clients.family.get_host("kvm1")).connection.public["ssh_host"] == "10.0.0.1"
     assert "kvm2" not in {host.host_id for host in (await clients.family.list_hosts(include_disabled=True)).hosts}
 
 

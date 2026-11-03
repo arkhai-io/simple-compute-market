@@ -32,6 +32,17 @@ def test_the_codec_satisfies_the_host_authority_protocol() -> None:
     assert SSH_CONNECTION_VERSION == SshConnectionCodec.version == 2
 
 
+def test_a_connections_address_is_the_host_the_service_connects_to() -> None:
+    """Not the tenant-facing ``public_host``: the rule comparing a host's
+    address with its pool's relay is about the management route."""
+    codecs = ConnectionCodecs([SshConnectionCodec(_KEY)])
+    envelope = SshConnectionCodec(_KEY).build(
+        {**_PATH_KEY, "public_host": "192.0.2.10"}, {}
+    )
+
+    assert codecs.address(envelope) == "10.0.0.1"
+
+
 def test_public_fields_are_completed_with_their_defaults() -> None:
     envelope = SshConnectionCodec(_KEY).build(_PATH_KEY, {})
 

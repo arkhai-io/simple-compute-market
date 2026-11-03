@@ -9,6 +9,10 @@ whose persistence is an in-memory database.
 
 from __future__ import annotations
 
+from datetime import timedelta
+from types import SimpleNamespace
+
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -19,8 +23,10 @@ from compute_provisioning.release import (
     FulfillmentReleaseStatusPort,
 )
 
+from compute_provisioning.relays import release_reservation_ports
+from compute_provisioning.relays.rebinding import relay_host_pool_change
+
 from compute_provisioning_service.container import Container
-from vm_provisioning_adapter.runtime import HOST_POOL_CHANGE_HOOKS
 
 
 def _container() -> Container:
@@ -55,10 +61,104 @@ def test_one_engine_and_one_host_authority_reach_both_runtimes():
     assert job_engine._host_lookup == host_authority.lookup
 
 
-def test_the_host_authority_carries_every_adapter_s_pool_change_hooks():
-    host_authority = _container().host_authority()
+def test_the_host_authority_carries_the_relays_pool_change_hooks():
+    """Both relay checks, the rebinding rule and the management route, over
+    the codecs the authority and the relay service share."""
+    container = _container()
+    host_authority = container.host_authority()
 
-    assert set(HOST_POOL_CHANGE_HOOKS) <= set(host_authority._pool_change_hooks)
+    assert relay_host_pool_change in host_authority._pool_change_hooks
+    assert len(host_authority._pool_change_hooks) == 2
+    assert len(host_authority._connection_change_hooks) == 1
+    assert host_authority._codecs is container.connection_codecs()
+    assert container.relay_service()._connection_codecs is container.connection_codecs()
+
+
+def test_both_pool_configurations_check_hosts_through_the_authoritys_codecs():
+    """Pointing a pool at a relay checks its hosts' management routes, so each
+    domain's pool configuration holds the codecs the host authority stores
+    connections with."""
+    container = _container()
+    codecs = container.connection_codecs()
+
+    assert container.vm_runtime().pool_config_handler._connection_codecs is codecs
+    assert container.bare_metal_runtime().pool_config_handler._connection_codecs is codecs
+
+
+def test_the_allocator_reads_the_grant_grace_and_the_reuse_margin():
+    container = _container()
+    container.config.override(
+        SimpleNamespace(relay_grant_expiry_grace_seconds=120, relay_port_reuse_margin_seconds=45)
+    )
+    allocator = container.relay_port_allocator()
+
+    assert allocator._grant_expiry_grace == timedelta(seconds=120)
+    assert allocator._reuse_margin == timedelta(seconds=45)
+
+
+@pytest.mark.parametrize(
+    ("grace", "margin", "setting"),
+    [
+        (-1, 300, "relay_grant_expiry_grace_seconds"),
+        (3600, 0, "relay_port_reuse_margin_seconds"),
+        (3600, -60, "relay_port_reuse_margin_seconds"),
+    ],
+)
+def test_the_allocator_refuses_a_timing_setting_that_defeats_its_protection(
+    grace, margin, setting
+):
+    container = _container()
+    container.config.override(
+        SimpleNamespace(
+            relay_grant_expiry_grace_seconds=grace, relay_port_reuse_margin_seconds=margin
+        )
+    )
+
+    with pytest.raises(ValueError, match=setting):
+        container.relay_port_allocator()
+
+
+def test_the_allocator_accepts_no_grace_and_the_smallest_margin():
+    """A zero grace still expires a grant no earlier than its lease's end, and
+    any positive margin can exceed some skew; both are the operator's call."""
+    container = _container()
+    container.config.override(
+        SimpleNamespace(relay_grant_expiry_grace_seconds=0, relay_port_reuse_margin_seconds=1)
+    )
+    allocator = container.relay_port_allocator()
+
+    assert allocator._grant_expiry_grace == timedelta(0)
+    assert allocator._reuse_margin == timedelta(seconds=1)
+
+
+def test_the_relays_are_composed_once_for_every_domain():
+    """VM's runtime holds the container's one allocator and one execution
+    resolver, and the relay release effect, definitions document, and
+    reconciliation are each registered once, by the relays rather than by a
+    domain."""
+    container = _container()
+    composed = container.composed_adapters()
+
+    assert container.vm_runtime().relay_port_allocator is container.relay_port_allocator()
+    assert container.vm_runtime().codec._relay_resolver is container.relay_execution_resolver()
+    bare_metal = container.bare_metal_runtime()
+    assert bare_metal.fulfillment_provider._plan._port_allocator is container.relay_port_allocator()
+    assert bare_metal.job_executor()._codec._relay_resolver is container.relay_execution_resolver()
+    assert container.release_effects()._effects.count(release_reservation_ports) == 1
+    assert [d.kind for d in composed.definition_documents] == ["relays"]
+    assert [t.name for t in composed.background_tasks] == ["relay-port-reconciliation"]
+    assert container.vm_adapter_bundle().release_effects == ()
+    assert container.vm_adapter_bundle().definition_documents == ()
+
+
+def test_both_pool_configuration_handlers_hold_the_services_settings():
+    """Each provider's execution read decrypts a relay's token with the
+    service's key, so each handler is built over the service's settings."""
+    container = _container()
+    config = container.config()
+
+    assert container.vm_runtime().pool_config_handler._settings is config
+    assert container.bare_metal_runtime().pool_config_handler._settings is config
 
 
 def test_release_is_composed_once_for_every_offering_mode():

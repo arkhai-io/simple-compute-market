@@ -317,6 +317,40 @@ def test_relay_administration_admits_the_administrator_only(identities, path, bo
     assert calls["count"] == 1
 
 
+def test_the_relay_holdings_read_admits_the_administrator_only(identities):
+    """What a relay holds names hosts and reservations across every
+    storefront, so a storefront's signed read is refused before dispatch.
+    Signed by hand, because the typed client refuses to sign it as the seller."""
+    storefront, authority = identities
+    table = assemble_service_route_table(vm_route_contracts())
+    client, calls = _app(storefront, authority, route_table=table)
+    path = "/api/v1/relays/site-a/leases"
+    client.app.add_api_route(path, _counting(calls), methods=["GET"])
+
+    as_seller = client.get(
+        path,
+        headers=_headers(
+            storefront, path, EMPTY_BODY, request_id="seller", method="GET", route_table=table
+        ),
+    )
+    as_admin = client.get(
+        path,
+        headers=_headers(
+            _ADMIN_SIGNER,
+            path,
+            EMPTY_BODY,
+            request_id="admin",
+            role="admin",
+            method="GET",
+            route_table=table,
+        ),
+    )
+
+    assert as_seller.status_code == 403
+    assert as_admin.status_code == 200
+    assert calls["count"] == 1
+
+
 def _counting(calls):
     async def mutation(_: Request):
         calls["count"] += 1

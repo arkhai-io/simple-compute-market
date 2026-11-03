@@ -15,14 +15,17 @@ docs/development/ARCHITECTURE.md, "Route contracts and their HTTP binding".
 from __future__ import annotations
 
 import base64
-import json
 import re
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
-from .evidence import BareMetalLeaseReadyEvidence, CanonicalPrincipal
+from .evidence import (
+    BareMetalLeaseReadyEvidenceDocument,
+    CanonicalPrincipal,
+    canonical_bare_metal_json,
+)
 
 # -- wire model ---------------------------------------------------------------
 
@@ -38,7 +41,7 @@ class BareMetalSignedLeaseReadyEvidence(BaseModel):
         EVIDENCE_SIGNATURE_PROTOCOL
     )
     seller_principal: CanonicalPrincipal
-    evidence: BareMetalLeaseReadyEvidence
+    evidence: BareMetalLeaseReadyEvidenceDocument
     # URL-safe base64, unpadded, of the seller's signature over the evidence's
     # canonical JSON.
     proof: str
@@ -95,7 +98,9 @@ class BareMetalEvidenceRouteService:
     def __init__(
         self,
         *,
-        load_evidence: Callable[[str], Awaitable[BareMetalLeaseReadyEvidence | None]],
+        load_evidence: Callable[
+            [str], Awaitable[BareMetalLeaseReadyEvidenceDocument | None]
+        ],
         seller_principal: CanonicalPrincipal,
         sign: Callable[[bytes], bytes],
         admin_principals: tuple[CanonicalPrincipal, ...],
@@ -105,7 +110,9 @@ class BareMetalEvidenceRouteService:
         self._sign = sign
         self._admins = tuple(admin_principals)
 
-    async def evidence(self, evidence_digest: str) -> BareMetalLeaseReadyEvidence:
+    async def evidence(
+        self, evidence_digest: str
+    ) -> BareMetalLeaseReadyEvidenceDocument:
         """The evidence the path's digest names, or a 404 refusal."""
         try:
             resource = evidence_resource(evidence_digest)
@@ -117,7 +124,7 @@ class BareMetalEvidenceRouteService:
         return evidence
 
     def readers(
-        self, evidence: BareMetalLeaseReadyEvidence
+        self, evidence: BareMetalLeaseReadyEvidenceDocument
     ) -> Mapping[str, tuple[CanonicalPrincipal, ...]]:
         """Who may read ``evidence``, by the role each signs as."""
         readers: dict[str, tuple[CanonicalPrincipal, ...]] = {
@@ -128,12 +135,14 @@ class BareMetalEvidenceRouteService:
         return readers
 
     def respond(
-        self, evidence: BareMetalLeaseReadyEvidence
+        self, evidence: BareMetalLeaseReadyEvidenceDocument
     ) -> BareMetalSignedLeaseReadyEvidence:
         """The evidence with the storefront's proof over its canonical form."""
-        proof = base64.urlsafe_b64encode(
-            self._sign(evidence.canonical_json().encode("utf-8"))
-        ).rstrip(b"=").decode("ascii")
+        proof = (
+            base64.urlsafe_b64encode(self._sign(evidence.canonical_bytes))
+            .rstrip(b"=")
+            .decode("ascii")
+        )
         return BareMetalSignedLeaseReadyEvidence(
             seller_principal=self._seller, evidence=evidence, proof=proof
         )
@@ -156,10 +165,16 @@ def _request(evidence_digest: str, role: str) -> tuple[tuple[str, str], dict[str
     }
 
 
-def _parsed(payload: Any) -> BareMetalSignedLeaseReadyEvidence:
-    # The evidence models are strict, so the JSON the transport decoded is
-    # validated as JSON, where a timestamp's string form is its wire form.
-    return BareMetalSignedLeaseReadyEvidence.model_validate_json(json.dumps(payload))
+def _parsed(payload: Any, evidence_digest: str) -> BareMetalSignedLeaseReadyEvidence:
+    if not isinstance(payload, dict) or "evidence" not in payload:
+        raise BareMetalEvidenceContractError("response has no evidence object")
+    canonical_bytes = canonical_bare_metal_json(payload["evidence"]).encode("utf-8")
+    document = BareMetalLeaseReadyEvidenceDocument(
+        canonical_bytes, "sha256:" + evidence_resource(evidence_digest)
+    )
+    return BareMetalSignedLeaseReadyEvidence.model_validate(
+        {**payload, "evidence": document}
+    )
 
 
 class BareMetalEvidenceClient:
@@ -180,7 +195,8 @@ class BareMetalEvidenceClient:
         return _parsed(
             await self._client.authenticated_request(
                 *args, **kwargs, request_id=request_id
-            )
+            ),
+            evidence_digest,
         )
 
 
@@ -196,7 +212,8 @@ class SyncBareMetalEvidenceClient:
     ) -> BareMetalSignedLeaseReadyEvidence:
         args, kwargs = _request(evidence_digest, self._role)
         return _parsed(
-            self._client.authenticated_request(*args, **kwargs, request_id=request_id)
+            self._client.authenticated_request(*args, **kwargs, request_id=request_id),
+            evidence_digest,
         )
 
 

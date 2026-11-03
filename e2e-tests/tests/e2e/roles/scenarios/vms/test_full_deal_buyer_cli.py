@@ -115,7 +115,7 @@ from tests.e2e.roles.helpers.compute_deal import (
 from tests.e2e.roles.helpers.compute_deal_stages import alkahest_opening
 from tests.e2e.roles.scenarios.vms.conftest import (
     DealState,
-    _signer,
+    _buyer_signer,
     capacity_site_id,
     capacity_source_for,
     one_site,
@@ -719,11 +719,7 @@ class TestStage05a_EvaluateNegotiate:
                     "ssh_public_key": buyer_config["ssh_public_key"],
                 },
             },
-            buyer_principal=_signer(
-                "eip191",
-                settings.BUYER.MARKETPLACE_CREDENTIAL,
-                "BUYER.MARKETPLACE_CREDENTIAL",
-            ).identity,
+            buyer_principal=_buyer_signer().identity,
         )
         assert result.would_negotiate, (
             f"Strategy would exit at round 0 for BUYER_INITIAL_PRICE={BUYER_INITIAL_PRICE}.\n"

@@ -1,16 +1,15 @@
 [project]
 name = "arkhai-vms-provisioning-adapter"
-version = "0.16.0"
+version = "0.17.0"
 license = "MIT"
 description = "VM and Ansible adapter for the compute provisioning service"
 requires-python = ">=3.12"
 dependencies = [
     "arkhai-compute-provisioning-contracts>=0.11.0",
     "arkhai-core>=0.4.0",
-    "arkhai-kit-config",
-    "arkhai-compute-provisioning>=0.20.0",
+    "arkhai-compute-provisioning>=0.24.0",
     "arkhai-compute-provisioning-ansible>=0.6.0",
-    "arkhai-vms-provisioning-operator-client>=0.10.0",
+    "arkhai-vms-provisioning-operator-client>=0.11.0",
     "arkhai-vms>=0.6.0",
     "arkhai-kit-resource-pools>=0.3.0",
     "arkhai-kit-fulfillment>=0.5.0",
@@ -22,9 +21,6 @@ dependencies = [
     # Imported by fastapi-utils' class-based views, which do not declare it.
     "typing-inspect>=0.9.0",
     "sqlalchemy>=2.0",
-    "cryptography>=42.0",
-    # Relay definition documents are YAML.
-    "pyyaml>=6.0",
 ]
 
 [build-system]
@@ -41,6 +37,8 @@ asyncio_mode = "auto"
 
 [dependency-groups]
 dev = [
+    # The tests generate throwaway Fernet keys.
+    "cryptography>=42.0",
     "pytest>=9.0.2",
     "pytest-asyncio>=0.23",
 ]

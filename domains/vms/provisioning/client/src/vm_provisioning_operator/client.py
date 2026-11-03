@@ -1,7 +1,7 @@
 """Typed VM methods over the compute provisioning client's transport.
 
-The family client names no domain's routes. VM's operations, its host capacity
-check, and relay administration are VM's, so these clients
+The family client names no domain's routes. VM's operations and its host
+capacity check are VM's, so these clients
 wrap any transport offering ``authenticated_request`` -- the family's async or
 sync client -- and name each route's declaration from ``routes``, the same
 declarations the provisioning service assembles into the table its request
@@ -18,13 +18,6 @@ from typing import Any, Optional, Protocol
 from compute_provisioning_contracts import JobSubmitResponse
 
 from vm_provisioning_operator.models import CreateVmRequest, VmActionRequest
-from vm_provisioning_operator.relays import (
-    RelayCreate,
-    RelayListResponse,
-    RelayResponse,
-    RelayTokenRotate,
-    RelayUpdate,
-)
 from vm_provisioning_operator.routes import vm_route
 
 
@@ -92,45 +85,6 @@ def _check_capacity(host: str) -> _Call:
     return _Call("provisioning_host_capacity", "GET", f"/api/v1/hosts/{host}/capacity", parse=_submitted)
 
 
-def _list_relays() -> _Call:
-    return _Call("provisioning_relays_list", "GET", "/api/v1/relays/", parse=RelayListResponse.model_validate)
-
-
-def _create_relay(body: RelayCreate) -> _Call:
-    return _Call("provisioning_relay_create", "POST", "/api/v1/relays/", body, parse=RelayResponse.model_validate)
-
-
-def _get_relay(relay_id: str) -> _Call:
-    return _Call("provisioning_relay_get", "GET", f"/api/v1/relays/{relay_id}", parse=RelayResponse.model_validate)
-
-
-def _update_relay(relay_id: str, body: RelayUpdate) -> _Call:
-    return _Call(
-        "provisioning_relay_update", "PATCH", f"/api/v1/relays/{relay_id}", body, parse=RelayResponse.model_validate
-    )
-
-
-def _rotate_relay_token(relay_id: str, body: RelayTokenRotate) -> _Call:
-    return _Call(
-        "provisioning_relay_rotate_token",
-        "POST",
-        f"/api/v1/relays/{relay_id}/token",
-        body,
-        parse=RelayResponse.model_validate,
-    )
-
-
-def _set_relay_enabled(relay_id: str, enabled: bool) -> _Call:
-    action = "enable" if enabled else "disable"
-    return _Call(
-        f"provisioning_relay_{action}",
-        "POST",
-        f"/api/v1/relays/{relay_id}/{action}",
-        {},
-        parse=RelayResponse.model_validate,
-    )
-
-
 class VmOperatorClient:
     """VM's provisioning routes over an async signing transport."""
 
@@ -175,27 +129,6 @@ class VmOperatorClient:
     async def check_capacity(self, host: str) -> JobSubmitResponse:
         return await self._run(_check_capacity(host))
 
-    # Relays.
-
-    async def list_relays(self) -> RelayListResponse:
-        return await self._run(_list_relays())
-
-    async def create_relay(self, body: RelayCreate) -> RelayResponse:
-        return await self._run(_create_relay(body))
-
-    async def get_relay(self, relay_id: str) -> RelayResponse:
-        return await self._run(_get_relay(relay_id))
-
-    async def update_relay(self, relay_id: str, body: RelayUpdate) -> RelayResponse:
-        return await self._run(_update_relay(relay_id, body))
-
-    async def rotate_relay_token(self, relay_id: str, body: RelayTokenRotate) -> RelayResponse:
-        """Replace a relay's admission token; separate from ``update_relay`` deliberately."""
-        return await self._run(_rotate_relay_token(relay_id, body))
-
-    async def set_relay_enabled(self, relay_id: str, enabled: bool) -> RelayResponse:
-        return await self._run(_set_relay_enabled(relay_id, enabled))
-
 
 class SyncVmOperatorClient:
     """VM's provisioning routes over a sync signing transport."""
@@ -238,27 +171,6 @@ class SyncVmOperatorClient:
 
     def check_capacity(self, host: str) -> JobSubmitResponse:
         return self._run(_check_capacity(host))
-
-    # Relays.
-
-    def list_relays(self) -> RelayListResponse:
-        return self._run(_list_relays())
-
-    def create_relay(self, body: RelayCreate) -> RelayResponse:
-        return self._run(_create_relay(body))
-
-    def get_relay(self, relay_id: str) -> RelayResponse:
-        return self._run(_get_relay(relay_id))
-
-    def update_relay(self, relay_id: str, body: RelayUpdate) -> RelayResponse:
-        return self._run(_update_relay(relay_id, body))
-
-    def rotate_relay_token(self, relay_id: str, body: RelayTokenRotate) -> RelayResponse:
-        """See ``VmOperatorClient.rotate_relay_token``."""
-        return self._run(_rotate_relay_token(relay_id, body))
-
-    def set_relay_enabled(self, relay_id: str, enabled: bool) -> RelayResponse:
-        return self._run(_set_relay_enabled(relay_id, enabled))
 
 
 __all__ = ["SyncVmOperatorClient", "VmOperatorClient"]

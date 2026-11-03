@@ -34,10 +34,12 @@ from market_fulfillment.settlement_repository import begin_sqlite_write_transact
 from market_fulfillment.transitions import validate_transition
 from market_site.db import Base as SiteBase, CapacityReservation
 from market_site.ledger import CapacityConflictError
-from vm_provisioning_adapter.db import Base as VmBase, Relay, RelayPortLease
-from vm_provisioning_adapter.services.relay_port_allocator import (
+from compute_provisioning.relays import (
+    Relay,
+    RelayPortLease,
     fulfillment_lease_owner_is_released,
 )
+from compute_provisioning.relays.db import Base as RelaysBase
 
 from compute_provisioning_service.services.fulfillment_convergence import (
     FulfillmentConvergenceWatchdog,
@@ -1485,7 +1487,7 @@ async def test_run_cycle_emits_one_zero_value_diagnostics_event_when_empty(
 
 
 def _relay_and_lease(session_factory, *, owner_id="cr-1", port=6100):
-    VmBase.metadata.create_all(session_factory.kw["bind"])
+    RelaysBase.metadata.create_all(session_factory.kw["bind"])
     with session_factory() as db:
         db.add(
             Relay(

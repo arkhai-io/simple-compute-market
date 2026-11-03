@@ -109,7 +109,7 @@ class PaymentsClient:
         parsed = Mandate.model_validate(mandate)
         attachments = None
         if agreement is not None:
-            if agreement_hash(agreement) != parsed.deal.root:
+            if agreement_hash(agreement) != wire_json(parsed.deal):
                 raise ValueError("agreement hash does not match mandate.deal")
             attachments = [DealAttachment.model_validate({"kind": "deal", "content": agreement})]
         body = ApprovalRequest(mandate=parsed, attachments=attachments)
@@ -177,7 +177,7 @@ class PaymentsClient:
         identifier = _transaction_id(transaction)
         expected_deal = agreement_hash(agreement_json)
         snapshot = self.get_transaction(identifier).snapshot
-        if snapshot.transaction.root != identifier or snapshot.receipt.receipt.deal.root != expected_deal:
+        if snapshot.transaction.root != identifier or wire_json(snapshot.receipt.receipt.deal) != expected_deal:
             raise PaymentsProtocolError("transaction does not commit to the supplied Agreement")
         # Every attachment is a deal attachment the service checked against the
         # deal hash, so any other hash means the service broke its contract.

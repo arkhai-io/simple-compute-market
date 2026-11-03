@@ -26,9 +26,10 @@ mockMode: false
 # ConfigMap and mounted into the application container; the service reads a
 # document only when its value is non-empty, so leaving one empty manages that
 # resource entirely through the API. They carry no credentials: a relay entry
-# names *which key* of the provisioning-secrets profile holds its admission
-# token, never the token, and a host entry names its key by the `key_path` of a
-# file mounted into the pod, never the key. Editing a document changes the
+# names *which keys* of the provisioning-secrets profile hold its admission
+# token (`token_secret_key`) and its grant-signing key (`grant_key_secret_key`,
+# required), never the values, and a host entry names its key by the `key_path`
+# of a file mounted into the pod, never the key. Editing a document changes the
 # ConfigMap, whose checksum rolls the pod, so a release that edits one applies
 # it.
 #

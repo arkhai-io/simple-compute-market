@@ -1,0 +1,4 @@
+---
+frp_server_port: 7000
+frp_admin_port: 740
+relay_client_config: /etc/frp/frpc-buyers.toml

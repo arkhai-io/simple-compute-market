@@ -132,9 +132,7 @@ def signed_listing_read_headers(listing_id: str) -> dict[str, str]:
     The signed body must match what the route hashes, which for a query-less
     GET is an empty query list rather than an empty body.
     """
-    signer = _signer(
-        "eip191", settings.BUYER.MARKETPLACE_CREDENTIAL, "BUYER.MARKETPLACE_CREDENTIAL"
-    )
+    signer = _buyer_signer()
     authenticated = sign_request(
         signer=signer,
         envelope=RequestEnvelope(
@@ -231,17 +229,39 @@ def _trust(*identifiers: str, scheme: str = "eip191"):
     )
 
 
-def _publisher_trust():
-    """The storefront's publishing principal, pinned for response verification."""
-
-    return _trust(
-        _signer(
-            settings.SELLER.get("admin_scheme", "eip191"),
-            settings.SELLER.PRIVATE_KEY,
-            "SELLER.PRIVATE_KEY",
-        ).identity.identifier
+def _buyer_signer():
+    return _signer(
+        settings.BUYER.get("marketplace_scheme", "eip191"),
+        settings.BUYER.MARKETPLACE_CREDENTIAL,
+        "BUYER.MARKETPLACE_CREDENTIAL",
     )
 
+
+def _seller_signer():
+    credential = settings.SELLER.get("marketplace_credential")
+    if credential:
+        return _signer(
+            settings.SELLER.get("marketplace_scheme", "eip191"),
+            credential,
+            "SELLER.MARKETPLACE_CREDENTIAL",
+        )
+    return _signer(
+        settings.SELLER.get("marketplace_scheme", "eip191"),
+        settings.SELLER.PRIVATE_KEY,
+        "SELLER.PRIVATE_KEY",
+    )
+
+
+def _publisher_trust():
+    """The storefront's publishing principal, pinned for response verification."""
+    return TrustedIdentitySet(identities=(_seller_signer().identity,))
+
+
+def _registry_trust():
+    return _trust(
+        _require_setting(settings.REGISTRY.get("identifier", ""), "REGISTRY.IDENTIFIER"),
+        scheme=str(settings.REGISTRY.get("authority_scheme", "eip191") or "eip191"),
+    )
 
 
 def _provisioning_admin_signer():
@@ -291,7 +311,7 @@ def site_capacity_admin_client():
     url = _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL")
     return SiteCapacityAdminClient(
         url,
-        _signer("eip191", settings.SELLER.PRIVATE_KEY, "SELLER.PRIVATE_KEY"),
+        _seller_signer(),
         _provisioning_authority_trust(),
     )
 
@@ -389,7 +409,7 @@ def storefront_client():
     url = _require_setting(settings.SELLER.API_URL, "SELLER.API_URL")
     client = SyncStorefrontClient(
         url,
-        _signer("eip191", settings.BUYER.MARKETPLACE_CREDENTIAL, "BUYER.MARKETPLACE_CREDENTIAL"),
+        _buyer_signer(),
         caller_role="buyer",
         expected_publishers=_publisher_trust(),
     )
@@ -409,7 +429,7 @@ def storefront_seller_client():
     url = _require_setting(settings.SELLER.API_URL, "SELLER.API_URL")
     client = SyncStorefrontClient(
         url,
-        _signer("eip191", settings.SELLER.PRIVATE_KEY, "SELLER.PRIVATE_KEY"),
+        _seller_signer(),
         caller_role="seller",
         expected_publishers=_publisher_trust(),
     )
@@ -487,11 +507,9 @@ def registry_client():
     url = _require_setting(settings.REGISTRY.API_URL, "REGISTRY.API_URL")
     client = SyncRegistryClient(
         url,
-        signer=_signer("eip191", settings.BUYER.MARKETPLACE_CREDENTIAL, "BUYER.MARKETPLACE_CREDENTIAL"),
+        signer=_buyer_signer(),
         caller_role="buyer",
-        expected_registries=_trust(_require_setting(
-            settings.REGISTRY.get("identifier", ""), "REGISTRY.IDENTIFIER"
-        )),
+        expected_registries=_registry_trust(),
         registry_authority=_require_setting(
             settings.REGISTRY.get("authority_id", ""), "REGISTRY.AUTHORITY_ID"
         ),
@@ -508,11 +526,9 @@ def registry_seller_client():
     url = _require_setting(settings.REGISTRY.API_URL, "REGISTRY.API_URL")
     client = SyncRegistryClient(
         url,
-        signer=_signer("eip191", settings.SELLER.PRIVATE_KEY, "SELLER.PRIVATE_KEY"),
+        signer=_seller_signer(),
         caller_role="seller",
-        expected_registries=_trust(_require_setting(
-            settings.REGISTRY.get("identifier", ""), "REGISTRY.IDENTIFIER"
-        )),
+        expected_registries=_registry_trust(),
         registry_authority=_require_setting(
             settings.REGISTRY.get("authority_id", ""), "REGISTRY.AUTHORITY_ID"
         ),
@@ -549,7 +565,7 @@ def provisioning_client():
 
 @pytest.fixture(scope="module")
 def vm_operator_client(provisioning_client) -> SyncVmOperatorClient:
-    """VM's operations, relays, and lease routes over the family client's transport."""
+    """VM's operations and host capacity routes over the family client's transport."""
     return SyncVmOperatorClient(provisioning_client)
 
 
@@ -631,7 +647,7 @@ def _ensure_provisioning_host_registered(provisioning_client):
 
 @pytest.fixture(scope="module")
 def buyer_config() -> dict[str, str]:
-    """Buyer wallet credentials for signing negotiate/settle requests."""
+    """EVM wallet inputs for the selected on-chain settlement, separate from identity."""
     private_key = str(settings.BUYER.PRIVATE_KEY or "")
     wallet_address = str(settings.BUYER.WALLET_ADDRESS or "")
     if not private_key or not wallet_address:
@@ -667,9 +683,7 @@ def seller_wallet() -> str:
 @pytest.fixture(scope="module")
 def buyer_principal():
     """The buyer's marketplace principal, as the buyer clients sign it."""
-    return _signer(
-        "eip191", settings.BUYER.MARKETPLACE_CREDENTIAL, "BUYER.MARKETPLACE_CREDENTIAL"
-    ).identity
+    return _buyer_signer().identity
 
 
 @pytest.fixture(scope="module")

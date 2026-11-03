@@ -1,5 +1,9 @@
 """The output a bare-metal access job produces under the mock profile.
 
+A relayed grant needs an explicit mock rule reporting its relay endpoint: that
+address is resolved only at execution, outside the stored parameters this
+renderer reads. Direct grants use the registered host route.
+
 The mock Ansible runner renders a run's output, when no rule replaces it, with
 the function a domain contributes; this is bare metal's. It is the
 ``node_grant_access_data`` or ``node_reclaim_access_data`` fact the access role

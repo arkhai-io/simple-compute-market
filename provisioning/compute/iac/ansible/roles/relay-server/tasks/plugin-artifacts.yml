@@ -1,0 +1,180 @@
+---
+- name: Require operator-supplied admission artifacts
+  ansible.builtin.assert:
+    that:
+      - frp_grant_admission_wheel is defined and frp_grant_admission_wheel | length > 0
+      - frp_grant_admission_requirements is defined and frp_grant_admission_requirements | length > 0
+      - frp_grant_admission_config is defined and frp_grant_admission_config | length > 0
+      - frp_grant_admission_wheel | basename is match('^.+\.whl$')
+  no_log: true
+
+- name: Inspect the relay Python version
+  ansible.builtin.command:
+    argv:
+      - "{{ frp_grant_admission_python }}"
+      - -c
+      - 'import sys; print("%d.%d" % sys.version_info[:2])'
+  register: frp_grant_admission_python_version
+  changed_when: false
+
+- name: Require Python with TOML support for admission
+  ansible.builtin.assert:
+    that:
+      - frp_grant_admission_python_version.stdout is version('3.11', '>=')
+    fail_msg: Admission requires python3 3.11 or later on the relay
+
+- name: Create a private admission artifact workspace
+  ansible.builtin.tempfile:
+    state: directory
+    prefix: frp-admission-
+  register: frp_grant_admission_workspace
+
+- name: Validate the candidate admission program and configuration
+  block:
+    - name: Copy the supplied admission wheel
+      ansible.builtin.copy:
+        src: "{{ frp_grant_admission_wheel }}"
+        dest: "{{ frp_grant_admission_workspace.path }}/{{ frp_grant_admission_wheel | basename }}"
+        mode: '0600'
+      no_log: true
+
+    - name: Copy the supplied hash-pinned requirements
+      ansible.builtin.copy:
+        src: "{{ frp_grant_admission_requirements }}"
+        dest: "{{ frp_grant_admission_workspace.path }}/requirements.txt"
+        mode: '0600'
+      no_log: true
+
+    - name: Copy the candidate admission configuration privately
+      ansible.builtin.copy:
+        src: "{{ frp_grant_admission_config }}"
+        dest: "{{ frp_grant_admission_workspace.path }}/config.toml"
+        mode: '0600'
+      no_log: true
+
+    - name: Fingerprint the supplied admission artifacts
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        checksum_algorithm: sha256
+      loop:
+        - "{{ frp_grant_admission_workspace.path }}/{{ frp_grant_admission_wheel | basename }}"
+        - "{{ frp_grant_admission_workspace.path }}/requirements.txt"
+      register: frp_grant_admission_artifact_stats
+      no_log: true
+
+    - name: Select the immutable candidate admission environment
+      ansible.builtin.set_fact:
+        frp_grant_admission_release: "{{ frp_grant_admission_root }}/releases/{{ frp_grant_admission_artifact_stats.results[0].stat.checksum }}-{{ frp_grant_admission_artifact_stats.results[1].stat.checksum }}"
+      no_log: true
+
+    - name: Protect the admission installation roots
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      loop:
+        - "{{ frp_grant_admission_root }}"
+        - "{{ frp_grant_admission_root }}/releases"
+
+    - name: Create the admission release directory
+      ansible.builtin.file:
+        path: "{{ frp_grant_admission_release }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Inspect the admission installation receipt
+      ansible.builtin.stat:
+        path: "{{ frp_grant_admission_release }}/.installed"
+      register: frp_grant_admission_installed
+
+    - name: Install the exact supplied admission program
+      when: not frp_grant_admission_installed.stat.exists
+      block:
+        - name: Create the candidate admission virtual environment
+          ansible.builtin.command:
+            argv: ["{{ frp_grant_admission_python }}", -m, venv, "{{ frp_grant_admission_release }}"]
+            creates: "{{ frp_grant_admission_release }}/pyvenv.cfg"
+
+        - name: Install admission dependencies with required hashes
+          ansible.builtin.command:
+            argv:
+              - "{{ frp_grant_admission_release }}/bin/python"
+              - -m
+              - pip
+              - install
+              - --disable-pip-version-check
+              - --require-hashes
+              - '--only-binary=:all:'
+              - --requirement
+              - "{{ frp_grant_admission_workspace.path }}/requirements.txt"
+          no_log: true
+
+        - name: Install only the supplied admission wheel
+          ansible.builtin.command:
+            argv:
+              - "{{ frp_grant_admission_release }}/bin/python"
+              - -m
+              - pip
+              - install
+              - --disable-pip-version-check
+              - --no-deps
+              - --force-reinstall
+              - "{{ frp_grant_admission_workspace.path }}/{{ frp_grant_admission_wheel | basename }}"
+          no_log: true
+
+        - name: Make installed program files readable without granting write access
+          ansible.builtin.file:
+            path: "{{ frp_grant_admission_release }}"
+            state: directory
+            owner: root
+            group: root
+            mode: 'u=rwX,go=rX'
+            recurse: true
+            follow: false
+
+        - name: Record successful admission installation
+          ansible.builtin.copy:
+            content: "{{ frp_grant_admission_release | basename }}\n"
+            dest: "{{ frp_grant_admission_release }}/.installed"
+            owner: root
+            group: root
+            mode: '0600'
+
+    - name: Check the candidate configuration with the supplied program
+      ansible.builtin.command:
+        argv:
+          - "{{ frp_grant_admission_release }}/bin/frp-grant-admission"
+          - check
+          - "{{ frp_grant_admission_workspace.path }}/config.toml"
+      register: frp_grant_admission_candidate_check
+      changed_when: false
+      no_log: true
+
+    - name: Require the checked program to report its loopback listener
+      ansible.builtin.assert:
+        that:
+          - frp_grant_admission_candidate_check.stdout_lines | length > 0
+          - frp_grant_admission_candidate_check.stdout_lines[0] is match('^listen (127\.[0-9.]+|\[::1\]):[0-9]+$')
+      no_log: true
+
+    - name: Read the exact checked candidate configuration
+      ansible.builtin.slurp:
+        src: "{{ frp_grant_admission_workspace.path }}/config.toml"
+      register: frp_grant_admission_checked_config
+      no_log: true
+
+    - name: Retain the checked admission listener and candidate configuration
+      ansible.builtin.set_fact:
+        frp_grant_admission_address: "{{ frp_grant_admission_candidate_check.stdout_lines[0] | regex_replace('^listen ', '') }}"
+        frp_grant_admission_candidate_config: "{{ frp_grant_admission_checked_config.content | b64decode }}"
+      no_log: true
+  always:
+    - name: Remove the private admission workspace
+      ansible.builtin.file:
+        path: "{{ frp_grant_admission_workspace.path }}"
+        state: absent
+      no_log: true

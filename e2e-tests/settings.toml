@@ -21,6 +21,7 @@ retry_backoff_seconds = 2
 api_url            = ""
 authority_id       = ""   # REGISTRY_AUTHORITY_ID the service publishes under
 identifier         = ""   # the registry's own signing principal
+authority_scheme   = "eip191"
 # Bearer token for a read/write gated private registry. The stack seeds one
 # write-scoped key at startup; this must be the key it seeded.
 bootstrap_api_key  = ""
@@ -30,6 +31,7 @@ bootstrap_api_key  = ""
 api_url            = ""
 authority_id       = ""
 identifier         = ""
+authority_scheme   = "eip191"
 
 # ---------------------------------------------------------------------------
 # Buyer wallet
@@ -37,6 +39,7 @@ identifier         = ""
 [default.buyer]
 api_url           = ""
 base_url_override = ""
+marketplace_scheme = "eip191"
 marketplace_credential = ""  # exact profile-provider secret, independent of wallet
 private_key       = ""
 wallet_address    = ""
@@ -47,6 +50,8 @@ chain_rpc_url     = ""   # RPC URL for on-chain escrow creation; falls back to r
 # ---------------------------------------------------------------------------
 [default.seller]
 api_url           = ""
+marketplace_scheme = "eip191"
+marketplace_credential = ""  # falls back to private_key for local EIP-191 profiles
 # Home site the storefront publishes capacity against; matches
 # [capacity.sites] in the storefront config.
 site_id           = "default"
@@ -149,3 +154,7 @@ deal_timeout_seconds = 900
 teardown_timeout_seconds = 300
 poll_interval_seconds = 2
 terminal_teardown_status = "released"
+
+# EVM settlement inputs are independent of the lane's buyer signing credential.
+[default.bare_metal_lane]
+buyer_wallet_private_key = ""  # falls back to buyer_credential for local profiles

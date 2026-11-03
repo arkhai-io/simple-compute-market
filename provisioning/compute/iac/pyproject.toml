@@ -1,0 +1,15 @@
+[project]
+name = "arkhai-compute-provisioning-iac"
+version = "0.1.0"
+description = "Shared compute relay Ansible roles and their tests"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = ["pytest>=8.0", "pyyaml>=6.0"]
+
+[tool.pytest.ini_options]
+pythonpath = ["tests"]

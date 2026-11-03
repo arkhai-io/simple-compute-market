@@ -5,13 +5,19 @@
 credential validation, fee policy, hold release, disputes, and cash operations;
 this kit persists no settlement state and runs no background worker.
 
-The JSON Schema is the payments service's current wire contract, extracted from
-its published OpenAPI document. The test vectors are the service's previous
-publication, kept as evidence of the signing and hashing framing alone. Both are
-vendored and identified by the content hashes recorded in
-[`schema/SOURCE.md`](schema/SOURCE.md), which also says how the schema was
-extracted. `src/market_arkhai_payments/models.py` is generated from the schema
-with `python scripts/generate_models.py`.
+The standalone JSON Schema and current producer conformance vectors are vendored
+by content hash. Historical vectors remain separate raw signing and hashing
+regressions. [`schema/SOURCE.md`](schema/SOURCE.md) records publication hashes,
+the neutral schema identifier, generation checks and evidence limits.
+`src/market_arkhai_payments/models.py` is generated with the pinned generator using
+`python scripts/generate_models.py`.
+
+Models accept effective part ends and zero gross snapshots and receipts while
+retaining unknown-field refusal and numeric/string bounds. Required nullable
+maximum hold extensions remain present as null; absent optional ends stay omitted
+through approval serialization, canonical identities and signature verification.
+Exact service compatibility is checked before consumer deployment; local producer
+vectors do not prove provider funding or physical delivery.
 
 ## Seller option and mandate
 
@@ -50,7 +56,7 @@ which the service refuses. The generated models also carry the contract's
 `rate` parts, which the kit never derives or settles. Either part's
 `maxHoldExtension` is required and may be null; models are generated so, and
 every wire form the kit produces keeps the null (see
-[`schema/SOURCE.md`](schema/SOURCE.md#required-nullable-durations)). The hold is the time from
+[`schema/SOURCE.md`](schema/SOURCE.md#required-nullable-durations-and-optional-values)). The hold is the time from
 acceptance to start, plus the service duration and the option window. The fixed
 nonce is `arkhai.payments.v1`; repeated derivation for the same inputs gives the
 same transaction ID. Mandate approval expires at `accepted_at + window`.
@@ -170,8 +176,9 @@ make build
 `make test` checks static typing; unit tests for mandate derivation, receipt
 verification, client response handling, the seller stage, buyer approval,
 settlement configuration, the receipt fixture, and the mandate against a literal
-request in the current wire; and the previous vectors' framing, whose mandates and
-receipt the current models must refuse.
+request in the current wire; current producer mandate, receipt, snapshot, event
+and attachment conformance; and historical raw signing/hash framing, whose obsolete
+mandates and receipt the current models must refuse.
 The vector runner is also available as `python scripts/check_vectors.py`.
 
 ## Local first use

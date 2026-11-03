@@ -1,0 +1,26 @@
+---
+- name: Parse every family relay task file
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Refuse execution of this parse-only playbook
+      ansible.builtin.fail:
+        msg: This playbook is for syntax checks only
+      tags: always
+    - ansible.builtin.import_role:
+        name: frp-binary
+    - ansible.builtin.import_role:
+        name: relay-client
+    - ansible.builtin.import_role:
+        name: relay-server
+    - ansible.builtin.import_role:
+        name: relay-proxy
+    - ansible.builtin.import_role:
+        name: relay-proxy
+        tasks_from: helper
+    - ansible.builtin.import_role:
+        name: relay-proxy
+        tasks_from: add
+    - ansible.builtin.import_role:
+        name: relay-proxy
+        tasks_from: remove

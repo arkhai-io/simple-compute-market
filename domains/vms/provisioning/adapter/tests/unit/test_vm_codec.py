@@ -314,15 +314,47 @@ class TestGoldenImageCredentials:
 
 class TestPrepare:
     def test_a_referenced_relay_is_resolved_at_preparation(self):
-        class Resolver:
-            def resolve_into(self, params):
-                return replace(params, relay_addr="203.0.113.4", relay_token="fresh")
+        asked: list[tuple] = []
 
-        stored = {"host_id": "kvm1", "vm_action": "create", "offering_mode": "vm", "relay_id": "r"}
+        class Resolver:
+            def resolve_into(self, params, *, remote_port=None, owner_id=None):
+                asked.append((remote_port, owner_id))
+                grant = "signed-grant" if remote_port is not None else None
+                return replace(
+                    params, relay_addr="203.0.113.4", relay_token="fresh", relay_grant=grant
+                )
+
+        stored = {
+            "host_id": "kvm1", "vm_action": "create", "offering_mode": "vm",
+            "relay_id": "r", "vm_remote_port": 6101, "escrow_uid": "cr-1",
+        }
         plan = VmAnsibleCodec(relay_resolver=Resolver()).prepare(_run(stored))
 
+        assert asked == [(6101, "cr-1")]
         assert plan.variables["frp_auth_token"] == "fresh"
+        assert plan.variables["relay_grant"] == "signed-grant"
         assert plan.limit == "kvm1"
+
+    def test_a_removal_asks_for_no_grant(self):
+        asked: list[int | None] = []
+
+        class Resolver:
+            def resolve_into(self, params, *, remote_port=None, owner_id=None):
+                asked.append(remote_port)
+                return replace(params, relay_addr="203.0.113.4", relay_token="fresh")
+
+        stored = {
+            "host_id": "kvm1", "vm_action": "vm_remove", "offering_mode": "vm", "relay_id": "r",
+        }
+        plan = VmAnsibleCodec(relay_resolver=Resolver()).prepare(_run(stored))
+
+        assert asked == [None]
+        assert "relay_grant" not in plan.variables
+
+    def test_the_relay_familys_secret_variables_are_redacted(self):
+        assert {"frp_auth_token", "relay_grant", "relay_admin_password"} <= (
+            VmAnsibleCodec.secret_fields
+        )
 
     def test_pool_variables_and_playbook_come_from_the_stored_parameters(self):
         stored = {
@@ -341,7 +373,7 @@ class TestPrepare:
     def test_reserved_keys_are_the_jobs_own_variables(self):
         codec = VmAnsibleCodec()
         params = _params(provider_extra_vars={"region": "eu"})
-        assert codec.reserved_var_keys(params) == frozenset(codec.variables(params))
+        assert frozenset(codec.variables(params)) <= codec.reserved_var_keys(params)
         assert "region" not in codec.reserved_var_keys(params)
 
 
@@ -555,9 +587,9 @@ class TestBuildResultPayload:
     @pytest.mark.parametrize("enabled", [True, "True"])
     def test_an_enabled_relays_remote_port_overrides_ssh_port(self, enabled):
         frp = {"enabled": enabled, "relay_addr": "198.51.100.7", "remote_port": "54321", "subdomain": "vm-abc"}
-        payload = build_result_payload(_output(ssh_port="2222", ansible_result={"action": "create", "frp": frp}))
+        payload = build_result_payload(_output(ssh_port="2222", ansible_result={"action": "create", "relay": frp}))
         assert payload["ssh_port"] == "54321"
-        assert payload["frp"] == frp
+        assert payload["relay"] == frp
 
     @pytest.mark.parametrize("enabled", [False, "False"])
     @pytest.mark.parametrize("remote_port", ["N/A", "54321"])
@@ -565,20 +597,20 @@ class TestBuildResultPayload:
         """The playbook reports the relay block on every create; without a relay
         it is disabled and its fields are ``N/A``."""
         frp = {"enabled": enabled, "relay_addr": "N/A", "remote_port": remote_port, "ssh_access": "N/A"}
-        payload = build_result_payload(_output(ssh_port="2222", ansible_result={"action": "create", "frp": frp}))
+        payload = build_result_payload(_output(ssh_port="2222", ansible_result={"action": "create", "relay": frp}))
         assert payload["ssh_port"] == "2222"
-        assert payload["frp"] == frp
+        assert payload["relay"] == frp
 
     @pytest.mark.parametrize("remote_port", ["N/A", "", "0", "65536", "40001x", "²", True, 4.5, None])
     def test_an_enabled_relay_without_a_port_keeps_the_forwarded_port(self, remote_port):
         frp = {"enabled": True, "relay_addr": "198.51.100.7", "remote_port": remote_port}
-        payload = build_result_payload(_output(ssh_port="2222", ansible_result={"action": "create", "frp": frp}))
+        payload = build_result_payload(_output(ssh_port="2222", ansible_result={"action": "create", "relay": frp}))
         assert payload["ssh_port"] == "2222"
 
     def test_a_disabled_relay_block_keeps_the_forwarded_port(self):
         """The buyer-key fact prints its relay block on the direct path too,
         disabled, with ``N/A`` for its port."""
-        fact = {"action": "create", "frp": {"enabled": False, "remote_port": "N/A"}}
+        fact = {"action": "create", "relay": {"enabled": False, "remote_port": "N/A"}}
         payload = build_result_payload(_output(ssh_port="2222", ansible_result=fact))
         assert payload["ssh_port"] == "2222"
 
@@ -729,7 +761,7 @@ def _create_fact_output(*, relay: dict | None) -> str:
             },
         },
         "network": network,
-        "frp": frp,
+        "relay": frp,
         "gpu": {
             "provisioned": False,
             "pci_address": "N/A",
@@ -785,7 +817,7 @@ _DIRECT = {
 _RELAY = {
     **_DIRECT,
     "ssh_port": "40001",
-    "frp": {"enabled": "True", "relay_addr": "relay.example", "remote_port": "40001"},
+    "relay": {"enabled": "True", "relay_addr": "relay.example", "remote_port": "40001"},
 }
 
 
@@ -815,7 +847,7 @@ class TestCreateResult:
         created = create_result(_RELAY, _create_params(relay_id="r1", vm_remote_port=40002))
 
         assert created.evidence is None
-        assert created.detail["frp"]["remote_port"] == "40001"
+        assert created.detail["relay"]["remote_port"] == "40001"
 
     def test_a_relayed_guest_with_no_relay_reported_yields_no_evidence(self):
         assert create_result(_DIRECT, _create_params(relay_id="r1", vm_remote_port=40001)).evidence is None
@@ -900,3 +932,29 @@ class TestPlaybookContract:
     def test_the_inventory_target_carries_the_tenant_address(self):
         target = inventory_target(_HOST)
         assert (target.public_host, target.ssh_host) == ("203.0.113.1", "10.0.0.1")
+
+
+@pytest.mark.parametrize("relay_id,port,required", [(None, None, False), ("fixture-relay", None, True), (None, 6100, True)])
+def test_cleanup_mode_is_accepted_job_state_and_cannot_be_overridden(relay_id, port, required):
+    codec = VmAnsibleCodec()
+    params = _params(relay_id=relay_id, vm_remote_port=port)
+    variables = codec.variables(params)
+    assert variables["vm_relay_required"] is required
+    assert "vm_relay_required" in codec.reserved_var_keys(params)
+    with pytest.raises(ValueError, match="vm_relay_required"):
+        render_extra_vars(variables, {"vm_relay_required": not required})
+
+
+@pytest.mark.parametrize("action", ["create", "vm_remove", "undefine"])
+@pytest.mark.parametrize("key", [
+    "relay_proxy_action", "relay_proxy_name", "relay_proxy_local_ip",
+    "relay_proxy_local_port", "relay_proxy_remote_port", "relay_client_config",
+    "relay_proxy_teardown_library", "relay_admin_credentials", "frp_binary_path",
+    "frp_server_addr", "vm_remote_port", "vm_name", "vm_ip", "target_host",
+])
+def test_stored_provider_options_cannot_redirect_proxy_execution(action, key):
+    with pytest.raises(ValueError, match=key):
+        VmAnsibleCodec().prepare(_run({
+            "host_id": "kvm1", "vm_action": action, "offering_mode": "vm",
+            "vm_target": "guest-example", "provider_extra_vars": {key: "synthetic-other"},
+        }))

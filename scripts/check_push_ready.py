@@ -25,6 +25,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
+from check_public_content import denylist, reasons, scan
+
 ROOT = Path(__file__).resolve().parents[1]
 PROTECTED = ("main", "dev")
 DEFAULT_REMOTE = "origin"
@@ -89,6 +91,15 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
               file=sys.stderr)
         return 1
     assert target is not None
+    try:
+        findings = ["<branch name>: " + r for r in reasons(target.branch, denylist(root))]
+        findings.extend(scan(root, remote=target.remote))
+    except ValueError as exc:
+        findings = [str(exc)]
+    if findings:
+        for finding in findings:
+            print("REFUSED: " + finding, file=sys.stderr)
+        return 1
     if args.action == "check":
         upstream = "no upstream yet; the push sets it" if target.set_upstream else "upstream matches"
         print(f"Ready to push {target.branch} to {target.remote} ({upstream}).")
