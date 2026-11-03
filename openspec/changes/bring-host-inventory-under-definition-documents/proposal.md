@@ -68,6 +68,9 @@ applies to relays.
   pool, beside the create, update, and INI rules of explicit host membership;
   and the startup rule of a configured pool document, which
   `DEPLOYMENT_AND_CONFIG.md` stated and no requirement did.
+- `site-capacity`: a declaration's capacity names at least one dimension, a
+  rule the authority enforces and the operator account of capacity documents
+  states, which the requirement accepting any set of dimensions left unstated.
 - `change-workflow`: a shell write refused by a deny rule that exists only to
   keep file writes on the Edit and Write tools, and then made with the tool the
   step's rules allow, is a gap rather than a workaround.
@@ -124,7 +127,7 @@ None.
   skill, and `docs/agents/change-workflow.md`, with the table's markings left
   for the owner's local run. Also, from the implementation round's triage: a
   run ended by a signal keeps the denials its stream's `permission_denied` events
-  name (`scripts/change_workflow/stream.py`), and the change-orchestrate skill gives
+  name, whether or not they give a reason (`scripts/change_workflow/stream.py`), and the change-orchestrate skill gives
   each step run the harness's longest timeout.
 
 ## Dependencies and Related Changes
@@ -143,7 +146,8 @@ None.
 
 - [x] `docs/development/ARCHITECTURE.md`
 - [x] Existing subsystem specification: `physical-provisioning`,
-      `deployment-state`, `resource-pool-management`, `change-workflow`
+      `deployment-state`, `resource-pool-management`, `site-capacity`,
+      `change-workflow`
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
@@ -161,8 +165,10 @@ None.
 - The operator account of the host, pool, and capacity documents (D13, 47 O1) →
   `docs/operator-handbook.md`, with its row in `openspec/README.md`'s placement
   table and `AGENTS.md`'s documentation ownership; the rules that account
-  stated and no spec did → the `resource-pool-management` and
-  `physical-provisioning` deltas (by the archive).
+  stated and no spec did → the `resource-pool-management`,
+  `physical-provisioning`, and `site-capacity` deltas (by the archive); the
+  last, a declaration's one-dimension minimum (61 F1), → "A capacity
+  declaration names no mandatory dimension".
 - The chart's `definitions.hosts` value and refused keys, the relay path's
   refusal included (D3) → `openspec/specs/deployment-state/spec.md` (by the
   archive) and `DEPLOYMENT_AND_CONFIG.md`.

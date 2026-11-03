@@ -73,9 +73,13 @@ class _KeyedCodec:
 
 @pytest.fixture
 def engine():
-    engine = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    return _with_pools(
+        create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     )
+
+
+def _with_pools(engine):
+    """``engine`` with the pool and host tables and three pools."""
     PoolsBase.metadata.create_all(engine)
     HostsBase.metadata.create_all(engine)
     with sessionmaker(bind=engine)() as db:
@@ -567,3 +571,42 @@ def test_the_route_service_exports_what_imports_unchanged(authority) -> None:
     response = service.import_definitions(HostDefinitionsImportRequest(yaml_text=service.export_definitions()))
 
     assert (response.applied, response.diff.unchanged) == (True, ["kvm1"])
+
+
+class _RacedAuthority(HostAuthority):
+    """Another request registers each host an entry creates, in its own session,
+    after the import evaluated the entry and before the import commits."""
+
+    def put_host_in_session(self, db, host_id, connection, **stated):
+        change = super().put_host_in_session(db, host_id, connection, **stated)
+        if change == "created":
+            _register(self, host_id, address="192.0.2.99", key_path="/keys/other")
+        return change
+
+
+@pytest.fixture
+def file_engine(tmp_path):
+    """A file database, so each session has a connection of its own; the
+    in-memory engine shares one across sessions."""
+    engine = _with_pools(create_engine(f"sqlite:///{tmp_path / 'hosts.db'}"))
+    yield engine
+    engine.dispose()
+
+
+def test_an_import_meeting_a_concurrent_registration_is_a_conflict_and_can_be_resubmitted(
+    file_engine,
+) -> None:
+    authority = _RacedAuthority(sessionmaker(bind=file_engine), codecs=ConnectionCodecs([_KeyedCodec()]))
+    service = HostRouteService(authority, {})
+    request = HostDefinitionsImportRequest(yaml_text=_document(_entry("kvm1", key_path="/keys/id")))
+
+    with pytest.raises(ProvisioningRouteError) as refused:
+        service.import_definitions(request)
+
+    assert refused.value.status_code == 409
+    assert authority.get_host("kvm1").connection.public["address"] == "192.0.2.99"
+
+    response = service.import_definitions(request)
+
+    assert (response.applied, response.diff.updated) == (True, ["kvm1"])
+    assert authority.get_host("kvm1").connection.public["address"] == "192.0.2.10"

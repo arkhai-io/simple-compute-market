@@ -69,8 +69,9 @@ class Stream:
 
     A run ended by a signal emits no `result` for its last turn, so a call its
     `permission_denied` event names that no result lists is a denial too, shaped
-    as a result shapes one from the `tool_use` that made the call; a call the
-    stream never showed takes the tool the event names, or `?`, with no input.
+    as a result shapes one from the `tool_use` that made the call, whether or
+    not the event gives a reason; a call the stream never showed takes the tool
+    the event names, or `?`, with no input.
     """
 
     def __init__(self, transcript: Path, progress: Path, clock: Clock = utc_now,
@@ -90,6 +91,9 @@ class Stream:
         self.notices: list[str] = []
         self._denials: dict[str, dict[str, Any]] = {}
         self._reasons: dict[str, str] = {}
+        # Every call a `permission_denied` event names, in order, with a reason
+        # or without one, so a run with no `result` keeps each of them.
+        self._denied: dict[str, None] = {}
         # Every tool call the run made, by id, which names the subagents it started.
         self.tool_use_ids: set[str] = set()
         # Each call's tool and input, by id, which shape a denial no result lists,
@@ -118,7 +122,7 @@ class Stream:
         when it gave one."""
         unlisted = {key: self._calls.get(key, {"tool_name": self._denied_tools.get(key, "?"),
                                                "tool_use_id": key, "tool_input": {}})
-                    for key in self._reasons if key not in self._denials}
+                    for key in self._denied if key not in self._denials}
         return [{**denial, **({"reason": self._reasons[key]} if key in self._reasons else {})}
                 for key, denial in {**self._denials, **unlisted}.items()]
 
@@ -163,9 +167,10 @@ class Stream:
                 if isinstance(denial, dict):
                     self._denials.setdefault(_denial_key(denial), denial)
         if event.get("type") == "system" and event.get("subtype") == "permission_denied":
-            if isinstance(event.get("tool_use_id"), str) and isinstance(
-                    event.get("decision_reason_type"), str):
-                self._reasons[event["tool_use_id"]] = event["decision_reason_type"]
+            if isinstance(event.get("tool_use_id"), str):
+                self._denied.setdefault(event["tool_use_id"], None)
+                if isinstance(event.get("decision_reason_type"), str):
+                    self._reasons[event["tool_use_id"]] = event["decision_reason_type"]
                 if isinstance(event.get("tool_name"), str):
                     self._denied_tools[event["tool_use_id"]] = event["tool_name"]
 

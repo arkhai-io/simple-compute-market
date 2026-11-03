@@ -90,6 +90,8 @@ def _killed_run_events() -> list[dict]:
          "tool_use_id": "t9", "decision_reason_type": "mode", "tool_name": "Write"},
         {"type": "system", "subtype": "permission_denied", "session_id": SESSION,
          "tool_use_id": "t10", "decision_reason_type": "mode"},
+        {"type": "system", "subtype": "permission_denied", "session_id": SESSION,
+         "tool_use_id": "t11", "tool_name": "Edit"},
     ]
 
 
@@ -101,6 +103,7 @@ def test_a_run_ended_without_a_result_keeps_the_denials_its_events_name(tmp_path
         {**DENIED, "reason": "rule"},
         {"tool_name": "Write", "tool_use_id": "t9", "tool_input": {}, "reason": "mode"},
         {"tool_name": "?", "tool_use_id": "t10", "tool_input": {}, "reason": "mode"},
+        {"tool_name": "Edit", "tool_use_id": "t11", "tool_input": {}},
     ]
 
 

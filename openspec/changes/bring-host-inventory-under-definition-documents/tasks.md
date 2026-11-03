@@ -1234,6 +1234,13 @@ Section 6 notes:
   section 1 notes); the proposal's capability bullet. Declined: a wrapper-level
   test of a killed run's line — the stream unit tests prove the denials, and
   the wrapper already records `stream.denials` on a stopped line.
+- **Fixed at section 7's round triage (61 F2).** The stream kept a result-less
+  run's denials only from `permission_denied` events giving a reason, since it
+  read their ids from the reasons it recorded; it now records every id such an
+  event names, in order, and attaches a reason or tool name only when the event
+  gives one. Unit (`test_change_workflow_stream.py`): the killed-run transcript
+  gains a reasonless denial, returned with no `reason` key. The round's checks
+  are under section 7's notes.
 
 ## 7. Operator documentation drafts
 
@@ -1462,13 +1469,32 @@ Files: `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/seller-quickstart.md`;
     spec says only that the site decides it); and a capacity declaration's
     `capacity` needing at least one dimension (the registration model's rule;
     `site-capacity` states no minimum).
+    *Settled at the round's triage (61 F1):* the minimum was **added** as a
+    `site-capacity` delta, a modified "A capacity declaration names no mandatory
+    dimension" accepting any non-empty set of dimensions and refusing a
+    declaration that names none, with the scenario "A declaration names no
+    dimension" (an empty or absent `capacity` map with no legacy scalar total
+    standing in; the registration route's `capacity: {}` beside `total_units`
+    declares the mirror dimension, so it names one). Existing tests prove it, and
+    no code changed: `kit/site/tests/unit/test_declarations.py::test_a_declaration_names_at_least_one_dimension`
+    (an empty map), `kit/site/tests/unit/test_capacity_definitions.py` (a
+    document entry with `capacity: {}`), and the ledger's
+    `test_a_declaration_naming_no_dimension_is_refused`
+    (`kit/site/tests/integration/test_ledger.py`, neither map nor total). The other two are stated already: `storefront-publication`'s
+    scenario "A pool whose members declare no GPUs states no shapes" states the
+    report, and its shape requirement leaves an omitted dimension to the site,
+    which the `default_vm_*` settings configure; 8.3 records both as kept in the
+    handbook.
 
   *Evidence for the added rules, at its level:* the export's order and
   stated pool and enabled state, library integration in the compute family
   library (`provisioning/compute/tests/integration/test_host_definitions.py`);
   the import's 409, a unit test whose mocked session's commit raises
-  `IntegrityError` (`provisioning/compute/tests/unit/test_host_route_service.py`),
-  so no real concurrent registration is exercised; strict capacity typing, a
+  `IntegrityError` (`provisioning/compute/tests/unit/test_host_route_service.py`)
+  for the translation, and, since the round's triage (61 F3), library
+  integration of a real concurrent registration
+  (`test_host_definitions.py::test_an_import_meeting_a_concurrent_registration_is_a_conflict_and_can_be_resubmitted`);
+  strict capacity typing, a
   unit test of the entry validator (`_validate_entry`), so that a quoted
   quantity applies nothing follows from the structural-problem rule rather
   than being exercised through an import; the pool document's startup rule,
@@ -1524,9 +1550,9 @@ Section 7 notes:
   none is owed. No `Owed by validation:` line.
 - **For closeout (8.3, 8.9).** The handbook is the operator destination D13
   names; 8.9 reconciles it, `DEPLOYMENT_AND_CONFIG.md`, and the quickstarts
-  with the final code. The three facts the 7.4 note lists as stated by no spec
-  wait on the round's triage; if it adds none, 8.3 records them as kept in the
-  handbook. The bare-metal quickstart still describes the fresh-site seed,
+  with the final code. Of the three facts the 7.4 note lists as stated by no
+  spec, the round's triage added the capacity minimum to a `site-capacity`
+  delta (61 F1); 8.3 records the other two as kept in the handbook. The bare-metal quickstart still describes the fresh-site seed,
   though its stack requires a pool document, so the seed never applies there;
   that predates this change and was left.
 - **7.4's fresh-context check.** No layering, import, packaging, comment, or
@@ -1548,6 +1574,36 @@ Section 7 notes:
   rule, which `site-capacity` owns, and stating it for documents only would
   leave registration's half unstated; it stays with the other two for triage.
   Declined too: rewriting the bare-metal quickstart's seed passage (above).
+- **Fixed at section 7's round triage (61 F1, F2, F3).** F1: the
+  `site-capacity` delta (`specs/site-capacity/spec.md`) and the proposal, 7.4's
+  note, 8.3, 8.9, 8.11, and the promotion record name it; the deltas are now
+  five. F2: under section 6's notes. F3: library integration in the compute
+  family library,
+  `test_host_definitions.py::test_an_import_meeting_a_concurrent_registration_is_a_conflict_and_can_be_resubmitted`,
+  over a file SQLite database so the sessions have their own connections: an
+  authority whose session-scoped write lets another request register the host
+  the entry creates, in its own session, before the import commits; the import
+  answers 409, the competitor's host stands, and the same document submitted
+  again updates it. The unit test of the translation stays. No production code
+  changed.
+- **The round triage's checks (61 F1–F3).** `make test-compute-provisioning`
+  (unit and library integration): 336 passed. `make test-release-tooling`
+  (`scripts/tests`, unit, the stream's killed-run test included): 1820 passed.
+  `make check-packaging` passed. `make test`: every suite passed, the Helm
+  render included. `make check-change`: all six checks passed. End-to-end:
+  none — a spec delta, a workflow tooling fix, and a test; no scenario reads
+  them, and none is owed. The fresh-context check of the diff against
+  `75dc4c4` found no defect in the code or tests, the delta faithful to the
+  permanent requirement, and comments clean. Fixed: 7.4's note read "refusing
+  none"; the scenario's WHEN, since the registration route's `capacity: {}`
+  beside `total_units` declares the mirror dimension (now "empty or absent,
+  and no legacy scalar total stands in"), and "nothing is stored" (now "no
+  declaration is written or changed"); the note's evidence, which now cites the
+  declaration and document unit tests of an empty map beside the ledger test;
+  the file engine, now a fixture disposed of whatever the test's result; a
+  delta paragraph's wrapping; and this note, which the section 6 note pointed
+  to. Left for 8.4: 7.4's fresh-context note counts "four added delta rules",
+  true of that round.
 
 ## 8. Closeout
 
@@ -1570,7 +1626,7 @@ implementation.
   lazy-load reason keeps it local. A needed move returns to implementation.
 - [ ] 8.3 **Documentation compliance.** Check D1–D14 against
   `openspec/README.md`'s placement rules and the promotion record: normative
-  behaviour in the four deltas, rationale in the companions, repository shape in
+  behaviour in the five deltas, rationale in the companions, repository shape in
   `ARCHITECTURE.md`, configuration conventions in `DEPLOYMENT_AND_CONFIG.md`,
   operator behaviour in `docs/operator-handbook.md` (7.4) and the quickstarts,
   test ownership in `TESTING.md`. Record a disposition for every
@@ -1631,7 +1687,8 @@ implementation.
     case's "configured inventory file naming the host" becomes the refused host
     document 4.3 tests.
   - The `physical-provisioning`, `deployment-state`, `resource-pool-management`,
-    and `change-workflow` specs are written by the archive (8.11), and the record
+    `site-capacity`, and `change-workflow` specs are written by the archive
+    (8.11), and the record
     names them. The change-workflow companion and the skills were written in 6.3;
     confirm they still match the merged requirement, and that 6.1 and the table's
     deny-rule markings were completed by the owner's local run. If they were not,
@@ -1643,7 +1700,7 @@ implementation.
   and exists on this branch once `dev` is merged in. Then run `openspec validate
   bring-host-inventory-under-definition-documents --strict`.
 - [ ] 8.11 **Archival.** Archive last with `openspec archive
-  bring-host-inventory-under-definition-documents -y`, which merges the four
+  bring-host-inventory-under-definition-documents -y`, which merges the five
   deltas into `openspec/specs/`. Then, in the same commit, make the edits the
   merged text cannot carry: retitle the two scenarios a modified requirement
   could not rename in `openspec/specs/physical-provisioning/spec.md` — "The
@@ -1673,8 +1730,9 @@ and a clean `make check-change-index`.
 | The general definition-document method (D13) | `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Definition documents" (7.1, 8.9) |
 | The operator account of the host, pool, and capacity documents (D13, 47 O1) | `docs/operator-handbook.md`, its row in `openspec/README.md`'s placement table, and `AGENTS.md`'s "Documentation ownership" (7.4, 8.9) |
 | Rules `DEPLOYMENT_AND_CONFIG.md` stated that no spec did (D13, 47 O1, 7.4): a configured pool document fails startup when missing or invalid; the host export's order and stated pool and enabled state; the host import's 409; strict capacity document typing | `openspec/specs/resource-pool-management/spec.md`, "A configured pool document is imported at startup or fails it"; `openspec/specs/physical-provisioning/spec.md`, "The host registry exports a canonical host definitions document", "A host definitions document is validated whole and carries no credential", and "Capacity definitions are imported from a mounted document" (by the archive) |
+| A capacity declaration names at least one dimension (61 F1), stated by the handbook and enforced by the authority, unstated by the requirement accepting any set of dimensions | `openspec/specs/site-capacity/spec.md`, "A capacity declaration names no mandatory dimension", and its scenario "A declaration names no dimension" (by the archive) |
 | A codec types a connection's public fields strictly, for every submission (D7, 45 F1) | `openspec/specs/physical-provisioning/spec.md`, "Host connections are typed by their implementation's codec" and "A host definitions document is validated whole and carries no credential" (by the archive) |
-| A run ended by a signal keeps its denials; step runs get the longest timeout (43 R5) | Workflow tooling itself (`scripts/change_workflow/stream.py`, `.agents/skills/change-orchestrate/SKILL.md`); no permanent document |
+| A run ended by a signal keeps its denials, with a reason or without one; step runs get the longest timeout (43 R5, 61 F2) | Workflow tooling itself (`scripts/change_workflow/stream.py`, `.agents/skills/change-orchestrate/SKILL.md`); no permanent document |
 | Startup order with host definitions | `openspec/specs/resource-pool-management/architecture.md`, "Administrative reconciliation" (8.9) |
 | How hosts reach the registry | `docs/development/ARCHITECTURE.md`, "Resource pools" (8.9) |
 | No startup INI seeding | `docs/development/ROADMAP.md` Goal 1 (8.5); `openspec/specs/site-capacity/architecture.md` (8.9); both seller quickstarts and `domains/vms/provisioning/iac/README.md` (7.2, 8.9) |
