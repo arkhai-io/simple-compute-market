@@ -8,6 +8,8 @@ This is nonvisual evidence; no screenshots, browser, server or deployment is use
 by closeout. The target is this branch's freshly built public wheelhouse and
 package-owned temporary test databases with deterministic development personas.
 No external credentials, inherited deployment selector or destructive seed is used.
+Task 16.11 later ran in `87e978790`: the change is archived with its deltas synchronized;
+the withheld-archive statements below describe this run, not the branch since.
 
 The independently recorded deployed encounters below used fresh owned stacks,
 readiness-gated before pytest, with real local authorities where stated. Those

@@ -1236,6 +1236,8 @@ Once-only qualification is not rate/ruling-execution or real-host qualification.
   [#329](https://github.com/arkhai-io/simple-compute-market/issues/329).
   16.11 remains unchecked and unperformed for owner review; no push, rebase,
   merge or execution-ticket closure is performed.
+- 16.11 then ran in `87e978790`, after owner review: the change is archived with its
+  deltas synchronized into `openspec/specs/`.
 
 ## Design promotion record
 
@@ -1346,3 +1348,24 @@ Setup and sensitivity evidence: `docs/attachments/aeet-fix3/index.md`.
 No hosted deployment was rerun. Pending-source/worker rationale is recorded in
 `openspec/specs/deal-lifecycle/architecture.md` and the servicing companion;
 no authority or remedy policy is added.
+
+## Closeout review 24/25 disposition
+
+Reviews 24 (internal) and 25 (external) read the archive at `87e978790`. Their
+findings were answered by a documentation reconciliation on this branch with no
+behaviour change; the two API-credit comments the owner authorized are the only code
+edits. Whether the change advances to archive cleanup is the triage owner's decision
+and is not recorded here.
+
+| Finding | Disposition |
+|---|---|
+| 24 F1 / 25 F1 (blocking) — undeliverable release model: unready versus startup refusal | Fixed. The implemented refusal (`require_deliverable_release_models`, enabled or not) is the one contract: the unready-only requirement and its disabled-section scenario no longer cover release models, an explicit refusal scenario is added, and `storefront-publication/spec.md`, the settlement-configuration, storefront-publication and market-composition companions, `DEPLOYMENT_AND_CONFIG.md`, `ROADMAP.md`, the bare-metal quickstart and the D5 promotion row now say so. The API-credit startup and composition comments describe the refusal |
+| 24 F2 / 25 F7 — task number and past-event condition in the lifecycle spec | Fixed. The delivery-end requirement cites the mediation kit's vendored contract and `kit/arkhai-mediation/schema/SOURCE.md`; the setup-preset gate states the current qualification condition |
+| 25 F2 — refund scenario contradicts the opt-in refund failure action | Fixed. The scenario permits `reverse` only for a seller-authenticated request or the enabled pre-delivery refund action, and again refuses a buyer-triggered reverse |
+| 25 F3 — scenarios prescribing external authorities' outcomes | Fixed. Lifecycle and servicing scenarios state what SCM files, preserves, sends or observes; the penalty-cap and never-delivered rate arithmetic is kept as context in `deal-lifecycle/architecture.md#external-authorities` |
+| 25 F4 — ROADMAP says not yet archived | Fixed in Goal 8's current state. The Goal 6 and Goal 8 "in closeout" gap rows stay accurate until triage; archive cleanup must mark them landed when the index row becomes `archived`, since the index procedure does not cover ROADMAP |
+| 25 F5 — deployed lanes predate the review 19–23 repairs | Deferred to the owner: rerun `e2e_deal`, `e2e_deal_buyer_cli`, `e2e_bare_metal_mock_deal` and `e2e_vm_payment_deal` on final HEAD, or accept the older-revision evidence explicitly in triage |
+| 25 F6 — `converge-ongoing-compute-leases` would drop the rejected-filing rule | Recorded in that change's index row; its delta is not rewritten here. Its design reverification owes the clause and both omitted scenarios |
+| 25 F8 — records still say archival is withheld | Fixed by appended notes in 16.10, the closeout packet's scope section and the design Status |
+| 25 F9 — vacuous "The full policy is enforced" scenarios | Fixed rather than left for `shorten-long-requirements`: each restated-requirement scenario (nineteen, counting THENs that restate the requirement under another title) is replaced by a concrete case, overflow obligations move to separately named requirements under 500 characters, and original headings are kept. `spot-deals-through-arkhai-payments` and `unify-compute-delivery-path` MODIFY two of those requirements; their index rows note the split |
+| 25 F10 — no pre-closeout review or 19–23 triage records | Recorded: no `NN-pre-closeout.md`, `NN-validation.md` or 19–23 `.triage.md` exists. The pre-closeout review and merge step were replaced by reviews 19–23 and the disposition sections above, and the branch integrates onto `goal-8-implementation-basis` rather than through the workflow's merge step. No earlier triage record is reconstructed |
