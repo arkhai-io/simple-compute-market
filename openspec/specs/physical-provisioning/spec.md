@@ -826,7 +826,7 @@ callers that own no acceptance transaction.
 
 A port lease MUST be unique on the relay and the remote port. The host is recorded as an attribute of the lease and MUST NOT form part of its uniqueness, because the listening socket is bound on the relay rather than on the host, and two hosts sharing a relay share one port namespace.
 
-Only released lease rows may be reused, and a released port MUST NOT be reissued until the expiry of the grant signed for its last lease plus the configured reuse margin has passed, so that a copied grant cannot register a port another host now holds. The margin MUST be read when a port is selected, so that a changed margin applies to leases already released. A relay checks a grant's expiry on its own clock with no leeway, so the relay's and the provisioning service's clocks MUST be kept synchronised, with skew below the margin. A stale free-port observation MUST NOT reassign an active lease; allocation MUST retry a conflicting claim without rolling back other writes in the caller's transaction.
+Only released lease rows may be reused, and a released port MUST NOT be reissued until the expiry of the grant signed for its last lease plus the configured reuse margin has passed, so that a copied grant cannot register a port another host now holds. The margin MUST be read when a port is selected, so that a changed margin applies to leases already released. A relay checks a grant's expiry on its own clock with no leeway, so the relay's and the provisioning service's clocks MUST be kept synchronised, with skew below the margin. The provisioning service MUST refuse to start with a reuse margin that is not positive, which no clock skew can stay below, or with a negative grant expiry grace, which would expire a grant before its lease's scheduled end. A stale free-port observation MUST NOT reassign an active lease; allocation MUST retry a conflicting claim without rolling back other writes in the caller's transaction.
 
 A lease MUST be released with its reservation's capacity, in the transaction that releases it, whatever path releases it, and MUST NOT be released on a fulfillment state alone. A failed creation may leave a guest running with its tunnel bound, so its port is held with its capacity: until a compensating teardown reaches `torn_down` and the capacity is released, or until an operator verifies the host and forces the release. A periodic reconciliation MUST release leases whose reservation has been released beyond a grace period, as a backstop rather than as the primary mechanism.
 
@@ -885,6 +885,11 @@ A pool whose referenced relay has no usable allocation window MUST be rejected b
 
 - **WHEN** the reuse margin is raised after a lease was released
 - **THEN** that lease's port is held until its grant expiry plus the raised margin
+
+#### Scenario: A timing setting would defeat the protection it configures
+
+- **WHEN** the provisioning service is configured with a reuse margin of zero or less, or a negative grant expiry grace
+- **THEN** it refuses to start, naming the setting
 
 ### Requirement: Relay definitions are imported from a mounted document
 
@@ -1369,7 +1374,10 @@ host pool-change hooks as declarations the root merges. Every change of a regist
 pool MUST go through those hooks, whether it arrives as a host update or in an imported
 inventory, and assigning a host the pool it already has is not a move. A hook MAY refuse a
 move; a refused move MUST leave every host the operation names unchanged, and a provisioning
-route MUST answer it as a conflict (409).
+route MUST answer it as a conflict (409). A placed host given a new connection without a
+move, by a host update or an imported inventory, MUST likewise go through the connection-change
+hooks the root merges; a refused connection change MUST leave every host the operation names
+unchanged, and a provisioning route MUST answer it as a conflict (409).
 
 #### Scenario: A host changes pool
 
@@ -2763,12 +2771,22 @@ Fulfillment preparation MUST refuse a pool whose referenced relay holds no activ
 
 ### Requirement: A host's management route does not use its pool's buyer relay
 
-A host MUST NOT be placed in a relay-backed pool when its connection address equals that relay's address, and a relay's address MUST NOT be set to the connection address of a host placed in a pool referencing it. Management proxies carry no grant, and a relay enforcing admission would refuse them; admitting them by a static list would let a token holder bind a dropped host's management port. The comparison is of normalized addresses and does not detect aliases.
+A write MUST NOT leave a host in a relay-backed pool with a connection address equal to that relay's address: a host MUST NOT be placed in such a pool, by registration, inventory import, or a move; a placed host's connection MUST NOT be changed, by an update or an inventory import, to its pool's relay's address; a pool MUST NOT be pointed at a relay whose address is the connection address of a host the pool holds; and a relay's address MUST NOT be set to the connection address of a host placed in a pool referencing it. Each refusal MUST leave every row the write named as it was. Management proxies carry no grant, and a relay enforcing admission would refuse them; admitting them by a static list would let a token holder bind a dropped host's management port. The comparison is of normalized addresses and does not detect aliases.
 
 #### Scenario: A host reached through the buyer relay is placed
 
 - **WHEN** an operator places a host whose connection address is the address of the relay its new pool references
 - **THEN** the placement is refused, naming the host and the relay
+
+#### Scenario: A placed host's connection is moved onto its pool's relay
+
+- **WHEN** an operator updates, or imports, the connection of a host placed in a relay-backed pool to that relay's address
+- **THEN** the write is refused, naming the host and the relay, and the host keeps its previous connection
+
+#### Scenario: A pool is pointed at the relay one of its hosts is managed through
+
+- **WHEN** an operator sets a pool's relay reference to a relay whose address is the connection address of a host the pool holds
+- **THEN** the write is refused, naming the host and the relay, and the pool keeps its previous relay reference
 
 ### Requirement: Relay holdings are readable by the administrator
 

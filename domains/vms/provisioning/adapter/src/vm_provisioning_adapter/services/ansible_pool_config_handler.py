@@ -6,6 +6,7 @@ from typing import Any, Mapping
 
 from sqlalchemy.orm import Session
 
+from compute_provisioning.hosts import ConnectionCodecs
 from compute_provisioning.relays import (
     RELAY_ID_FIELD,
     pool_relay_id,
@@ -24,13 +25,20 @@ from vm_provisioning_adapter.requirement_delegates import (
 class AnsiblePoolConfigHandler:
     provider = "vm.ansible"
 
-    def __init__(self, settings: Any | None = None) -> None:
+    def __init__(
+        self,
+        settings: Any | None = None,
+        connection_codecs: ConnectionCodecs | None = None,
+    ) -> None:
         # Settings carry the key that decrypts a relay's admission token. The
         # handler is constructed without them in contexts that only read or
         # write non-secret configuration; an execution read then finds no key
         # and fails loudly rather than returning a config that silently omits
         # the token.
         self._settings = settings
+        # The host authority's codecs, through which pointing the pool at a
+        # relay checks its hosts' management routes against that relay.
+        self._connection_codecs = connection_codecs
 
     _FIELDS = frozenset(
         {
@@ -218,6 +226,10 @@ class AnsiblePoolConfigHandler:
         row.default_vm_disk_size = normalized["default_vm_disk_size"]
         # A pool repoint changes which rendezvous its future VMs reach. Existing
         # VMs keep the relay recorded on their leases, so the family refuses
-        # the repoint while any of them are still bound, and the whole write
-        # rolls back with it.
-        set_pool_relay(db, pool_id, normalized[RELAY_ID_FIELD])
+        # the repoint while any of them are still bound. It also refuses one
+        # onto a relay a host the pool holds is managed through, whose relay
+        # would refuse that host's ungranted management proxy. Either refusal
+        # rolls the whole write back.
+        set_pool_relay(
+            db, pool_id, normalized[RELAY_ID_FIELD], codecs=self._connection_codecs
+        )

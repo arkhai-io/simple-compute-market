@@ -34,6 +34,7 @@ from compute_provisioning.relays import (
     RelayReconciliationSchedule,
     RelayService,
     relay_contribution,
+    relay_host_connection_change_hooks,
     relay_host_pool_change_hooks,
 )
 from compute_provisioning.release import (
@@ -199,12 +200,18 @@ def host_pool_change_hooks(codecs: ConnectionCodecs) -> tuple:
     return relay_host_pool_change_hooks(codecs)
 
 
+def host_connection_change_hooks(codecs: ConnectionCodecs) -> tuple:
+    """Every check a placed host's new connection runs, over the same codecs."""
+    return relay_host_connection_change_hooks(codecs)
+
+
 def _make_host_authority(session_factory, codecs):
     """The one host authority, built before any runtime is."""
     return HostAuthority(
         session_factory,
         codecs=codecs,
         pool_change_hooks=host_pool_change_hooks(codecs),
+        connection_change_hooks=host_connection_change_hooks(codecs),
     )
 
 
@@ -491,6 +498,7 @@ class Container(containers.DeclarativeContainer):
         job_submission=job_submission,
         relay_port_allocator=relay_port_allocator,
         relay_resolver=relay_execution_resolver,
+        connection_codecs=connection_codecs,
     )
 
     ansible_service = providers.Callable(
@@ -523,6 +531,7 @@ class Container(containers.DeclarativeContainer):
         build_bare_metal_runtime,
         relay_port_allocator=relay_port_allocator,
         relay_resolver=relay_execution_resolver,
+        connection_codecs=connection_codecs,
         job_engine=job_engine,
         job_submission=job_submission,
         config=config,

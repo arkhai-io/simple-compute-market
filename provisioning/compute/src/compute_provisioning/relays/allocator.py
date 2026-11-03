@@ -95,6 +95,22 @@ class RelayPortAllocator:
         grant_expiry_grace: timedelta = DEFAULT_GRANT_EXPIRY_GRACE,
         reuse_margin: timedelta = DEFAULT_PORT_REUSE_MARGIN,
     ) -> None:
+        # A negative grace expires a grant before its lease ends, refusing the
+        # tenant's proxy at its next reconnect within the paid term. A margin
+        # that is not positive reissues a port while its previous grant may
+        # still be admitted on a relay whose clock lags the service's, which
+        # is the reuse the quarantine exists to prevent. Either defeats what
+        # the setting configures, so the service refuses to start with it.
+        if grant_expiry_grace < timedelta(0):
+            raise ValueError(
+                "relay_grant_expiry_grace_seconds must not be negative, got "
+                f"{grant_expiry_grace.total_seconds():g}"
+            )
+        if reuse_margin <= timedelta(0):
+            raise ValueError(
+                "relay_port_reuse_margin_seconds must be positive, got "
+                f"{reuse_margin.total_seconds():g}"
+            )
         self._session_factory = session_factory
         self._grant_expiry_grace = grant_expiry_grace
         # Applied when a port is selected, never stored on a lease, so a raised

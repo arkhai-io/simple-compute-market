@@ -93,6 +93,7 @@ relay_token = ""
 # (lease_watchdog_grace_period_seconds) and a teardown job's retries
 # (default_max_retries and the retry backoff) with their runs; the default
 # covers the defaults with room. The expiry is fixed when the port is leased.
+# The service refuses to start with a negative value.
 relay_grant_expiry_grace_seconds = 3600
 
 # How long a released relay port is held past its last grant's expiry before it
@@ -100,7 +101,8 @@ relay_grant_expiry_grace_seconds = 3600
 # the port for another host. A relay checks a grant's expiry on its own clock
 # with no leeway, so the relays' and this service's clocks must be kept
 # synchronised with skew well under this margin. Read when a port is selected:
-# raising it holds back ports already released too.
+# raising it holds back ports already released too. The service refuses to
+# start with a value that is not positive.
 relay_port_reuse_margin_seconds = 300
 
 # Rate limiting

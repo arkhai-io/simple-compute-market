@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from compute_provisioning.hosts import ConnectionCodecs
 from compute_provisioning.relays import (
     RELAY_ID_FIELD,
     pool_relay_id,
@@ -28,11 +29,18 @@ class BareMetalPoolConfigHandler:
 
     provider = "bare_metal.ansible"
 
-    def __init__(self, settings: Any | None = None) -> None:
+    def __init__(
+        self,
+        settings: Any | None = None,
+        connection_codecs: ConnectionCodecs | None = None,
+    ) -> None:
         # Settings carry the key that decrypts a relay's admission token for
         # the execution read, which fails loudly for a relay holding a token
         # when no key is configured rather than resolving one without it.
         self._settings = settings
+        # The host authority's codecs, through which pointing the pool at a
+        # relay checks its hosts' management routes against that relay.
+        self._connection_codecs = connection_codecs
 
     def validate_config(self, config: Mapping[str, Any]) -> dict[str, Any]:
         normalized, problems = self.validate_config_problems(config)
@@ -89,7 +97,9 @@ class BareMetalPoolConfigHandler:
         config: Mapping[str, Any],
     ) -> None:
         normalized = self.validate_config(config)
-        set_pool_relay(db, pool_id, normalized.get(RELAY_ID_FIELD))
+        set_pool_relay(
+            db, pool_id, normalized.get(RELAY_ID_FIELD), codecs=self._connection_codecs
+        )
 
     @staticmethod
     def _shaped(relay_id: str | None) -> dict[str, Any]:

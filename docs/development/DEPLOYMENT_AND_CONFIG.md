@@ -1116,10 +1116,14 @@ replace it from the named profile key. The provisioning service's
 `relay_grant_expiry_grace_seconds` (default 3600 seconds) extends the lease end
 for the signed grant, while `relay_port_reuse_margin_seconds` (default 300
 seconds) delays reuse after that grant expiry. The allocator applies a raised
-reuse margin to already released ports. Keep the relay and provisioning clocks
-synchronized with skew well below the reuse margin; the relay plugin checks
-expiry against its own clock with no leeway. These values are service settings,
-not pool fields or buyer inputs.
+reuse margin to already released ports. Keep the grace at least the lease
+watchdog's grace period plus a teardown job's retries and their backoff, so a
+grant never expires while the teardown that revokes it is still due; the default
+covers the default watchdog and retry settings. The service refuses to start
+with a negative grace or a reuse margin that is not positive. Keep the relay
+and provisioning clocks synchronized with skew well below the reuse margin; the
+relay plugin checks expiry against its own clock with no leeway. These values
+are service settings, not pool fields or buyer inputs.
 
 ## Migrations at startup
 

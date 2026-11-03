@@ -52,6 +52,23 @@ class TestGrantExpiryAndQuarantine:
     until that expiry plus the reuse margin, so a grant copied from the host
     that held it cannot register it for another host."""
 
+    @pytest.mark.parametrize(
+        ("grace", "margin", "setting"),
+        [
+            (timedelta(seconds=-1), timedelta(seconds=300), "relay_grant_expiry_grace_seconds"),
+            (timedelta(hours=1), timedelta(0), "relay_port_reuse_margin_seconds"),
+            (timedelta(hours=1), timedelta(seconds=-60), "relay_port_reuse_margin_seconds"),
+        ],
+    )
+    def test_a_grace_or_margin_that_defeats_its_protection_is_refused(
+        self, session_factory, grace, margin, setting
+    ):
+        """A negative grace expires a grant before its lease ends, and a margin
+        that is not positive reissues a port while its old grant may still be
+        admitted on a lagging relay clock."""
+        with pytest.raises(ValueError, match=setting):
+            RelayPortAllocator(session_factory, grant_expiry_grace=grace, reuse_margin=margin)
+
     def test_the_grant_expiry_is_the_lease_end_plus_the_grace_rounded_up(
         self, session_factory
     ):

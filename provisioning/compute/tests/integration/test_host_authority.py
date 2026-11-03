@@ -23,6 +23,7 @@ from compute_provisioning_contracts import ConnectionSubmission, HostCreate, Hos
 from compute_provisioning.hosts.db import Base as HostsBase
 from compute_provisioning.hosts.db import Host
 from compute_provisioning.hosts.service import (
+    ConnectionChangeRefusedError,
     HostAuthority,
     HostNotFoundError,
     InventoryHost,
@@ -319,6 +320,67 @@ def test_assigning_a_host_its_current_pool_is_not_a_move(authority, moves) -> No
     )
 
     assert moves == [("h1", None, "gpu")]
+
+
+def test_a_placed_hosts_new_connection_runs_the_connection_change_hooks(
+    session_factory,
+) -> None:
+    """An update or an inventory giving a placed host a new connection in
+    place runs the connection-change hooks with its pool and the new
+    connection in the session; an unplaced host, and a write that also moves
+    the host, run none, since the pool-change hooks see a move."""
+    seen = []
+
+    def record(db, host_id, pool_id):
+        address = db.get(Host, host_id).connection().public["address"]
+        seen.append((host_id, pool_id, address))
+
+    hooked = HostAuthority(
+        session_factory,
+        codecs=ConnectionCodecs([_Codec()]),
+        connection_change_hooks=(record,),
+    )
+    hooked.register_host(HostCreate(host_id="h1", connection=_connection(), pool_id="gpu"))
+    hooked.register_host(HostCreate(host_id="h2", connection=_connection()))
+
+    hooked.update_host("h1", HostUpdate(connection=_connection("198.51.100.1")))
+    hooked.apply_inventory([InventoryHost(host_id="h1", connection=_connection("198.51.100.2"))])
+    hooked.update_host("h2", HostUpdate(connection=_connection("198.51.100.3")))
+    hooked.update_host(
+        "h1", HostUpdate(connection=_connection("198.51.100.4"), pool_id="default")
+    )
+    hooked.update_host("h1", HostUpdate(enabled=False))
+
+    assert seen == [
+        ("h1", "gpu", "198.51.100.1"),
+        ("h1", "gpu", "198.51.100.2"),
+    ]
+
+
+def test_a_refused_connection_change_leaves_the_host_and_the_import(session_factory) -> None:
+    """A connection-change hook's refusal rolls back the whole update, or the
+    whole import with every host it names."""
+
+    def refuse(db, host_id, pool_id):
+        raise ConnectionChangeRefusedError(f"{host_id} refused in {pool_id}")
+
+    guarded = HostAuthority(
+        session_factory,
+        codecs=ConnectionCodecs([_Codec()]),
+        connection_change_hooks=(refuse,),
+    )
+    guarded.register_host(HostCreate(host_id="h1", connection=_connection(), pool_id="gpu"))
+
+    with pytest.raises(PoolChangeRefusedError, match="h1 refused in gpu"):
+        guarded.update_host("h1", HostUpdate(connection=_connection("198.51.100.1")))
+    with pytest.raises(ConnectionChangeRefusedError):
+        guarded.apply_inventory([
+            InventoryHost(host_id="h2", connection=_connection()),
+            InventoryHost(host_id="h1", connection=_connection("198.51.100.2")),
+        ])
+
+    assert guarded.get_host("h1").connection.public["address"] == "192.0.2.10"
+    assert guarded.get_host("h2") is None
 
 
 def test_listing_filters_disabled_hosts_and_searches_by_id(authority) -> None:
