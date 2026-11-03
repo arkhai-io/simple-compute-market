@@ -1,0 +1,11 @@
+# The tool's environment, and the one `make test-floor` builds at the declared floors.
+.venv/
+.floor/
+__pycache__/
+.pytest_cache/
+
+# The wheel `make build` writes.
+dist/
+
+# frps and frpc binaries the real-frp gate fetches and verifies against frp-pins.toml.
+.frp-cache/

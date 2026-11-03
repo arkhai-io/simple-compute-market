@@ -368,8 +368,8 @@ class Wrapper:
                 # Each attempt is read alone; the transcript keeps them all.
                 stream = Stream(transcript, progress, self.clock, self.echo)
                 attempts.append(stream)
-                command = claude_command(prompt, rules, schema, model, session=session,
-                                         granted=granted)
+                command = claude_command(prompt, rules, schema, model, root=self.root,
+                                         session=session, granted=granted)
                 failure, status, reached = None, None, None
                 try:
                     status = self.runner(command, self.root, stream.feed)

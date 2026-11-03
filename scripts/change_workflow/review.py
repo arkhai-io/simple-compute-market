@@ -274,7 +274,7 @@ def _claude_attempt(model: Model, prompt: str, continuing: str | None, draft: Pa
     """One run of the review on Claude, its final message written to `draft`, as
     Codex writes its own."""
     stream = Stream(log, log.with_suffix(".progress"), clock, echo)
-    command = claude_command(prompt, rules, None, model, session=continuing,
+    command = claude_command(prompt, rules, None, model, root=root, session=continuing,
                              system=REVIEW_UNATTENDED)
     try:
         status = runner(command, root, stream.feed)

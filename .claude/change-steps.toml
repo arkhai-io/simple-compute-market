@@ -16,7 +16,9 @@
 # passed on that run's command line and noted on its log line, never added here.
 #
 # Rules use Claude Code's permission rule syntax. Each step's rules are its own
-# plus `common`'s. Contract: openspec/specs/change-workflow/spec.md, "Unattended
+# plus `common`'s. A file-tool rule's relative path names a path from the
+# checkout's root: the wrapper anchors it there, so a step that changes directory
+# keeps it. Contract: openspec/specs/change-workflow/spec.md, "Unattended
 # runs are held to their step's permissions".
 
 # Every step reads the repository and its history, and checks the change index.
