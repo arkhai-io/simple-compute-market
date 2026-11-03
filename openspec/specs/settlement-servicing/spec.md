@@ -327,12 +327,12 @@ A refund MUST be seller-initiated through `reverse`. `reverse` is authorized for
 #### Scenario: A seller discounts a running deal
 
 - **WHEN** a seller submits a `reverse` of a quarter of a delivered deal's held payment
-- **THEN** the payments service records one partial reverse, and the storefront records no refund intent and leaves the deal's status and lease unchanged
+- **THEN** the storefront sends one partial `reverse` for that amount, records no refund intent, and leaves the deal's status and lease unchanged
 
 #### Scenario: Only the seller initiates a refund
 
-- **WHEN** delivery fails or the seller voluntarily corrects an unentitled end
-- **THEN** the seller files delivery_end with the agreement's dispute authority and sends no stop or reverse for it; mediation's standard ruling returns unearned money then applies the capped premature-stop penalty, and a buyer disputing the account files a case
+- **WHEN** delivery fails, the seller voluntarily corrects an unentitled end, or a buyer requests settlement after any outcome
+- **THEN** no storefront issues `reverse` unless a seller-authenticated refund request names the deal, or the seller has enabled the `refund` failure action and the deal failed before any delivery; otherwise a committed deal's failure or correction is filed as delivery_end with the agreement's dispute authority, with no stop or reverse for it, and a buyer disputing the account files a case
 
 ### Requirement: Negotiation-scoped payment settlement converges
 

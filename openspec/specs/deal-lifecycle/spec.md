@@ -45,7 +45,7 @@ A ruling's outcome MUST be a list of consequences, each a payment effect on one 
 #### Scenario: A ruling discounts a deal
 
 - **WHEN** a ruling reverses a quarter of a hosted deal's held `once` payment and has no delivery end
-- **THEN** the payment authority records one partial `reverse` by the dispute authority with the case reference, and the lease is unchanged
+- **THEN** the storefront reads the outcome through `watch`, sends end service no delivery end, and the lease keeps running
 
 ### Requirement: Requests are intents or interface requests
 
@@ -441,8 +441,8 @@ The seller half MUST atomically journal delivery_end {ended_at, delivered, cause
 
 #### Scenario: Setup returns by delivery, not by time
 
-- **WHEN** a setup part clamped to approval is in a deal the seller files delivery_end on with `delivered: false`, and in another with `delivered: true`
-- **THEN** the first ruling returns the setup part in full and the second leaves it whole, whatever share of any term has passed
+- **WHEN** one deal with a setup part clamped to approval ends unentitled before its resource was ever available, and another after it was available
+- **THEN** the seller half files the first with `delivered: false` and the second with `delivered: true`, from durable availability whatever share of the term has passed, and sends no reverse of setup for either
 
 #### Scenario: Hardware fails on a spot deal
 
@@ -451,12 +451,12 @@ The seller half MUST atomically journal delivery_end {ended_at, delivered, cause
 
 #### Scenario: An unsupported claim is triaged
 
-- **WHEN** the Agreement cannot map cleanly or the claim predates Agreement start
-- **THEN** the authority sends it to an operator, not a mechanical ruling
+- **WHEN** the dispute adapter cannot map the Agreement or the claim onto its interface's revision
+- **THEN** the seller half reports repair required and sends no stop or reverse in place of the filing
 
 ### Requirement: Delivery end is one claim for either party
 
-The dispute adapter MUST map DeliveryEndClaim {kind: delivery_end, ended_at: int Unix seconds <= now, delivered: bool, cause: payee|payer} for either filer. Its concrete schema and signed payload MUST come from the mediation revision vendored at 12.1. Separate seller-end, buyer-end and end-acknowledgement mediation kinds MUST NOT be emitted.
+The dispute adapter MUST map DeliveryEndClaim {kind: delivery_end, ended_at: int Unix seconds <= now, delivered: bool, cause: payee|payer} for either filer. Its concrete schema and signed payload MUST come from the mediation kit's vendored published contract (provenance in `kit/arkhai-mediation/schema/SOURCE.md`). Separate seller-end, buyer-end and end-acknowledgement mediation kinds MUST NOT be emitted.
 
 #### Scenario: Buyer files a seller failure
 
@@ -487,18 +487,18 @@ SCM MUST preserve the signed authority record's ruling basis (payee_filed, payee
 
 #### Scenario: A payee-signed buyer claim
 
-- **WHEN** a payer files a matching seller-signed claim and all mechanical guards pass
-- **THEN** mediation rules with basis payee_signed, regardless of which party filed
+- **WHEN** a payer files a matching seller-signed claim and the authority's signed record states a ruling with basis `payee_signed`
+- **THEN** SCM preserves that basis as recorded and reports it the same whichever party filed
 
 #### Scenario: A repeated mechanical end
 
-- **WHEN** another delivery_end is filed after an earlier mechanical delivery_end ruling on the Agreement
-- **THEN** it goes to an operator; a new operation key cannot bypass the replay guard
+- **WHEN** the seller revises a delivery_end after an earlier mechanical delivery_end ruling on the Agreement
+- **THEN** the dispute adapter routes the revision to an operator under the same semantic filing identity, allocating no new operation key
 
 #### Scenario: Respondent stays silent
 
 - **WHEN** a claim has neither payee filing nor valid concurrence and the respondent never answers
-- **THEN** it remains with human triage and no timeout supplies a ruling
+- **THEN** SCM infers no ruling from the silence, and the case stays pending until a signed authority outcome is observed
 
 ### Requirement: Payee-caused ends return held unserved value
 
@@ -506,17 +506,17 @@ For cause=payee, SCM MUST file the fixed delivery-end claim and evidence with th
 
 #### Scenario: The seller files its failure
 
-- **WHEN** the payee files delivery_end(cause=payee) and mechanical guards pass
-- **THEN** mediation applies returned stops, reversals and capped penalty, not the seller
+- **WHEN** the payee files delivery_end(cause=payee)
+- **THEN** the seller half files the fixed claim and evidence, computes and sends no stop, reversal or penalty, and forwards to end service any delivery end the signed outcome carries
 
 ### Requirement: Setup returns by delivered for either cause
 
-SCM MUST encode setup's once end at Agreement start and send delivered from retained availability/end evidence for either cause, not substitute site activation or elapsed time. It MUST leave setup reversal to the authority. Setup-bearing presets MUST remain disabled until the delivery_end revision and signature/mapping vectors are vendored. The authority's delivered-based remedy is external context.
+SCM MUST encode setup's once end at Agreement start and send delivered from retained availability/end evidence for either cause, not substitute site activation or elapsed time. It MUST leave setup reversal to the authority. Setup-bearing presets MUST remain disabled until a hosted dispute authority is qualified on the vendored delivery_end revision. The authority's delivered-based remedy is external context.
 
 #### Scenario: Undelivered payer-caused end
 
-- **WHEN** a qualified cause=payer claim states delivered=false
-- **THEN** setup returns in full, non-setup once parts stay kept and no penalty applies
+- **WHEN** a buyer files a cause=payer claim on a deal whose resource was never available
+- **THEN** SCM sends `delivered: false` from its retained availability evidence, not from site activation or elapsed time, and leaves setup's reversal to the authority
 
 ### Requirement: Payer-caused ends preserve priced stop terms
 
@@ -524,8 +524,8 @@ For cause=payer, SCM MUST retain accepted terms, stop outcomes and the receipt-b
 
 #### Scenario: A receipt-backed end preserves notice
 
-- **WHEN** a receipt-backed payer claim qualifies and its payer notice has not elapsed
-- **THEN** the authority schedules or awaits E without erasing notice, netting any unknown-but-landed stop
+- **WHEN** a receipt-backed payer claim is filed before its payer notice has elapsed
+- **THEN** SCM files it with the accepted notice and stop terms unchanged, backdates no payment stop, and reports the authority's result apart from the surrender
 
 ### Requirement: Premature-stop penalties consume only held earnings
 
@@ -534,7 +534,7 @@ SCM MUST carry the accepted premature_stop_penalty and fixed claim to the disput
 #### Scenario: Held earnings cap the penalty
 
 - **WHEN** an unentitled end carries a 2400 minor-unit penalty and only 900 of earned amounts remain held after refunds
-- **THEN** the remedy reverses 900 across parts in mandate order, not 2400 or money already paid out
+- **THEN** SCM files the claim carrying the accepted 2400 term, computes no monetary delta, and preserves the authority's signed aggregate penalty answer without a per-part decomposition or a promise of more than held money
 
 ### Requirement: Premature-stop penalty is an option term
 
@@ -595,12 +595,12 @@ End service MUST classify verified evidence as lawful, seller failure or pending
 #### Scenario: Billing started seconds before the deadline and availability failed
 
 - **WHEN** the payment authority accepts the payee's `start` at 12:29:58 against a 12:30 deadline and the storefront crashes before recording `available`, recovering at 12:40
-- **THEN** the accepted start stands as history and is not refused after the fact; the deal is seller non-delivery, established at 12:30, access is never granted, the resource is ended through end service, and the seller half files `delivery_end(cause=payee)`, whose standard ruling stops the rate part returned and reverses everything it earned since the Agreement start
+- **THEN** the accepted start stands as history and is not refused after the fact; the deal is seller non-delivery, established at 12:30, access is never granted, the resource is ended through end service, and the seller half files `delivery_end(cause=payee)` with the Agreement start as its never-delivered basis, sending no stop or reverse of its own
 
 #### Scenario: Billing ran for many periods before the deadline and availability failed
 
 - **WHEN** a spot deal with a one-minute period, no setup charge and no penalty is approved at 12:00 with a 12:30 deadline, billing starts at 12:01, the storefront crashes before `available` and recovers at 12:40
-- **THEN** the filing is `delivery_end(cause=payee)`, the ruling reverses all thirty-nine completed periods, and the buyer's net charge for the deal is zero
+- **THEN** the seller half files `delivery_end(cause=payee)` with `delivered: false` and the Agreement start as its basis, and sends no reverse for the thirty-nine completed periods, whose return is the dispute authority's ruling
 
 ### Requirement: Pending correction resolves in the same journal
 

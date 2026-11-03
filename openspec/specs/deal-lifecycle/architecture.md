@@ -213,7 +213,11 @@ human-triaged; silence never rules. Signed basis is payee_filed/payee_signed/ope
 
 For cause=payee the authority stops rates now returned, reverses held earnings
 since the fixed end and non-setup once unserved share, then caps the penalty at
-remaining held earnings in mandate order. For cause=payer it preserves priced
+remaining held earnings in mandate order: a 2400 minor-unit penalty with only 900
+of earned amounts still held after refunds reverses 900, not 2400 or money already
+paid out. A never-delivered rate deal whose billing started before the deadline
+has everything earned since the Agreement start reversed, so its buyer's net charge
+is zero. For cause=payer it preserves priced
 notice/treatment, nets prior accepted/pending stops/effects, keeps non-setup once
 and applies no penalty. Missing/chosen payer entry goes to an operator. Past
 remedies use present stop plus held-money adjustment, never a backdated stop.
