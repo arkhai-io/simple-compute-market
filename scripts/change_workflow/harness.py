@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import posixpath
 import re
 import subprocess
 import sys
@@ -88,7 +89,9 @@ def anchored(rule: str, root: Path) -> str:
     table grants for the rest of the session. Written as `//<root>/<pattern>`, the
     pattern names the checkout's own files wherever the session stands. Patterns
     already absolute (`//`), home-relative (`~/`), or settings-relative (`/`) are
-    left alone.
+    left alone. A pattern reaching above the checkout, such as a sibling worktree's
+    `../*-proposal/**`, has its `..` resolved here: Claude Code never matches a
+    pattern holding a `..` segment.
     """
     match = _PATH_RULE.match(rule)
     if not match:
@@ -97,7 +100,7 @@ def anchored(rule: str, root: Path) -> str:
     if pattern.startswith(("/", "~/")) or pattern == "~":
         return rule
     relative = pattern[2:] if pattern.startswith("./") else pattern
-    return f"{tool}(/{root.resolve().as_posix().rstrip('/')}/{relative})"
+    return f"{tool}(/{posixpath.normpath(f'{root.resolve().as_posix()}/{relative}')})"
 
 
 def claude_command(prompt: str, rules: StepRules, schema: dict[str, Any] | None, model: Model,

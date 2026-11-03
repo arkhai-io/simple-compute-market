@@ -34,6 +34,18 @@ def test_relative_file_rules_are_anchored_at_the_checkout(tmp_path: Path) -> Non
     assert anchored("Read(**/*.py)", tmp_path) == f"Read(/{root}/**/*.py)"
 
 
+def test_a_rule_reaching_above_the_checkout_is_anchored_without_dot_dot(tmp_path: Path) -> None:
+    # Claude Code never matches a pattern holding `..`, so a sibling worktree's
+    # rule must reach it by its resolved path.
+    checkout = tmp_path / "changes" / "a-change"
+    checkout.mkdir(parents=True)
+    parent = (tmp_path / "changes").resolve().as_posix()
+
+    assert anchored("Edit(../*-proposal/openspec/**)", checkout) == \
+        f"Edit(/{parent}/*-proposal/openspec/**)"
+    assert anchored("Read(../*-proposal/**)", checkout) == f"Read(/{parent}/*-proposal/**)"
+
+
 def test_other_rules_pass_unchanged(tmp_path: Path) -> None:
     for rule in ("Read", "Grep", "Bash(make check-*)", "Edit(//etc/hosts)",
                  "Edit(~/notes.md)", "Edit(/openspec/**)", "WebFetch(domain:github.com)"):
