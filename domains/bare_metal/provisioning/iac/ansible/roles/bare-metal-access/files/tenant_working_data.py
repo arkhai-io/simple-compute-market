@@ -306,14 +306,18 @@ class Store:
                 self.write(fd, ledger)
             require(receipt["account"] == account, "reservation/account mismatch")
             self.fsync(fd)
+            if operation in ("reserve", "verify-identity", "install-key"):
+                # Once reclaim has cleaned or completed a receipt it stays on the
+                # reclaim path: the account may already be deleted, so a grant
+                # here would recreate it and restore access while teardown is
+                # unproven.
+                require(receipt["state"] != "complete", "completed reservation cannot grant")
+                require(receipt["state"] == "reserved", "reservation in cleanup cannot grant")
             if operation in ("inspect", "install-key", "revoke-key"):
                 self.identity(receipt, absent=receipt["state"] == "complete", present=operation == "install-key")
-                if operation == "install-key":
-                    require(receipt["state"] != "complete", "completed reservation cannot grant")
                 if operation != "inspect":
                     self.ssh_key(operation, receipt, request.get("ssh_public_key"))
             elif operation in ("reserve", "verify-identity"):
-                require(receipt["state"] != "complete", "completed reservation cannot grant")
                 self.identity(receipt, present=operation == "verify-identity")
             else:
                 receipt["observations"] = self.cleanup(operation, receipt)

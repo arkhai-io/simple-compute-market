@@ -482,7 +482,13 @@ recursive home removal, calls the helper's descriptor-verified `remove-home`,
 removes only the receipted unused private group, then calls `verify-complete` to
 independently verify absence and record completion. A refused step fails
 teardown and keeps capacity held; retry re-reads the receipt and remaining
-state. The SSH key helper pins the home and `.ssh` through no-follow descriptors
+state. Grant operations accept only a `reserved` receipt: once `clean` marks it
+`cleaned`, the account may already be deleted, so a grant that starts after
+cleanup is refused rather than recreating the account and its key while
+teardown is unproven. The helper's lock covers one call, not a grant's several
+role steps; a grant already past `reserve` when cleanup starts is refused at
+`verify-identity` or `install-key`, so no key is installed and reclaim's retry
+recovers. The SSH key helper pins the home and `.ssh` through no-follow descriptors
 and replaces or removes only the validated `authorized_keys` entry, avoiding
 path traversal through tenant symlinks. This bounded key path does not change the
 legacy policy's behavior. Neither policy promises erasure of transferred data,
