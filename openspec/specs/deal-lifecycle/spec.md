@@ -49,12 +49,12 @@ A ruling's outcome MUST be a list of consequences, each a payment effect on one 
 
 ### Requirement: Requests are intents or interface requests
 
-A case's requested outcome MUST be either a deal-level intent SCM issues, including delivery_end with either cause filed by either party, or an interface request the dispute adapter built or validated.
+A case's requested outcome MUST be either a deal-level intent SCM issues, including delivery_end with either cause filed by either party, or an interface request the dispute adapter built or validated. The dispute adapter MUST map an intent into its interface's request or reject it as unsupported. Generic lifecycle kits MUST NOT contain any interface's request vocabulary, and generic callers MUST NOT compute per-part effects for a case request.
 
-#### Scenario: The full policy is enforced
+#### Scenario: A seller's failure is filed as an intent
 
-- **WHEN** the owning component validates or applies this contract
-- **THEN** A case's requested outcome MUST be either a deal-level intent SCM issues, including delivery_end with either cause filed by either party, or an interface request the dispute adapter built or validated. The dispute adapter MUST map an intent into its interface's request or reject it as unsupported. The generic lifecycle kits MUST NOT contain any interface's request vocabulary, and generic lifecycle callers MUST NOT compute per-part effects for a case request.
+- **WHEN** the seller half issues delivery_end(cause=payee) for a deal
+- **THEN** it hands the dispute adapter the deal-level intent, and the adapter maps it into its interface's request
 
 #### Scenario: A buyer requests a refund for an outage
 
@@ -135,14 +135,36 @@ The payment-adapter protocol MUST send a stop only under a stop entry the mandat
 - **WHEN** the adapter is asked to send a stop for which the mandate states no entry for the sender
 - **THEN** it rejects before I/O rather than sending it or changing a priced entitlement
 
-### Requirement: Lifecycle terms are part of the selected option
+### Requirement: A settlement option states price, settlement and lifecycle
 
-The shared codec MUST own optional lifecycle terms beside price and schema-owned settlement parameters. The canonical option ID MUST include price, settlement and lifecycle, omitting lifecycle when absent. Compute delivery deadlines MUST follow site policy and default buyer acceptance; bond MUST remain reserved until supported.
+A settlement option MUST state its `price` (`asset`, `rates`; absent on a rateless option) and `settlement` (a `schema` naming the mechanism, its parameters flat beside it, none named `schema`), and MAY state a `lifecycle` carrying adjudication (version, dispute, dispute_window_seconds, case_hold_max_seconds), early_termination (version, payer/payee entitlements with notice_seconds/settles_through, term-end settles_through, premature_stop_penalty), `delivery_deadline_seconds` and reserved bond.
 
 #### Scenario: A lifecycle option is encoded
 
-- **WHEN** an option is published or accepted
-- **THEN** A settlement option MUST state its `price` (`asset`, `rates`; absent on a rateless option), its `settlement` (a `schema` naming the mechanism, with that schema's own parameters flat beside it, none named `schema`), and optionally its `lifecycle`, which MAY carry adjudication (version, dispute, dispute_window_seconds, case_hold_max_seconds), early_termination (version, payer/payee entitlements with notice_seconds/settles_through, term-end settles_through, premature_stop_penalty), `delivery_deadline_seconds` (a positive integer: the seconds after the later of the commitment instant and the Agreement start within which the resource is available to the buyer, as the storefront's durable `available` record) and reserved bond (version, amount). A compute option whose mechanism has a lifecycle adapter MUST carry the `delivery_deadline_seconds` its site enforces and MUST omit it where the site enforces none; a default buyer MUST refuse such an option without it, with an explicit opt-out. An option whose mechanism has no lifecycle adapter carries no `lifecycle` and so no deadline term; its lease takes the site's own capacity safeguard, and the buyer is shown that the option makes no delivery promise. The option ID MUST be the hash of the canonical payload of `price`, `settlement` and `lifecycle`, omitting `lifecycle` when absent. The shared codec MUST decode `lifecycle` as Agreement bytes and option identity; no settlement mechanism's model may own its keys; bond MUST remain reserved until a mechanism can hold seller-funded stake.
+- **WHEN** a seller publishes an Arkhai payments option with a one-day dispute window and a payer entitlement
+- **THEN** the option carries `price`, `settlement` and `lifecycle` as three objects, `settlement.schema` names the mechanism with its parameters beside it, and `lifecycle` holds the adjudication and early_termination terms
+
+### Requirement: The delivery deadline is the site's availability term
+
+`delivery_deadline_seconds` MUST be a positive integer: the seconds after the later of the commitment instant and the Agreement start within which the resource is available to the buyer, as the storefront's durable `available` record. A compute option whose mechanism has a lifecycle adapter MUST carry the deadline its site enforces and omit it where the site enforces none; a default buyer MUST refuse such an option without it, unless explicitly opted out.
+
+#### Scenario: A default buyer meets an option without a deadline
+
+- **WHEN** a default buyer is offered a compute Arkhai payments option with no `delivery_deadline_seconds`
+- **THEN** it refuses the option unless its operator has explicitly opted out
+
+### Requirement: An option without a lifecycle adapter makes no delivery promise
+
+An option whose mechanism has no lifecycle adapter MUST carry no `lifecycle`, and so no deadline term; its lease takes the site's own capacity safeguard, and the buyer MUST be shown that the option makes no delivery promise. The shared codec MUST decode `lifecycle` as Agreement bytes and option identity, and no settlement mechanism's model MAY own its keys.
+
+#### Scenario: An Alkahest compute option is shown
+
+- **WHEN** a buyer is shown a VM listing's Alkahest option
+- **THEN** the option carries no `lifecycle`, and the buyer is shown that it makes no delivery promise
+
+### Requirement: Lifecycle terms are part of the selected option
+
+The shared codec MUST own optional lifecycle terms beside price and schema-owned settlement parameters. The canonical option ID MUST include price, settlement and lifecycle, omitting lifecycle when absent. Compute delivery deadlines MUST follow site policy and default buyer acceptance; bond MUST remain reserved until supported.
 
 #### Scenario: A term changes the option ID
 
@@ -194,12 +216,12 @@ An unknown `version`, initiator key, or `settles_through` value, a `dispute` who
 
 ### Requirement: Dispute timing terms are bounded
 
-`case_hold_max_seconds` MUST be a nonnegative integer or `null`.
+`case_hold_max_seconds` MUST be a nonnegative integer or `null`. A `dispute_window_seconds` or `case_hold_max_seconds` below the dispute authority's advertised minimum MUST be refused at publication and by the buyer. On a compute option, `dispute_window_seconds` MUST be at least `delivery_deadline_seconds` plus the authority's minimum window, so no `once` part pays out before non-delivery can be established and filed on; publication and the buyer MUST refuse an option failing this.
 
-#### Scenario: The full policy is enforced
+#### Scenario: A negative case hold is refused
 
-- **WHEN** the owning component validates or applies this contract
-- **THEN** `case_hold_max_seconds` MUST be a nonnegative integer or `null`. A `dispute_window_seconds` or `case_hold_max_seconds` below the dispute authority's advertised minimum MUST be refused at publication and by the buyer. On a compute option, `dispute_window_seconds` MUST be at least `delivery_deadline_seconds` plus the authority's advertised minimum window, so that no `once` part pays out before non-delivery can be established and filed on; publication and the buyer MUST refuse an option that fails this.
+- **WHEN** a seller configures `case_hold_max_seconds: -1`
+- **THEN** publication refuses the option
 
 #### Scenario: A zero case hold is below the minimum
 
@@ -269,12 +291,12 @@ The sole term-end carrier MUST be early_termination.settles_through, distinct fr
 
 ### Requirement: The dispute window sets the earliest payout
 
-Each payment adapter MUST derive holds under which each amount a part holds pays out no earlier than the part's end plus `adjudication.dispute_window_seconds`.
+Each payment adapter MUST derive holds under which each amount a part holds pays out no earlier than the part's end plus `adjudication.dispute_window_seconds`, a window no shorter than the authority's advertised minimum. A prepaid `once` part MUST end at the Agreement term end, a setup once part at Agreement start (effectively clamped to approval if later), a rate part at its stop or term end. SCM MUST NOT refuse a filing for being after the window; that is the authority's policy.
 
-#### Scenario: The full policy is enforced
+#### Scenario: A window shorter than the authority's minimum
 
-- **WHEN** the owning component validates or applies this contract
-- **THEN** Each payment adapter MUST derive holds under which each amount a part holds pays out no earlier than the part's end plus `adjudication.dispute_window_seconds`. A prepaid `once` part MUST end at the Agreement term end; a setup once part at Agreement start, effectively clamped to approval if later; a rate part at its stop or term end. The window MUST NOT be shorter than the dispute authority's advertised minimum. SCM MUST NOT refuse a filing for being after the window; that is the dispute authority's policy.
+- **WHEN** a seller configures a one-hour dispute window for an authority advertising a one-day minimum
+- **THEN** publication refuses the option
 
 #### Scenario: A once deal's hold is derived
 
@@ -568,14 +590,23 @@ End service MUST fix the accepted Agreement start as the basis with never-delive
 - **WHEN** a seller failure is observed at 09:00 for an accepted 10:00 start
 - **THEN** end and filing intent are recorded atomically at 09:00, the filing waits until 10:00 with at 10:00, and restart preserves the same key without delivery
 
+### Requirement: Non-delivery is established at the delivery deadline
+
+Non-delivery MUST be established when `available` is not durably recorded by the earlier of the Agreement's term end and `delivery_deadline_seconds` after the later of the commitment instant and `start_utc`, whether or not the term continues and whatever the site's activation phase. End service MUST then refuse a new billing start; a `start` the payment authority accepted before the deadline MUST stand as history, remedied by the seller's `delivery_end` filing, not a local reversal.
+
+#### Scenario: The term ends before the deadline
+
+- **WHEN** an Agreement's term ends before its delivery deadline and `available` was never recorded
+- **THEN** non-delivery is established at the term end
+
 ### Requirement: Cause classification is owned by end service
 
-End service MUST classify verified evidence as lawful, seller failure or pending, correlate site reports with controlling requests, and preserve independently established prior non-delivery. Classification MUST follow evidence and entitlements, never event kind or arrival order; physical work MUST NOT wait for classification.
+End service MUST classify verified evidence as lawful (entitled stop, term end/exhaustion, ruling, surrender), seller failure (unentitled withdrawal, provisioning/start failure, activation lapse, established non-delivery) or pending, and correlate site reports with their controllers. It MUST follow evidence and entitlements, never event kind or arrival order; admission refusal or a later stop MUST NOT erase earlier non-delivery or alone create a penalty. Physical work MUST NOT wait for it.
 
 #### Scenario: Delivery deadline passes without availability
 
 - **WHEN** the accepted delivery deadline passes without durable available evidence
-- **THEN** End service MUST classify evidence as lawful (entitled buyer/payee stop, terms/exhaustion, ruling or surrender), seller failure (unentitled withdrawal, provisioning/start failure, activation lapse or established non-delivery), or pending. Non-delivery MUST be established when `available` is not durably recorded by the earlier of the Agreement's term end and `delivery_deadline_seconds` after the later of the commitment instant and `start_utc`, whether or not the term continues and whatever the site's activation phase; end service MUST refuse a new billing start on such a deal, and a `start` the payment authority accepted before the deadline MUST stand as history, the deal being seller non-delivery whose remedy is the seller's `delivery_end` filing and the authority's ruling, not a local reversal. It MUST correlate site reports with controlling requests. Classification MUST follow verified evidence and entitlement, not arrival order or event kind; admission refusal or a later clock/payee stop MUST NOT erase earlier non-delivery or alone create a penalty.
+- **THEN** end service classifies the end as seller non-delivery established at the deadline, refuses a new billing start, and journals the seller's `delivery_end(cause=payee)` filing
 
 #### Scenario: A site report confirms a lawful end
 
@@ -611,14 +642,23 @@ record_end MUST atomically retain any pending-classification slot beside the end
 - **WHEN** later verified evidence resolves an end's pending classification as seller failure
 - **THEN** the same journal atomically resolves the slot and records its fixed-basis filing without repeating physical work
 
+### Requirement: Revised cases carry their prior rulings
+
+A prior mechanical delivery_end ruling MUST route a revision to an operator. Revised or linked cases MUST carry prior ruling and effect references and net prior authority effects after unknown originals resolve.
+
+#### Scenario: A revision follows a ruling
+
+- **WHEN** the seller revises a delivery_end on a case the authority has already ruled
+- **THEN** the revised case carries the prior ruling and effect references
+
 ### Requirement: Filing identities and revised requests are safe across callers
 
-The dispute adapter MUST bind the semantic filing identity to commitment, Agreement authority, cause/end revision and fixed request.
+The dispute adapter MUST bind the semantic filing identity to commitment, Agreement authority, cause/end revision and fixed request, and MUST resolve or adopt the equivalent case without a concurrent-writer duplicate. An unresolved original writer MUST remain retryable rather than become a terminal rejection. Unsupported identity or revision mapping MUST report repair required, not allocate another key or use append as amendment.
 
-#### Scenario: The full policy is enforced
+#### Scenario: An original filing's result is unknown
 
-- **WHEN** the owning component validates or applies this contract
-- **THEN** The dispute adapter MUST bind the semantic filing identity to commitment, Agreement authority, cause/end revision and fixed request. It MUST resolve/adopt the equivalent case without a concurrent-writer duplicate. An unresolved original writer MUST remain retryable rather than become a terminal rejection. A prior mechanical delivery_end ruling MUST route revision to an operator. Revised or linked cases MUST carry prior ruling/effect references and net prior authority effects after unknown originals resolve. Unsupported identity/revision mapping MUST report repair required, not allocate another key or use append as amendment.
+- **WHEN** an original filing's submission returns no answer
+- **THEN** the filing stays retryable under the same semantic identity and is not recorded as rejected
 
 #### Scenario: An operator and online replay submit one intent
 

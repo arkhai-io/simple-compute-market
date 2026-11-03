@@ -273,14 +273,18 @@ VM, bare-metal, and API-credit buyers selecting `arkhai.payments.v1` MUST retain
 - **WHEN** a verified payment has issued credits but the buyer did not observe credentials
 - **THEN** it retrieves the same grant through the authenticated seller boundary rather than approving or issuing again
 
+### Requirement: An approved payment deal is handed off by its domain's route
+
+After approval, a buyer MUST send `commit` through the buyer half with the negotiation ID and transaction ID on a VM or bare-metal deal, and MUST settle with `settle_agreement` on an API-credit deal. Marketplace requests MUST use the recorded profile signer and storefront trust, independently of payment credentials.
+
+#### Scenario: A bare-metal buyer hands off an approved deal
+
+- **WHEN** a buyer has approved the mandate of a bare-metal Arkhai payments deal
+- **THEN** it sends `commit` through the buyer half with the negotiation ID and the transaction ID, signed by its recorded profile signer
+
 ### Requirement: Payment buyers approve and settle by negotiation
 
 The buyer MUST supply its Arkhai account as `payer_account`, verify that the mandate is the mechanism's derivation of the negotiated Agreement, including its authorities, the dispute authority's account from the option, each part's holds and terms, validate it against local payment policy, approve with owner-scoped WorkOS credentials, and poll the deterministic transaction ID.
-
-#### Scenario: The full policy is enforced
-
-- **WHEN** a buyer approves and hands off a negotiated payment deal
-- **THEN** The buyer MUST supply its Arkhai account as `payer_account`, verify that the mandate is the mechanism's derivation of the negotiated Agreement, including its authorities, the dispute authority's account from the option, each part's holds and terms, validate it against local payment policy, approve with owner-scoped WorkOS credentials, and poll the deterministic transaction ID. On VM and bare-metal deals it MUST then send `commit` through the buyer half with the negotiation ID and transaction ID; on API-credit deals it MUST settle with `settle_agreement`. Marketplace requests MUST use the recorded profile signer and storefront trust, independently of payment credentials.
 
 #### Scenario: Payment and marketplace credentials stay separate
 
@@ -292,14 +296,18 @@ The buyer MUST supply its Arkhai account as `payer_account`, verify that the man
 - **WHEN** a mandate lists the payee as a stop authority while the selected option entitles only the payer
 - **THEN** the buyer refuses to approve it
 
+### Requirement: EVM settlement is the typed client's separate call
+
+EVM settlement MUST be the typed storefront client's separate `settle_evm`, so EVM arguments never appear on the agreement path. Both settle calls MUST use the settle route contract, and the storefront MUST dispatch on the accepted Agreement's mechanism.
+
+#### Scenario: A buyer settles an escrow deal
+
+- **WHEN** a buyer settles an accepted Alkahest deal through the typed client
+- **THEN** it calls `settle_evm` over the settle route contract, and the storefront dispatches the request by the accepted Agreement's mechanism
+
 ### Requirement: The typed client settles Agreement deals apart from EVM deals
 
 The typed storefront client MUST settle an Agreement-settled deal with `settle_agreement(negotiation_id)` only where the domain has no buyer lifecycle route, which sends only the negotiation ID and the signer's principal; where the route exists the lifecycle client's `commit` replaces it.
-
-#### Scenario: The full policy is enforced
-
-- **WHEN** the typed client settles an accepted Agreement
-- **THEN** The typed storefront client MUST settle an Agreement-settled deal with `settle_agreement(negotiation_id)` only where the domain has no buyer lifecycle route, which sends only the negotiation ID and the signer's principal; where the route exists the lifecycle client's `commit` replaces it. EVM settlement is the separate `settle_evm`, so EVM arguments never appear on the agreement path. Both settle calls use the settle route contract, and the storefront dispatches on the accepted Agreement's mechanism.
 
 #### Scenario: A buyer settles a payments deal through the typed client
 

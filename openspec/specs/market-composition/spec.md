@@ -606,14 +606,18 @@ A domain composition that supports Arkhai payments MUST register `arkhai.payment
 - **WHEN** a domain installs Alkahest without the Arkhai payments kit
 - **THEN** it publishes no Arkhai payment option and acquires no Arkhai payment-service dependency
 
+### Requirement: Domains compose the stages they support
+
+Core MUST NOT prescribe the actors' order or require separate buyer-confirm and seller-verify steps. Domains MUST compose only supported stages; settlement and delivery MAY be fused.
+
+#### Scenario: A domain fuses settlement and delivery
+
+- **WHEN** a domain composes settlement and delivery as one stage
+- **THEN** core accepts the composition without a separate buyer-confirm or seller-verify step
+
 ### Requirement: Deals compose negotiate, settle, and provision stages
 
-Negotiation MUST pass its exact accepted Agreement to the domain's selected settlement stage.
-
-#### Scenario: The full policy is enforced
-
-- **WHEN** the owning component validates or applies this contract
-- **THEN** Negotiation MUST pass its exact accepted Agreement to the domain's selected settlement stage. The settle stage MUST be the post-commitment handoff by which the seller learns of the mechanism's commitment and verifies it; it is not a protocol step. Protected delivery MUST consume that stage's verified SettlementEvidence rather than compare mechanism IDs or infer payment from an escrow's presence. Core MUST NOT prescribe the actors' order or require separate buyer-confirm and seller-verify steps. Domains MUST compose only supported stages; settlement and delivery MAY be fused.
+Negotiation MUST pass its exact accepted Agreement to the domain's selected settlement stage, the post-commitment handoff by which the seller learns of and verifies the mechanism's commitment; it is not a protocol step. Protected delivery MUST consume that stage's verified SettlementEvidence rather than compare mechanism IDs or infer payment from an escrow's presence.
 
 #### Scenario: Arkhai payment gates domain provisioning
 
@@ -639,14 +643,23 @@ A domain MUST compose only mechanism stages it supports, and each stage MUST und
 - **WHEN** a supporting domain composes a stage whose first effect belongs to the seller
 - **THEN** core dispatches that role's entry without requiring a prior buyer deposit, confirmation or escrow proposal
 
+### Requirement: The payments service and dispute authority keep their authority
+
+The payments service MUST remain the authority for its ledger, account credentials, fees, hold release and hold extensions, and payment-provider operations. Cases and their outcomes MUST belong to the agreement's dispute authority, an independent party that acts at the payments service only through its own authorities and answers parties in its own protocol.
+
+#### Scenario: A hosted case's outcome is observed
+
+- **WHEN** a buyer's case on an `arkhai.payments.v1` deal is ruled
+- **THEN** the buyer half reads the outcome from the dispute authority's signed record, not from a payments-service response
+
 ### Requirement: Arkhai payments authority remains external
 
 `kit/arkhai-payments` MUST consume the payments service's published HTTP and JSON Schema contract, vendored with its conformance vectors and identified by content hash rather than by source location, and generate its Python wire models from it, rather than importing the service implementation or copying a TypeScript contract.
 
-#### Scenario: The full policy is enforced
+#### Scenario: A payments contract revision is vendored
 
-- **WHEN** the owning component validates or applies this contract
-- **THEN** `kit/arkhai-payments` MUST consume the payments service's published HTTP and JSON Schema contract, vendored with its conformance vectors and identified by content hash rather than by source location, and generate its Python wire models from it, rather than importing the service implementation or copying a TypeScript contract. The payments service MUST remain the authority for its ledger, account credentials, fees, hold release and hold extensions, and payment-provider operations. Cases and their outcomes MUST belong to the agreement's dispute authority, an independent party that acts at the payments service only through its own authorities and answers parties in its own protocol.
+- **WHEN** `kit/arkhai-payments` vendors a published payments contract revision
+- **THEN** the revision is identified by its content hash, not a source location, and the kit's Python wire models are generated from its JSON Schemas
 
 #### Scenario: Payments service owns the ledger
 
@@ -656,7 +669,7 @@ A domain MUST compose only mechanism stages it supports, and each stage MUST und
 #### Scenario: A case is filed on a hosted deal
 
 - **WHEN** a buyer files a case on an `arkhai.payments.v1` deal
-- **THEN** it files with the agreement's dispute authority, and the payments service records only that authority's `extend`, `lift` and outcome effects
+- **THEN** it files with the agreement's dispute authority and sends the payments service no case or effect of its own
 
 ### Requirement: Marketplace roles hold no payment ledger
 

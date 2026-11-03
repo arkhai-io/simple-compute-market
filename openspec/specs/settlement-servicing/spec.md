@@ -259,14 +259,36 @@ The `arkhai.payments.v1` seller kit MUST derive a mandate from the exact accepte
 - **WHEN** the seller polls the transaction ID and receives a receipt
 - **THEN** it verifies the Arkhai signature and matching transaction and Agreement deal before provisioning, and rejects an invalid, absent, or mismatched receipt
 
+### Requirement: The mandate binds the deal and its parties
+
+The mandate's `deal` MUST be `sha256(JCS(agreement))` and its transaction ID `sha256(JCS(mandate))`. It MUST name `settlement_params.payer_account` as `from` and the selected option's payee account as `to`, use the service's published fee policy and the fixed nonce `arkhai.payments.v1`, and, on once-only options, carry one `once` part for the agreed amount and asset, with per-part authorities.
+
+#### Scenario: A once-only mandate is bound
+
+- **WHEN** buyer and seller derive the mandate of an accepted once-only payments Agreement
+- **THEN** both derive the same `deal`, transaction ID, `from` and `to`, with one `once` part for the agreed amount and asset
+
+### Requirement: Mandate holds and approval follow the option's timing
+
+Every `once` hold MUST last at least its part end plus the option's `adjudication.dispute_window_seconds`; prepaid service ends at Agreement term end, and setup encodes its end at Agreement start, clamped effectively to approval if later. Approval MUST expire after the option's `approval_window`. Each part MUST carry `maxHoldExtension` from `adjudication.case_hold_max_seconds`, `null` when unbounded. A hosted option MUST NOT carry `bond` until payments can hold a seller-funded part.
+
+#### Scenario: An unbounded case hold
+
+- **WHEN** an option's `adjudication.case_hold_max_seconds` is `null`
+- **THEN** every part of its mandate carries `maxHoldExtension: null`
+
+### Requirement: A once-only mandate authorizes the seller and the dispute authority
+
+A `once`-only mandate MUST authorize no `start` and no `stop`. It MUST authorize `reverse` for the seller and the agreement's dispute authority, the account the option's `adjudication.dispute` names rather than one from `[Settlement.arkhai_payments]`, and MUST list only that authority under the one `extend` authorities key, which also authorizes `lift`. A `reverse` MAY name a part and an amount up to what that part still holds.
+
+#### Scenario: The buyer is never a reverse authority
+
+- **WHEN** a once-only mandate is derived
+- **THEN** its `reverse` authorities are the seller and the option's dispute authority, and the buyer is neither
+
 ### Requirement: The payments mandate is derived exactly from the Agreement
 
 The mandate MUST be derived only from the exact accepted Agreement, binding its JCS hash, deterministic transaction ID, parties, asset, amounts, part shapes, authorities, holds, caps and approval window. Buyer and seller MUST derive the same mandate under the selected mechanism's vendored contract; unsupported bonds or terms MUST refuse.
-
-#### Scenario: The complete mandate is checked
-
-- **WHEN** buyer and seller derive or verify a mandate before approval
-- **THEN** The mandate's `deal` MUST be `sha256(JCS(agreement))` and its transaction ID `sha256(JCS(mandate))`. It MUST name `settlement_params.payer_account` as `from`, the selected option's payee account as `to`, and, on once-only options, one `once` part for the agreed amount and asset, with per-part authorities. Every `once` hold MUST last no less than its own part end plus the option's `adjudication.dispute_window_seconds` (prepaid service ends at Agreement term end; setup encodes end at Agreement start, clamped effectively to approval if later), and approval MUST expire after the option's `approval_window`. A hosted option MUST NOT carry `bond` until the payments service can hold a seller-funded part. It MUST use the service's published fee policy and the fixed nonce `arkhai.payments.v1`. A `once`-only mandate MUST authorize no `start` and no `stop`, and MUST authorize `reverse` for the seller and the agreement's dispute authority, the account its `adjudication.dispute` names, and MUST list only that authority under the one `extend` authorities key, which also authorizes `lift`. The dispute authority's account MUST come from the option, not from `[Settlement.arkhai_payments]`. Each part MUST carry `maxHoldExtension` from `adjudication.case_hold_max_seconds`, `null` when unbounded. A `reverse` MAY name a part and an amount up to what that part still holds.
 
 #### Scenario: Hold and approval expiry follow the accepted timing
 

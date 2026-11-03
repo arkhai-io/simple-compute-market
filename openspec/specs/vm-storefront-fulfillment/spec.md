@@ -17,14 +17,27 @@ Once a deal has been accepted, commercial delivery takes priority over local boo
 - **AND** continues the live commercial delivery attempt
 - **AND** does not tear down or discard the deliverable VM solely because of that write failure
 
+### Requirement: A VM deal's lease begins at its reservation commit
+
+The VM storefront MUST commit the deal's reservation before fulfillment begins, which begins the lease; afterwards only end service writes to the lease. It MUST hold and commit site capacity under the deal's negotiation (`deal_ref.negotiation_id`) whatever the settlement mechanism, so a deal's site reservation is found by its negotiation and carries no settlement reference.
+
+#### Scenario: A payments deal's capacity is held
+
+- **WHEN** a VM storefront holds capacity for an Arkhai payments deal
+- **THEN** the hold names the deal's negotiation ID and carries no settlement reference, and fulfillment begins only after the hold is committed
+
+### Requirement: VM settlement stages own their mechanism's steps
+
+The selected settlement stage MUST own mechanism-specific attestation, readiness and claim binding; the claims engine retains submission and collection, not physical recovery. Common delivery MUST consume the stage's evidence and MUST NOT compare mechanism IDs.
+
+#### Scenario: An Alkahest deal is fulfilled
+
+- **WHEN** physical fulfillment of an Alkahest VM deal reaches an active result
+- **THEN** the Alkahest stage binds the fulfillment attestation and claim, the claims engine submits and collects, and common delivery records credentials without naming the mechanism
+
 ### Requirement: Full settlement convergence ownership
 
 The VM storefront MUST own capacity reservation, physical fulfillment, credential delivery, and listing/delivery progress.
-
-#### Scenario: The full policy is enforced
-
-- **WHEN** the owning component validates or applies this contract
-- **THEN** The VM storefront MUST own capacity reservation, physical fulfillment, credential delivery, and listing/delivery progress. It MUST commit the deal's reservation before the fulfillment begins, which begins the lease; afterwards only end service writes to the lease. The selected settlement stage MUST own mechanism-specific attestation, readiness and claim binding; the claims engine retains submission/collection, not physical recovery. Common delivery MUST consume evidence and MUST NOT compare mechanism IDs. The VM storefront MUST hold and commit site capacity under the deal's negotiation (`deal_ref.negotiation_id`) whatever the settlement mechanism, so a deal's site reservation is found by its negotiation and carries no settlement reference.
 
 #### Scenario: An escrow-settled deal's reservation is looked up
 
