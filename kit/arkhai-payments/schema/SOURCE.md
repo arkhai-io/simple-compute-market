@@ -27,8 +27,14 @@ generation for review.
 
 On the wire, a required property keeps its null and an optional property without a
 value is omitted. An optional property stated as an explicit `null`, such as a
-part's `end`, is normalized the same way: the models accept it, the wire form omits
-it, and the transaction ID hashes that normalized mandate, not the raw JSON.
+part's `end` or a receipt part's `rate`, is normalized the same way, though the
+schema does not allow that null: the models accept it, the wire form omits it, and
+the transaction ID hashes that normalized mandate, not the raw JSON. Receipts and
+snapshots parse the same way, and a receipt signature is verified against the
+normalized body. An inserted null changes no value the kit then checks or stores,
+because the kit computes transaction identity and verifies receipt signatures over
+the parsed model's canonical JSON, not over received bytes. Conversely, a body the
+service signed with such a null in it would not verify.
 `market_arkhai_payments.canonical.wire_json` produces that form for approval bodies,
 transaction JCS and receipt verification. The kit derives `P0D` and its buyer policy
 refuses other maximum hold extensions, including null.
