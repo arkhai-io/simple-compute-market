@@ -493,6 +493,10 @@ The goal does not gate merges on the workflow. A patch made directly to `dev` re
 
 This is a lesser goal because it changes how changes are made, not what the market can do. Unlike other lesser goals it carries a current state and open gaps, as a roadmap goal would, because no roadmap goal holds them. As changes open for its gaps, each is listed in a table here and linked from its row.
 
+| Change | Status | Depends on | Notes | Acceptance boundary |
+|---|---|---|---|---|
+| [`specify-change-workflow-and-engine`](specify-change-workflow-and-engine/) | ready for design | — | Proposal and open questions; the starting direction in `design.md` came from the discussion that opened this goal. The goal's other changes design against the surface and the inventory of repository assumptions it produces | The workflow is specified as a whole, separating what holds for any repository from what holds only here. The workflow and its engine have an architecture document with diagrams of the engine's parts, a step run's life, and where a change's state lives. The engine's public surface is classified, with what counts as breaking, and every assumption it and the skills make about the repository is inventoried. No step's behaviour changes except by a fix the review justifies |
+
 **Current state.** The workflow lives entirely in this repository:
 
 - **Skills:** ten leaf skills under [`.agents/skills/`](../../.agents/skills/), linked into Claude Code's and Codex's project skill directories.
@@ -522,7 +526,7 @@ The guidance agents load is not layered. [`AGENTS.md`](../../AGENTS.md), [`ARCHI
 
 | Open gap | Owned by |
 |---|---|
-| The engine is documented as this repository's contract, not as a tool in its own right. Its public surface — configuration schema, capabilities, extension points, and the record and outcome formats — is undefined, so nothing distinguishes a breaking change from an internal one | Unowned — needs a new change |
+| The engine is documented as this repository's contract, not as a tool in its own right. Its public surface — configuration schema, capabilities, extension points, and the record and outcome formats — is undefined, so nothing distinguishes a breaking change from an internal one | [`specify-change-workflow-and-engine`](specify-change-workflow-and-engine/) |
 | No single file states what the workflow assumes about a repository. Repository operations are make targets the skills name directly, not capabilities resolved through one standard configuration file under `.agents/`. A capability would resolve to the repository's declared command, else the workflow's default, else be absent, independent of the repository's implementation language | Unowned — needs a new change |
 | Unattended permissions are allowlists of this repository's commands, which cannot carry across repositories whose commands differ. What would carry across: per-step sandbox profiles; privileged actions such as push and outcome recording performed by the engine with credentials the step never holds; invariant checks after each step; and allow and deny rules a repository may add without loosening what the engine guarantees | Unowned — needs a new change, with the capability contract |
 | A skill can vary per repository only by being edited. Named extension points, each filled by a checked repository addendum that may add or narrow obligations but not silently remove them, would let a common baseline carry per-repository variation | Unowned — needs a new change |
