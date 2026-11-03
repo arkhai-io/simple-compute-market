@@ -46,8 +46,13 @@ applies to relays.
   remains the format of `POST /api/v1/hosts/import`.
 - The provisioning chart's schema also refuses `relay_definitions_path` under
   `config`, as it refuses the pool and capacity paths.
+- The `ssh` connection codec validates its fields strictly for every submission,
+  so a document refuses a quoted number in a connection, and the host API now
+  refuses one it used to coerce.
 - `DEPLOYMENT_AND_CONFIG.md` states the method every definition document kind
-  follows.
+  follows. A new operator handbook, `docs/operator-handbook.md`, holds the
+  operator account of the host, pool, and capacity documents, moved out of
+  `DEPLOYMENT_AND_CONFIG.md`, whose normative rules go to their specs.
 
 ## Capabilities
 
@@ -55,7 +60,8 @@ applies to relays.
 
 - `physical-provisioning`: how hosts enter the host registry — the host
   definitions document, its startup reconciliation, its export and import
-  routes, and the retirement of startup INI seeding.
+  routes, and the retirement of startup INI seeding — and strict typing of a
+  connection's codec fields for every submission.
 - `deployment-state`: the provisioning chart's `definitions.hosts` value and its
   refused keys.
 - `resource-pool-management`: a host definitions entry's rule for its host's
@@ -96,7 +102,14 @@ None.
   script stops writing `inventory_ini`.
 - The VM seller and bare-metal compose stacks, and the bare-metal end-to-end
   lane's host file.
+- The Ansible distribution's `ssh` codec (`compute_provisioning_ansible`, a minor
+  version): strict field types for every submission, including
+  `POST`/`PUT /api/v1/hosts`.
 - Operator documentation of how hosts are added, and both seller quickstarts.
+- A new `docs/operator-handbook.md` holding the operator account of the host,
+  pool, and capacity documents, moved from `DEPLOYMENT_AND_CONFIG.md`'s
+  "Definition documents"; a row for it in `openspec/README.md`'s placement table
+  and a line in `AGENTS.md`'s documentation ownership.
 - Deployments: an operator stating `inventory_ini` or `inventory_path` must
   replace it with a host document before upgrading, and every Helm deployment
   whose provisioning-secrets Secret states `inventory_ini`, even empty, must drop
@@ -107,7 +120,10 @@ None.
   deny-rule denial redone with the Edit or Write tool. The last is stated in the
   change-workflow spec and companion, the step skills, the change-orchestrate
   skill, and `docs/agents/change-workflow.md`, with the table's markings left
-  for the owner's local run.
+  for the owner's local run. Also, from the implementation round's triage: a
+  run ended by a signal keeps the denials its stream's `permission_denied` events
+  name (`scripts/change_workflow/stream.py`), and the change-orchestrate skill gives
+  each step run the harness's longest timeout.
 
 ## Dependencies and Related Changes
 
@@ -136,8 +152,13 @@ None.
   replacement per entry (D5), retention of unnamed hosts (D4), whole-document
   failure (D7), no credential in the document (D9), its export (D12) and import
   route (D14) → `openspec/specs/physical-provisioning/spec.md` (by the archive),
-  and the operator account in `docs/development/DEPLOYMENT_AND_CONFIG.md`'s
-  "Definition documents".
+  and the operator account in `docs/operator-handbook.md`.
+- A codec types its connection's public fields strictly for every submission
+  (D7, 45 F1) → `openspec/specs/physical-provisioning/spec.md`, "Host
+  connections are typed by their implementation's codec" (by the archive).
+- The operator account of the host, pool, and capacity documents (D13, 47 O1) →
+  `docs/operator-handbook.md`, with its row in `openspec/README.md`'s placement
+  table and `AGENTS.md`'s documentation ownership.
 - The chart's `definitions.hosts` value and refused keys, the relay path's
   refusal included (D3) → `openspec/specs/deployment-state/spec.md` (by the
   archive) and `DEPLOYMENT_AND_CONFIG.md`.

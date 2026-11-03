@@ -160,6 +160,25 @@ async def test_a_hook_refusal_and_another_stored_state_problem_are_both_reported
     assert (await clients.family.get_host("kvm1")).pool_id == _RELAY_POOL
 
 
+async def test_a_quoted_port_refuses_the_whole_document(client_and_queue, recorded):
+    """Validation is strict for the connection's own fields too: a quoted
+    ``ssh_port`` is refused by the ``ssh`` codec at its entry's connection, and
+    the document's valid entry is not applied either."""
+    clients, _ = client_and_queue
+    admin, transport = recorded
+    quoted = _entry("kvm2", ssh_host="10.0.0.2")
+    quoted["connection"]["public"]["ssh_port"] = "2222"
+
+    refused = await admin.import_host_definitions(_document(_entry("kvm1"), quoted))
+
+    assert transport.responses[-1][0] == 422
+    assert refused.applied is False
+    assert [(p.path, p.code) for p in refused.problems] == [("hosts[1].connection", "invalid_connection")]
+    assert "ssh_port" in refused.problems[0].message
+    hosts = {host.host_id for host in (await clients.family.list_hosts(include_disabled=True)).hosts}
+    assert hosts.isdisjoint({"kvm1", "kvm2"})
+
+
 async def test_a_validate_only_import_answers_200_with_its_plan_and_applies_nothing(
     client_and_queue, recorded
 ):

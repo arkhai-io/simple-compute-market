@@ -264,6 +264,19 @@ anything.
 The INI import route keeps its own rules: it upserts, an absent `pool_id` leaves
 a host's pool unchanged, and a malformed entry is skipped with a warning.
 
+Strictness reaches the connection's public fields too. The entry model cannot
+type them, since they are the kind's; the kind's codec does, and the `ssh` codec
+validates them strictly for every submission, so a quoted `ssh_port` in a
+document is a connection its codec refuses, reported at that entry's connection.
+The same rule refuses a quoted number in a host API body, which was coerced
+before; the INI parser reads its ports as integers, so the INI route is
+unaffected (settled at the round's triage, 45 F1).
+
+*Rejected (45 F1).* Strict only for documents, through a flag on the codec
+protocol: the same field would follow two rules by who submitted it, for a
+coercion no caller relies on. Narrowing D7 so `public` follows its codec's lax
+rules: it weakens the guarantee exactly where operators type values by hand.
+
 *Rationale.* With a digest recorded, a skipped entry stays missing until the
 document changes again, which is the failure this change removes; logging and
 continuing is the current silent failure. The INI route is an operator's API
@@ -375,6 +388,14 @@ One round of two sessions, then closeout:
    needless. Allowing any deny-rule denial to be redone by another tool: that
    would undo the rules that forbid the work itself.
 
+After the round's triage, one more implementation round runs before closeout:
+task 7.4, moving the operator account of the host, pool, and capacity documents
+into the operator handbook (D13, 47 O1). The same triage fixed two workflow
+tooling defects in its fix commit, on the owner's word that each was too small
+for a change of its own (43 R5): a run ended by a signal now keeps the denials
+its stream's `permission_denied` events name, and the change-orchestrate
+skill gives each step run the harness's longest timeout.
+
 ### D12. The host registry exports a canonical host document
 
 `GET /api/v1/hosts/definitions/export`, a family host route admitting the
@@ -402,8 +423,26 @@ site.
 
 ### D13. Definition documents follow one method, written down
 
-`DEPLOYMENT_AND_CONFIG.md`'s "Definition documents" opens with the method every
-kind follows, and each kind's section states only its own rules:
+`DEPLOYMENT_AND_CONFIG.md`'s "Definition documents" states the method every kind
+follows, and each kind there gets only a short paragraph pointing to its spec
+and its operator account. The operator account of the host, pool, and capacity
+documents — each kind's format and example, its operator rules, and its upgrade
+and recovery steps — is in a new operator handbook, `docs/operator-handbook.md`;
+each kind's normative rules are in its spec, and a rule `DEPLOYMENT_AND_CONFIG.md`
+states that no spec does becomes a delta requirement of this change.
+`openspec/README.md`'s placement table and `AGENTS.md`'s documentation ownership
+name the handbook as the home of operating a deployment (settled at the round's
+triage, 47 O1, on the owner's note that `DEPLOYMENT_AND_CONFIG.md` holds
+configuration conventions, not an operator's handbook; the pool and capacity
+sections move with the host one, so no later change repeats the migration).
+
+*Rejected (47 O1).* Cutting the host section to a pointer and leaving the rest
+in specs only: operator guidance such as validating before a release or stating
+a VM region twice is no contract, and would be lost. The seller quickstarts as
+the home: they are Compose tutorials for a first setup, and a Helm operator
+would not look there.
+
+The method every kind follows:
 
 - one `<kind>_definitions_path` setting, derived by the chart from
   `definitions.<kind>`, rendered into the ConfigMap so an edit rolls the pod,

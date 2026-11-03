@@ -37,9 +37,16 @@ PRIVATE_KEY = "private_key"
 
 
 class SshConnection(BaseModel):
-    """An ``ssh`` connection's public fields."""
+    """An ``ssh`` connection's public fields.
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    Validation is strict for every submission — the host API, an INI import, and
+    a host definitions document alike: a quoted port is the wrong type, not a
+    number to coerce. A host document's validation must refuse a quoted number,
+    and its connection's fields are typed only here, so a lax model would let one
+    through; the INI parser reads its ports as integers before they arrive.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     #: The address the provisioner connects to. Required; nothing falls back.
     ssh_host: str = Field(min_length=1)

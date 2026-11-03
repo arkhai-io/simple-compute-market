@@ -229,6 +229,27 @@ Section 1 notes:
   strict, so `ssh_port: "22"` in a document is accepted as 22. Making it strict
   would change `POST /api/v1/hosts` and the INI route too, which this change does
   not plan. Left as it is for the round's triage to decide.
+- **Settled and fixed at the implementation round's triage (45 F1, option a).**
+  The note above was wrong about the INI route: its parser reads ports as
+  integers before the codec, so only a hand-written host API body with a quoted
+  number changes. `SshConnection` is now `strict=True` for every submission; a
+  quoted number in a document is a connection its codec refuses
+  (`invalid_connection` at the entry's connection), and the host API answers 400
+  for one (D7; the `physical-provisioning` delta gains a MODIFIED "Host
+  connections are typed by their implementation's codec" and the scenario "An
+  entry quotes its SSH port"). The Ansible distribution is bumped once, minor,
+  against `dev`: `arkhai-compute-provisioning-ansible` 0.6.0 → 0.7.0, the
+  service's lower bound raised to `>=0.7.0` (it relies on the strictness; the VM
+  and bare-metal adapters do not, so theirs stay), and `make lock` rewrote the
+  four locks holding it. Unit (`ansible/tests/unit/test_ssh_connection.py`): a
+  quoted `ssh_port`, a fractional one, and a quoted `public_port` refused — the
+  Ansible suite, 137 passed. Application integration (the service suite): a
+  document quoting `ssh_port` beside a valid entry answers 422 with
+  `invalid_connection` at `hosts[1].connection` and applies neither
+  (`test_host_definitions_api.py`); a host API registration quoting `ssh_port`
+  answers 400 naming it and stores nothing (`test_hosts_api.py`) — 620 unit and
+  527 integration passed. `make check-packaging` and `make test` passed, the
+  Helm render included; see the section 6 note on the triage fixes' checks.
 
 ## 2. The family host document
 
@@ -453,7 +474,7 @@ Section 2 notes:
   (now the `physical-provisioning` scenario); the fake codec's description and
   two thin assertions (no hook run in the defaults case). Declined: none.
   Still open from section 1: the `ssh` codec coerces a quoted number in
-  `public`.
+  `public` (since settled: the codec is strict, 45 F1; see the section 1 notes).
 - **Second fresh-context check, on those fixes.** No layering, import, comment,
   or test-level break; the 422/409 handling and canonical equality hold. Fixed:
   `canonical` had widened the export's omissions to a stored connection its
@@ -1182,6 +1203,37 @@ Section 6 notes:
   in the promotion record); three wrapping slips. Declined: rewording the
   delta's "marks" — the owner settled that the markings come with the local
   run, so the requirement states what the table will say.
+- **Fixed at the implementation round's triage (43 R5), on the owner's word
+  that each is too small for a change of its own.** A run ended by a signal
+  emits no `result`, so its main session's denials were lost from its line
+  (workflow log seq 54). `scripts/change_workflow/stream.py` now also keeps
+  every call a `permission_denied` event names that no result lists, shaped
+  from the `tool_use` that made it (or the event's tool name, or `?`); a
+  finished run's denials are unchanged, since its results list every such call.
+  `.agents/skills/change-orchestrate/SKILL.md` gives each step run's background
+  command the harness's longest timeout. Unit (`scripts/tests/
+  test_change_workflow_stream.py`): a transcript with no `result` yields its
+  denials with their reasons, shaped from the call or the event; a denial a
+  result lists is listed once — `make test-release-tooling`, 1820 passed. `make
+  check-agent-skills` passed.
+- **The triage fixes' checks (45 F1, 43 R5).** `make check-packaging` and `make
+  test` (every suite, the Helm render included) passed. `make check-change`
+  passed five of its six checks; the documentation citations check reports only
+  `docs/operator-handbook.md`, cited by `design.md`, `proposal.md`, and this
+  file, which task 7.4 creates in the next round. The fresh-context check of the fix diff against `7549f5b` found no
+  break in the codec change, the stream change, the versions, or the MODIFIED
+  requirement (the permanent text plus only the added paragraph and scenario),
+  and no stored or packaged connection the strict codec refuses. Fixed: the
+  quoted-port API test moved into `TestConnectionVersions`; a "numeric user"
+  case that proved nothing new dropped; the stream's fallback for a call it
+  never saw now takes the tool the event names; D11 and the proposal said
+  "main session's" denials where subagents' are kept too (subagent
+  `permission_denied` events appear in the parent stream, and the wrapper drops
+  their duplicate from the subagent transcript by id); stale notes under
+  sections 1 and 2 and the missing record of the Ansible bump (now in the
+  section 1 notes); the proposal's capability bullet. Declined: a wrapper-level
+  test of a killed run's line — the stream unit tests prove the denials, and
+  the wrapper already records `stream.denials` on a stopped line.
 
 ## 7. Operator documentation drafts
 
@@ -1256,6 +1308,56 @@ Files: `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/seller-quickstart.md`;
   its checks): passed. Read against the code of sections 1–5: the setting,
   route, response field, status, chart value, and compose variable names
   match; see the fresh-context check below.
+- [ ] 7.4 The operator handbook (D13; the implementation round's triage, 47 O1).
+  *Added at that triage, on the owner's note that `DEPLOYMENT_AND_CONFIG.md`
+  holds configuration conventions, not an operator's handbook; implemented as an
+  implementation round of its own, then read, validated, and reviewed.*
+  `DEPLOYMENT_AND_CONFIG.md`'s "Definition documents" carries, for the host,
+  pool, and capacity documents, operator knowledge that is neither a
+  configuration convention nor normative behaviour. Move it, losing nothing:
+  - Create `docs/operator-handbook.md`, opening with a "Definition documents"
+    chapter: per kind (hosts, pools, capacity) its format and an example, the
+    operator rules a spec does not state as contracts (validate a changed
+    document before the release that mounts it; a refused host move keeps the
+    service down under `Recreate` until the edit is reverted; exchanging hosts
+    between two declarations takes two imports; for VM, state a region on the
+    pool and on its declarations; a bare-metal declaration describes one whole
+    machine; replacing or disabling the pool seed), and its upgrade and recovery
+    steps: from an INI inventory under Helm (drop `inventory_ini` from the
+    provisioning-secrets Secret, export, edit, mount as `definitions.hosts`) and
+    under Compose (start once with `hosts: []`, export, edit, mount), and moving
+    a pool's members to another provider.
+  - Cut "Host definitions", "Pool definitions", and "Capacity definitions" in
+    `DEPLOYMENT_AND_CONFIG.md` to one short paragraph each: the setting and chart
+    value, and links to the kind's spec and its handbook section. Keep the
+    section's opening, "The method a document kind follows", "Reconciliation
+    follows the document, not the process", "What a document does to entries it
+    stops naming", "Secrets are named, not carried", and the retired-settings
+    sentence under "Profile-based configuration": these are how configuration
+    works across kinds. Pointers into those sections from elsewhere still
+    resolve.
+  - Check every sentence removed against the specs: hosts against the
+    `physical-provisioning` delta, pools against
+    `openspec/specs/resource-pool-management/spec.md`, capacity against the
+    `physical-provisioning` requirement "Capacity definitions are imported from
+    a mounted document" and `openspec/specs/site-capacity/spec.md`. A normative
+    rule no spec states becomes a delta requirement or scenario of this change
+    (the `physical-provisioning` or `resource-pool-management` delta). Record in
+    this task's note, sentence group by group, where each went: the handbook, a
+    spec (already, or by a delta added here), or nowhere, with the reason.
+  - Add the handbook to `openspec/README.md`'s documentation placement table
+    ("Operating a deployment: document formats, procedures, upgrade and recovery
+    steps") and to `AGENTS.md`'s "Documentation ownership".
+  - Point both seller quickstarts' host-document and upgrade passages at the
+    handbook rather than restating the procedure, keeping what a first setup
+    needs in place.
+
+  Verify: `make check-change CHANGE=bring-host-inventory-under-definition-documents`
+  (documentation citations, strict OpenSpec validation, and comment hygiene among
+  its checks); a search finds every heading other documents cite in
+  `DEPLOYMENT_AND_CONFIG.md` still present or the citation updated; a read of the
+  handbook against the code of sections 1–5 and the specs. End-to-end: none —
+  documentation only. None is owed.
 
 Section 7 notes:
 
@@ -1299,7 +1401,8 @@ implementation.
   every comment and docstring sections 1–7 added or rewrote — the new
   `hosts/definitions.py`, the importer's applier and docstrings, `settings.toml`'s
   `host_definitions_path` comment, `RETIRED_SETTINGS`, the chart's values comments,
-  the compose headers, and `review.py` — for current-system rationale with no
+  the compose headers, `review.py`, and the round's triage fixes' `SshConnection`
+  and `Stream` docstrings — for current-system rationale with no
   change, review, or migration narration. A needed correction returns to
   implementation.
 - [ ] 8.2 **Import placement — confirm.** Check that every import sections 1–6
@@ -1308,8 +1411,9 @@ implementation.
 - [ ] 8.3 **Documentation compliance.** Check D1–D14 against
   `openspec/README.md`'s placement rules and the promotion record: normative
   behaviour in the four deltas, rationale in the companions, repository shape in
-  `ARCHITECTURE.md`, operator behaviour in `DEPLOYMENT_AND_CONFIG.md` and the
-  quickstarts, test ownership in `TESTING.md`. Record a disposition for every
+  `ARCHITECTURE.md`, configuration conventions in `DEPLOYMENT_AND_CONFIG.md`,
+  operator behaviour in `docs/operator-handbook.md` (7.4) and the quickstarts,
+  test ownership in `TESTING.md`. Record a disposition for every
   decision, and check every promoted statement against the code.
 - [ ] 8.4 **Narrative compression.** Compress section notes to final behaviour,
   validation evidence, deferred work (the two open questions), and destinations,
@@ -1360,9 +1464,9 @@ implementation.
     write places a host in a pool…" states that hosts reach the registry through
     the host API, the Ansible INI import, or a host definitions document
     reconciled at startup like pool and capacity documents.
-  - `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Definition documents" (D13) and
-    "Host definitions", and both seller quickstarts and the IaC README: reconcile
-    section 7's drafts with the final code.
+  - `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Definition documents" (D13),
+    `docs/operator-handbook.md` (7.4), both seller quickstarts, and the IaC
+    README: reconcile section 7's drafts with the final code.
   - `docs/development/TESTING.md`, "Host Requirement Enforcement": the dispatch
     case's "configured inventory file naming the host" becomes the refused host
     document 4.3 tests.
@@ -1406,7 +1510,10 @@ and a clean `make check-change-index`.
 | The chart's `definitions.hosts` and refused keys (D3) | `openspec/specs/deployment-state/spec.md`, "The provisioning chart renders a host definitions document" (by the archive) |
 | Export and import routes (D12, D14) | `openspec/specs/physical-provisioning/spec.md`, "The host registry exports a canonical host definitions document" and "A host definitions document is validated whole and carries no credential" (by the archive) |
 | Why hosts are a reconciled, family-owned declaration (D1, D4, D5, D6, D8, D12) | `openspec/specs/physical-provisioning/architecture.md`, "Hosts are a reconciled declaration" (8.9) |
-| The general definition-document method (D13) and the operator account | `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Definition documents" (7.1, 8.9) |
+| The general definition-document method (D13) | `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Definition documents" (7.1, 8.9) |
+| The operator account of the host, pool, and capacity documents (D13, 47 O1) | `docs/operator-handbook.md`, its row in `openspec/README.md`'s placement table, and `AGENTS.md`'s "Documentation ownership" (7.4, 8.9) |
+| A codec types a connection's public fields strictly, for every submission (D7, 45 F1) | `openspec/specs/physical-provisioning/spec.md`, "Host connections are typed by their implementation's codec" and "A host definitions document is validated whole and carries no credential" (by the archive) |
+| A run ended by a signal keeps its denials; step runs get the longest timeout (43 R5) | Workflow tooling itself (`scripts/change_workflow/stream.py`, `.agents/skills/change-orchestrate/SKILL.md`); no permanent document |
 | Startup order with host definitions | `openspec/specs/resource-pool-management/architecture.md`, "Administrative reconciliation" (8.9) |
 | How hosts reach the registry | `docs/development/ARCHITECTURE.md`, "Resource pools" (8.9) |
 | No startup INI seeding | `docs/development/ROADMAP.md` Goal 1 (8.5); `openspec/specs/site-capacity/architecture.md` (8.9); both seller quickstarts and `domains/vms/provisioning/iac/README.md` (7.2, 8.9) |

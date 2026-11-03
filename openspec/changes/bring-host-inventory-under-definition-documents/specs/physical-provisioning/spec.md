@@ -97,7 +97,7 @@ A reconciliation MUST leave every registered host the document does not name unc
 
 ### Requirement: A host definitions document is validated whole and carries no credential
 
-Host definitions validation MUST be strict and MUST run in two stages. It MUST report every structural problem with its location — unparseable YAML, a root that is not a mapping (an empty document included), a missing or non-list `hosts`, an unknown field, a missing `host_id`, `connection`, or connection `version`, a `host_id` named twice, or a value of the wrong type — and MUST NOT check a document with any structural problem against stored state. For a structurally valid document it MUST report every refusal stored state decides: a pool that does not exist, a connection its kind's codec refuses, and a pool move a pool-change hook refuses. The apply MUST continue past a refusal so that every refusal is reported. Any problem MUST leave the whole document unapplied with no digest recorded.
+Host definitions validation MUST be strict and MUST run in two stages. It MUST report every structural problem with its location — unparseable YAML, a root that is not a mapping (an empty document included), a missing or non-list `hosts`, an unknown field, a missing `host_id`, `connection`, or connection `version`, a `host_id` named twice, or a value of the wrong type — and MUST NOT check a document with any structural problem against stored state. For a structurally valid document it MUST report every refusal stored state decides: a pool that does not exist, a connection its kind's codec refuses — a quoted number among its public fields included, since the codec types them strictly — and a pool move a pool-change hook refuses. The apply MUST continue past a refusal so that every refusal is reported. Any problem MUST leave the whole document unapplied with no digest recorded.
 
 A host definitions document MUST NOT carry a credential: an entry stating connection secrets is a structural problem. A key is named by its file path.
 
@@ -133,6 +133,11 @@ The import API MUST answer with one response: whether it applied, the created, u
 
 - **WHEN** an operator imports a document one of whose entries names an unknown pool while another makes a move a hook refuses
 - **THEN** the import answers 422 reporting both problems, and nothing is applied
+
+#### Scenario: An entry quotes its SSH port
+
+- **WHEN** an operator imports a document one of whose entries states `ssh_port: "2222"` beside a valid entry
+- **THEN** the import answers 422 reporting a connection the codec refuses at that entry's connection, and neither entry is applied
 
 #### Scenario: An entry carries key material
 
@@ -437,3 +442,74 @@ without applying either.
 - **WHEN** no capacity-definitions path is configured
 - **THEN** startup proceeds and declarations come only from derivation and the
   administration surface
+
+### Requirement: Host connections are typed by their implementation's codec
+
+A host's connection MUST be held as a connection envelope (a kind, a version, public
+fields, and protected values) whose kind names the codec of the implementation
+distribution that supports it. Compute provisioning MUST NOT define per-kind connection
+fields; it validates an envelope through its codec. An executor MUST receive an immutable
+execution-host value, not the persistence record, and MUST refuse a connection kind it
+does not support.
+
+A codec MUST validate the public fields it defines strictly, for every submission alike
+— the host API, an INI import, and a host definitions document: a value of the wrong
+type, such as a quoted number, MUST be refused rather than coerced.
+
+A deployment MUST register one codec per kind, and each codec serves one version;
+composition MUST refuse two codecs for one kind. A connection MUST be built by the codec
+of its own kind, at the version that codec serves. A connection at a kind no codec
+serves, or at another version than its kind's codec serves, MUST be refused naming the
+kinds or the version that is served. A reader of a stored connection MUST check its kind
+and version before reading its fields, and MUST refuse a version it does not serve
+rather than read it as another, so a host stored at a version no longer served runs no
+work until it is submitted again at the served version. Such a submission MUST carry
+forward a protected value it still needs and does not resubmit, whatever the previous
+connection's version, as opaque material it neither reads nor decrypts. A stored connection MUST NOT
+be rewritten to another version except by a submission that states that version, and
+nothing upgrades a stored connection on its own.
+
+#### Scenario: A compute domain needs another connection kind
+
+- **WHEN** a domain's executor reaches its targets by a means other than SSH
+- **THEN** an implementation distribution adds a codec for that kind, and neither the host
+  authority's model nor the executor contract changes
+
+#### Scenario: A connection quotes a number
+
+- **WHEN** a host is submitted through the host API with an `ssh` connection whose
+  `ssh_port` is the string `"2222"`
+- **THEN** the submission is refused naming the field, and nothing is stored
+
+#### Scenario: A connection states a version no codec serves
+
+- **WHEN** a host is submitted with an `ssh` connection at a version other than the one the
+  registered `ssh` codec serves
+- **THEN** the submission is refused naming the version served, and nothing is stored
+
+#### Scenario: A stored connection is at an unsupported version
+
+- **WHEN** an execution path reads a stored connection whose version its codec does not
+  serve, such as a host stored at `ssh` version 1
+- **THEN** it refuses the connection before any playbook runs, rather than reading it
+  under another version's fields
+
+#### Scenario: A host stored at version 1 is submitted again at version 2
+
+- **WHEN** a host stored at `ssh` version 1 whose key is protected, with no key file,
+  is updated with a version-2 connection that restates its public fields and submits
+  no key
+- **THEN** the host is stored at version 2, its protected key is kept unchanged, and work
+  runs against it again
+
+#### Scenario: A host stored at version 1 with a key file is submitted again at version 2
+
+- **WHEN** a host stored at `ssh` version 1 whose key is a file is updated with a
+  version-2 connection restating its public fields, `key_path` included
+- **THEN** the host is stored at version 2 with the same key file; an update omitting
+  `key_path` names no key and is refused
+
+#### Scenario: A host stored at version 1 is imported again
+
+- **WHEN** an inventory naming a host stored at `ssh` version 1 is imported
+- **THEN** the host is stored at version 2 with the connection and key its entry names

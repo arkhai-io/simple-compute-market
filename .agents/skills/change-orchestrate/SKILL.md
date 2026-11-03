@@ -179,7 +179,9 @@ run inside an ordinary command — `( make … & )`, `nohup`, `setsid`, or a tra
 opening the round view together: the call returns at once, the harness has
 nothing left to track, and a run that finishes is never reported, so the change
 waits on a step that ended long ago. Run the round view, and each of a pair of
-side-by-side runs, in calls of their own.
+side-by-side runs, in calls of their own. Give each run's background command the
+harness's longest timeout: an implementation session can outlast the default, and
+a run killed at it stops mid-step with its work uncommitted.
 
 For `round`, record the round the computation names, as it names it, just before
 starting its first session — copying the list is routing, not a reading of the

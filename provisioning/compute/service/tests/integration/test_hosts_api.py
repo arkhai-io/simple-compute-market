@@ -683,7 +683,8 @@ class TestTenantFacingRoute:
 
 
 class TestConnectionVersions:
-    """The ``ssh`` connection is served at version 2 alone. Addresses are RFC 5737
+    """The ``ssh`` connection is served at version 2 alone, its fields typed
+    strictly. Addresses are RFC 5737
     documentation values, fixture values that must never be used on a public
     network."""
 
@@ -718,6 +719,22 @@ class TestConnectionVersions:
         assert f"is at version 2, not {version}" in str(refused.value)
         with pytest.raises(ComputeProvisioningError) as missing:
             await client.family.get_host("other-version")
+        assert missing.value.status_code == 404
+
+    async def test_a_registration_stating_a_quoted_port_is_refused(self, client_and_queue):
+        """The ``ssh`` codec validates strictly for every submission, so a quoted
+        number is the wrong type rather than a port to coerce."""
+        client, _ = client_and_queue
+        public = {**self._PUBLIC, "ssh_port": "2222"}
+        with pytest.raises(ComputeProvisioningError) as refused:
+            await client.family.register_host(HostCreate(
+                host_id="quoted-port",
+                connection=ConnectionSubmission(kind="ssh", version=2, public=public),
+            ))
+        assert refused.value.status_code == 400
+        assert "ssh_port" in str(refused.value)
+        with pytest.raises(ComputeProvisioningError) as missing:
+            await client.family.get_host("quoted-port")
         assert missing.value.status_code == 404
 
 
