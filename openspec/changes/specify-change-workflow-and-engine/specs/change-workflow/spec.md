@@ -15,6 +15,21 @@ directory, when run outside one.
 - **THEN** it runs `scripts/change-workflow find --json <change>` and reads the
   `directory` and `archived` fields, and imports nothing of the engine
 
+#### Scenario: A change's checkout holds no records
+
+- **WHEN** `find --json` runs for a change whose directory exists and whose
+  checkout holds no `reviews/`
+- **THEN** it exits 0 with `records` as `null`; for a change that does not exist it
+  exits 1, naming the change
+
+#### Scenario: A change's clone exists but is unusable
+
+- **WHEN** `clone where <change>` runs and the clone's directory exists but holds
+  another branch, or is not a clone of the workspace, or its bootstrap has not
+  succeeded
+- **THEN** it exits 1, naming the reason, and never prints nothing as it does for
+  a change worked in place, where no clone directory exists
+
 #### Scenario: A step is started interactively without make
 
 - **WHEN** the owner runs `scripts/change-workflow start design <change>` for an
@@ -57,8 +72,11 @@ public interface.
 Each interface of the engine MUST be classified as public, which an adopting
 repository, a person, or a runner may rely on; provisional, public with a named
 successor expected; or internal, used only by the engine and its shipped skills.
-The command's subcommands, flags, exit statuses, and outputs, and the skills'
-names and argument forms, MUST be public unless classified otherwise by name.
+The command's subcommands, flags, exit-status categories, and structured outputs,
+and the skills' names and argument forms, MUST be public unless classified
+otherwise by name; report text written for a person MUST carry no promise. Exit
+statuses MUST be 0 for success, 1 for a refusal or failed check, 2 for a usage
+error.
 
 #### Scenario: A provisional subcommand is replaced
 
@@ -72,14 +90,20 @@ names and argument forms, MUST be public unless classified otherwise by name.
   step's environment
 - **THEN** no public interface changes, since only the engine reads it
 
+#### Scenario: A report is reworded
+
+- **WHEN** a workflow change rewords `history`'s report or a check's message, and
+  changes no exit status and no structured output
+- **THEN** its proposal records no change to a public interface for it
+
 ### Requirement: CW-x7jd A change's record set carries one format version
 
-The workflow log's `format` MUST version a change's whole record set: the log's
-lines and the outcomes and decisions they embed, the records' layout and names,
-the fields the engine parses from records, and the ledger's lines. The `next` and
-`find --json` outputs MUST carry the same `format`, and the outcome schema MUST
-state it in its `$id`. An engine MUST refuse a record set of a format it does not
-read, naming the format.
+The workflow log's `format` MUST version a change's whole record set: its lines,
+the records' layout, names, and parsed fields, and the ledger's lines. The `next`
+and `find --json` outputs MUST carry it, and the outcome schema's `$id` MUST state
+it. A line with no `format` or a lower one MUST be read as older, to be converted;
+a higher one MUST be refused by the reader and the converter, naming it. With no
+log, numbered records MUST be read as older, and a ledger alone as current.
 
 #### Scenario: A runner reads the next step
 
@@ -91,6 +115,32 @@ read, naming the format.
 
 - **WHEN** an engine reading format 2 finds a log line marked format 3
 - **THEN** it refuses the change, naming format 3, and routes on none of its lines
+
+#### Scenario: An older engine is asked to convert a newer log
+
+- **WHEN** `scripts/change-workflow convert <change>` runs on a log holding a line
+  marked format 3, under an engine reading format 2
+- **THEN** it refuses, naming format 3, and rewrites nothing
+
+### Requirement: CW-k6qa A step started through the command opens the log
+
+Before any step it starts runs, interactive or unattended, `start` MUST ensure the
+change's workflow log exists and append a line carrying the log's format, so that a
+change worked through the command has its format marked before any other record.
+The next-step computation MUST route on no such line.
+
+#### Scenario: A design discussion writes the ledger before its outcome
+
+- **WHEN** the owner starts a design discussion through `start`, and the session
+  appends to the ledger before it records an outcome
+- **THEN** the log already holds the opening line with its format, and the ledger
+  is read in that format
+
+#### Scenario: A ledger with no log
+
+- **WHEN** a discussion started by slash command leaves a ledger and no log
+- **THEN** the record set is read in the reader's format, not as older records to
+  convert
 
 ### Requirement: CW-c2tw Compatibility is judged by semantic versioning
 
@@ -132,12 +182,13 @@ from the graph's declaration alone.
 
 ### Requirement: CW-m4ps An adopting repository provides the workflow's roles
 
-The workflow MUST state each role an adopting repository provides — such as a
-command that validates a commit locally, the change index at a known path, the
-guidance documents every step reads, and protected branches — with the skills that
-use it. An adopting repository MUST state how it provides each role, and a test
-MUST fail on a make target or repository path the skills, the step table, or the
-make fragment name that the repository's statement does not list.
+The workflow MUST state each role an adopting repository provides, such as a local
+validation command, the change index, and protected branches, with the skills that
+use it. A repository MUST state how it provides each. A test MUST fail on a make
+target or repository path the skills, step table, or make fragment name that the
+statement omits. The engine's own assumptions — its paths, commands, remotes,
+environment variables, and tools — MUST be listed too, marked as maintained by
+review.
 
 #### Scenario: A skill names a new target
 

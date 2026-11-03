@@ -81,7 +81,11 @@ implicit.
   so the capability contract starts from a complete list rather than discovering
   assumptions one at a time. The inventory is two-sided: the roles an adopting
   repository provides, in `change-workflow`, and how this repository provides
-  each, in `market-change-workflow`, held complete by a test.
+  each, in `market-change-workflow`. A test holds it complete for the make targets
+  and repository paths the skills, the step table, and the make fragment name; the
+  engine's own assumptions — its modules' paths, the bootstrap command, remotes,
+  environment variables, and the tools it invokes — are listed too, and maintained
+  by review.
 - **Consolidate the engine behind one command.** The engine's standalone scripts
   move into `scripts/change_workflow/`, reached through one executable,
   `scripts/change-workflow`; the Makefile's entry logic moves into its `start`

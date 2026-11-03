@@ -1,9 +1,9 @@
 # Design: specify the change workflow and its engine
 
-Status: design settled; awaiting the design review. The decisions below are the
-owner's, reached in the design discussion. The ledger
-(`interventions.jsonl`) records where the owner decided otherwise than the agent
-recommended.
+Status: design settled, revised by the triage of design review 18 (F1–F4);
+awaiting another design review. The decisions below are the owner's, reached in
+the design discussion and that triage. The ledger (`interventions.jsonl`) records
+where the owner decided otherwise than the agent recommended.
 
 ## Context
 
@@ -208,7 +208,8 @@ the engine and its shipped skills use it).
 
 | Interface | Tier |
 |---|---|
-| `start`, `next`, `record`, `note`, `review`, `find` (`--records`, `--json`), `clone`, `clone-remove`, `clone where`, `round-view`, `round-done`, `watch`, `cost`, `history`, `check index`/`tasks`/`push`/`skills`, `push`, their flags, exit statuses, and outputs | public |
+| `start`, `next`, `record`, `note`, `review`, `find` (`--records`, `--json`), `clone`, `clone-remove`, `clone where`, `round-view`, `round-done`, `watch`, `cost`, `history`, `check index`/`tasks`/`push`/`skills`, `push`, their flags, exit-status categories, and structured outputs | public |
+| Those subcommands' report text for a person | outside the promise |
 | Skill names `change-<step>` and `change-orchestrate`, and their argument forms (`<change>`, `<change> sections 3-4`, `<change> from <branch>`) | public |
 | `hook post-compaction` | provisional: the installer and the harness adapters take its wiring |
 | `convert` | provisional: `remove-workflow-log-conversion` removes it |
@@ -217,15 +218,34 @@ the engine and its shipped skills use it).
 
 `CLAUDE_CODE_SESSION_ID` is the harness's, an assumption in the inventory (D13).
 
+What an output promises is what a program reads (18 F3): its structured form —
+`find --json`, `next`'s JSON, `clone where`'s path — its exit status's category,
+and its refusal of a malformed argument. Text written for a person — `history`'s
+and `cost`'s reports, a check's messages, `next`'s plain form — is outside the
+compatibility promise, and rewording it changes no public interface. Every
+subcommand's exit status is one of three categories: 0, success; 1, a refusal or a
+failed check, its reason on standard error; 2, a usage error, such as a malformed or
+missing argument.
+
 A repository calls the engine only as the command. The four importers move to it:
 `check_change.py`, `check_doc_citations.py`, and `validate_slice.py` through
-`find --json`, which prints the change's name, directory, whether it is archived,
-and its records directory; `validate_parallel.py` through `clone where <change>`,
-which prints the clone's path, or nothing for a change worked in place.
+`find --json <change>`, which prints `name`, `directory`, `archived`, `records`
+(the records directory, or `null` when this checkout holds none), and `format`
+(D8), and refuses an unknown change, naming it; `validate_parallel.py` through
+`clone where <change>`, which tells three cases apart:
+
+| Case | Exit | Output |
+|---|---|---|
+| The change's clone exists and is usable | 0 | the clone's path |
+| No clone directory exists: the change is worked in place | 0 | nothing |
+| A clone directory exists but is unusable — not a clone of the workspace, its branch not checked out, its bootstrap not succeeded | 1 | the reason, on standard error |
+
+so that a broken clone is never taken for a change worked in place.
 
 Rejected: everything reachable public, which would freeze plumbing and the
 fragment; only what a repository's files name, which would leave `record`,
-`round-view`, and the runner's commands internal.
+`round-view`, and the runner's commands internal; every output public, report text
+included (18 F3), which would freeze wording no caller parses.
 
 ### D7. The graph's vocabulary is public and closed
 
@@ -248,7 +268,21 @@ the log lines and the outcomes and decisions they embed, the records' layout and
 names, the fields parsed from records, and the ledger line. It moves when any of
 them changes incompatibly, with a migration command. `next` and `find --json`
 output carry the same `format`, and the outcome schema states its format in its
-`$id`. An engine refuses a format it does not read, naming it. The step table is
+`$id`. An engine refuses a format it does not read, naming it.
+
+A reader tells older, current, and newer formats apart before it routes or writes
+(18 F2): a log line with no `format`, or a lower one, is older, and the owner
+converts it with `convert`; a higher one is newer, and both the reader and `convert`
+refuse it, naming the format, rather than converting it backward. A log is the
+format's only authority, so the engine marks a change's format before anything
+else records: `start` opens the log, before any step it starts runs, interactive or
+unattended, with a line carrying the format, which the next-step computation reads
+for no route. With no log, or an empty one, numbered records under `reviews/` are
+older, as today; a ledger alone, or nothing, is read as the reader's format. Only a
+step started outside the command, by a slash command, can leave a ledger with no
+log, and that ledger is read as current.
+
+The step table is
 provisional and unversioned; the change index and the task list are public inputs
 versioned by the engine's release. Extraction adds the engine's own version
 beside `format` on each line.
@@ -262,7 +296,9 @@ beside `format` on each line.
 
 Rejected: a marker per format, whose combinations a reader would have to handle
 for records read together; no markers beyond the log's, which would need a table
-from engine versions to formats.
+from engine versions to formats; for a change with no log (18 F2), inference alone,
+which cannot tell a newer engine's unlogged records from older ones, and a manifest
+file in `reviews/`, a second marker beside the log's.
 
 ### D9. Semantic versioning
 
@@ -305,8 +341,48 @@ holds its completeness. The draft outline, for shape:
                         what an adopting repository provides
 ```
 
+Where each existing requirement goes is decided here (18 F1), at the level of the
+requirement and, for a requirement the seam splits, of its clause groups. A general
+row's rules stay in `change-workflow`; a split row names what moves to
+`market-change-workflow` and the seam the general requirement keeps, where the
+repository's part plugs in. `trace.md` refines this table to every MUST clause and
+scenario, and MUST agree with it: a clause the trace cannot place as the table
+does returns the change to design.
+
+| Existing requirement | Destination | Moves to `market-change-workflow` | Seam kept in `change-workflow` |
+|---|---|---|---|
+| Phases and owner touchpoints | split | the merge's default branch, `dev` | the merge brings in the branch the change lands on: the one it was branched from unless the owner names another, or the repository's default |
+| Index transitions are written by the step that makes them | general | — | the index's path is a role (D13) |
+| Review records | general | — | — |
+| Finding lens, basis, and severity | general | — | — |
+| Triage of every finding | general | — | — |
+| Intervention ledger | general | — | — |
+| Implementation sections and sessions | general | — | the evidence a section may owe validation is named by validation's parts; CI is this repository's example |
+| Validation observes a committed slice | split | building the tested packages from the commit, never from the shared wheelhouse; end-to-end evidence from a pipeline run whose head is the commit; dispatching the owed CI workflows from a fixed list holding none that publishes, a tracked change by the owner to extend; judging named jobs, and comparing every other failing job with `dev`'s latest completed ancestor run; building the service images, the Helm render checks with the chart-to-loader check, a skipped one failing; the Helm end-to-end run of a listed set of scenarios from no persistent state, every unlisted scenario reported as not run against Helm; the scenarios on leftover volumes, an earlier pipeline run, a scenario the charts do not serve, and the four comparisons with `dev` | validation describes one commit and modifies nothing — a clean worktree and an unmoved `HEAD` after every part, else no further evidence; no regenerated tracked file; a condition it could repair fails it; it fixes nothing; results `passed`, `failed`, `inconclusive`; an environmental failure put to the owner with its remedy and rerun on their word, every attempt's evidence kept; the record names the end-to-end scenarios exercising the change with each one's basis; the stale-lock scenario; and the seam: validation's parts are the repository's, and each part's evidence comes from the commit under validation |
+| Guarded push of a change branch | split | the protected branches, `main` and `dev` | the push refuses the repository's protected branches |
+| Triage of an implementation round | general | — | — |
+| Harness-neutral agent skills | general | — | the skills' and harnesses' paths are inventory entries (D13) |
+| An orchestrating session advances one change | general | — | merges of `dev` become merges of the branch the change lands on; the default is row 1's |
+| Unattended step runs end with a structured outcome | general | — | — |
+| The next step is computed from the files | general | — | — |
+| Discussion steps stay conversations with the owner | general | — | — |
+| Unattended runs are held to their step's permissions | general | — | the rule syntax is provisional (D5, 7) |
+| A design blocked on a prerequisite halts | general | — | — |
+| Unattended steps run on their step's ordered models | split | the forbidden models, Fable and Astra | a repository may forbid models, and the table names none it forbids; the owner's override for one review stands |
+| Unattended runs record their cost | general | — | — |
+| Each change is worked in its own clone | general | the clone's bootstrap command (`make init`), which the requirement does not name today | the bootstrap is the repository's; the wheelhouse scenario says "environments" |
+| Each Helm validation is isolated in its change's namespace | market, whole | the namespace, per-change image tags, volume and Secret setup, in-namespace scenarios, kept logs and scale-down, the memory preflight and its classification, and archive cleanup's removal of the namespace and images and its capacity record | archive cleanup runs the repository's removal of a change's validation resources |
+| The workflow graph is declared in code | general | — | — |
+| Interactive step runs record their outcome | general | — | — |
+| The owner directs a change's next step | general | — | — |
+
+The specification's Purpose drops the Helm namespace, and its Evidence entries for
+validation's parts, the CI comparison, the namespace, the capacity record, and the
+parallel Helm check move to `market-change-workflow`'s Evidence.
+
 The deltas this design writes hold the behaviours the decisions add (the command,
-the tiers, the format, compatibility, the closed vocabulary, the roles, the
+the tiers, the format and the log's opening line, compatibility, the closed
+vocabulary, the roles, the
 orchestrator's row, this repository's provision of the roles, and the indexed
 organization); the rewrite of the existing requirements, their REMOVED entries,
 and the move of this repository's requirements into `market-change-workflow` join
@@ -314,7 +390,10 @@ them in round 2 (D14).
 
 Rejected: reorganizing by RENAMED and MODIFIED, which every split for the seam and
 the length rule would turn into a disguised rewrite; a per-requirement trace only,
-too coarse to check; the trace in this document, which it would swamp.
+too coarse to check; the trace in this document, which it would swamp; deciding
+the destinations only with the trace in round 2 (18 F1), which would leave the
+change's largest authority boundary unreviewed until written; mapping every MUST
+clause here, which is the trace's first half written twice.
 
 ### D11. No hard dependency on the changes editing `change-workflow`
 
@@ -348,7 +427,7 @@ Rejected: a check that the parts diagram's boxes are the package's modules, sinc
 the diagram is not generated from them; separate diagrams of the relay loop and the
 round's join, which the step run's life and the graph already draw.
 
-### D13. The assumptions inventory is two-sided and held complete by a test
+### D13. The assumptions inventory is two-sided, its named targets and paths held by a test
 
 `change-workflow` states, by role, what an adopting repository provides — a
 command validating a commit locally, a packaging check before closeout, the change
@@ -360,25 +439,40 @@ each role (`make validate-local`, `make check-packaging`,
 `openspec/changes/README.md`, `dev` and `main`, …). A test among the engine's tests
 collects every `make <target>` and repository path the skills, the step table, and
 the make fragment name, and fails on any the second table does not list, and on a
-role either table lacks. `add-workflow-capability-contract` turns each role into a
-capability and each provision into its declaration.
+role either table lacks. That is all the test proves (18 F4). The engine's own
+assumptions — the paths its modules hold (`openspec/changes/`, `reviews/`,
+`.claude/change-steps.toml`, `.agents/change-outcome.schema.json`,
+`.claude/settings.local.json`), the clone's bootstrap command, the default merge
+branch, the `workspace` remote, the environment variables it reads
+(`CLAUDE_CODE_SESSION_ID`), and the tools it invokes (`git`, `claude`, `codex`,
+`gh`) — are entries of the same tables, marked as maintained by review, and the
+documents say so rather than calling the inventory test-complete.
+`add-workflow-capability-contract` turns each role into a capability and each
+provision into its declaration.
 
 Rejected: the inventory in this document only, which nothing would keep current;
 one table in `change-workflow`, which would ship this repository's values; a data
-file now, which is the configuration file that change owns.
+file now, which is the configuration file that change owns; extending the test to
+the engine's modules by category with AST scans (18 F4), heuristics the owner
+would rather the engine's tests not carry; gathering the engine's assumptions into
+one module of constants, a structural fix D5 leaves to that change.
 
 ### D14. Implementation cadence
 
 Two rounds, each of two sessions:
 
 - **Round 1, the engine consolidated** (D4, D5, D6). Session one: the package, the
-  command, the make fragment, and the four fixes, with the engine's tests. Session
+  command, its exit categories, `find --json`'s fields and `clone where`'s three
+  cases (D6; `format` joins `find --json` in round 2), the make fragment, and the
+  four fixes, with the engine's tests. Session
   two: every caller moved to the command — the skills, the step table's rules, the
   root `Makefile`, the four importers, the guide, the completion, and the hook
   wiring. The round changes no behaviour; its validation exercises the rewritten
   step table.
 - **Round 2, the conventions and the specifications.** Session one: the index and
-  id check (D15), `format` on the outputs and the schema's `$id` (D8), the graph
+  id check (D15), `format` on the outputs and the schema's `$id`, the reader's and
+  `convert`'s older, current, and newer formats, and `start`'s opening line (D8),
+  the graph
   diagram's move (D12), and the assumptions test (D13) with
   `market-change-workflow`'s `README.md` table it reads, written here because
   closeout cannot add the test. Session two: the `change-workflow` delta rewritten
