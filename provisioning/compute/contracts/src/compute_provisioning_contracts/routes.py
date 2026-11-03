@@ -323,6 +323,10 @@ PROVISIONING_ROUTE_CONTRACTS = (
     # Host registry administration.
     ProvisioningRouteContract("GET", re.compile(r"/api/v1/hosts/?"), "provisioning_hosts_list"),
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/hosts/?"), "provisioning_host_create"),
+    # Two segments below ``/hosts``, so no ``/hosts/{host}`` route matches
+    # either and no host name is reserved by them.
+    ProvisioningRouteContract("GET", re.compile(r"/api/v1/hosts/definitions/export"), "provisioning_host_definitions_export"),
+    ProvisioningRouteContract("POST", re.compile(r"/api/v1/hosts/definitions/import"), "provisioning_host_definitions_import"),
     ProvisioningRouteContract("GET", re.compile(r"/api/v1/hosts/(?P<host>[^/]+)"), "provisioning_host_get", path_resource="host"),
     ProvisioningRouteContract("PUT", re.compile(r"/api/v1/hosts/(?P<host>[^/]+)"), "provisioning_host_update", path_resource="host"),
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/hosts/(?P<host>[^/]+)/enable"), "provisioning_host_enable", path_resource="host"),
@@ -365,6 +369,8 @@ ADMIN_PROVISIONING_OPERATIONS = frozenset(
         "provisioning_job_cancel_admin",
         "provisioning_hosts_list",
         "provisioning_host_create",
+        "provisioning_host_definitions_export",
+        "provisioning_host_definitions_import",
         "provisioning_host_get",
         "provisioning_host_update",
         "provisioning_host_enable",

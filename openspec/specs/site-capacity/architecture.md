@@ -51,8 +51,8 @@ that affects nothing to be recorded — that is easily diagnosed and fixed. Befo
 the columns were dropped, the ordered migration read them for capacity once, at
 upgrade: a host with GPUs that no declaration named received a declaration derived
 from it. No host write declares capacity —
-not an INI inventory applied at startup or through the import API, and not the
-host API — because a declaration made as a side effect of listing a host would sell
+not a host definitions document, not an INI inventory submitted to the import
+route, and not the host API — because a declaration made as a side effect of listing a host would sell
 it before its administrator decided how, and would make one host behave
 differently by the entry point that wrote it.
 

@@ -1,7 +1,9 @@
 """The host registry's routes, bound to ``HostRouteService``.
 
 Host import, which reads an Ansible inventory, is bound separately; a domain's
-own host routes, such as VM's capacity check, are its adapter's.
+own host routes, such as VM's capacity check, are its adapter's. The host
+definitions export and import are this registry's, since the document is the
+family's, in the registration contract's own field names.
 """
 
 from __future__ import annotations
@@ -10,11 +12,13 @@ from compute_provisioning.hosts.route_service import HostRouteService
 from compute_provisioning_contracts import (
     ConnectivityResult,
     HostCreate,
+    HostDefinitionsImportRequest,
+    HostDefinitionsImportResponse,
     HostListResponse,
     HostResponse,
     HostUpdate,
 )
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
 
 from compute_provisioning_service import container as _container_module
 from compute_provisioning_service.controllers.route_errors import routed, routed_async
@@ -45,6 +49,36 @@ def list_hosts(
 def register_host(body: HostCreate, service: HostRouteService = Depends(_service)) -> HostResponse:
     """Register a host; a submitted secret is protected before storage and never returned."""
     return routed(lambda: service.register_host(body))
+
+
+@router.get(
+    "/definitions/export",
+    response_class=Response,
+    responses={200: {"content": {"application/yaml": {}}}},
+    summary="Export the registry as a host definitions document",
+)
+def export_host_definitions(service: HostRouteService = Depends(_service)) -> Response:
+    """Every host an entry can state, in YAML, with no secret; importing it
+    unedited changes nothing."""
+    return Response(content=service.export_definitions(), media_type="application/yaml")
+
+
+@router.post(
+    "/definitions/import",
+    response_model=HostDefinitionsImportResponse,
+    summary="Reconcile a host definitions document",
+)
+def import_host_definitions(
+    body: HostDefinitionsImportRequest, service: HostRouteService = Depends(_service)
+) -> HostDefinitionsImportResponse:
+    """Register or wholly replace each host the document names; leave the rest.
+
+    Reconciles regardless of any document applied before, and records no digest. An
+    applying request with any problem answers 422 with every problem and applies
+    nothing; ``validate_only`` answers 200 with the problems and the changes an
+    import would make, applying nothing either way.
+    """
+    return routed(lambda: service.import_definitions(body))
 
 
 @router.get("/{host}", response_model=HostResponse, summary="Get host details")

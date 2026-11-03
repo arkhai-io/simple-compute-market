@@ -22,7 +22,7 @@ The provisioning service MUST persist each resource pool under a stable operator
 
 ### Requirement: Explicit valid host membership
 
-A provisioning host MAY reference one existing resource pool; a host that references none is unplaced. A host create, update, or inventory import that names a pool MUST be refused unless that pool exists. A create or a new inventory entry that names no pool MUST leave the host unplaced rather than assign a pool. On update, an omitted pool MUST leave the host's pool unchanged and an explicit `null` MUST unplace it. In an INI inventory, a non-empty `pool_id=` places or moves the host, an empty `pool_id=` unplaces it, and an absent `pool_id` leaves an existing host's pool unchanged. Every move, unplacing included, MUST pass the host authority's pool-change hooks, and a refusal MUST leave every host in the request or import unchanged.
+A provisioning host MAY reference one existing resource pool; a host that references none is unplaced. A host create, update, inventory import, or host definitions entry that names a pool MUST be refused unless that pool exists. A create or a new inventory entry that names no pool MUST leave the host unplaced rather than assign a pool. On update, an omitted pool MUST leave the host's pool unchanged and an explicit `null` MUST unplace it. In an INI inventory, a non-empty `pool_id=` places or moves the host, an empty `pool_id=` unplaces it, and an absent `pool_id` leaves an existing host's pool unchanged. A host definitions entry declares its host's whole placement: an entry that names no pool, or names a `null` one, leaves a new host unplaced and unplaces an existing one. Every move, unplacing included, MUST pass the host authority's pool-change hooks, and a refusal MUST leave every host in the request, import, or document unchanged.
 
 #### Scenario: Existing schema is migrated
 
@@ -58,6 +58,11 @@ A provisioning host MAY reference one existing resource pool; a host that refere
 
 - **WHEN** an INI inventory entry for an existing placed host carries no `pool_id`
 - **THEN** the host keeps its pool
+
+#### Scenario: A host definitions entry omits the pool of a placed host
+
+- **WHEN** a reconciled host definitions entry for an existing placed host states no `pool_id`
+- **THEN** the host is unplaced if every pool-change hook allows it, and otherwise the whole document is refused and no host changes
 
 ### Requirement: Non-destructive pool lifecycle
 
@@ -990,6 +995,20 @@ read, export, or fulfillment fails for a missing handler.
 
 - **WHEN** the stored pool naming an unserved provider is disabled
 - **THEN** startup is refused all the same, because its records are still read
+
+### Requirement: A configured pool document is imported at startup or fails it
+
+The provisioning service MAY be configured with a pool definitions document through `pool_definitions_path`. At startup it MUST reconcile that document under the digest contract of "Atomic authoritative reconciliation", before the fresh-site seed is considered and before host and capacity definitions are imported, so every pool the document declares exists when a host or a capacity declaration names it. A configured document that is missing or cannot be applied MUST fail startup and record no digest, and the seed document MUST NOT be applied in its place.
+
+#### Scenario: A configured pool document is missing
+
+- **WHEN** the service starts on a database storing no pool, with a `pool_definitions_path` naming no document
+- **THEN** startup fails and no pool is created, from the seed or otherwise
+
+#### Scenario: A configured pool document cannot be applied
+
+- **WHEN** the service starts on a database storing no pool, with a `pool_definitions_path` whose document fails pool document validation
+- **THEN** startup fails, no pool is created, the seed is not applied, and no digest is recorded
 
 ## Evidence
 

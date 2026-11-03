@@ -51,9 +51,14 @@ def test_runtime_refuses_retired_settings_before_any_other_step():
     assert names[0] == "refuse-retired-settings"
 
 
-def test_runtime_imports_pools_before_seeding_inventory():
+def test_runtime_imports_host_definitions_after_the_pools_they_name():
+    """An entry names a pool, from the pool document or the fresh-site seed,
+    and the stored pools are checked before any host is placed in one."""
     names = [step.name for step in worker.app_runtime.startup_steps()]
-    assert names.index("import-pool-definitions") < names.index("seed-inventory")
+    hosts = names.index("import-host-definitions")
+    assert names.index("import-pool-definitions") < hosts
+    assert names.index("seed-initial-pools") < hosts
+    assert names.index("verify-pool-declarations") < hosts
 
 
 def test_runtime_imports_capacity_after_the_pools_and_hosts_it_names():
@@ -63,7 +68,7 @@ def test_runtime_imports_capacity_after_the_pools_and_hosts_it_names():
     names = [step.name for step in worker.app_runtime.startup_steps()]
     capacity = names.index("import-capacity-definitions")
     assert names.index("import-pool-definitions") < capacity
-    assert names.index("seed-inventory") < capacity
+    assert names.index("import-host-definitions") < capacity
     assert capacity < names.index("create-job-queue")
 
 

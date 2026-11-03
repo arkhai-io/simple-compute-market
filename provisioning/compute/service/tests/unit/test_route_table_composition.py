@@ -59,6 +59,19 @@ def test_the_composition_root_builds_the_complete_table() -> None:
         assert operations and operations <= served, name
 
 
+def test_the_host_definitions_routes_are_composed_once_each() -> None:
+    operations = [contract.operation for contract in provisioning_route_table.contracts]
+
+    for operation in ("provisioning_host_definitions_export", "provisioning_host_definitions_import"):
+        assert operations.count(operation) == 1, operation
+    assert provisioning_route_table.resolve("GET", "/api/v1/hosts/definitions/export", {})[0].operation == (
+        "provisioning_host_definitions_export"
+    )
+    assert provisioning_route_table.resolve("POST", "/api/v1/hosts/definitions/import", {})[0].operation == (
+        "provisioning_host_definitions_import"
+    )
+
+
 @pytest.mark.parametrize(
     ("method", "path"),
     [

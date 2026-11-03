@@ -637,7 +637,6 @@ async def client_and_queue(
         frp_domain="",
         frp_dashboard_password="",
         resolved_vm_playbook_path=Path("/fake/playbook.yml"),
-        resolved_inventory_path=Path("/fake/hosts"),
         # A real Fernet key, not an empty string: the at-rest encryption used
         # by embedded host keys and relay tokens fails closed without one, and
         # a harness that supplies nothing can only exercise the unencrypted

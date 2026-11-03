@@ -133,6 +133,8 @@ def _app(storefront, authority, route_table=_ROUTE_TABLE):
     )
     app.add_api_route("/api/v1/system/check-leases", mutation, methods=["POST"])
     app.add_api_route("/api/v1/capacity/snapshot", mutation, methods=["GET"])
+    app.add_api_route("/api/v1/hosts/definitions/export", mutation, methods=["GET"])
+    app.add_api_route("/api/v1/hosts/definitions/import", mutation, methods=["POST"])
 
     @app.get("/health")
     async def health():
@@ -246,6 +248,33 @@ def test_the_operator_s_release_controls_admit_the_administrator_only(identities
         path,
         json={},
         headers=_headers(_ADMIN_SIGNER, path, {}, request_id="admin", role="admin"),
+    )
+
+    assert as_seller.status_code == 403
+    assert as_admin.status_code == 200
+    assert calls["count"] == 1
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("GET", "/api/v1/hosts/definitions/export", EMPTY_BODY),
+        ("POST", "/api/v1/hosts/definitions/import", {"yaml_text": "hosts: []\n"}),
+    ],
+)
+def test_the_host_definitions_routes_admit_the_administrator_only(identities, method, path, body):
+    storefront, authority = identities
+    client, calls = _app(storefront, authority)
+    payload = {} if body is EMPTY_BODY else {"json": body}
+
+    as_seller = client.request(
+        method, path, headers=_headers(storefront, path, body, request_id="seller", method=method), **payload
+    )
+    as_admin = client.request(
+        method,
+        path,
+        headers=_headers(_ADMIN_SIGNER, path, body, request_id="admin", role="admin", method=method),
+        **payload,
     )
 
     assert as_seller.status_code == 403

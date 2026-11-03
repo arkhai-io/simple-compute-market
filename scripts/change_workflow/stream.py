@@ -38,6 +38,14 @@ def call_summary(given: Any) -> str:
     return ""
 
 
+def _tool_uses(event: dict[str, Any]) -> list[dict[str, Any]]:
+    """The tool calls an assistant event makes."""
+    message = event.get("message") if event.get("type") == "assistant" else None
+    content = message.get("content") if isinstance(message, dict) else None
+    return [item for item in content if isinstance(item, dict) and item.get("type") == "tool_use"
+            ] if isinstance(content, list) else []
+
+
 def _denial_key(denial: dict[str, Any]) -> str:
     """What identifies a denied call: its tool use id, or the call itself."""
     if isinstance(denial.get("tool_use_id"), str):
@@ -58,6 +66,12 @@ class Stream:
     matched, `rule` for one a deny rule refused, and `subcommandResults` for a
     shell command the harness refused by one of its parts. A denial with no such
     event carries no reason.
+
+    A run ended by a signal emits no `result` for its last turn, so a call its
+    `permission_denied` event names that no result lists is a denial too, shaped
+    as a result shapes one from the `tool_use` that made the call, whether or
+    not the event gives a reason; a call the stream never showed takes the tool
+    the event names, or `?`, with no input.
     """
 
     def __init__(self, transcript: Path, progress: Path, clock: Clock = utc_now,
@@ -77,8 +91,15 @@ class Stream:
         self.notices: list[str] = []
         self._denials: dict[str, dict[str, Any]] = {}
         self._reasons: dict[str, str] = {}
+        # Every call a `permission_denied` event names, in order, with a reason
+        # or without one, so a run with no `result` keeps each of them.
+        self._denied: dict[str, None] = {}
         # Every tool call the run made, by id, which names the subagents it started.
         self.tool_use_ids: set[str] = set()
+        # Each call's tool and input, by id, which shape a denial no result lists,
+        # and the tool a `permission_denied` event names, for a call never shown.
+        self._calls: dict[str, dict[str, Any]] = {}
+        self._denied_tools: dict[str, str] = {}
         self._files: dict[Path, TextIO] = {}
 
     def close(self) -> None:
@@ -99,8 +120,11 @@ class Stream:
     def denials(self) -> list[dict[str, Any]]:
         """Every denial the run recorded, in order, each with the harness's reason
         when it gave one."""
+        unlisted = {key: self._calls.get(key, {"tool_name": self._denied_tools.get(key, "?"),
+                                               "tool_use_id": key, "tool_input": {}})
+                    for key in self._denied if key not in self._denials}
         return [{**denial, **({"reason": self._reasons[key]} if key in self._reasons else {})}
-                for key, denial in self._denials.items()]
+                for key, denial in {**self._denials, **unlisted}.items()]
 
     def feed(self, line: str) -> None:
         self._append(self.transcript, line if line.endswith("\n") else line + "\n")
@@ -112,22 +136,24 @@ class Stream:
         if not isinstance(event, dict):
             return
         self.take(event)
-        message = event.get("message") if event.get("type") == "assistant" else None
-        content = message.get("content") if isinstance(message, dict) else None
-        for item in content if isinstance(content, list) else []:
-            if isinstance(item, dict) and item.get("type") == "tool_use":
-                if isinstance(item.get("id"), str):
-                    self.tool_use_ids.add(item["id"])
-                at = self.clock().astimezone(timezone.utc).strftime("%H:%M:%SZ")
-                shown = f"{at} {item.get('name', '?')} {tool_summary(item)}".rstrip()
-                self._append(self.progress, shown + "\n")
-                if self.echo:
-                    self.echo(shown)
+        for item in _tool_uses(event):
+            at = self.clock().astimezone(timezone.utc).strftime("%H:%M:%SZ")
+            shown = f"{at} {item.get('name', '?')} {tool_summary(item)}".rstrip()
+            self._append(self.progress, shown + "\n")
+            if self.echo:
+                self.echo(shown)
 
     def take(self, event: dict[str, Any]) -> None:
         """Read an event for the run's session, its results, and its denials."""
         if isinstance(event.get("session_id"), str):
             self.session = event["session_id"]
+        for item in _tool_uses(event):
+            if isinstance(item.get("id"), str):
+                self.tool_use_ids.add(item["id"])
+                given = item.get("input")
+                self._calls[item["id"]] = {"tool_name": item.get("name", "?"),
+                                           "tool_use_id": item["id"],
+                                           "tool_input": given if isinstance(given, dict) else {}}
         if event.get("type") == "assistant" and self.first_usage is None:
             message = event.get("message")
             usage = message.get("usage") if isinstance(message, dict) else None
@@ -141,9 +167,12 @@ class Stream:
                 if isinstance(denial, dict):
                     self._denials.setdefault(_denial_key(denial), denial)
         if event.get("type") == "system" and event.get("subtype") == "permission_denied":
-            if isinstance(event.get("tool_use_id"), str) and isinstance(
-                    event.get("decision_reason_type"), str):
-                self._reasons[event["tool_use_id"]] = event["decision_reason_type"]
+            if isinstance(event.get("tool_use_id"), str):
+                self._denied.setdefault(event["tool_use_id"], None)
+                if isinstance(event.get("decision_reason_type"), str):
+                    self._reasons[event["tool_use_id"]] = event["decision_reason_type"]
+                if isinstance(event.get("tool_name"), str):
+                    self._denied_tools[event["tool_use_id"]] = event["tool_name"]
 
     def failure_text(self, status: int | None) -> str:
         """What a run that failed said about it: its result and any other output.
