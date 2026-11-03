@@ -305,8 +305,9 @@ covers an oracle-gated section with no trusted oracle; a trusted or interruptibl
 equal to the seller wallet's address or to the account its key signs as; an interruptible
 section with no interruptible oracle; a seller wallet with neither an address nor a key,
 whatever clients the storefront composes; a missing wallet key or no configured chain
-where the storefront needs them to settle; and a release model the storefront's domain
-cannot deliver. A release condition MUST NOT fall back to the seller wallet as its oracle.
+where the storefront needs them to settle. A release model the storefront's domain cannot
+deliver is not such an input: it refuses startup (see "Alkahest release models are listed
+per option"). A release condition MUST NOT fall back to the seller wallet as its oracle.
 A section that does not parse MUST stop startup, as any configuration does.
 
 #### Scenario: An oracle-gated section names no oracle
@@ -365,8 +366,7 @@ configuration blockers its mechanism's preflight reports for it.
 
 #### Scenario: A disabled section could not settle
 
-- **WHEN** a seller's Alkahest section is disabled and lacks its wallet key, or names a
-  release model its domain cannot deliver
+- **WHEN** a seller's Alkahest section is disabled and lacks its wallet key
 - **THEN** its readiness reports `disabled` followed by the configuration blocker naming
   the problem, and no reachability blocker
 
@@ -532,9 +532,14 @@ table, and migration MUST move either into it.
 
 ### Requirement: Alkahest release models are listed per option
 
-`[Settlement.alkahest].release_models` MUST list the release models a storefront offers, drawn from `recipient`, `oracle_gated` and `interruptible`, and the storefront MUST publish one Alkahest option per model. Oracle-address settings MUST be validated against list membership, and a domain that cannot deliver a listed model MUST refuse to start. A listing MUST NOT carry a listing-level interruptible marker.
+`[Settlement.alkahest].release_models` MUST list the release models a storefront offers, drawn from `recipient`, `oracle_gated` and `interruptible`, and the storefront MUST publish one Alkahest option per model. Oracle-address settings MUST be validated against list membership, and a storefront whose section, enabled or not, lists a model its domain cannot deliver MUST refuse to start. A listing MUST NOT carry a listing-level interruptible marker.
 
 #### Scenario: A storefront offers two Alkahest release models
 
 - **WHEN** a VM storefront configures `release_models = ["recipient", "interruptible"]`
 - **THEN** each listing carries two Alkahest options, only the interruptible one's release condition describes interruption, and the listing resource has no interruptible field
+
+#### Scenario: A domain is configured for a release model it cannot deliver
+
+- **WHEN** a bare-metal storefront's Alkahest section, enabled or disabled, lists `interruptible` with an interruptible oracle
+- **THEN** startup is refused naming the undeliverable model, before any loop starts, rather than Alkahest being reported unready

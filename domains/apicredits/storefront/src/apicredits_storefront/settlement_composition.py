@@ -351,7 +351,8 @@ def build_api_credit_settlement_composition(
         # address its key does not sign as names two accounts. The storefront
         # submits its issuance evidence on chain with the key, so a missing key
         # or chain makes Alkahest unready. A configured model the Alkahest entry
-        # cannot deliver is reported the same way.
+        # cannot deliver has already refused startup above; preflight reports
+        # one too, to a caller that evaluates readiness apart from startup.
         "wallet": {"address": seller_wallet_address, "private_key": seller_wallet_key},
         "signs_transactions": True,
         "deliverable_release_models": SELLER_STAGES[ALKAHEST_MECHANISM_ID].release_models,

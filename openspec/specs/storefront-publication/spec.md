@@ -2736,9 +2736,9 @@ publishes on, the release condition its escrow will use: the arbiter and its dem
 derived by the Alkahest mechanism from the seller's `[Settlement.alkahest]` policy, the
 seller wallet, and the chain's address book, identically for every domain that composes
 Alkahest. Release conditions MUST be derived only for Alkahest clauses whose mechanism is
-ready. A domain MUST declare which release models it can deliver, and a configured release
-model its domain cannot deliver MUST make Alkahest unready with a configuration blocker
-naming the model, rather than refusing startup.
+ready. A domain MUST declare which release models it can deliver, and a storefront whose
+Alkahest section, enabled or not, lists a release model its domain cannot deliver MUST
+refuse to start, naming the model.
 
 #### Scenario: A bare-metal listing offers Alkahest settlement
 
@@ -2751,8 +2751,7 @@ naming the model, rather than refusing startup.
 
 - **WHEN** a bare-metal storefront starts with `[Settlement.alkahest]` configured as
   interruptible
-- **THEN** it starts, Alkahest is reported unready naming the release model, and no
-  listing advertises an Alkahest option
+- **THEN** startup is refused naming the release model, and no listing is published
 
 #### Scenario: Alkahest is unready on a VM storefront
 

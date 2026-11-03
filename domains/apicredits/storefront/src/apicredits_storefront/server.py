@@ -190,8 +190,8 @@ def _build_api_credit_services(
     # Before anything is constructed: a renamed or removed setting (the
     # retired credits-service preflight settings among them), an unset
     # `[credits].service_url`, a capacity configuration that cannot be read,
-    # or a contradictory Alkahest release model stops startup. A coherent
-    # model this storefront cannot deliver makes Alkahest unready instead.
+    # or an Alkahest section, enabled or not, listing a release model this
+    # storefront cannot deliver stops startup.
     require_startable_storefront()
     require_coherent_release_model()
     marketplace_signer = resolve_identity_signer()
