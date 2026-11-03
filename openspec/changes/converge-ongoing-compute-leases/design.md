@@ -185,7 +185,7 @@ intent to its interface's request; the foundation supplies `delivery_end` among 
 intents together with mediation's request vocabulary and published mapping.
 
 Arkhai mediation's mechanical delivery-end rule is payee agreement under the foundation's guards; its cause=payee branch is the standard self-penalty
-(`openspec/changes/agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`); this change proves its financial consequences in both lanes (rows 5, 8 and
+(`openspec/changes/archive/2026-11-03-agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`); this change proves its financial consequences in both lanes (rows 5, 8 and
 10) and restates none of its steps. A buyer-filed cause=payee claim receives the same cap: automatically with payee agreement and the mapping/time/replay guards, otherwise through an operator. A matching receipt-backed cause=payer claim also rules automatically, preserving payer notice/treatment and paying no penalty. No response or invalid concurrence stays with triage; no silence default exists. SCM's respondent poll signs durable-record matches or contests them; final wire/vectors wait at foundation 12.1. The authority never reconciles direct seller restitution because there is none.
 
 A self-penalty is one package — stop, refunds and bond — and a partial direct path
@@ -224,7 +224,7 @@ and billing runs until the stop lands. `end_delivery` is the explicit end-now-re
 command: it carries no `at`, and the storefront signs its own receipt time as evidence.
 The storefront has no authority to stop billing for the buyer and journals no
 cooperative payment stop. The exact signed request, receipt and site reports are kept
-through the foundation's ingestion and read. The buyer's `delivery_end(cause=payer)` case is the foundation's (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-buyers-end`); this change proves it
+through the foundation's ingestion and read. The buyer's `delivery_end(cause=payer)` case is the foundation's (`openspec/changes/archive/2026-11-03-agreed-evidence-and-early-termination/design.md#the-buyers-end`); this change proves it
 in row 1 and assumes no payee notice waiver and no payer early release.
 
 Operator recovery is stateless and runs through the injected adapters from a

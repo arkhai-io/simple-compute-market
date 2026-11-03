@@ -18,7 +18,7 @@ An architecture companion does not replace a normative requirement. When explana
 | Change workflow | [Spec](change-workflow/spec.md) | [Architecture](change-workflow/architecture.md) |
 | CLI query language | [Spec](cli-query-language/spec.md) | [Architecture](cli-query-language/architecture.md) |
 | Compute provisioning contract | [Spec](compute-provisioning-contract/spec.md) | — |
-| Deal lifecycle | — | [Architecture](deal-lifecycle/architecture.md) |
+| Deal lifecycle | [Spec](deal-lifecycle/spec.md) | [Architecture](deal-lifecycle/architecture.md) |
 | Deployment and state | [Spec](deployment-state/spec.md) | [Architecture](deployment-state/architecture.md) |
 | Fulfillment | [Spec](fulfillment/spec.md) | [Architecture](fulfillment/architecture.md) |
 | Introduction delivery | [Spec](introduction-delivery/spec.md) | [Architecture](introduction-delivery/architecture.md) |

@@ -236,7 +236,7 @@ delivery. Delivery admission must also honor an expiry claim that wins activatio
   supplies a valid command instant, with the buyer's case as backstop; reports are evidence.
 - Seller-direct exceptional-end correction or backdated payee stop — the seller
   files a dispute, not its own stop/reverse, and mediation alone applies the standard
-  self-penalty (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`).
+  self-penalty (`openspec/changes/archive/2026-11-03-agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`).
 - Compound payment termination authority — deferred until hosted bonds are designed;
   foundation records this alternative and its required dispute-authority recording,
   not a new site capability.

@@ -2,7 +2,7 @@
 
 ## Context
 
-The lifecycle foundation, [`agreed-evidence-and-early-termination`](../agreed-evidence-and-early-termination/),
+The lifecycle foundation, [`agreed-evidence-and-early-termination`](../archive/2026-11-03-agreed-evidence-and-early-termination/),
 is the frame: the protocol ends at commitment, and everything after it is
 authority records and the signed bytes each party keeps. The terms a deal
 carries — `early_termination {version, entitlements, settles_through,
@@ -341,7 +341,7 @@ uncertain filing outcome uses the same operation identity and read-and-retry
 contract rather than a second correction journal.
 
 Arkhai mediation's mechanical delivery-end rule is payee agreement under the foundation's guards; its cause=payee branch is the standard self-penalty
-(`openspec/changes/agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`); its amounts and effects belong to mediation's published mapping, not to
+(`openspec/changes/archive/2026-11-03-agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`); its amounts and effects belong to mediation's published mapping, not to
 this payment adapter, which derives the parts and terms the ruling reads — the rate
 part it stops returned, the setup part it returns only for non-delivery, the penalty it
 caps. An unsupported hosted bond is a publication refusal. A self-penalty is a
@@ -405,7 +405,7 @@ lands. The outage is not a backdated stop, and the storefront has no authority t
 stop billing for the buyer. `end_delivery` carries no `at`: the storefront signs
 its receipt time as evidence of immediate surrender, not as authority to issue a
 cooperative payment stop. The buyer's `delivery_end(cause=payer)` case and its handling are the foundation's
-(`openspec/changes/agreed-evidence-and-early-termination/design.md#the-buyers-end`); this change supplies the stop-then-hint rate sequence it starts with.
+(`openspec/changes/archive/2026-11-03-agreed-evidence-and-early-termination/design.md#the-buyers-end`); this change supplies the stop-then-hint rate sequence it starts with.
 Both-authorities-down recovery keeps the journal and retry path. The terms change owns the display of a normal stop against
 an immediate surrender, and of billing that continues while a stop is pending.
 

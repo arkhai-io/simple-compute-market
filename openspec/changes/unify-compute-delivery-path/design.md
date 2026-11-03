@@ -220,7 +220,7 @@ corrections.
 
 `end_delivery` carries no `at`; the storefront signs its receipt time as evidence.
 It grants the storefront no authority to stop billing for the buyer; the buyer's stop,
-retry and `delivery_end` case are the foundation's (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-buyers-end`). Delivery consumes the
+retry and `delivery_end` case are the foundation's (`openspec/changes/archive/2026-11-03-agreed-evidence-and-early-termination/design.md#the-buyers-end`). Delivery consumes the
 foundation's evidence and admission result, not a second policy.
 
 | Observed evidence before availability | Authority-backed cause input | Caller handoff |
@@ -256,7 +256,7 @@ from its own durable `available` record, false on every never-delivered and
 past-deadline basis.
 
 Arkhai mediation's mechanical delivery-end rule is payee agreement under the foundation's guards; its cause=payee branch is the standard self-penalty
-(`openspec/changes/agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`): dispute-authority rules the foundation and mediation own, never amounts or
+(`openspec/changes/archive/2026-11-03-agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`): dispute-authority rules the foundation and mediation own, never amounts or
 payment operations for delivery to implement. The package needs one ruling; a partial
 seller-direct path would still need a dispute, and the authority records disputes so
 it can act on bad sellers. On-demand's "won't preempt" is enforced by remedy — the buyer's case over

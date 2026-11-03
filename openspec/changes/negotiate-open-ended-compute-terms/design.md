@@ -103,7 +103,7 @@ On-demand has no payee stop entry. The mandate therefore does not enforce that t
 won't preempt; that is enforced by the penalty and a buyer's case over held money, not by the mandate.
 The seller's own exit is `delivery_end(cause=payee)`, a dispute filing the seller half journals with
 the end and files with the dispute authority; the seller sends no stop or reverse of its own.
-Arkhai mediation rules payee-agreed delivery_end under its mapping/time/replay guards; the cause=payee branch is the standard self-penalty (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`); the terms this change publishes are what that
+Arkhai mediation rules payee-agreed delivery_end under its mapping/time/replay guards; the cause=payee branch is the standard self-penalty (`openspec/changes/archive/2026-11-03-agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`); the terms this change publishes are what that
 ruling reads — the penalty, the on-demand returned treatment, the setup charge — and
 the display explains them against it (D7). A buyer contesting the account files a case;
 mediation triages claims lacking payee agreement or failing its mapping/time/replay guards; matching receipt-backed payer claims rule automatically. There is no compensation enum. Setup-bearing presets wait for foundation 12.1 to vendor the proposed delivery_end signature/concurrence revision and vectors, not another payments wire change; setup-free presets remain independently eligible.
@@ -266,7 +266,7 @@ Holds last through stop plus dispute window and accepted case extensions. Keep
 signed evidence through at least the window after the latest delivery end, last
 payout or case close. Sellers file delivery_end for failed/non-started delivery;
 the buyer's stop/case is its backstop. The buyer's end — stop first, hint, `end_delivery` as end-now, the journaled retry while
-billing runs, the receipt-backed `delivery_end(cause=payer)` or triage — is the foundation's (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-buyers-end`); the display
+billing runs, the receipt-backed `delivery_end(cause=payer)` or triage — is the foundation's (`openspec/changes/archive/2026-11-03-agreed-evidence-and-early-termination/design.md#the-buyers-end`); the display
 explains each step as that statement gives it. The setup charge is
 owed from approval; a payment stop alone does not reverse it. A qualified delivery_end returns it iff delivered=false for either cause, keeping it iff true.
 

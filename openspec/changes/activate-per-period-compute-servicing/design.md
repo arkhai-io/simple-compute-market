@@ -38,7 +38,7 @@ and published mapping. The seller half files with the Agreement dispute authorit
 journaled with the end, never future-dated. Pre-start failure journals immediately
 and files at Agreement start. Seller sends no stop/reverse for this path.
 Arkhai mediation's mechanical delivery-end rule is payee agreement under the foundation's guards; its cause=payee branch is the standard self-penalty
-(`openspec/changes/agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`), requalified here against the hosted authority step by step and never
+(`openspec/changes/archive/2026-11-03-agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`), requalified here against the hosted authority step by step and never
 restated; seller exit requires that complete dispute-recorded package, not direct
 partial restitution, and the authority records disputes to act on bad sellers,
 including bans.
@@ -48,7 +48,7 @@ exit files delivery_end. No seller PT0S/returned restitution entry, implicit
 favourable-stop permission, payee notice waiver, payer early release or several-
 stop-entries dependency remains. On-demand non-preemption is remedied by buyer case
 over held money plus the premature-stop penalty, not by mandate enforcement. The buyer's end and its
-`delivery_end` case are requalified exactly as the foundation states them (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-buyers-end`).
+`delivery_end` case are requalified exactly as the foundation states them (`openspec/changes/archive/2026-11-03-agreed-evidence-and-early-termination/design.md#the-buyers-end`).
 
 A deployment must demonstrate semantics, not merely advertise a version. Check
 vendored schema/proof/vectors through the existing SOURCE record and reuse current

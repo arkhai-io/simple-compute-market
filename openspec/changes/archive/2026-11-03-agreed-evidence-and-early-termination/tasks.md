@@ -1,8 +1,8 @@
 # Tasks — agreed evidence and early termination
 
 Implementation tasks 1–15 are complete, including review 19–23 repairs.
-Closeout 16.1–16.10 promotes the verified current system; 16.11 archival awaits
-owner review. Published contracts are vendored; deployed qualification and its
+Closeout 16.1–16.11 is complete: the verified current system is promoted and the
+change is archived after owner review. Published contracts are vendored; deployed qualification and its
 limits are recorded below. Hosted development mediation remains on an older revision.
 
 Sections follow the design's implementation cadence. Sections 1–7 are round 1 (foundation,
@@ -1137,7 +1137,7 @@ documentation only; a part needing code returns the change to implementation.
 - [x] 16.10 **Documentation citations.** Run `make check-doc-citations
       CHANGE=agreed-evidence-and-early-termination` and resolve every match; then
       `openspec validate agreed-evidence-and-early-termination --strict`.
-- [ ] 16.11 **Archival.** `openspec archive agreed-evidence-and-early-termination -y`, merging the
+- [x] 16.11 **Archival.** `openspec archive agreed-evidence-and-early-termination -y`, merging the
       deltas; link the index row to the archive.
 
 ## Implementation review 19/20 disposition — domain
@@ -1242,10 +1242,10 @@ Once-only qualification is not rate/ruling-execution or real-host qualification.
 Architecture/configuration/index promotion is written on this branch. Permanent
 prose describes the implemented system, with external monetary policy contextual
 rather than prescribed as SCM behavior. The fourteen delta-covered normative
-specifications are reserved for 16.11 synchronization, not manually merged here.
-In particular, the new capability's normative `spec.md` will be generated from
-`specs/deal-lifecycle/spec.md` at archival; the capability index links the existing
-architecture companion only until that owner-approved step. No archival is performed.
+specifications were synchronized by the 16.11 archive, not merged by hand.
+In particular, the new capability's normative `openspec/specs/deal-lifecycle/spec.md`
+was generated from the change's `specs/deal-lifecycle/spec.md` at archival, and the
+capability index links it beside the architecture companion.
 
 | Accepted decision | Permanent location |
 |---|---|

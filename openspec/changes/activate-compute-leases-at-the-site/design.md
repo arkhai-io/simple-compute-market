@@ -73,7 +73,7 @@ retired `provisioning` state. Provider readiness is fulfillment's checkpoint;
 activation is the site's, and `activated_at_utc` is its instant.
 Whether a late activation means the deal was delivered is not the site's question:
 the lifecycle judges delivery by the storefront's durable `available` record against
-the accepted deadline (`openspec/changes/agreed-evidence-and-early-termination/design.md`,
+the accepted deadline (`openspec/changes/archive/2026-11-03-agreed-evidence-and-early-termination/design.md`,
 D8), and the site's phase is a capacity fact.
 
 ### D2. Typed activation and inspection through the shared contract
