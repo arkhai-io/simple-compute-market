@@ -495,7 +495,9 @@ def route_of(log: Sequence[Entry], join: Join = ROUND_JOIN) -> Route | None:
     since nothing says where the change goes after it. A validation
     naming the target it was given leaves the route where it was, so the guards it
     remedied are checked again; one directed by the owner leads to its target once
-    it passed. The conversion line names no exit, and routes nothing.
+    it passed. The conversion line names no exit, and routes nothing. Nor does the
+    owner's direction to revisit a finished triage: the triage, resumed, ends again,
+    and that later outcome is the exit the change takes for the reviews it names.
     """
     route: Route | None = None
     for entry in log:

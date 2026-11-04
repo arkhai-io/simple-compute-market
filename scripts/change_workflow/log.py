@@ -9,7 +9,8 @@ orchestrating session's own lines: a `round` line recording the implementation
 round the owner agreed, and an `orchestrator` line recording a decision — the
 orchestrating session's own routing or recovery, or the owner's — naming the run
 whose denials it reads, the run it resolves, and, for the owner's alone, the node
-it directs the change to next, so the next-step computation routes on it. Reading
+it directs the change to next, so the next-step computation routes on it, or the
+finished triage it revisits, which the wrapper then resumes. Reading
 and resolving are distinct because a run can be denied a call and still end with a
 question or a proposed return: its denials are read first, and its outcome is
 answered or decided after. This module is the log's only writer.
@@ -383,13 +384,55 @@ def direction(next_step: str, kind: str | None = None,
     return {"step": next_step, "target": qualified}
 
 
+def revisit_refusal(entries: Sequence[Entry], seq: int) -> str | None:
+    """Why the triage run at `seq` cannot be revisited; None when it can.
+
+    Only a finished triage naming the reviews it triaged is revisited, and only
+    while it is the latest triage run of those reviews: a later triage of any of
+    them has superseded its outcome, and so has a run that resumed it, which may
+    still wait on the owner with a question or a stop before it names them again.
+    """
+    run = next((entry for entry in entries if entry.get("seq") == seq
+                and entry.get("step") in STEPS), None)
+    if run is None or run.get("step") != "triage" or run.get("outcome") != "finished":
+        what = (f"a {run.get('step')} run that ended {run.get('outcome')}" if run is not None
+                else "no run")
+        return f"seq {seq} is {what}, not a finished triage, so there is no triage to revisit"
+    triaged = {name for name in run.get("triaged") or () if isinstance(name, str)}
+    if not triaged:
+        return f"the triage at seq {seq} names no review it triaged, so none is revisited"
+    later = next((entry for entry in reversed(entries)
+                  if entry["seq"] > seq and entry.get("step") == "triage"
+                  and (triaged & set(entry.get("triaged") or ())
+                       or entry.get("resumes") == seq)), None)
+    if later is not None:
+        return (f"the triage at seq {later['seq']} came after seq {seq}, "
+                + (f"triaging {', '.join(sorted(triaged & set(later['triaged'])))} again"
+                   if later.get("triaged") else f"resuming it, and ended {later.get('outcome')}")
+                + f"; revisit or answer seq {later['seq']} instead")
+    return None
+
+
+def revisit_direction(entries: Sequence[Entry], seq: int) -> Entry | None:
+    """The owner's direction to revisit the triage run at `seq`, while no run has
+    resumed it since; None otherwise. A direction is used once."""
+    direction_ = next((entry for entry in reversed(entries)
+                       if entry.get("outcome") == ORCHESTRATOR and entry.get("by") == "owner"
+                       and entry.get("resumes") == seq), None)
+    if direction_ is None or any(entry["seq"] > direction_["seq"]
+                                 and entry.get("step") in STEPS
+                                 and entry.get("resumes") == seq for entry in entries):
+        return None
+    return direction_
+
+
 def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHESTRATOR,
                       resolves: int | None = None, reads: int | None = None,
                       next_step: str | None = None, kind: str | None = None,
                       sections: list[list[int | str]] | None = None,
                       target: str | None = None,
                       branch: str | None = None, change: str | None = None,
-                      clock: Clock = utc_now) -> Entry:
+                      resumes: int | None = None, clock: Clock = utc_now) -> Entry:
     """Record a decision: the orchestrating session's own routing or recovery, or
     the owner's, relayed by it.
 
@@ -419,19 +462,24 @@ def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHE
     `branch` and `change` record the owner's word that `change` is worked on
     `branch` though the branch is not its own, which each step's branch check
     accepts in place of asking (`branch_decisions`); only the owner gives it.
+    `resumes` is the owner's direction to revisit a finished triage, naming its
+    run, which `Wrapper.resume` then resumes once with the owner's words; it is
+    refused unless that run is the latest triage of the reviews it triaged
+    (`revisit_refusal`). It routes nothing: the resumed triage's outcome does.
     """
     if next_step is None and (kind, sections, target) != (None, None, None):
         raise StepError("a kind, sections, or target qualify the step a decision directs")
     directed = direction(next_step, kind, sections, target) if next_step is not None else None
     line = decision_line(path, read_log(path), decision, reason, by=by, resolves=resolves,
-                         reads=reads, directs=directed, branch=branch, change=change)
+                         reads=reads, directs=directed, branch=branch, change=change,
+                         resumes=resumes)
     return append_entry(path, line, clock)
 
 
 def decision_line(path: Path, entries: Sequence[Entry], decision: str, reason: str, *,
                   by: str, resolves: int | None = None, reads: int | None = None,
                   directs: Entry | None = None, branch: str | None = None,
-                  change: str | None = None) -> Entry:
+                  change: str | None = None, resumes: int | None = None) -> Entry:
     """The decision `note_orchestrator` records, checked against `entries`, the lines
     of the log at `path` it would follow, and not yet numbered: `directs` is the
     target of the owner's direction. A line that breaks a rule raises, naming it."""
@@ -461,6 +509,15 @@ def decision_line(path: Path, entries: Sequence[Entry], decision: str, reason: s
             raise StepError(f"the run at seq {reads} recorded no denial; a decision reads "
                             "a run's denials")
         line["reads"] = reads
+    if resumes is not None:
+        if by != "owner":
+            raise StepError("a direction to revisit a triage is the owner's")
+        if directs is not None:
+            raise StepError("a direction to revisit a triage directs no step: the resumed "
+                            "triage names its exit again")
+        if refusal := revisit_refusal(entries, resumes):
+            raise StepError(f"the revisit is refused: {refusal}")
+        line["resumes"] = resumes
     if directs is not None:
         if by != "owner":
             raise StepError("a decision directing a step is the owner's; the orchestrating "

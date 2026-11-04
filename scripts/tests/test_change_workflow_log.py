@@ -15,8 +15,8 @@ from change_workflow.cli import main
 from change_workflow.common import StepError
 from change_workflow.log import (LogError, append_entry, branch_decisions, last_entries,
                                  note_orchestrator, note_round, numbered, read_log,
-                                 record_interactive, record_outcome, replace_log, unmarked,
-                                 unused_direction)
+                                 record_interactive, record_outcome, replace_log,
+                                 revisit_direction, unmarked, unused_direction)
 from change_workflow_fixtures import (CHANGE, COMMIT, DENIALS, VALID, clock, descriptors_of,
                                       log_file)
 
@@ -410,6 +410,102 @@ def test_a_decision_reads_a_run_with_denials_without_resolving_it(tmp_path: Path
 
     assert (line["reads"], "resolves" in line) == (1, False)
     assert (both["reads"], both["resolves"]) == (1, 1)
+
+
+# The owner's direction to revisit a finished triage.
+
+TRIAGED = {"outcome": "finished", "message": "Advance.", "triaged": ["04-implementation"],
+           "next": {"step": "round"}}
+
+
+def _triaged(log: Path, outcome: dict = TRIAGED) -> dict:
+    return record_outcome(log, "triage", outcome, session="t-1", commit=COMMIT)
+
+
+def test_the_owner_directs_a_revisit_of_the_latest_triage_of_its_reviews(
+        tmp_path: Path) -> None:
+    log = log_file(tmp_path)
+    triage = _triaged(log)
+    # A later triage of other reviews leaves this one the latest of its own.
+    _triaged(log, {**TRIAGED, "triaged": ["05-design"]})
+
+    line = note_orchestrator(log, "revisits 04 F5", "cite the stable row", by="owner",
+                             resumes=triage["seq"], clock=clock)
+
+    assert (line["by"], line["resumes"], "next" in line) == ("owner", triage["seq"], False)
+    assert revisit_direction(read_log(log), triage["seq"]) == line
+
+
+def test_a_revisit_of_a_triage_a_later_triage_superseded_is_refused(tmp_path: Path) -> None:
+    """A later triage has run."""
+    log = log_file(tmp_path)
+    first = _triaged(log)
+    later = _triaged(log, {**TRIAGED, "triaged": ["04-implementation", "05-validation"]})
+
+    with pytest.raises(StepError, match=f"the triage at seq {later['seq']} came after seq "
+                                        f"{first['seq']}, triaging 04-implementation again"):
+        note_orchestrator(log, "revisits 04 F5", "r", by="owner", resumes=first["seq"])
+    assert read_log(log)[-1] == later
+
+
+def test_a_revisit_whose_resumed_run_waits_is_answered_not_revisited(tmp_path: Path) -> None:
+    log = log_file(tmp_path)
+    first = _triaged(log)
+    note_orchestrator(log, "revisits 04 F5", "r", by="owner", resumes=first["seq"])
+    asked = record_outcome(log, "triage", VALID["question"], session="t-1", commit=COMMIT,
+                           extra={"resumes": first["seq"]})
+
+    with pytest.raises(StepError, match=f"resuming it, and ended question; revisit or answer "
+                                        f"seq {asked['seq']} instead"):
+        note_orchestrator(log, "revisits 04 F5 again", "r", by="owner", resumes=first["seq"])
+
+
+def test_a_triage_naming_no_review_is_not_revisited(tmp_path: Path) -> None:
+    log = log_file(tmp_path)
+    run = _triaged(log, {key: value for key, value in TRIAGED.items() if key != "triaged"})
+
+    with pytest.raises(StepError, match="names no review it triaged"):
+        note_orchestrator(log, "revisits", "r", by="owner", resumes=run["seq"])
+
+
+def test_a_revisit_directs_no_step(tmp_path: Path) -> None:
+    log = log_file(tmp_path)
+    triage = _triaged(log)
+
+    with pytest.raises(StepError, match="directs no step"):
+        note_orchestrator(log, "revisits", "r", by="owner", resumes=triage["seq"],
+                          next_step="plan")
+
+
+@pytest.mark.parametrize("outcome", [VALID["question"], VALID["stopped"],
+                                     {**VALID["returned"], "triaged": ["04-implementation"]}])
+def test_a_revisit_names_a_finished_triage(tmp_path: Path, outcome: dict) -> None:
+    log = log_file(tmp_path)
+    run = _triaged(log, outcome)
+    validation = record_outcome(log, "validate", VALID["finished"], session="v",
+                                commit=COMMIT)
+
+    for seq in (run["seq"], validation["seq"], 99):
+        with pytest.raises(StepError, match="not a finished triage"):
+            note_orchestrator(log, "revisits", "r", by="owner", resumes=seq)
+
+
+def test_only_the_owner_directs_a_revisit(tmp_path: Path) -> None:
+    log = log_file(tmp_path)
+    triage = _triaged(log)
+
+    with pytest.raises(StepError, match="the owner's"):
+        note_orchestrator(log, "revisits", "r", resumes=triage["seq"])
+
+
+def test_a_revisit_direction_is_used_once_a_run_resumes_the_triage(tmp_path: Path) -> None:
+    log = log_file(tmp_path)
+    triage = _triaged(log)
+    note_orchestrator(log, "revisits", "r", by="owner", resumes=triage["seq"], clock=clock)
+    record_outcome(log, "triage", VALID["question"], session="t-1", commit=COMMIT,
+                   extra={"resumes": triage["seq"]})
+
+    assert revisit_direction(read_log(log), triage["seq"]) is None
 
 
 def test_a_decision_may_not_read_a_run_that_recorded_no_denial(tmp_path: Path) -> None:

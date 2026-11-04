@@ -291,6 +291,64 @@ def test_the_command_resumes_by_seq(tmp_path: Path) -> None:
     assert claude.commands[1][2] == "The owner's answer: Yes."
 
 
+def test_the_owners_revisit_resumes_the_finished_triage_with_their_words(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    triaged = {**VALID["finished"], "triaged": ["04-implementation"]}
+    claude = FakeClaude((event_lines(triaged, session="t-1"), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    log = log_path(tmp_path, CHANGE)
+    _triaged(log, "04-implementation")
+    triage = record_outcome(log, "triage", triaged, session="t-1", commit=COMMIT)
+
+    assert main(["note", CHANGE, "orchestrator", "--by", "owner", "--resumes",
+                 str(triage["seq"]), "--decision", "revisits 04 F5",
+                 "--reason", "cite the stable row"], root=tmp_path) == 0
+    assert main(["resume", CHANGE, "--seq", str(triage["seq"]), "--answer",
+                 "Cite the stable row."], root=tmp_path, wrapper=wrapper) == 0
+
+    assert option(claude.commands[0], "--resume") == "t-1"
+    assert claude.commands[0][2] == "The owner's answer: Cite the stable row."
+    assert (read_log(log)[-1]["outcome"], read_log(log)[-1]["resumes"]) == (
+        "finished", triage["seq"])
+
+
+def test_a_revisit_direction_from_the_orchestrator_is_refused(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    log = log_file(tmp_path)
+    _triaged(log, "04-implementation")
+    triage = record_outcome(log, "triage", {**VALID["finished"],
+                                            "triaged": ["04-implementation"]},
+                            session="t-1", commit=COMMIT)
+
+    assert main(["note", CHANGE, "orchestrator", "--resumes", str(triage["seq"]),
+                 "--decision", "revisits", "--reason", "r"], root=tmp_path) == 1
+
+    assert "a direction to revisit a triage is the owner's" in capsys.readouterr().err
+    assert read_log(log) == [triage]
+
+
+@pytest.mark.parametrize("later,refused", [
+    ({**VALID["finished"], "triaged": ["04-implementation"]}, "triaging 04-implementation again"),
+    (None, "not a finished triage"),
+])
+def test_the_command_line_refuses_a_revisit_the_log_refuses(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str], later: dict | None,
+        refused: str) -> None:
+    """A later triage has run; or the run named is not a finished triage."""
+    log = log_file(tmp_path)
+    _triaged(log, "04-implementation")
+    first = record_outcome(log, "triage", later or VALID["question"], session="t-1",
+                           commit=COMMIT)
+    if later is not None:
+        record_outcome(log, "triage", later, session="t-2", commit=COMMIT)
+
+    assert main(["note", CHANGE, "orchestrator", "--by", "owner", "--resumes",
+                 str(first["seq"]), "--decision", "revisits", "--reason", "r"],
+                root=tmp_path) == 1
+
+    assert refused in capsys.readouterr().err
+
+
 def test_a_fresh_run_is_granted_each_rule_its_allow_values_hold(tmp_path: Path) -> None:
     claude = FakeClaude((event_lines(VALID["finished"]), 0))
 

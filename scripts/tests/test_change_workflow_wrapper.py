@@ -795,6 +795,91 @@ def test_a_killed_runs_record_is_stale_though_its_child_survives(tmp_path: Path)
             pass
 
 
+# A finished triage is resumed only on the owner's direction to revisit it.
+
+def _finished_triage(tmp_path: Path) -> tuple[Wrapper, FakeClaude, dict]:
+    _triaged_records(tmp_path, "04-implementation")
+    outcome = {"outcome": "finished", "message": "Advance.", "triaged": ["04-implementation"],
+               "next": {"step": "round"}}
+    claude = FakeClaude((event_lines(outcome, session="t-1"), 0),
+                        (event_lines(outcome, session="t-1"), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    triage = record_outcome(log_path(tmp_path, CHANGE), "triage", outcome, session="t-1",
+                            commit=COMMIT)
+    return wrapper, claude, triage
+
+
+def test_a_finished_triage_is_resumed_under_the_owners_revisit(tmp_path: Path) -> None:
+    wrapper, claude, triage = _finished_triage(tmp_path)
+    # A step started after the triage, stopped and resolved before the revisit.
+    stopped = record_outcome(log_path(tmp_path, CHANGE), "validate", VALID["stopped"],
+                             session="v-1", commit=COMMIT)
+    note_orchestrator(log_path(tmp_path, CHANGE), "revisits 04 F5", "the owner's words",
+                      by="owner", resumes=triage["seq"])
+    note_orchestrator(log_path(tmp_path, CHANGE), "the revisit supersedes it", "r",
+                      by="owner", resolves=stopped["seq"])
+
+    line = wrapper.resume(CHANGE, triage["seq"], "Cite the stable row.")
+
+    assert option(claude.commands[0], "--resume") == "t-1"
+    assert (line["step"], line["outcome"], line["resumes"]) == ("triage", "finished",
+                                                                triage["seq"])
+
+
+def test_a_finished_triage_resumed_without_a_direction_is_refused(tmp_path: Path) -> None:
+    """A finished run is resumed without a direction."""
+    wrapper, claude, triage = _finished_triage(tmp_path)
+
+    with pytest.raises(StepError, match="ended finished, not with a question or a stop, so "
+                                        "it is not waiting"):
+        wrapper.resume(CHANGE, triage["seq"], "Cite the stable row.")
+    assert claude.commands == []
+
+
+def test_a_revisit_direction_resumes_the_triage_once(tmp_path: Path) -> None:
+    wrapper, claude, triage = _finished_triage(tmp_path)
+    note_orchestrator(log_path(tmp_path, CHANGE), "revisits 04 F5", "r", by="owner",
+                      resumes=triage["seq"])
+    resumed = wrapper.resume(CHANGE, triage["seq"], "Cite the stable row.")
+
+    # The direction is spent, and the resumed run is now the triage's latest.
+    assert resumed["resumes"] == triage["seq"]
+    with pytest.raises(StepError, match=f"seq {triage['seq']} is not triage's latest run, so "
+                                        "it no longer waits"):
+        wrapper.resume(CHANGE, triage["seq"], "Again.")
+    assert len(claude.commands) == 1
+
+
+def test_a_revisit_a_later_triage_superseded_is_refused_at_the_resume(tmp_path: Path) -> None:
+    """The direction was given while the triage was the latest of its review; a
+    triage of that review since supersedes it."""
+    wrapper, claude, triage = _finished_triage(tmp_path)
+    note_orchestrator(log_path(tmp_path, CHANGE), "revisits", "r", by="owner",
+                      resumes=triage["seq"])
+    later = record_outcome(log_path(tmp_path, CHANGE), "triage",
+                           {"outcome": "finished", "message": "x",
+                            "triaged": ["04-implementation"], "next": {"step": "round"}},
+                           session="t-2", commit=COMMIT)
+
+    with pytest.raises(StepError, match=f"the revisit is refused: the triage at seq "
+                                        f"{later['seq']} came after"):
+        wrapper.resume(CHANGE, triage["seq"], "Words.")
+    assert claude.commands == []
+
+
+def test_a_direction_naming_another_triage_resumes_nothing(tmp_path: Path) -> None:
+    wrapper, claude, triage = _finished_triage(tmp_path)
+    other = record_outcome(log_path(tmp_path, CHANGE), "triage",
+                           {"outcome": "finished", "message": "x", "triaged": ["04-implementation"],
+                            "next": {"step": "round"}}, session="t-2", commit=COMMIT)
+    note_orchestrator(log_path(tmp_path, CHANGE), "revisits", "r", by="owner",
+                      resumes=other["seq"])
+
+    with pytest.raises(StepError, match=f"seq {triage['seq']} is not triage's latest run"):
+        wrapper.resume(CHANGE, triage["seq"], "Words.")
+    assert claude.commands == []
+
+
 # A triage names the records it triaged, which the computation routes on.
 
 def _reviews(tmp_path: Path) -> Path:

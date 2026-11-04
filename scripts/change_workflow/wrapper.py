@@ -38,7 +38,8 @@ from change_workflow.cost import (conversation_file, measured_before, measured_c
                                   read_conversation)
 from change_workflow.harness import (NETWORK_RETRIES, Runner, claude_command, missing_program,
                                      run_claude, unreachable)
-from change_workflow.log import last_run, log_path, read_log, record_outcome
+from change_workflow.log import (last_run, log_path, read_log, record_outcome,
+                                 revisit_direction, revisit_refusal)
 from change_workflow.outcome import SCHEMA, load_schema, outcome_problems
 from change_workflow.records import git_head, next_transcript, triage_outcome_problems
 from change_workflow.running import recorded_run, runs_directory, termination_ends_the_run
@@ -211,6 +212,10 @@ class Wrapper:
         last run is not necessarily the one that asked. It must be waiting — its
         step's latest run, ended with a question, or stopped with no decision
         line resolving it — since an answer to any other run has nowhere to go.
+        The one finished run that may be resumed is a triage the owner revisits:
+        named by their unused direction (`revisit_direction`), and still the
+        latest triage of the reviews it triaged (`revisit_refusal`). Its line
+        records the run it `resumes`, which uses the direction.
 
         A granted rule applies to this run alone: it is passed on this command line
         and noted on this run's log line, never added to the step table, so the
@@ -232,20 +237,32 @@ class Wrapper:
         if step not in steps or step == "review":
             raise StepError(f"seq {seq} is a {step} line, not the run of a step that can be "
                             "resumed")
-        latest = last_run(log, [step])
-        if latest is None or latest["seq"] != seq:
-            raise StepError(f"seq {seq} is not {step}'s latest run, so it no longer waits")
-        resolved = {e.get("resolves") for e in entries if e.get("outcome") == ORCHESTRATOR}
-        if seq in resolved:
-            raise StepError(f"seq {seq} ended {previous.get('outcome')} and a decision line "
-                            "resolves it, so it no longer waits")
-        if previous.get("outcome") not in ("question", "stopped"):
-            raise StepError(f"seq {seq} ended {previous.get('outcome')}, not with a question "
-                            "or a stop, so it is not waiting for an answer")
+        revisited = (previous.get("outcome") == "finished"
+                     and revisit_direction(entries, seq) is not None)
+        if revisited:
+            if refusal := revisit_refusal(entries, seq):
+                raise StepError(f"the revisit is refused: {refusal}")
+        else:
+            latest = last_run(log, [step])
+            if latest is None or latest["seq"] != seq:
+                raise StepError(f"seq {seq} is not {step}'s latest run, so it no longer waits")
+            resolved = {e.get("resolves") for e in entries if e.get("outcome") == ORCHESTRATOR}
+            if seq in resolved:
+                raise StepError(f"seq {seq} ended {previous.get('outcome')} and a decision line "
+                                "resolves it, so it no longer waits")
+            if previous.get("outcome") not in ("question", "stopped"):
+                raise StepError(f"seq {seq} ended {previous.get('outcome')}, not with a "
+                                "question or a stop, so it is not waiting for an answer"
+                                + ("; a finished triage is resumed only on the owner's "
+                                   "direction to revisit it, `note --by owner --resumes "
+                                   f"{seq}`" if step == "triage" else ""))
         if not previous.get("session"):
             raise StepError(f"{change}'s {step} run (seq {seq}) recorded no session to "
                             "resume; run the step again")
-        extra = {"sections": previous["sections"]} if previous.get("sections") else {}
+        extra: Entry = {"sections": previous["sections"]} if previous.get("sections") else {}
+        if revisited:
+            # Marks the direction used: it resumes the run once.
+            extra["resumes"] = seq
         if granted:
             extra["granted"] = list(granted)
         # Framed, so an answer starting with `-` is never read as a flag.

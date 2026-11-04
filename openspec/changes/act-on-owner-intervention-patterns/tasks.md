@@ -119,19 +119,40 @@ default acceptance". Touches `scripts/change_workflow/cli.py`, `log.py`, `wrappe
 and `scripts/change_next_step.py`; no node or exit of `scripts/change_workflow/graph.py`
 changes (D4).
 
-- [ ] 2.1 Add `--resumes <seq>` to `run_change_step.py note`, accepted only with
+- [x] 2.1 Add `--resumes <seq>` to `run_change_step.py note`, accepted only with
   `--by owner`, naming a `finished` triage run; the log's writer refuses it when that
   run is not the latest triage run of the reviews it triaged, naming the later
   triage, or when the run is not a finished triage (D16). Verify: unit tests in
   `scripts/tests/test_change_workflow_log.py` and `test_run_change_step.py` for the
   accepted direction and each refusal; the delta scenario "A later triage has run"
   maps to a test.
-- [ ] 2.2 Let `Wrapper.resume` resume a `finished` triage run only when an unused owner
+  Done: `log.revisit_refusal` and `revisit_direction`, checked in `decision_line`; the
+  line records `resumes` and no `next`. Beyond the task's two refusals, three found
+  by the fresh-context check: a run that resumed the triage supersedes it too, even
+  while it waits with a question or a stop (else a second revisit would resume the
+  finished session under a waiting one); a finished triage naming no review is not
+  revisited; and `--resumes` with `--next` is refused, since the resumed triage names
+  the exit. Unit tests, `test_change_workflow_log.py`: the accepted direction beside a
+  later triage of other reviews; "A later triage has run"
+  (`test_a_revisit_of_a_triage_a_later_triage_superseded_is_refused`); a question,
+  stop, or return, a validation, and a missing seq refused as not a finished triage;
+  the orchestrator's refused; a waiting resumed run; no review named; `--next`.
+  `test_run_change_step.py`: the command line's accepted direction resuming the
+  triage, the orchestrator's refused, and the later-triage and not-finished refusals.
+- [x] 2.2 Let `Wrapper.resume` resume a `finished` triage run only when an unused owner
   direction `--resumes` names it, and keep refusing every other finished run as not
   waiting (D16). Verify: unit tests in `scripts/tests/test_change_workflow_wrapper.py`
   for a resume under the direction, a resume without one refused ("A finished run is
   resumed without a direction"), and a direction used once only.
-- [ ] 2.3 Make the next-step computation route on the resumed triage's later outcome
+  Done: under an unused direction the step's-latest-run rule gives way to
+  `revisit_refusal`, checked again at the resume; the resumed line records
+  `resumes: <seq>`, which spends the direction. A finished triage without a direction
+  is refused as before, its message now naming the `--resumes` direction. Unit tests,
+  `test_change_workflow_wrapper.py`: a resume under the direction after the stopped
+  validation was resolved; "A finished run is resumed without a direction"; a direction
+  used once; a direction given before a later triage of the same review, refused at the
+  resume; a direction naming another triage resuming nothing.
+- [x] 2.3 Make the next-step computation route on the resumed triage's later outcome
   for the reviews it names, and read the stopped step it superseded as resolved only
   through the owner's decision line (D16). Verify: unit tests in
   `scripts/tests/test_change_next_step.py` for "A revisit while the fix commit is
@@ -139,11 +160,32 @@ changes (D4).
   triage resumed and finished again, and the computation naming what that later
   outcome's exit requires; `scripts/tests/test_change_workflow_graph.py` passes
   unchanged, showing the graph has no new node or edge.
-- [ ] 2.4 Verification: `pytest -q scripts/tests/test_change_workflow_log.py
+  Done: no code change was needed. `route_of` already takes the last exit logged, and
+  `pending` already holds a stopped run until a line resolves it; only `route_of`'s
+  docstring gained a sentence saying a revisit's direction routes nothing. The test
+  `test_a_revisit_while_the_fix_commit_is_validated_routes_on_the_resumed_triage`
+  (unit) therefore proves that existing behaviour holds for a revisit, not new routing:
+  the stopped validation waits through the interrupt line and the `--resumes` line,
+  and once resolved, the resumed triage's exit (pre-closeout) governs in place of the
+  first's (the next round). `graph.py` and its test are unchanged.
+- [x] 2.4 Verification: `pytest -q scripts/tests/test_change_workflow_log.py
   scripts/tests/test_change_workflow_wrapper.py scripts/tests/test_change_next_step.py
   scripts/tests/test_change_workflow_graph.py scripts/tests/test_run_change_step.py`
   (unit) passes; `make test` passes. End-to-end: none; no scenario exercises the
   workflow tooling.
+  Done: the five suites, 541 passed; `make test-release-tooling` 1923 passed. `make
+  test` was not rerun for this section: it rewrites this machine's locks (section 1's
+  handoff), and the section touched only `scripts/` and its tests, which
+  `make test-release-tooling` covers; it runs again after section 3. `make
+  check-change` fails only on the citations sections 5 and 8 create. End-to-end
+  confirmed: none.
+  Handoff for section 10 (`change-orchestrate`): nothing in code stops a resume of the
+  stopped step a revisit leaves; the spec's "resolved rather than resumed" rests on the
+  skill. Order the procedure stop, `note --by owner --resumes`, resume the triage, then
+  resolve the stopped step: resolved before the resume, the computation names the old
+  triage's exit again until the resumed triage ends. At closeout,
+  `openspec/specs/change-workflow/architecture.md` still says the wrapper refuses any
+  run not waiting; D16's promotion there covers the revisit.
 
 ## 3. Reviewers state alternatives on every finding (D17)
 

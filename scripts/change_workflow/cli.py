@@ -229,6 +229,9 @@ def _parser() -> argparse.ArgumentParser:
     decision.add_argument("--change", dest="decided_change", default=None,
                           help="the change the branch decision is for; the log's own by "
                                "default")
+    decision.add_argument("--resumes", type=int, default=None,
+                          help="the owner's direction to revisit the finished triage run at "
+                               "this seq, which `resume` then continues with their words")
     return parser
 
 
@@ -329,6 +332,7 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
                                                if args.sections is not None else None),
                                      target=args.target,
                                      branch=args.branch,
+                                     resumes=args.resumes,
                                      # A branch decision is about the change whose
                                      # log holds it, which is where steps look.
                                      change=args.decided_change
