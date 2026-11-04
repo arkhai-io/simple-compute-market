@@ -18,8 +18,8 @@ reworded scenario's row says so. Where a scenario's outcome was the only stateme
 of a rule, the rewrite also states the rule in its requirement's body (CW-1iaz's
 naming of the archived directory, CW-yib2's isolation of two clones, CW-zq4h's
 refusal of a table, CW-zniv's writing nothing); the scenario's row names that
-requirement. Rows marked "market-change-workflow (section 9)" are this repository's
-part; section 9 of the plan names the ids that hold them.
+requirement. A row naming an MCW id is this repository's part, held by this change's
+`market-change-workflow` delta.
 
 No clause or scenario is dropped.
 
@@ -36,7 +36,7 @@ names another, or the repository's default.
 | The design phase MUST end with a design review, the implementation phase with a pre-closeout review, the closeout phase with a closeout review | CW-nfdb |
 | A phase ending in a review MUST NOT be treated as finished until its triage names a step of the next phase as its exit; for implementation, the merge | CW-nfdb |
 | Once the pre-closeout triage advances the change, a merge step MUST bring in the branch the change lands on, the one it was branched from unless the owner names another | CW-hdxi |
-| That branch is `dev` unless the owner names another | CW-hdxi (the repository's default); `dev`: market-change-workflow (section 9) |
+| That branch is `dev` unless the owner names another | CW-hdxi (the repository's default); `dev`: MCW-ca51 |
 | The merge MUST resolve its conflicts and reconcile the change's code with what that branch changed, even without a conflict, before closeout starts | CW-hdxi |
 | Closeout MUST NOT start until a validation of the merged `HEAD` passed, unless the owner waives it | CW-a6ow |
 | The merge MUST judge whether its resolutions merit another pre-closeout review and whether its validation may be waived, and MUST take either only on the owner's confirmation | CW-a6ow |
@@ -157,7 +157,7 @@ naming a workflow file.
 |---|---|
 | Each section MUST be a coherent, verifiable slice, sized by what it changes and proves, and MUST end at a verification point | CW-5r7l |
 | A section's verification MUST name only evidence an implementation session can produce | CW-5h8e |
-| Evidence only a push produces MUST be named as owed by validation: the workflow, the job, and what it must show | CW-5h8e (as the repository's validation part identifies it); the CI part's form, the workflow, the job, and what it must show: market-change-workflow (section 9) |
+| Evidence only a push produces MUST be named as owed by validation: the workflow, the job, and what it must show | CW-5h8e (as the repository's validation part identifies it); the CI part's form, the workflow, the job, and what it must show: MCW-gvqb |
 | Such evidence MUST NOT gate a task's completion | CW-5h8e |
 | A session finding it in a verification MUST check the task on its own evidence and name it as owed in the section's notes | CW-5h8e |
 | The plan MUST NOT prescribe in `tasks.md` how sections are distributed across sessions or rounds | CW-5r7l |
@@ -192,38 +192,38 @@ commit under validation (CW-zkhs).
 | It MUST fail if the worktree is not clean at its start or after any step, or if `HEAD` is no longer the validated commit | CW-a7dw |
 | It MUST then collect no further evidence, and MAY still stop what it started | CW-a7dw |
 | It MUST NOT regenerate lockfiles or any other tracked file, `tasks.md` included | CW-a7dw |
-| It MUST build the internal packages it tests from the commit, never from wheels another branch left in the shared wheelhouse | market-change-workflow (section 9) |
+| It MUST build the internal packages it tests from the commit, never from wheels another branch left in the shared wheelhouse | MCW-v3tf |
 | A condition validation could repair MUST fail validation and return the slice to implementation | CW-af15 |
-| End-to-end evidence MUST come from a pipeline run whose head commit is the commit under validation | market-change-workflow (section 9); the general rule, each part's evidence from the commit, CW-zkhs |
-| It MUST dispatch, on the change's branch, each workflow a complete section names as owed | market-change-workflow (section 9) |
-| It MUST dispatch only workflows on a fixed list that holds none that publishes | market-change-workflow (section 9) |
-| Adding to the list MUST be a tracked change by the owner | market-change-workflow (section 9) |
-| It MUST judge each named job and what it must show, from a run whose head is the commit | market-change-workflow (section 9) |
-| A named job that fails, or an absent observation, MUST be a failure | market-change-workflow (section 9) |
-| It MUST compare each failure of every other failing job with the same job in `dev`'s latest completed ancestor run, and MUST name that run and its commit | market-change-workflow (section 9) |
-| A failure that run shows too MUST be reported as already failing on `dev` and MUST NOT be a failure | market-change-workflow (section 9) |
-| Any other failure MUST be diagnosed as any failure is | market-change-workflow (section 9) |
-| With no such run, or failures that cannot be compared, the failure MUST be of unknown cause | market-change-workflow (section 9) |
-| Validation MUST build the service images, include the Helm render checks with the chart-to-loader check able to run, and a Helm end-to-end run of a listed set of scenarios | market-change-workflow (section 9) |
-| A skipped chart-to-loader check MUST fail validation | market-change-workflow (section 9) |
-| Every pipeline scenario not on the list MUST be reported as not run against Helm, never as passed | market-change-workflow (section 9) |
+| End-to-end evidence MUST come from a pipeline run whose head commit is the commit under validation | MCW-zk52; the general rule, each part's evidence from the commit, CW-zkhs |
+| It MUST dispatch, on the change's branch, each workflow a complete section names as owed | MCW-3i99 |
+| It MUST dispatch only workflows on a fixed list that holds none that publishes | MCW-3i99 |
+| Adding to the list MUST be a tracked change by the owner | MCW-3i99 |
+| It MUST judge each named job and what it must show, from a run whose head is the commit | MCW-7hr1 |
+| A named job that fails, or an absent observation, MUST be a failure | MCW-7hr1 |
+| It MUST compare each failure of every other failing job with the same job in `dev`'s latest completed ancestor run, and MUST name that run and its commit | MCW-2lzw |
+| A failure that run shows too MUST be reported as already failing on `dev` and MUST NOT be a failure | MCW-2lzw |
+| Any other failure MUST be diagnosed as any failure is | MCW-2lzw |
+| With no such run, or failures that cannot be compared, the failure MUST be of unknown cause | MCW-3yqn |
+| Validation MUST build the service images, include the Helm render checks with the chart-to-loader check able to run, and a Helm end-to-end run of a listed set of scenarios | MCW-qeja (the images and the render checks); MCW-8h0r (the Helm end-to-end run) |
+| A skipped chart-to-loader check MUST fail validation | MCW-qeja |
+| Every pipeline scenario not on the list MUST be reported as not run against Helm, never as passed | MCW-8h0r |
 | Validation MUST NOT fix what it finds in the commit | CW-af15 |
 | Its result MUST be `passed`, `failed`, or `inconclusive`, as defined | CW-e7lm |
 | An environmental failure MUST be put to the owner with its remedy before the record is written, and its part rerun on the owner's word | CW-a1nz |
 | Every attempt's evidence MUST be kept | CW-a1nz |
-| The Helm end-to-end run MUST start from no persistent state left by an earlier deployment | market-change-workflow (section 9) |
+| The Helm end-to-end run MUST start from no persistent state left by an earlier deployment | MCW-8h0r |
 | The record MUST name the end-to-end scenarios that exercise the change, with the basis for each | CW-av28 |
-| Scenario: A deploy fails on volumes left by an earlier install | market-change-workflow (section 9) |
+| Scenario: A deploy fails on volumes left by an earlier install | MCW-8h0r |
 | Scenario: A lockfile is stale | CW-af15 |
-| Scenario: An earlier pipeline run exists on the branch | market-change-workflow (section 9); CW-zkhs's scenario states its general form |
-| Scenario: A pipeline scenario the charts do not serve | market-change-workflow (section 9) |
-| Scenario: Owed CI evidence beside jobs that fail on `dev` | market-change-workflow (section 9) |
-| Scenario: A job not owed fails only on the branch | market-change-workflow (section 9) |
-| Scenario: A new failure in a job that already fails on `dev` | market-change-workflow (section 9) |
-| Scenario: A test that fails on `dev` fails another way on the branch | market-change-workflow (section 9) |
-| Scenario: No `dev` run of the branch's code | market-change-workflow (section 9) |
-| Scenario: A plan owes a workflow that publishes | market-change-workflow (section 9), with the dispatch list's clause group |
-| Scenario: A dispatched run is cancelled | market-change-workflow (section 9), with the CI dispatch's clause group; the general rule it applies is CW-a1nz |
+| Scenario: An earlier pipeline run exists on the branch | MCW-zk52; CW-zkhs's scenario states its general form |
+| Scenario: A pipeline scenario the charts do not serve | MCW-8h0r |
+| Scenario: Owed CI evidence beside jobs that fail on `dev` | MCW-7hr1 (`test · test-deployment-packaging`, a job `tests.yml` has, for one it does not) |
+| Scenario: A job not owed fails only on the branch | MCW-2lzw |
+| Scenario: A new failure in a job that already fails on `dev` | MCW-2lzw |
+| Scenario: A test that fails on `dev` fails another way on the branch | MCW-2lzw |
+| Scenario: No `dev` run of the branch's code | MCW-3yqn |
+| Scenario: A plan owes a workflow that publishes | MCW-3i99, with the dispatch list's clause group |
+| Scenario: A dispatched run is cancelled | MCW-3i99, with the CI dispatch's clause group; the general rule it applies is CW-a1nz |
 
 ## Guarded push of a change branch
 
@@ -232,7 +232,7 @@ refuses the repository's protected branches.
 
 | Clause or scenario | Held by |
 |---|---|
-| An agent MAY push a change's own branch without approval only after the check: `HEAD` attached, worktree clean, branch neither `main` nor `dev`, upstream of the same name | CW-59c7 (the repository's protected branches); `main` and `dev`: market-change-workflow (section 9) |
+| An agent MAY push a change's own branch without approval only after the check: `HEAD` attached, worktree clean, branch neither `main` nor `dev`, upstream of the same name | CW-59c7 (the repository's protected branches); `main` and `dev`: MCW-farr |
 | The push MUST send exactly `HEAD` and MUST NOT be forced | CW-59c7 |
 | A branch with no upstream MAY be pushed to the same name, setting it | CW-59c7 |
 | The check MUST report a refused state and MUST NOT repair it | CW-59c7 |
@@ -541,7 +541,7 @@ review stands.
 | Each row MUST name its models in priority order, each with its harness and effort | CW-ebmo |
 | The wrapper MUST run the first available, falling to the next only when one is unavailable | CW-ebmo |
 | It MUST record the model and effort that ran on the log line | CW-ebmo |
-| The table MUST NOT name a Fable or Astra model | CW-zq4h (the models a repository forbids); Fable and Astra: market-change-workflow (section 9) |
+| The table MUST NOT name a Fable or Astra model | CW-zq4h (the models a repository forbids); Fable and Astra: MCW-y37w |
 | A row MUST NOT list two models of one vendor | CW-zq4h |
 | Another harness's model MUST appear only on a row whose limits it can enforce | CW-zq4h |
 | A run whose models are all unavailable MUST end stopped, naming the reason | CW-1dld |
@@ -553,7 +553,7 @@ review stands.
 | The orchestrating session MUST NOT name one | CW-d1sm |
 | Scenario: The owner reviews on a model the table forbids | CW-d1sm (a model the repository forbids, for a Fable model) |
 | Scenario: Codex is unavailable for a review | CW-clhl |
-| Scenario: A row names a forbidden model | Two models of one vendor: CW-zq4h; a Fable model: market-change-workflow (section 9) |
+| Scenario: A row names a forbidden model | Two models of one vendor: CW-zq4h; a Fable model: MCW-y37w |
 | Scenario: A step's only model is at its usage limit | CW-1dld |
 
 ## Unattended runs record their cost
@@ -580,7 +580,7 @@ bootstrap is the repository's; the wheelhouse scenario says "environments".
 | When the workspace holds the change's records, the computation MUST NOT name the clone and MUST bring the change to the owner, naming both routes | CW-4x66 |
 | Creating a clone MUST be safe to repeat, finish an incomplete clone, and refuse, deleting nothing, a directory as stated | CW-8jyb |
 | The clone's `origin` MUST be the workspace's, and a remote MUST name the workspace | CW-8jyb |
-| The bootstrap MAY run while design proceeds | CW-8npg; the bootstrap command: market-change-workflow (section 9) |
+| The bootstrap MAY run while design proceeds | CW-8npg; the bootstrap command: MCW-uqlq |
 | Implementation and validation MUST NOT start before it has succeeded | CW-8npg |
 | Its state MUST be recorded so running, succeeded, and failed are told apart | CW-8npg |
 | A failed bootstrap MUST be brought to the owner, naming its log, not retried by itself | CW-8npg |
@@ -607,29 +607,29 @@ change's validation resources (CW-ikmm).
 
 | Clause or scenario | Held by |
 |---|---|
-| The Helm part MUST deploy into its change's own namespace, derived from its name | market-change-workflow (section 9) |
-| It MUST NOT install, upgrade, remove, or scale a release or volume in another namespace | market-change-workflow (section 9) |
-| Its images MUST carry a tag fixed per change, and MUST NOT be tagged by commit | market-change-workflow (section 9) |
-| Before deploying, it MUST remove every volume the previous deployment wrote, the out-of-band ones included | market-change-workflow (section 9) |
-| It MUST create the namespace's out-of-band Secrets | market-change-workflow (section 9) |
-| It SHOULD upgrade in place from zero replicas, and MAY uninstall and install when refused, saying so | market-change-workflow (section 9) |
-| Its scenarios MUST run inside the namespace and MUST NOT depend on a local port | market-change-workflow (section 9) |
-| After the scenarios it MUST keep every pod's log and the events, and MUST scale the workloads to zero | market-change-workflow (section 9) |
-| A preflight MUST compare the recorded memory times the running releases with what the node can allocate, and MUST treat a misfit as environmental | market-change-workflow (section 9) |
-| With no figure, or no measurement, it MUST warn and go on | market-change-workflow (section 9) |
-| A pod failing for memory after a passed preflight MUST be classified from the evidence named | market-change-workflow (section 9) |
-| Archive cleanup MUST remove the change's namespace and images | market-change-workflow (section 9); archive cleanup running it: CW-ikmm |
-| It MUST record the memory the latest validation measured, with when; with none, keep the figure and say so | market-change-workflow (section 9) |
-| Conflicting figures at a merge: the one measured later MUST be kept | market-change-workflow (section 9) |
-| Scenario: Two changes are validated at once | market-change-workflow (section 9) |
-| Scenario: A change is validated again | market-change-workflow (section 9) |
-| Scenario: An earlier run crashed with its workloads up | market-change-workflow (section 9) |
-| Scenario: Usage cannot be measured | market-change-workflow (section 9) |
-| Scenario: Archive cleanup after a validation that measured nothing | market-change-workflow (section 9) |
-| Scenario: No memory figure is recorded yet | market-change-workflow (section 9) |
-| Scenario: Two validations pass the preflight together | market-change-workflow (section 9) |
-| Scenario: A commit's own pod is killed for memory | market-change-workflow (section 9) |
-| Scenario: A change's archive is cleaned up | market-change-workflow (section 9) |
+| The Helm part MUST deploy into its change's own namespace, derived from its name | MCW-fnuh |
+| It MUST NOT install, upgrade, remove, or scale a release or volume in another namespace | MCW-fnuh |
+| Its images MUST carry a tag fixed per change, and MUST NOT be tagged by commit | MCW-fnuh |
+| Before deploying, it MUST remove every volume the previous deployment wrote, the out-of-band ones included | MCW-a0hu |
+| It MUST create the namespace's out-of-band Secrets | MCW-a0hu |
+| It SHOULD upgrade in place from zero replicas, and MAY uninstall and install when refused, saying so | MCW-a0hu |
+| Its scenarios MUST run inside the namespace and MUST NOT depend on a local port | MCW-notv |
+| After the scenarios it MUST keep every pod's log and the events, and MUST scale the workloads to zero | MCW-notv |
+| A preflight MUST compare the recorded memory times the running releases with what the node can allocate, and MUST treat a misfit as environmental | MCW-7bia |
+| With no figure, or no measurement, it MUST warn and go on | MCW-7bia |
+| A pod failing for memory after a passed preflight MUST be classified from the evidence named | MCW-epkd |
+| Archive cleanup MUST remove the change's namespace and images | MCW-7ts3; archive cleanup running it: CW-ikmm |
+| It MUST record the memory the latest validation measured, with when; with none, keep the figure and say so | MCW-7ts3 |
+| Conflicting figures at a merge: the one measured later MUST be kept | MCW-7ts3 |
+| Scenario: Two changes are validated at once | MCW-fnuh |
+| Scenario: A change is validated again | MCW-a0hu |
+| Scenario: An earlier run crashed with its workloads up | MCW-a0hu |
+| Scenario: Usage cannot be measured | MCW-7bia |
+| Scenario: Archive cleanup after a validation that measured nothing | MCW-7ts3 |
+| Scenario: No memory figure is recorded yet | MCW-7bia |
+| Scenario: Two validations pass the preflight together | MCW-epkd |
+| Scenario: A commit's own pod is killed for memory | MCW-epkd |
+| Scenario: A change's archive is cleaned up | MCW-7ts3 |
 
 ## The workflow graph is declared in code
 

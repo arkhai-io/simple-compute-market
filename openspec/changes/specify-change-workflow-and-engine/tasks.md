@@ -1094,17 +1094,47 @@ repository's values, beside MCW-5tgp (D3; D10's destination table). Touches
 `openspec/changes/specify-change-workflow-and-engine/specs/market-change-workflow/spec.md`
 and `trace.md`.
 
-- [ ] 9.1 ADDED requirements, each `### Requirement: MCW-xxxx <name>` with a new
+- [x] 9.1 ADDED requirements, each `### Requirement: MCW-xxxx <name>` with a new
       random id and under 500 characters: this repository's validation parts (the
       clause groups of D10's "Validation observes a committed slice" row), each Helm
       validation isolated in its change's namespace (whole), the protected branches,
       the merge's default branch, the forbidden models, and the clone's bootstrap
       (D3; D10).
-- [ ] 9.2 `trace.md`'s rows for the clauses that move here name these ids (D10).
-- [ ] 9.3 Verification: `openspec validate specify-change-workflow-and-engine
+      Done, beside MCW-5tgp: the validation parts, MCW-v3tf (packages built from
+      the commit, by every part that builds), MCW-zk52 (the pipeline), MCW-gvqb (the
+      form of owed CI evidence, which section 8 left to this capability), MCW-3i99
+      (the dispatch list), MCW-7hr1, MCW-2lzw, MCW-3yqn (judging owed jobs and
+      comparing the rest with `dev`), MCW-qeja (images and render checks), MCW-8h0r
+      (the Helm end-to-end run); the Helm namespace, MCW-fnuh, MCW-a0hu, MCW-notv,
+      MCW-7bia, MCW-epkd, MCW-7ts3; and MCW-farr, MCW-ca51, MCW-y37w, MCW-uqlq. The
+      moved scenarios are carried with their text, but MCW-7hr1's, which named a
+      `tests.yml` job that does not exist and now names `test ·
+      test-deployment-packaging`; the requirements no moved scenario fits got new
+      ones.
+- [x] 9.2 `trace.md`'s rows for the clauses that move here name these ids (D10).
+      Done, and the REMOVED entries' Migration lines name them too; no row is left
+      unnamed.
+- [x] 9.3 Verification: `openspec validate specify-change-workflow-and-engine
       --strict`; every requirement under 500 characters; `make check-change
       CHANGE=specify-change-workflow-and-engine`, failing only on the citations of
       files the change creates. End-to-end: none, and none is owed.
+      Evidence: the pinned strict validation passed, run by `make check-change`;
+      each of the 20 requirements' bodies, counted with `awk` as in 8.5, is under 500
+      bytes (the longest, MCW-2lzw, 478), the limit 1.14.1's and not the pinned
+      validator's; every `trace.md` scenario row naming an MCW id names the
+      requirement that carries that scenario in the delta, 20 rows, checked with
+      `awk`; `make check-change` failed only on `check-doc-citations`, its misses
+      the files closeout creates, as in 8.5; `make test` passed.
+
+Notes for the next session. The fresh-context check found no breach of the
+guidance; fixed: MCW-v3tf narrowed to the local part where the rule binds every part
+that builds; MCW-2lzw's "that run" with nothing to refer to; the form of owed CI
+evidence split from the dispatch into MCW-gvqb; the job name. Declined: splitting
+MCW-7ts3 and MCW-8h0r, whose scenarios tell their clauses apart and whose clauses
+share one subject, archive cleanup's removal and one Helm run.
+`market-change-workflow`'s `README.md` provisions and these requirements agree on
+the values (`main` and `dev`, `make init`, the dispatch list in
+`scripts/ci_evidence.py`); closeout's README completes the rest (11.9).
 
 ## 10. The indexed organization's text
 

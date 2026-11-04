@@ -2491,8 +2491,7 @@ behaviour each, under 500 characters, with ids; the merge's default branch is th
 repository's value.
 **Migration**: CW-ab9h, CW-nfdb, CW-hdxi, CW-a6ow, CW-9pbk, CW-ksnu, CW-trdu,
 CW-pkug, CW-1iaz, CW-z83w, CW-neua, CW-3tvs, CW-7d5f; the default branch the merge
-brings in,
-`dev`, moves to `market-change-workflow`.
+brings in, `dev`, moves to `market-change-workflow` as MCW-ca51.
 
 ### Requirement: Index transitions are written by the step that makes them
 
@@ -2523,22 +2522,27 @@ brings in,
 
 **Reason**: Rewritten as requirements of one behaviour each, with ids; the evidence a
 section may owe validation is named by the repository's validation part.
-**Migration**: CW-5r7l, CW-5h8e, CW-0ia3, CW-al17, CW-v6nj, CW-tc82, CW-1u53.
+**Migration**: CW-5r7l, CW-5h8e, CW-0ia3, CW-al17, CW-v6nj, CW-tc82, CW-1u53; the
+form of owed CI evidence, its workflow, job, and what the job must show, moves to
+`market-change-workflow` as MCW-gvqb.
 
 ### Requirement: Validation observes a committed slice
 
 **Reason**: Its general rules are rewritten as requirements of one behaviour each,
 with ids, and validation's parts become the repository's; this repository's parts
 are its own requirements.
-**Migration**: CW-a7dw, CW-af15, CW-zkhs, CW-e7lm, CW-a1nz, CW-av28; the local,
-pipeline, CI, and Helm parts, the dispatch list, and the comparison with `dev` move
-to `market-change-workflow`.
+**Migration**: CW-a7dw, CW-af15, CW-zkhs, CW-e7lm, CW-a1nz, CW-av28; this
+repository's parts move to `market-change-workflow`: the packages built from the
+commit, MCW-v3tf; the pipeline's evidence, MCW-zk52; the owed CI workflows and their
+dispatch list, MCW-3i99; the owed jobs judged and the comparison with `dev`,
+MCW-7hr1, MCW-2lzw, MCW-3yqn; the images and render checks, MCW-qeja; the Helm
+end-to-end run, MCW-8h0r.
 
 ### Requirement: Guarded push of a change branch
 
 **Reason**: Rewritten with an id; the protected branches are the repository's.
 **Migration**: CW-59c7; `main` and `dev` as the protected branches move to
-`market-change-workflow`.
+`market-change-workflow` as MCW-farr.
 
 ### Requirement: Triage of an implementation round
 
@@ -2596,7 +2600,7 @@ CW-svng, CW-5rmh, CW-vdqj, CW-jqi7, CW-drf6, CW-tl5v, CW-56zq, CW-mzyz.
 **Reason**: Rewritten as requirements of one behaviour each, with ids; the models a
 repository forbids are its own.
 **Migration**: CW-ebmo, CW-zq4h, CW-1dld, CW-clhl, CW-d1sm; the forbidden Fable and
-Astra models move to `market-change-workflow`.
+Astra models move to `market-change-workflow` as MCW-y37w.
 
 ### Requirement: Unattended runs record their cost
 
@@ -2608,12 +2612,14 @@ Astra models move to `market-change-workflow`.
 **Reason**: Rewritten as requirements of one behaviour each, with ids; the clone's
 bootstrap is the repository's.
 **Migration**: CW-yib2, CW-4x66, CW-8jyb, CW-8npg, CW-hak6, CW-rf50, CW-c3he,
-CW-xx5f; the bootstrap command, `make init`, is stated in `market-change-workflow`.
+CW-xx5f; the bootstrap command, `make init`, is stated in `market-change-workflow`
+as MCW-uqlq.
 
 ### Requirement: Each Helm validation is isolated in its change's namespace
 
 **Reason**: It holds only for this repository's Helm validation.
-**Migration**: The requirement moves whole to `market-change-workflow`; archive
+**Migration**: The requirement moves whole to `market-change-workflow`, as
+MCW-fnuh, MCW-a0hu, MCW-notv, MCW-7bia, MCW-epkd, and MCW-7ts3; archive
 cleanup's running of the repository's removal of a change's validation resources is
 CW-ikmm.
 
