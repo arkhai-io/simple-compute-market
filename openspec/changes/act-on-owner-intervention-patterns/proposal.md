@@ -31,112 +31,97 @@ findings that cite a written rule, the owner accepted 52 as proposed. So the
 corrections show three things:
 
 - **Guidance that is false.** It sends agents to GitHub Issues for intake, which the
-  owner does not use. It points them to a glossary that does not exist.
+  owner does not use, and to glossary files, a vocabulary skill and ADRs that do not
+  exist — all from an external skill template none of whose skills is installed.
 - **Rules the owner applies repeatedly that nobody wrote down.** For example: no
   guard code for a case nobody can describe; amend a rule or comply, never keep a
-  private exception; prefer an existing open-source library.
+  private exception; prefer an existing open-source library; when a validation may
+  be waived.
 - **Written rules that nothing enforces.** Reviews keep catching the same breaches.
 
 Some of the owner's working preferences also live only in an agent's private memory
 between sessions, where no other agent or person sees them.
 
-`design.md` gives the method, every table, the owner's decisions, and the held-out
-check.
+`design.md` gives the method, every table, and the settled decisions.
 
 ## What Changes
 
-### Triage accepts uncontested outcomes by default
+### Triage accepts uncontested findings by default
 
-- **Triage classifies each finding at triage time.** A finding is either discussed or
-  accepted by default. The rule uses only facts known before it is presented:
-  - the reviewer's severity;
-  - the record it came from;
-  - the agent's stance and proposed outcome;
-  - whether the agent sees an alternative worth weighing, or a fact that would change
-    its recommendation;
-  - what the fix affects.
-
-  The rule's width is settled in design from the evidence in `design.md`.
-- **Discussed findings are presented as today.** One finding per message, in the same
-  order, each disposed of only by the owner's word.
-- **Default-accepted findings are reported, not asked.** At the end of the round,
-  after the discussed findings are disposed of, triage reports every default-accepted
-  finding in one table: its label, severity, the finding in one line, and its outcome.
-  Each is recorded in the triage file as accepted by default, so the record tells it
-  apart from a disposition the owner stated. The fixes are made with the round's other
-  accepted fixes.
-- **Advancing is the default exit.** When the agent recommends advancing, triage takes
-  the advancing exit without asking and reports it beside the table. A recommendation
-  of another round is still argued and asked, as today.
-- **A triage can finish without asking anything.** This happens when every finding is
-  accepted by default and the agent recommends advancing. Today only a triage with
-  nothing to dispose of finishes that way.
-- **The owner can revisit afterwards.** The owner may reopen any default-accepted
-  finding, or the exit, by telling the orchestrating session. A revision is recorded
-  in the intervention ledger as revising that finding. How a revision reaches work
-  already committed or a step already started is a design question.
-- **The batch is measurable.** Default acceptances and their later revisions are
-  recorded, so a later guidance review can measure how often the batch is reopened.
+- **A stated rule classifies each finding at triage time** (D3). A finding is accepted
+  by default when it comes from a review, is not `blocking`, the agent agrees and
+  proposes one edit or fix, neither the reviewer nor the agent lays out an
+  alternative and the agent names nothing that would change its recommendation, and
+  its fix touches no interface, migration, scope or validation environment. Every
+  other finding is discussed as today, one per message.
+- **Reviewers state alternatives on every finding** (D17), in a required
+  `Alternatives:` field that may say `none` with a reason, so the rule's
+  no-alternative condition gets an independent reading.
+- **Default-accepted findings are reported, not asked** (D1). One table — label,
+  severity, the finding in one line, outcome — rides on the triage's last question
+  when it asks one, before any fix, and otherwise goes in its final report. Each is
+  recorded in the triage file as accepted by default, with the classification that
+  admitted it (D18).
+- **Advancing is the default exit** (D2). A recommendation of another round is still
+  argued and asked. A triage with nothing to discuss and an advancing recommendation
+  asks nothing.
+- **The owner can interrupt a running step** (D15). A `stop` command signals a running
+  step so it is logged `stopped` with its session; the orchestrating session records
+  the interrupt and then resumes, reruns or redirects on the owner's word.
+- **The owner can revisit afterwards** (D16). On the owner's direction, the finished
+  triage session is resumed with the owner's words, after any step started since is
+  stopped; it amends the fix in a new commit, logs the correction, and names its exit
+  again. A revisit is a ledger entry marked `revisits default acceptance:` (D19).
+- **Guidance reviews measure it** (D20, D21). A new interactive skill,
+  `guidance-review`, reads every change's records since the last review, reports
+  default acceptances, revisits and a sample audit of classifications against the
+  rule's measured baseline, clusters the owner's corrections, and lists candidate
+  guidance edits for the owner to pick.
+- **Steps recommend waivers** (D22). A step meeting a waivable guard recommends a
+  waiver when a written criterion holds; only the owner waives, and recommendations
+  and their acceptance are counted.
 
 ### The guidance says what the owner actually does
 
-- **The issue-tracker guidance is corrected.** `AGENTS.md` "Issue tracker" and
-  "Triage labels", `docs/agents/issue-tracker.md`, and `docs/agents/triage-labels.md`
-  say GitHub Issues handle intake and triage. The owner does not use them. The
-  corrected guidance says where deferred work goes instead: the open change that owns
-  that area, a new change, or an unowned gap in the index or roadmap. The
-  issue-discovery harness's own issue filing (`docs/development/ISSUE_DISCOVERY.md`)
-  is a separate tool and is unchanged.
-- **Where a defect found during a change is fixed.** The guidance states the owner's
-  practice: a defect found during a change is fixed in that change unless it is large
-  enough, or vague enough, to merit a change of its own or an unowned gap. Today the
-  guidance leans the other way:
-  - `openspec/README.md` treats a growing closeout as a scope-creep signal;
-  - `change-design` prefers a change that closes out on its own.
-
-  Design settles the wording, because the owner holds this as a preference and wants
-  it stated with nuance.
-- **The vocabulary guidance points at a glossary that exists.**
-  `docs/agents/domain.md` tells agents to use the terms defined in each context's
-  `CONTEXT.md`, and to send gaps to a `/domain-modeling` skill. No `CONTEXT.md` and no
-  such skill exist. `AGENTS.md` also cites `docs/adr/`, which does not exist. The
-  guidance names where the shared vocabulary lives and tells agents to use it. A term
-  new to the reader is defined where it first appears and flagged as new, never
-  invented silently. Design settles where the vocabulary lives.
-- **Three rules the owner applies are written down.**
-  - **No guard code for a case nobody can describe.** No refusal, warning, probe or
-    hardening for a case that nobody can describe, or that no integration or
-    end-to-end test could deliberately trigger.
-  - **Amend a rule or comply.** When work conflicts with a written rule, the rule is
-    amended first or the work complies. A private exception is never recorded.
-  - **Prefer an existing open-source library.** Use one wherever it meets the
-    requirements, and build our own only when none does.
-- **The owner's working preferences move from agent memory into the repository.** The
-  candidates are listed in `design.md`. For example, a recorded note or a new change's
-  proposal on the current branch does not breach one change per branch. The owner
-  picks which to promote.
+- **Deferred work** (D5). The issue-tracker and triage-label documents and sections
+  are deleted; `AGENTS.md` says where deferred work goes instead. The issue-discovery
+  harness's own filing is unchanged.
+- **Defects found during a change** (D6). `openspec/README.md` states the owner's
+  preference: a small, understood defect is fixed in the change that found it; a large
+  or vague one gets its own change or an unowned gap. The review, triage, design and
+  implementation skills align to it; implementation fixes such a defect and records it
+  as outside the plan.
+- **Vocabulary** (D11). `docs/agents/domain.md` names where terms live — product terms
+  in `ARCHITECTURE.md`, subsystem terms in each specification, workflow terms in a new
+  `Terms` section of `change-workflow`'s specification — and states the rule for new
+  terms. The ADR guidance is dropped (D23).
+- **Three rules the owner applies are written down** (D8–D10): no speculative guard
+  code; amend a rule or comply; prefer an existing open-source library.
+- **Working preferences move from agent memory** (D12): notes and follow-up proposals
+  across changes; stating bookkeeping in a design discussion rather than asking it; a
+  skill restates guidance only briefly, with a citation, and never stricter than its
+  source.
+- **Six written rules get checks** (D24): permanent destinations for decisions,
+  history wording in added comments, one version bump per changed package, private-key
+  blocks, reasons for function-local imports, and the capability index, whose missing
+  `contact-exchange-settlement` row is added.
 
 ### Not changed, by the owner's decision
 
-- **No narrowest-fix rule.** The owner's scope growth comes from deliberately unifying
-  the VM and bare-metal domains, which the architecture already favours. A rule
-  steering agents toward the narrowest fix would work against that.
-- **The rule for stored-state migrations stays as written.** Whether anything is
-  deployed is the team's decision, made outside the repository, and a feature branch
-  cannot know where its change will run. So no "never deployed" exception can be
-  derived from the repository.
-- **Promoting principles stays as it is.** The design agent lists candidate
-  principles, and the owner picks and clarifies each promotion.
+- **No narrowest-fix rule** (D7). The owner's scope growth comes from deliberately
+  unifying the VM and bare-metal domains, which the architecture already favours.
+- **The rule for stored-state migrations stays as written** (D13).
+- **Promoting principles stays as it is** (D14).
 
 ### Out of scope
 
-- **Folding revisits into the workflow graph.** If revisits of default acceptances
-  turn out to be frequent, normalizing them into the workflow graph is a later change.
+- **Folding revisits into the workflow graph** (D4), proposed by a guidance review if
+  revisits become frequent.
+- **Adopting ADRs** (D23), not proposed.
+- **Skills citing guidance instead of restating it**, an open question in
+  `layer-engineering-guidance`.
 - **The design discussion's presentation.** It already presents consequence and
   convention decisions together for confirmation.
-- **Mechanical checks and agent-recommended waivers.** Checks for the written rules
-  reviews keep catching, and agents recommending validation waivers, are open
-  questions in `design.md`. They join this change only if design takes them in.
 
 ## Capabilities
 
@@ -146,46 +131,70 @@ None.
 
 ### Modified Capabilities
 
-- `change-workflow`: the owner's touchpoints in triage, the disposition of every
-  finding, the intervention ledger's treatment of revised default acceptances, and the
-  one-finding-per-turn rule for orchestrated triage.
+- `change-workflow`: default acceptance and its report in triage, the advancing
+  default, reviewers' alternatives, the owner's interrupt of a running step, revisiting
+  a default acceptance, the ledger's marking of revisits and recommended waivers,
+  waiver recommendations, guidance reviews, and the checks a change's closing checks
+  run.
 
 ## Impact
 
-- **Specification.** `openspec/specs/change-workflow/spec.md` changes these
-  requirements:
-  - "Phases and owner touchpoints";
-  - "Triage of every finding";
-  - "Intervention ledger";
-  - "Discussion steps stay conversations with the owner".
-
-  `openspec/specs/change-workflow/architecture.md` changes its "Triage" section.
+- **Specification.** `openspec/specs/change-workflow/spec.md` modifies "Phases and
+  owner touchpoints", "Review records", "Triage of every finding", "Intervention
+  ledger", and "Discussion steps stay conversations with the owner"; adds "The owner
+  interrupts a running step", "The owner revisits a default acceptance", "Waivers are
+  recommended and the owner's to take", "Guidance reviews", and "A change's closing
+  checks enforce written rules"; and gains a `## Terms` section at closeout.
+  `openspec/specs/change-workflow/architecture.md` changes "What the workflow is for",
+  "The owner is interrupted only for judgement", "The orchestrator relays and routes",
+  "Reviews are files", and "Triage".
+- **Tooling.**
+  - `scripts/run_change_step.py` and `scripts/change_workflow/` (`cli.py`,
+    `wrapper.py`, `running.py`, `log.py`): the `stop` command, the `--resumes`
+    direction, and resuming a finished triage under it.
+  - `scripts/change_workflow/review.py`: the `Alternatives` field.
+  - `scripts/check_change.py` and new check scripts under `scripts/`: destinations,
+    history wording, version bumps, local imports, the capability index.
+  - `scripts/check_public_content.py`: private-key blocks.
+  - `scripts/change_next_step.py`: a resumed triage's later outcome governs; no new
+    node or exit.
 - **Skills.**
-  - `.agents/skills/change-triage/SKILL.md` changes its presenting, recording and
-    exit steps, and its outcome for a defect outside the change's scope.
-  - `.agents/skills/change-orchestrate/SKILL.md` changes how it relays the round's
-    table and routes a revisit.
-  - `.agents/skills/change-design/SKILL.md` changes its preference on splitting a
-    change.
+  - `.agents/skills/change-triage/SKILL.md`: the rule, the classification, the table,
+    the advancing default, revisits, waiver recommendations, and the defect outcome.
+  - `.agents/skills/change-orchestrate/SKILL.md`: relaying the table, interrupting a
+    step, and routing a revisit.
+  - `.agents/skills/change-review/SKILL.md`: the `Alternatives` field and the scope and
+    consistency lenses.
+  - `.agents/skills/change-implement/SKILL.md`: a found defect.
+  - `.agents/skills/change-design/SKILL.md`: decisions under `### D<n>` headings, the
+    splitting question, stating bookkeeping, and waiver recommendations after a return.
+  - `.agents/skills/change-validate/SKILL.md` and
+    `.agents/skills/change-archive-cleanup/SKILL.md`: waiver recommendations.
+  - `.agents/skills/guidance-review/SKILL.md`: new, linked from `.claude/skills/` and
+    `.codex/skills/`.
 - **Guidance.**
-  - `AGENTS.md`: "Issue tracker", "Triage labels", "Domain docs", and a section for
-    rules that conflict with work.
-  - `docs/agents/issue-tracker.md` and `docs/agents/triage-labels.md`.
-  - `docs/agents/domain.md`.
-  - `docs/agents/change-workflow.md`.
-  - `openspec/README.md`.
-  - `docs/development/ARCHITECTURE.md`, for the guard-code and library rules.
-- **Tooling.** No change to the next-step computation is expected. The advancing exit
-  is recorded as it is today. Design confirms this.
+  - `AGENTS.md`: "Deferred work" replacing "Issue tracker" and "Triage labels"; "Domain
+    docs" without ADRs; a rule for work that conflicts with a written rule.
+  - `docs/agents/issue-tracker.md` and `docs/agents/triage-labels.md`: deleted.
+  - `docs/agents/domain.md`: rewritten.
+  - `docs/agents/change-workflow.md`: the table, default acceptance, interrupts,
+    revisits, "Waivers", notes and proposals across changes, and skills restating
+    guidance.
+  - `openspec/README.md`: defects found during a change, and the scope-creep sentence.
+  - `docs/development/ARCHITECTURE.md`: the guard-code and library rules, and the
+    key-block rule under "Public repository content checks".
+  - `openspec/specs/README.md`: the `contact-exchange-settlement` row.
 - **Coordination.**
   - `layer-engineering-guidance` restructures the guidance by layer. This change lands
-    first, and that change inherits these edits in its design review.
+    first, and that change inherits these edits in its design review. Its design gains
+    the open question on skills citing instead of restating.
+  - `align-package-paths-with-layers` has an open point on `domain.md`'s platform
+    context, which this change's rewrite dissolves; its design reverifies once this
+    change lands.
   - `extract-change-workflow-repository` moves the skills, the workflow specification
-    and the guidance to a separate repository.
-  - `add-skill-extension-points` restructures the skills into slots.
-
-  Neither of those two has started, and whichever lands second carries the other's
-  edit.
+    and the guidance to a separate repository, and `add-skill-extension-points`
+    restructures the skills into slots. Neither has started, and whichever lands second
+    carries the other's edit.
 
 ## Permanent documentation impact
 
@@ -196,18 +205,49 @@ None.
 
 ### Knowledge to promote
 
-- The default-acceptance rule and the advancing default:
-  `openspec/specs/change-workflow/spec.md`.
-- Why a class of findings is accepted by default, what keeps the owner's later
-  revision possible, and the evidence the rule rests on in summary:
+- D1, the table and when it reaches the owner: `openspec/specs/change-workflow/spec.md`
+  ("Triage of every finding"), and `docs/agents/change-workflow.md`.
+- D2, the advancing default: `openspec/specs/change-workflow/spec.md` ("Phases and
+  owner touchpoints"), and `architecture.md`, "The owner is interrupted only for
+  judgement".
+- D3, the default-acceptance rule: `openspec/specs/change-workflow/spec.md`; why the
+  class is accepted by default, and the evidence in summary with Rule E's baseline:
   `openspec/specs/change-workflow/architecture.md`, "Triage".
-- The table, the record of a default acceptance, and how to revisit one:
+- D4, revisits outside the graph: `openspec/specs/change-workflow/architecture.md`,
+  "Triage".
+- D5, deferred work: `AGENTS.md`.
+- D6, defects found during a change: `openspec/README.md`.
+- D7: no permanent destination — a decision not to add a rule.
+- D8, no speculative guard code: `docs/development/ARCHITECTURE.md`.
+- D9, amend a rule or comply: `AGENTS.md`.
+- D10, prefer an existing library: `docs/development/ARCHITECTURE.md`.
+- D11, where the vocabulary lives and the rule for new terms: `docs/agents/domain.md`;
+  the workflow's terms: `openspec/specs/change-workflow/spec.md`, "Terms".
+- D12, the promoted preferences: `docs/agents/change-workflow.md` ("Skills", and notes
+  and proposals across changes) and `.agents/skills/change-design/SKILL.md`.
+- D13: no permanent destination — the existing rule stays as written.
+- D14, the one promoted principle, that the owner can always reach a running step:
+  `openspec/specs/change-workflow/architecture.md`, "The orchestrator relays and
+  routes".
+- D15, interrupting a running step: `openspec/specs/change-workflow/spec.md`,
+  `architecture.md` ("The orchestrator relays and routes"), and
   `docs/agents/change-workflow.md`.
-- Where deferred work goes, and where a defect found during a change is fixed:
-  `AGENTS.md` and `openspec/README.md`.
-- The vocabulary rule and where the vocabulary lives: `docs/agents/domain.md`, and the
-  vocabulary's own home as design settles.
-- No speculative guard code, and prefer an existing library:
-  `docs/development/ARCHITECTURE.md`.
-- Amend a rule or comply: `AGENTS.md`.
-- Each promoted working preference: the skill or guidance document design assigns.
+- D16, revisiting a default acceptance: `openspec/specs/change-workflow/spec.md`,
+  `architecture.md` ("Triage"), and `docs/agents/change-workflow.md`.
+- D17, reviewers' alternatives: `openspec/specs/change-workflow/spec.md` ("Review
+  records") and `architecture.md`, "Reviews are files".
+- D18, the classification record: `openspec/specs/change-workflow/spec.md` ("Triage of
+  every finding").
+- D19, the revisit marker: `openspec/specs/change-workflow/spec.md` ("Intervention
+  ledger") and `docs/agents/change-workflow.md`, "The ledger".
+- D20, guidance reviews: `openspec/specs/change-workflow/spec.md` ("Guidance reviews")
+  and `architecture.md`, "Triage".
+- D21, how the revisit rate is read: `openspec/specs/change-workflow/architecture.md`,
+  "Triage".
+- D22, waiver recommendations and their criteria: `openspec/specs/change-workflow/spec.md`
+  and `docs/agents/change-workflow.md`, "Waivers".
+- D23: no permanent destination — guidance is removed.
+- D24, the six checks: `openspec/specs/change-workflow/spec.md` ("A change's closing
+  checks enforce written rules"), `docs/agents/change-workflow.md`, and, for the
+  key-block rule, `docs/development/ARCHITECTURE.md`, "Public repository content
+  checks".
