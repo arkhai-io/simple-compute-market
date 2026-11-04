@@ -992,30 +992,99 @@ already in it). Touches
 `openspec/changes/specify-change-workflow-and-engine/specs/change-workflow/spec.md`
 and a new `openspec/changes/specify-change-workflow-and-engine/trace.md`.
 
-- [ ] 8.1 ADDED requirements written from D10's outline, each `### Requirement:
+- [x] 8.1 ADDED requirements written from D10's outline, each `### Requirement:
       CW-xxxx <name>` with a new random id, one behaviour in under 500 characters,
       its cases as scenarios; the general rules of every "general" and "split" row
       of D10's destination table, with the seam each split row keeps; and the
       commands the requirements name are the command's, not the old scripts'
       (D10; D3; D4).
-- [ ] 8.2 The conversion's rules are requirements of their own, and so are the
+      Done: 136 new requirements beside the nine the design wrote, in the outline's
+      order (the process; implementation and validation; reviews and triage; the
+      engine; the public surface), which closeout's `index.md` groups. Two of the
+      design's requirements were over 500 characters: CW-5qne's exit statuses
+      became CW-m7fk, and CW-x7jd was tightened. Every old scenario is carried
+      under the id that holds its rule; a requirement no old scenario fits got a
+      new one. The seams: the merge brings in the branch the change lands on, or
+      the repository's default (CW-hdxi); validation's parts are the repository's,
+      each part's evidence from the commit (CW-zkhs); the push refuses the
+      repository's protected branches (CW-59c7); a repository may forbid models
+      (CW-zq4h); the bootstrap is the repository's (CW-8npg); archive cleanup runs
+      the repository's removal of validation resources (CW-ikmm). Scenarios name
+      `scripts/change-workflow start …`, `check graph`, and `--allow` where the old
+      ones named make targets.
+- [x] 8.2 The conversion's rules are requirements of their own, and so are the
       round view's mechanics, so that `remove-workflow-log-conversion` and
       `workflow-round-review-without-merges` each meet known ids (D11).
-- [ ] 8.3 Every one of the 24 existing requirements REMOVED, its `**Reason**` and
+      Conversion: CW-qj77, CW-h12x, CW-42me, CW-o1ca, CW-zniv, CW-ajcm, CW-95xp,
+      CW-v8mq. The converter's refusal of a newer log moved out of CW-x7jd into
+      CW-h12x with its scenario, so removing `convert` touches no format
+      requirement. The round view: CW-aoby, CW-4svs, CW-9mrq, CW-78ul, CW-n44s,
+      CW-uq5q, CW-gd24, CW-rgws, CW-te38.
+- [x] 8.3 Every one of the 24 existing requirements REMOVED, its `**Reason**` and
       its `**Migration**` naming the ids that hold its rules, in `change-workflow` or
       `market-change-workflow` (D10).
-- [ ] 8.4 `trace.md`: one row per MUST clause and per scenario of the existing
+      Done; where a requirement's scenarios went to other requirements' ids, its
+      Migration names those too. What moves to `market-change-workflow` is named
+      by what it is; section 9 names its ids.
+- [x] 8.4 `trace.md`: one row per MUST clause and per scenario of the existing
       specification, naming the id that holds it, or "dropped" with the reason;
       every placement agreeing with D10's destination table. A clause the trace
       cannot place as the table does stops the section and returns the change to
       design (D10).
-- [ ] 8.5 Verification: `openspec validate specify-change-workflow-and-engine
+      Done, covering MAY, SHALL, and SHOULD clauses as well as MUST; nothing is
+      dropped, and every placement agrees with the table. Two scenarios the table
+      names in neither column, "A plan owes a workflow that publishes" and "A
+      dispatched run is cancelled", go with the clause group they exercise, the CI
+      dispatch, to `market-change-workflow`. The rows of this repository's part
+      read "market-change-workflow (section 9)" until section 9 names the ids.
+- [x] 8.5 Verification: `openspec validate specify-change-workflow-and-engine
       --strict` under the pinned 1.14.0, and every ADDED requirement's text under
       500 characters, read from the delta; `trace.md` names every requirement and
       scenario heading of `openspec/specs/change-workflow/spec.md`, checked by
       listing those headings with `grep` against the trace's rows; `make
       check-change CHANGE=specify-change-workflow-and-engine`, failing only on the
       citations of files the change creates. End-to-end: none, and none is owed.
+      Evidence: the pinned strict validation passed, run by `make check-change`;
+      each ADDED requirement's body, from its heading to its first scenario, read
+      with `awk` from the delta, is under 500 bytes (the longest, CW-m4ps, 492),
+      and each holds MUST or SHALL and a scenario; the headings were listed with
+      `awk` rather than `grep`, matched exactly against the trace's section
+      headings and `Scenario:` rows: 24 requirements and 185 scenarios, none
+      missing, and each scenario row's id is the requirement the delta carries it
+      under, but for the four the trace says move or split; `make check-change`
+      failed only on `check-doc-citations`, its misses the files closeout creates
+      (the two `index.md`, `market-change-workflow`'s `spec.md`); `make test`
+      passed. The 500-character limit is 1.14.1's, which the pinned validator does
+      not apply, so the `awk` count is its only evidence.
+
+Notes for the next session. The fresh-context check found no breach of the
+guidance; its findings were fixed but two. Fixed: Migration lists missing the ids
+that hold moved scenarios; the converter's refusal kept in CW-x7jd (now CW-h12x);
+the CI part's form of owed evidence, which now goes to section 9's CI requirement
+(its trace row says so); scenarios naming this repository's values or targets in
+general requirements (CW-h8vm's `dev`, CW-4yhk's `make lock`), a scenario saying
+what a make target used to do (CW-r3ka), `make orchestrate` for the command
+(CW-w2ld), and `start` without its step and change (CW-tl5v); trace notes for the
+reworded scenarios and the rules a scenario alone stated. Declined: splitting
+CW-r9d2, CW-a6ow, and CW-3tvs, each two clauses of one subject that no scenario
+tells apart.
+
+Owed elsewhere, and not this section's to fix: the `Contract:` docstrings of
+`scripts/change_workflow/` (`__init__.py`, `find.py`, `wrapper.py`, `steps.py`,
+`next_step.py`, `convert.py`, `tasks.py`, `round_view.py`, `history.py`, `clone.py`,
+`cost_report.py`, `push.py`) and of `scripts/validate_slice.py`,
+`scripts/validate_parallel.py`, `scripts/change_namespace.py`, and
+`scripts/ci_evidence.py`, and `.claude/change-steps.toml`'s header comment, cite
+`change-workflow` requirements by the names this rewrite removes. Once the archive
+merges the delta they name headings that no longer exist, and `make
+check-doc-citations` checks paths, not headings, so nothing reports it. No task
+moves them to the ids, and closeout cannot (CW-pkug: a code edit returns the change
+to implementation); the step table's comment is the orchestrator's. This is a
+missing task for the round's triage to add before closeout: each citation names the
+ids that hold its rules, in `change-workflow` or `market-change-workflow`. The
+permanent documents citing the old names (`docs/agents/change-workflow.md`,
+`docs/development/DEPLOYMENT_AND_CONFIG.md`, the capability's `README.md`) are
+closeout's to rewrite (11.9).
 
 ## 9. The `market-change-workflow` specification
 
