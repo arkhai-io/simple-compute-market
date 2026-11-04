@@ -514,8 +514,8 @@ The option-shape producer gate is satisfied: mediation's published
 only term horizon. The schema and regenerated vectors are vendored together;
 `kit/arkhai-mediation/schema/SOURCE.md` records the exact revision. No Agreement
 rewriting or compatibility projection is used, so committed hashes and signatures
-remain exact. This resolves the mapping constraint tracked in
-[payments #4](https://github.com/arkhai-io/arkhai-payments/issues/4).
+remain exact. This resolves the mapping constraint the producer tracked before publishing the
+revision.
 
 The published revision supplies D10's DeliveryEndClaim, SignedDeliveryEndClaim, canonical frame, Filing/Append.concurrence, signed ruling basis, respondent listing and producer mapping/guard vectors. Closed entries distinguish a nothing-held dismissal without basis from a decided closure requiring basis. Marketplace identities and proofs use per-scheme canonical wire definitions. The hosted development service is still on the older revision: vendoring satisfies the publication gate, not deployment, setup enablement, or live qualification.
 

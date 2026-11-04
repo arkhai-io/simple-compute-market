@@ -504,8 +504,8 @@ Edits required outside this owned directory (parent coordination, not performed 
 
 **Coordinated status:** the campaign index's row is the authoritative status, `in
 design` until this change's own design review has run. The published payments
-partialPeriod revision is ready for foundation 8.1 vendoring; the mediation baseline is published on arkhai-payments main b98fed26 (payments 3be127e4). delivery_end and its canonical payload/concurrence/respondent read are a later proposed, unpublished revision gated at foundation 12.1, so those scenarios remain proposed-only. Exact producer revisions are
-recorded only in each kit's schema/SOURCE.md at vendoring. The producer's own acknowledgement fixture is a
+partialPeriod revision is ready for foundation 8.1 vendoring; the mediation contract, including its delivery_end revision, is published and vendored by the foundation at 12.1, identified by content in `kit/arkhai-mediation/schema/SOURCE.md` and `publication.json`; the hosted development service still runs an older revision, so vendoring is not deployment. Exact producer revisions are
+recorded only in each kit's schema/SOURCE.md. The producer's own acknowledgement fixture is a
 locally framed v2 exchange, so this change's lanes must exercise acknowledgements from shipped SCM traffic. No further full design round is recommended: the central
 changes are settled owner decisions and the remaining choices above are explicit.
 Implementation remains section-gated on the named contract/fixture seams, and
