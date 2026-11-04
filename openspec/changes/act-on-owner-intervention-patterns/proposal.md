@@ -101,10 +101,14 @@ between sessions, where no other agent or person sees them.
   across changes; stating bookkeeping in a design discussion rather than asking it; a
   skill restates guidance only briefly, with a citation, and never stricter than its
   source.
-- **Six written rules get checks** (D24): permanent destinations for decisions,
+- **Seven written rules get checks** (D24): permanent destinations for decisions,
   history wording in added comments, one version bump per changed package, private-key
-  blocks, reasons for function-local imports, and the capability index, whose missing
-  `contact-exchange-settlement` row is added.
+  blocks, reasons for function-local imports, the capability index, whose missing
+  `contact-exchange-settlement` row is added, and one lock revision across every
+  `uv.lock`. Agents on different uv releases have been rewriting each other's locks.
+  So the uv minimum rises to the release that writes the repository's lock revision,
+  the environment refresh checks it, and the locks still at the older revision are
+  relocked.
 
 ### Not changed, by the owner's decision
 
@@ -156,6 +160,10 @@ None.
   - `scripts/check_change.py` and new check scripts under `scripts/`: destinations,
     history wording, version bumps, local imports, the capability index.
   - `scripts/check_public_content.py`: private-key blocks.
+  - `scripts/check_locks.py`: one lock revision. `scripts/check_uv_version.py`: the
+    raised minimum. `scripts/uv_project.py`: `reinit` checks the uv version.
+    `.github/workflows/tests.yml` and `e2e.yml`: the uv they install. The `uv.lock`
+    files still at the older revision: relocked.
   - `scripts/change_next_step.py`: a resumed triage's later outcome governs; no new
     node or exit.
 - **Skills.**
@@ -184,6 +192,8 @@ None.
   - `docs/development/ARCHITECTURE.md`: the guard-code and library rules, and the
     key-block rule under "Public repository content checks".
   - `openspec/specs/README.md`: the `contact-exchange-settlement` row.
+  - `docs/development/BUILD_AND_PACKAGING.md`: the raised uv minimum, the lock-revision
+    check, and drift in both directions.
 - **Coordination.**
   - `layer-engineering-guidance` restructures the guidance by layer. This change lands
     first, and that change inherits these edits in its design review. Its design gains
@@ -247,7 +257,7 @@ None.
 - D22, waiver recommendations and their criteria: `openspec/specs/change-workflow/spec.md`
   and `docs/agents/change-workflow.md`, "Waivers".
 - D23: no permanent destination — guidance is removed.
-- D24, the six checks: `openspec/specs/change-workflow/spec.md` ("A change's closing
-  checks enforce written rules"), `docs/agents/change-workflow.md`, and, for the
-  key-block rule, `docs/development/ARCHITECTURE.md`, "Public repository content
-  checks".
+- D24, the seven checks: `openspec/specs/change-workflow/spec.md` ("A change's closing
+  checks enforce written rules"), `docs/agents/change-workflow.md`; for the key-block
+  rule, `docs/development/ARCHITECTURE.md`, "Public repository content checks"; and,
+  for the lock revision and the uv minimum, `docs/development/BUILD_AND_PACKAGING.md`.

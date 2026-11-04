@@ -4,9 +4,13 @@
 
 The orchestrating session MUST, on the owner's word, be able to stop a running
 unattended step of its change through a command that signals the process the run
-recorded as it started, so that the run is logged `stopped` with its session; when two
+recorded as it started, so that the run is logged `stopped` with its session and any
+process the run started is ended; when two
 runs of the change are in progress, the command MUST name the step it stops, and it
-MUST refuse, stopping nothing, when no run of the change is in progress. The owner's
+MUST refuse, stopping nothing, when no run of the change is in progress. The command
+MUST signal only a process it verifies is still the recorded run, when it selects the
+run and again immediately before the signal, and MUST refuse, signalling nothing, a
+record whose run no longer holds it or a run that ends meanwhile. The owner's
 interrupt MUST be recorded as an owner's decision that resolves no run. A stopped run
 MUST then be recovered as any stop is: resumed with the owner's words, rerun, or
 resolved by the owner's decision. A stop MUST commit nothing, and an interrupted
@@ -24,8 +28,14 @@ review MUST publish nothing.
 
 - **WHEN** a validation and a review of the change run side by side and the owner
   interrupts the review
-- **THEN** the stop names the review, the validation runs on, and the review publishes
-  nothing and is rerun
+- **THEN** the stop names the review, the validation runs on, the review is logged
+  `stopped`, its reviewer process is ended, and the review publishes nothing and is
+  rerun
+
+#### Scenario: A run record outlives its run
+
+- **WHEN** the stop command finds a record whose run is no longer holding it
+- **THEN** it refuses, naming the record as stale, and signals nothing
 
 #### Scenario: Nothing is running
 
@@ -95,14 +105,22 @@ took, and the terms the owner asked about. It MUST group the owner's corrections
 guidance that is false, rules applied but unwritten, and rules written but unenforced,
 and MUST list candidate guidance edits for the owner to pick. On the owner's word it
 MUST write the proposal of a change carrying the edits picked, stating the period it
-covered.
+covered. Every guidance review, whether or not it writes a proposal, MUST record its
+period, its headline figures, and the proposal it wrote or none, and the next guidance
+review MUST start where the last recorded period ended.
 
 #### Scenario: The owner runs a guidance review
 
 - **WHEN** the owner runs a guidance review after several changes have been triaged
-- **THEN** it reads their records from where the newest proposal it wrote says its
-  period ended, reports the figures and the audit, and writes a proposal only for the
-  edits the owner picks
+- **THEN** it reads their records from the end of the last recorded period, reports
+  the figures and the audit, writes a proposal only for the edits the owner picks, and
+  records its period
+
+#### Scenario: A guidance review picks nothing
+
+- **WHEN** the owner picks no edit in a guidance review
+- **THEN** no proposal is written, the review's period is recorded with no proposal,
+  and the next guidance review starts where that period ended
 
 ### Requirement: A change's closing checks enforce written rules
 
@@ -113,8 +131,12 @@ list; when a package version differs from its version at the merge-base with the
 branch the change lands on by more than one SemVer step; when an import its diff adds
 inside a function has no comment giving its reason; or when a capability with a
 specification has no row in the capability index, or a row links no capability. The
-public-content check MUST refuse a private-key block whose body holds a line of 40 or
-more base64 characters, reporting its location without its content.
+public-content check MUST find a private-key block across real line breaks and escaped
+ones alike, and MUST refuse one whose body, without whitespace and escapes, holds 32 or
+more base64 characters, reporting its location without its content. The packaging
+checks MUST fail when a committed lock carries a lock revision other than the one the
+repository's minimum uv writes, and every command that may rewrite a lock MUST first
+refuse a uv older than that minimum.
 
 #### Scenario: A decision names no destination
 
@@ -157,9 +179,29 @@ more base64 characters, reporting its location without its content.
 
 #### Scenario: A real key is staged
 
-- **WHEN** a staged file holds a private-key block with base64 key lines
+- **WHEN** a staged file holds a private-key block with base64 key lines, wrapped at
+  any length
 - **THEN** the public-content check refuses it, naming the file and line without
   echoing the key
+
+#### Scenario: A key is embedded as one escaped string
+
+- **WHEN** an added source line holds a private-key block as one string, its line
+  breaks written as `\n` escapes, with key material for a body
+- **THEN** the public-content check refuses it, naming the file and line without
+  echoing the key
+
+#### Scenario: A lock is written by another uv release
+
+- **WHEN** a committed `uv.lock` carries a lock revision other than the one the
+  repository's minimum uv writes
+- **THEN** the packaging checks fail, naming the lock and both revisions
+
+#### Scenario: A package environment is refreshed with an older uv
+
+- **WHEN** a package's environment is refreshed, which may rewrite its lock, with a uv
+  older than the repository's minimum
+- **THEN** the refresh refuses before running uv, naming both versions
 
 ## MODIFIED Requirements
 

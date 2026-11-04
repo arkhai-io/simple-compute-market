@@ -5,7 +5,10 @@ first (D1–D14, recorded before the discussion opened). The discussion then set
 the batch rule, how revisits and interrupts work, the reviewer's alternatives, the
 guidance-review skill, waivers, the mechanical checks, and the wording and placement
 of each guidance edit. Corrections found while loading the change reshaped several
-of these; they are folded into the context below.
+of these; they are folded into the context below. The triage of design review 20
+amended D15 (the review runner's interrupt, and the run's identity as a held lock),
+D17's place in the cadence, D20 (a period ledger), and D24 (the key-block measure, and
+a seventh check for the lock revision).
 
 ## Context
 
@@ -363,7 +366,25 @@ The orchestrating session is free while a step runs a long task, so the owner ca
 reach it mid-step. `python3 scripts/run_change_step.py stop <change> [--step <step>]`
 reads the change's run records and sends SIGTERM to the recorded process: the one
 run, or, with validation and a review side by side, the step named. The wrapper's
-existing handler logs the run `stopped` with its session. The orchestrating session
+existing handler logs the run `stopped` with its session. The review runner gains the
+same handling: SIGTERM raised as the wrapper's termination inside `review_and_log`
+reaches its existing interruption path, which logs the review `stopped`, and its
+record is removed as the run ends. Every runner ends the reviewer or agent process it
+started before the run is logged, as `run_claude` already does and `run_codex` does
+not today, so no orphaned reviewer goes on to write output after the stop.
+
+`stop` signals only a process it verifies is still the recorded run. Each run holds an
+exclusive lock on its record file for as long as it runs; a record counts as a live run
+only while its lock is held, for `stop` and for the round view's check alike. `stop`
+checks the lock when it selects the run and again immediately before it signals. A
+stale record — its lock free, the run killed before it could remove it — a changed
+identity, or a run that exits meanwhile is a refusal that signals nothing. The kernel
+releases the lock however the process ends, SIGKILL included, and the lock's file
+descriptor is not inherited by the run's children, so neither a reused process id nor
+a surviving child can pass for the run. The check and the signal are microseconds
+apart, so a process id reused inside that window is not a practical case.
+
+The orchestrating session
 records the owner's interrupt as an owner's decision line that resolves nothing, then
 does what the owner says: resume the session with the owner's words, rerun, or resolve
 the stop and direct the change elsewhere, as it recovers any stop. An interrupted
@@ -375,6 +396,11 @@ work waits uncommitted for its resume.
   leaves no log line.
 - **Rejected: delivering words into a running session.** Headless runs take no input
   mid-turn; that would be a harness capability.
+- **Rejected: a separate cancel operation for reviews** (20 F1). A second command for
+  the same act; the review runner's existing interruption path needs only the signal.
+- **Rejected: comparing the process's recorded start time** (20 F2). It needs
+  `/proc/<pid>/stat` on Linux and another source elsewhere, a platform branch for the
+  guarantee the held lock gives through `fcntl` on both.
 
 ### D16 — A revisit after the fixes resumes the finished triage
 
@@ -475,8 +501,8 @@ alone holds every cleaned-up change's records. It is not a step of a change: no 
 node, no step-table row, no outcome. It:
 
 1. reads every ledger, triage record and workflow log since the last guidance review —
-   where the newest proposal it wrote says its period ended, or from a date the owner
-   gives;
+   from the end of the last period its period ledger records, or, before the first
+   review, from a date the owner gives;
 2. reports the disposition figures, default acceptances and their revisits (before
    the fix and after), an audit of a sample of `Classification:` lines against their
    findings, waiver recommendations and how many the owner accepted, by criterion
@@ -488,7 +514,16 @@ node, no step-table row, no outcome. It:
    including whether to keep, narrow or widen Rule E and whether any waiver criterion
    has earned acceptance by default;
 5. on the owner's word, writes the proposal of a change carrying the picks, stating
-   the period it covered.
+   the period it covered;
+6. whatever the owner picks, nothing included, appends one line to its period ledger:
+   the period's start and end, the headline figures — default acceptances, revisits
+   before and after the fix, the audit's sample and its disagreements, waiver
+   recommendations and acceptances — and the proposal it wrote, or `none`.
+
+The period ledger is an untracked file in the owner's workspace beside the cleaned-up
+change records it measures; planning fixes its path. A review that picks nothing stays
+a read-only session apart from that line, and the next review starts where the last
+line ends and has the earlier figures to compare with (D21).
 
 Its method is this design's "Evidence" sections, which move into the skill. What
 reaches the repository is aggregates and the principles drawn from them, under
@@ -497,6 +532,13 @@ reaches the repository is aggregates and the principles drawn from them, under
 - **Rejected: a change of its own.** D18's sampling and D21's reading would point at
   nothing until it landed.
 - **Rejected: no skill.** Each guidance review would re-derive its method.
+- **Rejected: the newest proposal as the cursor** (20 F5). A review whose owner picks
+  nothing writes no proposal, so the next would count that period twice or need a date
+  from memory.
+- **Rejected: a tracked table of periods.** A review that picks nothing would commit
+  outside any change.
+- **Rejected: the owner giving the start date each time.** The history would live in
+  the owner's memory.
 
 ### D21 — The revisit rate is read by the guidance review, against the rule's baseline
 
@@ -691,9 +733,9 @@ From the agent's memory, reviewed on 2026-11-04:
   implementation cadence already covers; and two entries that are the agent's notes
   on unrelated initiatives.
 
-### D24 — The change's closing checks enforce six written rules
+### D24 — The change's closing checks enforce seven written rules
 
-All but the key-block rule run in `make check-change CHANGE=<change>`, against the
+All but the key-block and lock-revision rules run in `make check-change CHANGE=<change>`, against the
 change's documents or its diff from its merge-base with the branch it lands on, which
 every step that commits already runs:
 
@@ -714,9 +756,15 @@ every step that commits already runs:
    (`docs/development/RELEASING.md`, "Versioning policy"). A missing bump is not
    checked; the rule does not require one.
 4. **Private-key blocks**, in `scripts/check_public_content.py` beside its rules: a
-   `-----BEGIN … PRIVATE KEY-----` block whose body holds a line of 40 or more base64
-   characters is refused, reported by location without its content. The existing test
-   fixtures, whose bodies are words such as `fixture`, pass.
+   `-----BEGIN … PRIVATE KEY-----` block is found across real newlines and literal
+   `\n` escapes alike, since a key pasted into a source string is one physical line,
+   as the existing fixtures are. Its body, with whitespace and escapes removed, is
+   refused when 32 or more base64 characters remain, reported by location without its
+   content. No real private key is that short — the smallest, an Ed25519 or X25519 key
+   in PKCS#8, has a 64-character body — and the existing fixtures, whose bodies are
+   `fixture`, `material` and `legacy-fixture`, pass. Line wrapping does not matter.
+   Tests cover a key wrapped at short lines, a key embedded as one escaped string, and
+   a key added in an intermediate outgoing commit that a later commit deletes.
 5. **Local imports.** An import inside a function that the diff adds to a `.py` file
    has a comment on its own line or the line above giving its reason
    (`openspec/README.md`, closeout part 2). Whether the reason is sound stays with
@@ -724,12 +772,49 @@ every step that commits already runs:
 6. **The capability index.** Every `openspec/specs/<capability>/` with a `spec.md`
    has a row in `openspec/specs/README.md` linking it, and every row links one that
    exists. The `contact-exchange-settlement` row is added in this change.
+7. **One lock revision** (21 R1), in `scripts/check_locks.py`, which `check-packaging`
+   and CI run: every committed `uv.lock` carries the lock revision the repository's
+   minimum uv writes, 5, and a lock carrying another fails, naming it and both
+   revisions. With it:
+   - `MINIMUM` in `scripts/check_uv_version.py` rises to the first uv release that
+     writes revision 5, established by running uv during implementation; CI's pins in
+     `tests.yml` and `e2e.yml` and `docs/development/BUILD_AND_PACKAGING.md` move to
+     it. The check stays a minimum, not an exact pin.
+   - `scripts/uv_project.py reinit`, which every package's `make init` runs and which
+     may rewrite a lock, runs the uv-version check first, as `make lock` does.
+   - The locks still at revision 3 are relocked to 5.
+
+   `BUILD_AND_PACKAGING.md`'s explanation and `check_uv_version.py`'s docstring cover
+   both directions of the drift: an older uv rewrites a newer one's lock as surely as
+   the reverse.
 
 The rule "test at the level that can prove the behaviour" stays with review: it is not
 mechanizable.
 
+The seventh check exists because agents on different uv releases rewrite each other's
+locks. A relock of most locks made with a uv newer than CI's pin raised them from
+revision 3 to 5. Then a change clone's bootstrap, running `reinit` on the pinned
+release, wrote four of them back to 3. That dirtied the worktree under a design step,
+and its guarded push was refused. A second change has seen the same drift. Nothing
+caught it: the minimum admitted both releases, `reinit` checked no version, and
+`check-locks` asks only whether a lock satisfies its project. The raised minimum stops
+an older uv writing; the revision check stops any uv's rewrite from landing unseen,
+newer ones included, until tooling pins uv exactly. Because the drift is happening now,
+it is the first work of round 1's checks session. Until that lands, every machine that
+runs the workflow's steps needs a uv at or above the new minimum.
+
 - **Rejected: a change of its own for the checks.** The owner keeps them with the
   rules they enforce.
+- **Rejected: a per-line base64 threshold for key blocks** (20 F4). A key rewrapped at
+  short lines passes, and a key in an escaped source string has no body line at all.
+- **Rejected: allowlisting fixture words, or refusing every key block** (20 F4). The
+  first needs a checker edit for every new fixture word. The second makes every fixture
+  build its header at runtime.
+- **Rejected: keeping the uv minimum at 0.12 and relocking back to revision 3** (21 R1).
+  The owner raises the minimum instead, toward the release that already writes the
+  repository's locks.
+- **Rejected: an exact uv pin in this change** (21 R1). The revision check holds the
+  locks steady without one. Pinning is later tooling work.
 
 ### Not changed
 
@@ -752,15 +837,19 @@ evidence serves the guidance review alone, so it lives in that skill (D20).
 ## Implementation cadence
 
 - **Round 1 — the code, two sessions.** One session for the workflow tooling: the
-  `stop` command (D15), resuming a finished triage under the owner's direction with
-  the `note --resumes` direction (D16), and the `Alternatives` field in the review
-  publishing check (D17). One session for the six checks and the capability-index row
-  (D24). Skills should describe tooling that exists, so the code comes first; the two
-  sessions are independent, and are reviewed and validated together.
+  `stop` command with the held-lock run identity and the review runner's signal
+  handling (D15), resuming a finished triage under the owner's direction with the
+  `note --resumes` direction (D16), and the `Alternatives` field in the review
+  publishing check and in `change-review`'s required finding format together (D17), so
+  round 1's own review is written in the format its publisher checks. One session for
+  the seven checks and the capability-index row (D24), the lock revision first, with
+  the raised uv minimum and the relock. Skills should describe tooling that exists, so
+  the code comes first; the two sessions are independent, and are reviewed and
+  validated together.
 - **Round 2 — the skills and guidance, two sessions.** One session for the workflow
   skills: `change-triage`'s rule, table, classification and revisits (D1–D3, D16,
   D18, D19); `change-orchestrate`'s interrupt and revisit procedures (D15, D16);
-  `change-review`'s field and lenses (D6, D17); waivers (D22); the defect-fixing
+  `change-review`'s scope and consistency lenses (D6); waivers (D22); the defect-fixing
   alignment of `change-implement` and `change-design` (D6, D12). One session for the
   guidance and the new skill: `AGENTS.md`, `docs/agents/domain.md`, the issue
   documents, `openspec/README.md`, `docs/agents/change-workflow.md` (D5, D6, D8–D12,
