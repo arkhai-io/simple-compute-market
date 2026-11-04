@@ -137,7 +137,12 @@ when the authority view is explicitly unsupported or unavailable.
 
 When surrender is the selected end, its receipt embeds the dispute adapter's
 SignedDeliveryEndClaim(cause=payer, delivered=true) for that receipt instant.
-The buyer verifies/keeps it and can file it as concurrence. An uncertain surrender
+The buyer verifies/keeps it and can file it as concurrence. A payee-signed claim is
+the one assertion the authority rules on without a person, and only because of its
+direction: signing "the buyer surrendered at T" or "I never delivered" can only
+cost the payee, so there is nothing to weigh; an assertion the seller could gain by
+is evidence a person weighs against the buyer's own records, and silence rules
+nothing. An uncertain surrender
 is retried under the same key before a claim is fixed; a selected earlier seller
 end suppresses automatic payer filing. Delivery acknowledgement, payment command
 and case protection are distinct outcomes. Rate stop-then-hint, notice-preserving
