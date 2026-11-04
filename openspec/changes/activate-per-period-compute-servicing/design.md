@@ -94,7 +94,7 @@ is an internal product prerequisite, not a request for another payments capabili
 Missing credentials or an unavailable target block the live checks; they are not
 passing double evidence.
 
-The hosted dispute authority is qualified against the foundation's published description: repeated/concurrent-case and dismissal policy, plus key-retention and origin-continuity through deal life, window and open cases. Missing these blocks activation. A mediation response bound is an EULA/advertising matter with no code consequence, not an activation gate or open question.
+The hosted dispute authority is qualified against the foundation's published description: repeated/concurrent-case and dismissal policy, plus key-retention and origin-continuity through deal life, window and open cases. Missing these blocks activation. No response bound is asked of the authority: a binding one would end unruled cases in default judgements against someone, and an unbounded one is no bound; a seller mistreated by its chosen authority picks another for its next deals. The authority may publish an advisory expected time to rule, which qualification records as advisory if present and as absent otherwise, and the terms display shows the same.
 
 The baseline arkhai.mediation.v1 is published on arkhai-payments main b98fed26 (payments 3be127e4). Its delivery_end revision is proposed and not yet published. Foundation 12.1 gates its signed payload, concurrence, respondent read, mapping and ed25519/eip191 vectors; live claim qualification and setup-bearing presets wait for that revision, not another payments wire change.
 

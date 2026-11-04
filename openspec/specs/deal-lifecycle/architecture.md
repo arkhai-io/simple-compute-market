@@ -220,6 +220,12 @@ under arkhai.mediation.delivery-end-claim.v1 for ed25519/eip191. Mechanical ruli
 require payee filing or valid seller concurrence, clean Agreement mapping,
 non-prestart time and no prior mechanical delivery-end ruling. Other cases remain
 human-triaged; silence never rules. Signed basis is payee_filed/payee_signed/operator.
+No response bound is asked of the authority and none is a gate: a binding bound ends
+cases filed faster than they can be ruled in default judgements against someone, and
+one large enough to avoid that is no bound. Parties agree to their authority before
+the deal, and a seller mistreated by one chooses another for its next deals; the
+marketplace does not protect a party from its own chosen mediator. An advisory
+expected time to rule, if the authority publishes one, is shown as advisory.
 
 For cause=payee the authority stops rates now returned, reverses held earnings
 since the fixed end and non-setup once unserved share, then caps the penalty at
