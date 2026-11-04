@@ -150,7 +150,8 @@ Read in full, even if you believe you know it:
 - The pre-closeout review and its triage, and the latest validation record: their
   dispositions may have added to the closeout task.
 - For every capability the change touches: `openspec/specs/<capability>/spec.md`
-  and its `architecture.md` companion when one exists.
+  and its companion when one exists — `README.md` where the capability has an
+  `index.md`, which you read too, and `architecture.md` elsewhere.
 - The change's row, campaign, and every row that lists it in `Depends on`, in
   `openspec/changes/README.md`.
 - Another change's records, where the closeout's evidence or promotion rests on
@@ -214,12 +215,22 @@ decided. Never settle it yourself.
 ## 4. Promote, check, then archive
 
 **Promotion.** Write every permanent document the closeout section names:
-architecture companions, `ARCHITECTURE.md`, the other documents under `docs/`,
+companions — a capability's `README.md` where it has an `index.md`, its
+`architecture.md` elsewhere — `ARCHITECTURE.md`, the other documents under `docs/`,
 `openspec/specs/README.md`, and any `spec.md` content the deltas do not carry.
 Describe the system as it is now, never the change that made it so. Complete the
 design-promotion record in `design.md`: every accepted decision and its permanent
 location, as a heading anchor where one exists. A `spec.md` the change's deltas
 cover is written by the archive, not by hand; the record names it all the same.
+
+In a capability organized by an `index.md`
+(`openspec/README.md#capability-documentation-pattern`), promotion also writes the
+index before the archive merges the deltas: an entry for each id the change's deltas
+add — its link to the requirement's heading in `spec.md` and its summary line, under
+the part and group it belongs to — and, for each requirement the deltas remove, its
+id moved to the retired ids with where its rule went. `make check-change` runs the
+index check with the change's deltas counted, so an id a delta adds is accepted
+before the archive puts it in `spec.md`.
 
 **Checks against the promoted state.** Now that every document the change cites
 exists:

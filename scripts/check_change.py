@@ -3,7 +3,8 @@
 
 A step of an OpenSpec change ends by running the same checks: comment hygiene,
 the agent skills, the change's documentation citations and task list, the change
-index, and the pinned OpenSpec validator in strict mode. Run as six commands,
+index, the indexed capabilities' specifications against their indexes, the change's
+deltas counted, and the pinned OpenSpec validator in strict mode. Run as seven commands,
 each is a tool call that replays the step's whole conversation; run here, they
 are one call, and an answer of one line when everything passes. Every check runs
 whatever the others report, and each failing check's own output is printed under
@@ -60,6 +61,7 @@ def checks(change: str, archived: bool,
         ("documentation citations", [*make, "check-doc-citations", f"CHANGE={change}"]),
         ("task list", [*make, "check-tasks", f"CHANGE={change}"]),
         ("change index", [*make, "check-change-index"]),
+        ("specification index", [*make, "check-spec-index", f"CHANGE={change}"]),
         ("openspec validate", [*openspec_command(which), *validate]),
     ]
 

@@ -144,8 +144,10 @@ start, and go on only when it names them — archive cleanup also when it names 
 before it, which it then checks for your waiver.
 
 `make check-change CHANGE=<change>` runs a step's closing checks — comment hygiene,
-the agent skills, the change's citations and task list, the change index, and the
-pinned strict OpenSpec validation — printing only failures and one pass line. `make
+the agent skills, the change's citations and task list, the change index, each
+indexed capability's `spec.md` against its `index.md` with the change's deltas
+counted (`make check-spec-index`), and the pinned strict OpenSpec validation —
+printing only failures and one pass line. `make
 check-tasks CHANGE=<change>` fails when a numbered task sits under another section's
 heading; the steps that act on a task list run it first.
 

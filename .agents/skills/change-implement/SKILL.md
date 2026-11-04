@@ -290,8 +290,9 @@ Run each of these, and fix what it reports:
   dependency, or a lock reaches projects no focused suite covers, and the full
   suite is cheap beside a review round spent finding that;
 - `make check-change CHANGE=<change>`: comment hygiene, the agent skills, the
-  change's documentation citations and task list, the change index, and the
-  pinned strict OpenSpec validation, in one call that prints only what fails.
+  change's documentation citations and task list, the change index, the indexed
+  capabilities' specifications against their indexes, and the pinned strict
+  OpenSpec validation, in one call that prints only what fails.
   Before closeout its citations check may report only the permanent documents the
   change's tasks create at closeout — the promotion destinations its plan names;
   list those in the report and fix anything else. A change with no spec deltas

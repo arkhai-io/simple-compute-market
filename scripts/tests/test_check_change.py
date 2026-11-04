@@ -13,7 +13,7 @@ from check_change import OPENSPEC, checks, main, openspec_command, run_checks
 
 CHANGE = "shape-bounds"
 NAMES = ["comment hygiene", "agent skills", "documentation citations", "task list",
-         "change index", "openspec validate"]
+         "change index", "specification index", "openspec validate"]
 
 
 def _checkout(tmp_path: Path) -> Path:
@@ -61,6 +61,8 @@ def test_every_check_passing_prints_one_line(tmp_path: Path) -> None:
         ["make", "--no-print-directory", "check-doc-citations", f"CHANGE={CHANGE}"],
         ["make", "--no-print-directory", "check-tasks", f"CHANGE={CHANGE}"],
         ["make", "--no-print-directory", "check-change-index"],
+        # The change named, so its deltas count as the archive will leave them.
+        ["make", "--no-print-directory", "check-spec-index", f"CHANGE={CHANGE}"],
         ["bunx", OPENSPEC, "validate", CHANGE, "--strict"],
     ]
 

@@ -730,28 +730,81 @@ Touches a new `scripts/check_spec_index.py`, `scripts/check_change.py`,
 `openspec/config.yaml`, `.agents/skills/change-closeout/SKILL.md`,
 `change-design/SKILL.md`, `change-review/SKILL.md`, and `scripts/tests/`.
 
-- [ ] 5.1 `scripts/check_spec_index.py`: for each capability under
+- [x] 5.1 `scripts/check_spec_index.py`: for each capability under
       `openspec/specs/` with an `index.md`, fails on a requirement whose name begins
       with no id (the capability's prefix and four characters from `[a-z0-9]`), two
       requirements sharing an id, an id `index.md` omits or lists twice, a listed id
       in neither `spec.md` nor the named change's own deltas, a retired id in use,
       and a link in `index.md` that does not resolve; it names each. A capability
       with no `index.md` is not checked (D15).
-- [ ] 5.2 `scripts/check_change.py` runs it among a change's closing checks, with
+      The index's shape, which D15 left to the check and section 10 and closeout
+      write down: a line `Prefix: `CW`` declares the capability's prefix (the
+      check fails without one); a listed id is a list item or table row whose first
+      cell is the link `[CW-a8tf](spec.md#…)`; the retired ids are the items under
+      `## Retired ids`, each beginning with the id, bare, in backticks, or as the
+      link its entry carried. An id is followed by a space or the name's end. A
+      link resolves when its file exists and its fragment is a heading of that file
+      as GitHub writes anchors; fenced code is skipped throughout, the prefix line
+      and requirement headings included, and a URL is not followed. With a change
+      named, its delta for the capability counts as the archive will leave it:
+      ADDED and MODIFIED names, and a rename's new name, are in the specification
+      and their headings resolve in `spec.md` (a requirement both renamed and
+      modified counted once); a REMOVED requirement, and a rename's old name, are
+      held to nothing, and their headings no longer resolve — which
+      this change's own closeout needs, since `change-workflow`'s 24 requirements
+      carry no id until the archive removes them. A change not found active (an
+      archived one, whose deltas are merged) has no deltas. A new
+      `make check-spec-index [CHANGE=…]` runs it.
+- [x] 5.2 `scripts/check_change.py` runs it among a change's closing checks, with
       the change named so its deltas count (D15, "The deltas clause").
-- [ ] 5.3 `openspec/config.yaml`'s rules, and the closeout, design, and review
+      As `specification index`, before the validator: seven checks now. The
+      permanent lists of those checks follow: `docs/agents/change-workflow.md`, the
+      implement skill's check list, and `make check-change`'s description.
+- [x] 5.3 `openspec/config.yaml`'s rules, and the closeout, design, and review
       skills, name the companion as `README.md` where `index.md` exists and
       `architecture.md` elsewhere; the closeout skill's promotion part writes the
       `index.md` entries, with links and summary lines, for the ids a change adds,
       and moves a removed requirement's id to the retired ids with where its rule
       went (D15).
-- [ ] 5.4 Tests, unit, `scripts/tests/test_check_spec_index.py`: each failure case
+      Each skill's context list reads the companion by the two names, and the
+      index where it exists; `config.yaml`'s specs rule also asks a new id for each
+      requirement of an indexed capability, and its tasks rule names the index's
+      entries and retired ids among promotion destinations.
+- [x] 5.4 Tests, unit, `scripts/tests/test_check_spec_index.py`: each failure case
       named; an id listed in `index.md` and present only in a change's ADDED delta
       accepted; a capability without `index.md` ignored.
-- [ ] 5.5 Verification: the section's tests, unit; `make test-release-tooling`;
+      Also: a missing prefix line; an id accepted from the delta is refused without
+      the change named, as listed though no specification holds it and as an
+      unresolved heading; a requirement a REMOVED delta names held to nothing; a
+      rename, read from a string by `read_deltas` and checked by
+      `capability_problems`; a rename with a MODIFIED block under the new name, from
+      a delta file through `problems(root, change)`, counted once; a link to a
+      heading a rename drops refused; a retired id written as a link; headings in a
+      code fence neither anchors nor requirements; an id running past its four
+      characters; GitHub's anchor form; the command's statuses.
+      `test_check_change.py` expects the seventh check, with the change named.
+- [x] 5.5 Verification: the section's tests, unit; `make test-release-tooling`;
       `make check-agent-skills`; `make check-change
       CHANGE=specify-change-workflow-and-engine`, failing only on the citations of
       files a later section creates. End-to-end: none, and none is owed.
+      Evidence: `test_check_spec_index.py` and `test_check_change.py` (unit, real
+      files in a temporary directory), 38 passed after the fresh-context check's
+      fixes; the scripts suite (`scripts/tests`, as `make test-release-tooling`
+      runs it), 2075 passed; `make check-agent-skills` and `make
+      check-comment-hygiene` passed; `make check-spec-index
+      CHANGE=specify-change-workflow-and-engine` passed on this repository, which
+      has no `index.md` yet, so it shows the wiring and not a real index; `make
+      check-change` failed only on `check-doc-citations`, every miss a file a later
+      section creates (its new `specification index` check passing); `make test`
+      passed before the fixes and after them; `make check-packaging` passed.
+
+Notes for the next session. The index's shape the check reads (the prefix line, the
+entry and retired forms) is the format section 10's text and closeout's `index.md`
+must use; the check's docstring states it. The fresh-context check's findings were
+all fixed but one gap D15 does not ask for: an entry whose link points at another
+requirement's heading than its id's passes. `openspec/README.md#capability-documentation-pattern`,
+which the check, the `Makefile`, and the closeout skill cite, describes the index
+only once section 10 writes it.
 
 ## 6. The graph diagram moved into its capability
 

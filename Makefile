@@ -821,6 +821,13 @@ check-comment-hygiene: ## Fail if change-ID/task-number references leak outside 
 check-doc-citations: ## Fail if a document cites a path that is absent or tombstoned (CHANGE=<name> to scope)
 	@python3 scripts/check_doc_citations.py "$(CHANGE)"
 
+# An indexed capability's spec.md held to its index.md
+# (openspec/README.md#capability-documentation-pattern). With CHANGE=<name> that
+# change's deltas count as its archive will leave them, since closeout writes the
+# index before the archive merges them.
+check-spec-index: ## Fail if an indexed capability's spec.md and index.md disagree on its requirement ids (CHANGE=<name> counts its deltas)
+	@python3 scripts/check_spec_index.py "$(CHANGE)"
+
 # Each storefront chart's values schema carries one definition generated from
 # that storefront's typed configuration models; it keeps secret-marked fields
 # out of the chart's pass-through config. Each storefront names the schema files
@@ -968,7 +975,7 @@ CHANGE_WORKFLOW_REVIEW_BASE := dev
 include scripts/change_workflow/workflow.mk
 validate: ARGUMENTS += $(if $(filter 1,$(HELM_ALL_SCENARIOS)),with HELM_ALL_SCENARIOS=1)
 
-check-change: ## Run a change's closing checks — comment hygiene, agent skills, its citations and task list, the change index, and the pinned strict OpenSpec validation — printing only failures and one pass line (CHANGE=<change>)
+check-change: ## Run a change's closing checks — comment hygiene, agent skills, its citations and task list, the change index, the indexed capabilities' specifications, and the pinned strict OpenSpec validation — printing only failures and one pass line (CHANGE=<change>)
 	@python3 scripts/check_change.py "$(CHANGE)"
 
 record-capacity: ## Record in helm/validation-capacity.toml the memory a change's latest validation measured, with when and from which change; when it measured none, leave the file as it is and say so; run by archive cleanup (CHANGE=<change>)

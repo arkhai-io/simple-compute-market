@@ -70,7 +70,8 @@ Read all of this before forming a view:
   checkout's or, from a change's clone, the owner's workspace's, which holds the
   history of every cleaned-up change.
 - For every capability the change names or touches: `openspec/specs/<capability>/spec.md`
-  and its `architecture.md` companion when one exists.
+  and its companion when one exists — `README.md` where the capability has an
+  `index.md`, which you read too, and `architecture.md` elsewhere.
 - The code the change cites, and the code it changes or would change. Read enough
   to verify every factual claim it makes.
 - For `implementation`, `pre-closeout`, and `closeout`: the change's diff,
