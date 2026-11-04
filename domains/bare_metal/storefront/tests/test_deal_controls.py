@@ -293,6 +293,36 @@ async def test_admin_reserve_takes_the_listings_machine(tmp_path) -> None:
     assert refused.value.status_code == 409
 
 
+async def test_admin_reserve_matches_the_claim_the_site_receives(tmp_path) -> None:
+    """A required attribute is matched against the claim as the site receives
+    it: the listing's machine pinned by ``resource_id`` and its quantities
+    under ``dimensions``, compared as values, not as their string forms."""
+    runtime, _negotiation_id, capacity = await _runtime(tmp_path)
+    app = _app(runtime)
+    refused = []
+    async with app.router.lifespan_context(app):
+        async with _client(app, ADMIN_SIGNER, "admin") as admin:
+            reserved = await admin.admin_reserve_capacity(
+                required_attributes={"resource_id": "resource-1", "dimensions": {"units": 1}},
+                listing_id="listing-1",
+            )
+            for required in (
+                {"resource_id": "resource-2"},
+                {"dimensions": {"units": 2}},
+            ):
+                with pytest.raises(StorefrontClientError) as refusal:
+                    await admin.admin_reserve_capacity(
+                        required_attributes=required, listing_id="listing-1"
+                    )
+                refused.append(refusal.value)
+
+    assert reserved.capacity_reservation_id == "reservation-a"
+    [call] = capacity.reserve_calls
+    assert call["claim"]["resource_id"] == "resource-1"
+    assert call["claim"]["dimensions"] == {"units": 1}
+    assert [refusal.status_code for refusal in refused] == [409, 409]
+
+
 async def test_admin_reserve_refuses_a_listing_no_authority_stands_behind(tmp_path) -> None:
     """An unbacked bare-metal listing constructs no capacity claim (requirement
     "A bare-metal listing sells one whole unit"): the refusal comes before any

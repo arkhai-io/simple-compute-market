@@ -200,11 +200,18 @@ def capacity_admin_routes(
             claim = whole_machine_claim(context)
         except ClaimAttributesMissing as exc:
             raise LookupError(str(exc)) from exc
+        claim["resource_id"] = str(context["physical_resource_id"])
         # A whole machine is reserved as its listing describes it; an
         # administrator's required attribute it does not match finds nothing.
-        if any(claim.get(str(name)) != str(value) for name, value in required.items()):
+        # The match is against the claim the site receives, its machine pinned
+        # and its quantities structured under `dimensions`: scalar attributes
+        # compare in the string form the claim holds them in, structured ones
+        # as values.
+        if any(
+            claim.get(str(name)) != (value if isinstance(value, Mapping) else str(value))
+            for name, value in required.items()
+        ):
             return None
-        claim["resource_id"] = str(context["physical_resource_id"])
         return await CapacityEffects(runtime.capacity_client).reserve(
             binding, claim=claim, deal_ref=dict(deal_ref)
         )
