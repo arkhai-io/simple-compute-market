@@ -158,7 +158,12 @@ unsupported linked revisions require repair, not a fresh key or append-as-amendm
 Initial missing history permits the original filing only, not a verified empty
 ordinary read or an acknowledgement without a signed filed entry.
 
-Respondent discovery journals exact signed concurrence for matching durable facts,
+Either party appends evidence while a case is open; only the payee appends
+concurrence. The window matters because triage has no response bound and the
+respondent contests with evidence of its own: a buyer that could not answer in the
+same case would open a second one to rebut. A closed case takes nothing, and later
+evidence is a new case the authority nets against the first. Respondent discovery
+journals exact signed concurrence for matching durable facts,
 or contesting evidence, before advancing its account cursor. Foreign commitments
 are skipped and local unresolved rows retry fairly. Deal watch uses the same
 case-keyed answer, waits rather than replacing it, and may advance on confirmed

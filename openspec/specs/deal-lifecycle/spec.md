@@ -412,7 +412,7 @@ For selected buyer surrender, end_delivery MUST embed SignedDeliveryEndClaim(cau
 
 ### Requirement: Case appends follow interface authorization
 
-A dispute adapter MUST follow its interface's append authorization with operation-derived idempotency keys. SCM's mediation respondent MUST send items or concurrence as mandate.to and preserve the record's actor attribution. A counterparty case surfaced through watch MUST journal the seller's answer by case_ref; the dispute cursor MUST wait for that answer or confirmed closure. Authority-side append policy is external context.
+Either party MAY append evidence to its open case, repeatedly, through its half of the lifecycle interface; only the payee MAY append concurrence; a closed case takes no append, and evidence that arrives after closure is a new case the authority nets against the first. A dispute adapter MUST follow its interface's append authorization with operation-derived idempotency keys. SCM's mediation respondent MUST send items or concurrence as mandate.to and preserve the record's actor attribution. A counterparty case surfaced through watch MUST journal the seller's answer by case_ref; the dispute cursor MUST wait for that answer or confirmed closure. Authority-side append policy is external context.
 
 #### Scenario: The seller answers a buyer's case
 
@@ -428,6 +428,11 @@ A dispute adapter MUST follow its interface's append authorization with operatio
 
 - **WHEN** a payee claimant appends a second evidence item to its open case
 - **THEN** the record shows both submissions under the payee, in order
+
+#### Scenario: The buyer answers the respondent's contest
+
+- **WHEN** the seller, as respondent, appends contesting evidence to a buyer's open case and the buyer then appends the site-signed `lease_ended` report it retrieved after filing
+- **THEN** the record shows both under their actors, in order, and the person ruling sees the exchange in one case rather than a second case opened to rebut
 
 ### Requirement: An append to a closed case is skipped
 
