@@ -69,7 +69,11 @@ class FulfillmentEventResponse(BaseModel):
 
 
 class InterruptDealRequest(BaseModel):
-    """Request body for POST /api/v1/admin/deals/{escrow_uid}/interrupt."""
+    """Interrupt a hosted negotiation ID or an Alkahest escrow UID.
+
+    Hosted interruptions use receipt time, require a reason and accept no payout
+    amounts. The operation key identifies a retry independently of transport.
+    """
 
     interrupted_at_utc: str | None = Field(
         default=None,
@@ -78,6 +82,7 @@ class InterruptDealRequest(BaseModel):
             "time when omitted."
         ),
     )
+    operation_key: str | None = Field(default=None, min_length=1)
     reason: str | None = None
     seller_amount: int | None = Field(
         default=None,
@@ -110,3 +115,5 @@ class InterruptDealResponse(BaseModel):
     seller_amount: int | None = None
     refund_amount: int | None = None
     reservation: dict[str, Any] | None = None
+    lifecycle_outcome: dict[str, Any] | None = None
+    delivery: dict[str, Any] | None = None

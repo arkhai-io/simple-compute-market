@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import Request
 from fastapi.responses import JSONResponse, Response
 from market_identity import EMPTY_BODY
+from market_deal_servicing.evidence import EvidenceSession, transaction
 
 from market_storefront_kit import get_storefront_container
 
@@ -141,6 +142,14 @@ async def authenticate_response(request: Request, call_next):
             body=body,
         )
     )
+    if isinstance(body, dict) and body.get("negotiation_id") and body.get("agreement_bytes"):
+        with transaction(runtime.db.db_path) as conn:
+            EvidenceSession(conn).capture(
+                body["negotiation_id"], evidence_id="seller-response:" + request_id,
+                body=raw_body, headers=headers,
+                context={"operation": context.operation, "resource": context.resource},
+                recorded_at=int(headers["X-Market-Timestamp"]),
+            )
     return Response(
         content=raw_body,
         status_code=response.status_code,

@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from functools import partial
 from typing import Any, ClassVar
 
+from market_core.schemas import settlement_option_schema, settlement_option_params
 from arkhai_vms import normalize_vm_provision_terms
 from arkhai_vms_listings import extract_compute_from_order
 from arkhai_vms_settlement import (
@@ -100,7 +101,7 @@ def accepted_alkahest_proposal(
         raise ValueError("accepted Agreement bytes are unavailable")
     agreement = json.loads(raw)
     selected = agreement.get("settlement")
-    if not isinstance(selected, Mapping) or selected.get("mechanism") != mechanism:
+    if not isinstance(selected, Mapping) or settlement_option_schema(selected) != mechanism:
         raise ValueError("accepted Agreement does not select Alkahest")
     # Only the accepted proposal carries the release condition the seller
     # authorized; the buyer's opening is not a substitute for it.
@@ -157,7 +158,7 @@ class VmAlkahestSellerStage:
         self, *, domain: Any, context: Any, listing: Mapping[str, Any],
         selection: Any, option: Mapping[str, Any], build_selection: Callable,
     ) -> dict[str, Any]:
-        entry = option.get("params", {}).get("accepted_escrow")
+        entry = settlement_option_params(option).get("accepted_escrow")
         if not isinstance(entry, Mapping):
             raise ValueError("selected Alkahest option has no accepted escrow")
         # The escrow funded is the option's, so an escrow carrier the buyer
@@ -192,9 +193,9 @@ class VmAlkahestSellerStage:
     ) -> SettlementEvidence:
         agreement = json.loads(raw)
         selected = agreement["settlement"]
-        if selected["mechanism"] != self.mechanism:
+        if settlement_option_schema(selected) != self.mechanism:
             raise ValueError("Agreement does not select Alkahest")
-        accepted = selected["params"]["accepted_escrow"]
+        accepted = settlement_option_params(selected)["accepted_escrow"]
         token = token_resource_from_accepted_escrow(
             accepted, chain_config_paths=chain_config_paths
         )
@@ -392,7 +393,10 @@ class VmAlkahestSellerStage:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         selection = proposal.get("settlement_selection")
         mechanism = self.mechanism
-        if isinstance(selection, Mapping) and selection.get("mechanism") != mechanism:
+        if (
+            isinstance(selection, Mapping)
+            and selection.get("settlement", {}).get("schema") != mechanism
+        ):
             raise HTTPException(
                 status_code=400,
                 detail="this route accepts only alkahest.v1",
@@ -669,7 +673,7 @@ def validate_accepted_evidence(
     if (
         evidence.status not in VERIFIED_EVIDENCE_STATUSES
         or evidence.negotiation_id != agreement["negotiation_id"]
-        or evidence.mechanism != agreement["settlement"]["mechanism"]
+        or evidence.mechanism != settlement_option_schema(agreement["settlement"])
         or evidence.evidence.get("agreement_sha256") != hashlib.sha256(raw).hexdigest()
     ):
         raise ValueError("settlement evidence differs from accepted Agreement")
@@ -793,12 +797,15 @@ def resolve_proposal_stage(
     )
     accepted = agreement.get("settlement") if isinstance(agreement, Mapping) else None
     mechanism = (
-        selection.get("mechanism") if isinstance(selection, Mapping)
-        else accepted.get("mechanism") if isinstance(accepted, Mapping) else None
+        selection.get("settlement", {}).get("schema")
+        if isinstance(selection, Mapping)
+        else settlement_option_schema(accepted)
+        if isinstance(accepted, Mapping)
+        else None
     )
     if not isinstance(mechanism, str) or not mechanism:
         raise ValueError("settlement_mechanism_required")
-    if isinstance(accepted, Mapping) and accepted.get("mechanism") != mechanism:
+    if isinstance(accepted, Mapping) and settlement_option_schema(accepted) != mechanism:
         raise ValueError("settlement_selection_differs_from_agreement")
     try:
         return stages[mechanism]

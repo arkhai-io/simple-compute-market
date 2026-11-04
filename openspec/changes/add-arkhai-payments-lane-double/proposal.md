@@ -32,7 +32,7 @@ lane, not a cooperative storefront masquerading as an authority.
   hash without requiring an attachment and extends holds. delivery_end(at) is a
   journaled seller-half dispute filing, never seller stop/reverse calls. Its sole
   mechanical rule is the foundation's standard self-penalty
-  (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`), applied as stated there.
+  (`openspec/changes/archive/2026-11-03-agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`), applied as stated there.
   delivery_end remains a person's triage case with payer notice/treatment; signed
   acknowledgements never trigger a mechanical buyer ruling. Only the authority
   applies dispute effects and nets agreement-wide prior remedies. Filings never

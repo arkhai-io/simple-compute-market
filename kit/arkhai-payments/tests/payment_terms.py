@@ -9,6 +9,7 @@ from market_core.schemas import Agreement, SettlementOption, derive_settlement_o
 from market_identity import Ed25519Signer
 
 from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM, ArkhaiPaymentsConfig
+from market_arkhai_payments.fixtures import dispute_lifecycle
 
 BUYER = "11111111-1111-4111-8111-111111111111"
 PAYEE = "22222222-2222-4222-8222-222222222222"
@@ -18,15 +19,19 @@ SERVICE = Ed25519Signer(b"\x07" * 32)
 IMPOSTOR = Ed25519Signer(b"\x08" * 32)
 
 
-def option(*, deposit: bool = False, payee: str = PAYEE, window: str = "P7D") -> SettlementOption:
-    params = {"payee_account": payee, "asset": "USD/2", "window": window, "deposit_agreement": deposit}
+def option(
+    *, deposit: bool = False, payee: str = PAYEE, window: str = "P7D", dispute: str = DISPUTE
+) -> SettlementOption:
+    params = {"payee_account": payee, "window": window, "deposit_agreement": deposit}
     return SettlementOption(
         option_id=derive_settlement_option_id(
-            mechanism=ARKHAI_PAYMENTS_MECHANISM, asset="USD/2", rates=[], params=params
+            price={"asset": "USD/2", "rates": []},
+            settlement={"schema": ARKHAI_PAYMENTS_MECHANISM, **(params or {})},
+            lifecycle=dispute_lifecycle(dispute),
         ),
-        mechanism=ARKHAI_PAYMENTS_MECHANISM,
-        asset="USD/2",
-        params=params,
+        price={"asset": "USD/2", "rates": []},
+        settlement={"schema": ARKHAI_PAYMENTS_MECHANISM, **(params or {})},
+        lifecycle=dispute_lifecycle(dispute),
     )
 
 
@@ -34,6 +39,7 @@ def agreement(
     *,
     deposit: bool = False,
     payer: str = BUYER,
+    dispute: str = DISPUTE,
     accepted_at: str = "2026-10-07T12:00:00.250000Z",
     start_utc: str = "2026-10-07T12:00:10.500000Z",
     duration_seconds: int = 3600,
@@ -45,7 +51,7 @@ def agreement(
         listing_hash="a" * 64,
         buyer={"scheme": "ed25519", "identifier": "buyer-key"},
         seller={"scheme": "ed25519", "identifier": "seller-key"},
-        settlement=option(deposit=deposit),
+        settlement=option(deposit=deposit, dispute=dispute),
         settlement_params={"payer_account": payer},
         amount=amount,
         asset="USD/2",
@@ -66,7 +72,6 @@ def config(**overrides: Any) -> ArkhaiPaymentsConfig:
         "service_url": "http://127.0.0.1:9",
         "service_identity": SERVICE.identity,
         "fee_bps": 250,
-        "dispute_authority": DISPUTE,
         "development_auth": True,
     }
     values.update(overrides)

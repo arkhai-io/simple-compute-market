@@ -19,7 +19,8 @@ The delivery double receives only verified settlement evidence; the planner read
 its accepted VM facts without interpreting the mechanism or loading an escrow.
 The observed sequence is `pending` with zero deliveries before approval,
 `provisioning` after approval, and `ready` with one delivery on retry. The final
-SQLite inspection observes zero `escrows` rows. This is a
+SQLite inspection observes zero `escrows` rows. The signed administrator lifecycle
+list contains the verified payment deal and its exact transaction reference. This is a
 local diagnostic, not a live ledger or VM acceptance run. For the real payments
 service setup see [`kit/arkhai-payments/README.md`](../../../../kit/arkhai-payments/README.md#local-first-use).
 
@@ -38,7 +39,6 @@ priority = ["arkhai.payments.v1", "alkahest.v1"]
 enabled = true
 service_url = "https://payments.example.com"
 fee_bps = 200
-dispute_authority = "00000000-0000-4000-8000-000000000013"
 api_key_env = "ARKHAI_PAYMENTS_API_KEY"
 
 [Settlement.arkhai_payments.service_identity]
@@ -49,7 +49,12 @@ identifier = "<trusted-service-public-identity>"
 Set the named environment variable to that role owner's WorkOS user-scoped API
 key. For loopback development only, replace `api_key_env` with
 `development_auth = true` and use the development service origin. Never put an
-API key value in TOML.
+API key value in TOML. Choose dispute authorities separately through root
+`[[Dispute]]` entries or signed registry recommendations; the buyer must opt into
+recommendations explicitly. The accepted option carries the selected authority
+in `lifecycle.adjudication.dispute`, and the retired payments `dispute_authority`
+key is rejected. See
+[dispute authority preferences](../../../../docs/development/DEPLOYMENT_AND_CONFIG.md#dispute-authority-preferences).
 
 The VM buyer additionally supplies its Arkhai account, separate from its
 marketplace signing identity:

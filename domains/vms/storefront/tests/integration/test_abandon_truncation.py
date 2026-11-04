@@ -7,31 +7,25 @@ learn it to release the reservation.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from unittest.mock import patch
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from core_storefront.domain_registry import StorefrontThreadBinding
-from market_identity import create_signer
 from market_capacity_publication import PublicationBinding
+from market_deal_servicing.journal import stable_ref
 
 from market_storefront.domain_runtime import (
     build_vm_storefront_domain,
     build_vm_storefront_registry,
 )
-from market_storefront.publication_binding import prepare_vm_listing_binding
-from market_storefront.services.capacity_client import capacity_binding_for_listing
 from market_storefront.settlement_composition import (
     truncate_lease_for_terminal_settlement,
 )
 from market_storefront.utils.sqlite_client import SQLiteClient
-from tests.fake_site import (
-    FakeSite,
-    TEST_MARKETPLACE_SIGNER,
-    capacity_runtime_over,
-)
+from tests.fake_site import FakeSite, capacity_runtime_over
+from tests.fulfillment_fixtures import make_vm_lifecycle_fixture
 
-_BUYER_SIGNER = create_signer("ed25519", b"\x43" * 32)
 
 async def _persist_terminal_negotiation(
     db: SQLiteClient,
@@ -40,70 +34,12 @@ async def _persist_terminal_negotiation(
     listing_id: str,
     pool_id: str,
 ) -> PublicationBinding:
-    now = datetime.now(timezone.utc).isoformat()
-    listing_binding = prepare_vm_listing_binding(
-        listing_id=listing_id,
-        candidate={
-            "capacity_backing": "backed",
-            "site_id": "default",
-            "pool_id": pool_id,
-            "listing_shape": {"gpu": {"count": 1, "model": "H200"}},
-        },
+    fixture = await make_vm_lifecycle_fixture(
+        Path(db.db_path), escrow_uid="settlement:" + agreement_ref,
+        negotiation_id=agreement_ref, listing_id=listing_id, pool_id=pool_id, site_id="default",
     )
-    await db.upsert_listing_with_binding(
-        binding=listing_binding,
-        status="closed",
-        closed_by="reconciliation",
-        created_at=now,
-        updated_at=now,
-        listing_resource={
-            "resource_id": pool_id,
-            "gpu_model": "H200",
-            "gpu_count": 1,
-            "sla": 99.9,
-            "region": "California, US",
-            "offering_mode": "vm",
-        },
-        accepted_escrows=[
-            {
-                "chain_name": "anvil",
-                "escrow_address": "0x" + "11" * 20,
-                "literal_fields": {
-                    "token": "0x0000000000000000000000000000000000000001"
-                },
-                "rates": [{"field": "amount", "per": "hour", "value": "9000"}],
-            }
-        ],
-        fulfillment_resource=None,
-        max_duration_seconds=3600,
-        storefront_url="http://seller:8001",
-        seller_principal=TEST_MARKETPLACE_SIGNER.identity,
-    )
-    await db.create_negotiation_thread(
-        negotiation_id=agreement_ref,
-        our_listing_id=listing_id,
-        their_listing_id=f"demand-{agreement_ref}",
-        our_agent_id="http://seller:8001",
-        their_agent_id="http://buyer:8000",
-        buyer_principal=_BUYER_SIGNER.identity,
-        seller_principal=TEST_MARKETPLACE_SIGNER.identity,
-        owner_id="seller",
-        status="active",
-        our_initial_price="9000",
-        our_strategy="fixed",
-        requested_duration_seconds=3600,
-        binding=StorefrontThreadBinding(
-            negotiation_id=agreement_ref,
-            listing_id=listing_binding.listing_id,
-            site_id=listing_binding.site_id,
-            binding=listing_binding.binding,
-        ),
-    )
-    await db.update_negotiation_thread_terminal(
-        negotiation_id=agreement_ref,
-        terminal_state="abandoned",
-    )
-    return await capacity_binding_for_listing(db, listing_id)
+    await db.update_negotiation_thread_terminal(negotiation_id=agreement_ref, terminal_state="abandoned")
+    return fixture.capacity_binding
 
 
 async def _persist_reservation_identity(
@@ -172,7 +108,7 @@ async def test_an_uncommitted_hold_is_released_not_truncated(db):
 
     with (
         patch(
-            "market_storefront.settlement_composition.build_capacity_runtime",
+            "market_storefront.delivery_lifecycle.build_capacity_runtime",
             return_value=capacity_runtime_over(fake),
         ),
     ):
@@ -185,27 +121,30 @@ async def test_an_uncommitted_hold_is_released_not_truncated(db):
 
     assert released is not None
     row = fake.reservations[reservation_id]
-    assert (row["state"], row["failure_reason"]) == ("released", "expiration window passed")
+    assert (row["state"], row["failure_reason"]) == (
+        "released", stable_ref(f"negotiation-{pool_id}", "terminate", "terminate"),
+    )
     assert not any(path.endswith("/truncate-lease") for _, path in fake.requests)
 
 
 @pytest.mark.asyncio
 async def test_truncates_the_ledger_lease_to_now(db):
-    """A delivered lease cannot be freed by the storefront: the site refuses the
-    release, and the storefront truncates it so its lifecycle tears it down."""
+    """A delivered lease is terminated immediately; truncation is not teardown."""
     pool_id = "res-trunc"
     listing_id = "listing-abandoned"
     fake = FakeSite(deliverable_modes={"vm"})
     fake.add_resource(pool_id, 2, attributes={"vm_host": "kvm1"})
     capacity = capacity_runtime_over(fake)
+    remote = SimpleNamespace(terminate_lease=AsyncMock())
     agreement_ref = "negotiation-abandoned"
     escrow_uid = "0xabandoned"
 
     with (
         patch(
-            "market_storefront.settlement_composition.build_capacity_runtime",
+            "market_storefront.delivery_lifecycle.build_capacity_runtime",
             return_value=capacity,
         ),
+        patch("market_storefront.delivery_lifecycle.build_fulfillment_client", return_value=remote),
     ):
         binding = await _persist_terminal_negotiation(
             db,
@@ -246,8 +185,9 @@ async def test_truncates_the_ledger_lease_to_now(db):
     assert truncated is not None
     row = fake.reservations[reservation_id]
     assert row["state"] == "leased"
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    assert str(row["lease_end_utc"]).startswith(today)
+    assert truncated["progress"] == "tearing_down"
+    remote.terminate_lease.assert_awaited_once()
+    assert not any(path.endswith("/truncate-lease") for _, path in fake.requests)
 
 
 @pytest.mark.asyncio
@@ -259,7 +199,7 @@ async def test_no_live_reservation_is_a_quiet_noop(db):
 
     with (
         patch(
-            "market_storefront.settlement_composition.build_capacity_runtime",
+            "market_storefront.delivery_lifecycle.build_capacity_runtime",
             return_value=capacity,
         ),
     ):
@@ -280,5 +220,5 @@ async def test_no_live_reservation_is_a_quiet_noop(db):
                 sqlite_client=db,
                 agreement_ref=agreement_ref,
             )
-            is None
+            == {"progress": "released", "done": True}
         )

@@ -17,9 +17,27 @@ Once a deal has been accepted, commercial delivery takes priority over local boo
 - **AND** continues the live commercial delivery attempt
 - **AND** does not tear down or discard the deliverable VM solely because of that write failure
 
+### Requirement: A VM deal's lease begins at its reservation commit
+
+The VM storefront MUST commit the deal's reservation before fulfillment begins, which begins the lease; afterwards only end service writes to the lease. It MUST hold and commit site capacity under the deal's negotiation (`deal_ref.negotiation_id`) whatever the settlement mechanism, so a deal's site reservation is found by its negotiation and carries no settlement reference.
+
+#### Scenario: A payments deal's capacity is held
+
+- **WHEN** a VM storefront holds capacity for an Arkhai payments deal
+- **THEN** the hold names the deal's negotiation ID and carries no settlement reference, and fulfillment begins only after the hold is committed
+
+### Requirement: VM settlement stages own their mechanism's steps
+
+The selected settlement stage MUST own mechanism-specific attestation, readiness and claim binding; the claims engine retains submission and collection, not physical recovery. Common delivery MUST consume the stage's evidence and MUST NOT compare mechanism IDs.
+
+#### Scenario: An Alkahest deal is fulfilled
+
+- **WHEN** physical fulfillment of an Alkahest VM deal reaches an active result
+- **THEN** the Alkahest stage binds the fulfillment attestation and claim, the claims engine submits and collects, and common delivery records credentials without naming the mechanism
+
 ### Requirement: Full settlement convergence ownership
 
-The VM storefront MUST own capacity reservation, physical fulfillment, credential delivery, and listing/delivery progress. It MUST commit the deal's reservation before the fulfillment begins, which begins the lease; it writes nothing to the lease afterwards. The selected settlement stage MUST own mechanism-specific attestation, readiness and claim binding; the claims engine retains submission/collection, not physical recovery. Early lease-termination client plumbing remains available without requiring a buyer-facing flow. Common delivery MUST consume evidence and MUST NOT compare mechanism IDs. The VM storefront MUST hold and commit site capacity under the deal's negotiation (`deal_ref.negotiation_id`) whatever the settlement mechanism, so a deal's site reservation is found by its negotiation and carries no settlement reference.
+The VM storefront MUST own capacity reservation, physical fulfillment, credential delivery, and listing/delivery progress.
 
 #### Scenario: An escrow-settled deal's reservation is looked up
 
@@ -37,6 +55,11 @@ The VM storefront MUST own capacity reservation, physical fulfillment, credentia
 
 - **WHEN** verified payment evidence produces an active VM
 - **THEN** common delivery returns the same domain result without creating an escrow claim or choosing a no-chain path by mechanism ID
+
+#### Scenario: Terminal settlement ends a lease
+
+- **WHEN** a VM deal's settlement reaches a terminal state before its lease end
+- **THEN** the storefront requests end service, which truncates or terminates the lease
 
 ### Requirement: Foreground and restart convergence
 
@@ -201,3 +224,26 @@ VM settlement evidence and payment delivery checkpoints/claims MUST be domain-ow
 
 - **WHEN** a write proposes verified evidence without a SHA-256 Agreement digest, authoritative source, or supported validated `vm.delivery-facts` version 1 payload
 - **THEN** storage refuses before freezing an authoritative record or creating delivery progress
+
+### Requirement: VM buyers can end delivery through end service
+
+The VM storefront MUST accept the accepted buyer's `end_delivery` peer message through the shared lifecycle route and realize it through end service, including before fulfillment begins. When the end is due it MUST invoke the site's termination or undelivered-hold release path immediately, not truncate to now and wait for a watchdog. Its signed response MUST distinguish a recorded end from proven capacity release.
+
+#### Scenario: A buyer ends before provisioning
+
+- **WHEN** a committed VM deal's buyer sends `end_delivery` while no resource has been dispatched
+- **THEN** the storefront records the end, releases any undelivered hold and prevents later reconciliation from starting delivery
+
+#### Scenario: A buyer ends a running VM
+
+- **WHEN** the accepted buyer sends `end_delivery` for a running VM
+- **THEN** end service requests termination at its recorded site and reports teardown progress until the site's capacity-released callback proves capacity return
+
+### Requirement: VM lease ends keep the requested instant
+
+The VM storefront MUST send and record lease ends to at least one-second precision, and MUST still read lease ends already recorded to the minute.
+
+#### Scenario: A lease is truncated mid-minute
+
+- **WHEN** end service truncates a VM lease to 12:00:30
+- **THEN** the site receives 12:00:30, not 12:00 or 12:01

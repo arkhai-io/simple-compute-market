@@ -63,6 +63,7 @@ from compute_provisioning_service.services.system_status import (
     SystemStatusService,
 )
 from compute_provisioning_service.services.lease_watchdog import LeaseWatchdog
+from compute_provisioning_service.services.lease_end_reports import LeaseEndReports
 from compute_provisioning_service.services.principal_authority import (
     SqlAlchemyProvisioningPrincipalAuthority,
 )
@@ -250,6 +251,7 @@ def _make_lease_lifecycle(
     release_status,
     lifecycle_event_sink,
     capacity_release_outbox,
+    lease_end_reports,
 ):
     return LeaseLifecycleService(
         cfg,
@@ -262,6 +264,7 @@ def _make_lease_lifecycle(
             )
         ),
         capacity_release_outbox=capacity_release_outbox,
+        lease_end_report_drain=lambda: lease_end_reports.drain(lifecycle_event_sink.deliver_lease_end),
     )
 
 
@@ -320,6 +323,12 @@ class Container(containers.DeclarativeContainer):
         _merge_host_requirements(VM_HOST_REQUIREMENT, BARE_METAL_HOST_REQUIREMENT)
     )
 
+    lease_end_reports = providers.Singleton(
+        LeaseEndReports, session_factory=session_factory,
+        signer=identity_context.provided.signer,
+        peer=providers.Callable(lambda cfg: str(getattr(cfg, "storefront_url", "") or "").rstrip("/"), config),
+    )
+
     capacity_ledger_service = providers.Singleton(
         CapacityLedgerService,
         session_factory=session_factory,
@@ -336,6 +345,8 @@ class Container(containers.DeclarativeContainer):
             settlement_repository=settlement_repository,
         ),
         release_effect=release_effects,
+        site_id=identity_context.provided.storefront_site_id,
+        lease_end_effect=lease_end_reports.provided.record,
     )
 
     # Filled and frozen by adapter composition; the job engine resolves each
@@ -556,12 +567,14 @@ class Container(containers.DeclarativeContainer):
         release_status=release_status,
         lifecycle_event_sink=lifecycle_event_sink,
         capacity_release_outbox=capacity_release_outbox,
+        lease_end_reports=lease_end_reports,
     )
 
     lease_route_service = providers.Singleton(
         LeaseRouteService,
         leases=executor_lease_service,
         lifecycle=lease_lifecycle_service,
+        reports=lease_end_reports.provided.read,
     )
 
     lease_watchdog = providers.Singleton(

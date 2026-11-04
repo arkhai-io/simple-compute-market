@@ -26,10 +26,11 @@ def test_non_scalar_options_must_not_advertise_amount_rate() -> None:
         "settlement_options": [
             {
                 "option_id": "aa" * 32,
-                "mechanism": "demo.pay.v1",
-                "asset": "usd",
-                "rates": [{"field": "amount", "per": "hour", "value": "100"}],
-                "params": {},
+                "price": {
+                    "asset": "usd",
+                    "rates": [{"field": "amount", "per": "hour", "value": "100"}],
+                },
+                "settlement": {"schema": "demo.pay.v1", **({} or {})},
             }
         ],
     }
@@ -43,10 +44,8 @@ def test_non_scalar_options_without_amount_rate_pass() -> None:
         "settlement_options": [
             {
                 "option_id": "bb" * 32,
-                "mechanism": "demo.pay.v1",
-                "asset": "introduction",
-                "rates": [],
-                "params": {"terms": "prose"},
+                "price": {"asset": "introduction", "rates": []},
+                "settlement": {"schema": "demo.pay.v1", **({"terms": "prose"} or {})},
             }
         ],
     }

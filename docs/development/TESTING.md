@@ -937,9 +937,15 @@ configured for one mode is tested with a receipt signed in the other:
 payments.serve(build_signed_receipt(signer=SERVICE, mandate=accepted.mandate, livemode=True))  # refused unless the role sets livemode
 ```
 
-A fake may give the surrounding transaction snapshot a placeholder proof,
-because sellers trust only the embedded receipt. A change that makes snapshot
-state authoritative must first add a snapshot vector and fixture.
+A snapshot consumed as authority state needs its own verified proof, mode,
+deal/mandate/receipt binding and nonregressing event sequence. The payments kit
+owns snapshot vectors, `sign_snapshot` and the shared clock-injected
+`PaymentsAuthority` fixture engine. `FakePaymentsClient` uses that engine rather
+than reimplementing billing; a receipt-only fixture proves only the receipt gate,
+not part-state observation. The mediation kit independently owns claim framing,
+both signature-scheme vectors and ruling traces. Neither fixture qualifies a
+deployed authority or monetary ruling execution. See
+[lifecycle contract evidence](../../openspec/specs/test-compatibility/architecture.md#lifecycle-contract-evidence).
 
 ## Boundary-Change Validation
 
@@ -1115,7 +1121,7 @@ The API-credit payment scenario reads its payments policy through
 may reuse. A blank PAYMENTS.SERVICE_URL means no payments target is configured,
 and the scenario reports a blocked skip, never an Alkahest fallback: that is
 what the pipeline runs. With SERVICE_URL set, SERVICE_IDENTITY,
-DISPUTE_AUTHORITY, BUYER_ACCOUNT, BUYER_MARKETPLACE_CREDENTIAL and
+BUYER_ACCOUNT, BUYER_MARKETPLACE_CREDENTIAL and
 SELLER_MARKETPLACE_CREDENTIAL are required, and a missing one fails the
 scenario by name before the target's `/health` is checked (timeout 5 seconds,
 environment proxies disabled); an unready target is again a blocked skip.

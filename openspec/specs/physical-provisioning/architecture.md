@@ -88,6 +88,36 @@ fallback. Rebuild `.dist` and reinstall consumers before use. Controlled HTTP
 settlement/contact entries use fresh pytest-owned SQLite and clean it afterward;
 this is not live hardware access/revocation qualification.
 
+## Lease-end report delivery
+
+The site forms immutable `lease_ended` evidence when it intends to end a lease,
+before teardown. Explicit termination, expiry, direct release without dispatch,
+release failure and force release all have durable event identity. Payloads bind
+reservation/site, effective instant, cause/source state, caller/failure reason
+and applicable deadline phase. The ledger ending transition and separately
+acknowledged report outbox commit atomically; retries reuse the original event.
+
+The compute wire codec frames canonical payload bytes under
+`arkhai.site.lease-ended.v1`. The service persists the original signed wrapper,
+so retries and `LeaseView.end_reports` return the same bytes after signer changes.
+Push targets only the owning storefront peer. A 404/unsupported receiver parks
+that peer's push, transient failures retry, and a changed peer cannot redirect
+old events. Explicit resumption after receiver upgrade re-enables parked push.
+Authenticated lease reads recover reports independently of the push channel.
+
+VM/bare-metal ingress verifies the configured selected-site binding, retains the
+exact wrapper idempotently, and records source/actor/cause in end service. Buyer
+lifecycle reads expose that same evidence, not a storefront re-signing of it.
+The site knows no payment transaction, dispute policy or payee credential.
+Seller end classification/filing belongs above provisioning.
+
+Due delivery ends terminate immediately; future ends truncate rather than extend
+the accepted horizon at second precision. Pre-dispatch release stays behind the
+site's guard; create-in-flight is adopted before termination. The intended-end
+report has its own acknowledgement, distinct from the existing capacity-released
+outbox. A report, failed release or queued teardown proves no hardware stop and
+returns no capacity; normal release remains proof-driven below.
+
 ## Proof-driven release
 
 Release is proof-driven and split across two cooperating owners. Lease lifecycle decides when a reservation should release and owns the final capacity-return decision; it never dispatches a second teardown operation. Fulfillment convergence (see `openspec/specs/fulfillment/spec.md#fulfillment-convergence-worker`) owns teardown dispatch, provider polling, and recovery through `torn_down`/`teardown_failed`. A kind-routed `ReleaseJobPort` connects the two: VM-backed reservations resolve release status by reading the fulfillment aggregate's teardown state; other offering modes continue reading the shared job queue. The site authority releases capacity only after the fulfillment aggregate reaches `torn_down`, or an operator explicitly force-releases. Failure retains the reservation and records a retryable release state (`teardown_failed`), which convergence requeues on its own without an operator prompting it. An explicit force release is an operator override with distinct audit meaning, not fabricated proof of executor success.

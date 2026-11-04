@@ -126,8 +126,12 @@ def _urlopen_fake(responses, captured=None):
             negotiation_id = payload.get("negotiation_id") or req.full_url.rstrip("/").rsplit("/", 1)[-1]
             params = {"accepted_escrow": payload.get("accepted_escrow_proposal") or _seller_proposal(amount)}
             option = SettlementOption(
-                option_id=derive_settlement_option_id(mechanism="alkahest.v1", asset=_TOKEN, rates=[], params=params),
-                mechanism="alkahest.v1", asset=_TOKEN, rates=[], params=params,
+                option_id=derive_settlement_option_id(
+                    price={"asset": _TOKEN, "rates": []},
+                    settlement={"schema": "alkahest.v1", **(params or {})},
+                ),
+                price={"asset": _TOKEN, "rates": []},
+                settlement={"schema": "alkahest.v1", **(params or {})},
             )
             payload.setdefault("accepted_escrow_proposal", _seller_proposal(amount))
             payload.setdefault("settlement_plan", {

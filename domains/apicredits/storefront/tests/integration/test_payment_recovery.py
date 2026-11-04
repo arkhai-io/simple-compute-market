@@ -12,7 +12,7 @@ from market_arkhai_payments import (
     ArkhaiPaymentsConfig,
     servicing_stage,
 )
-from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt
+from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt, dispute_lifecycle
 from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
 from market_identity import Ed25519Signer
 
@@ -61,12 +61,12 @@ class IssuanceBoundary:
 @pytest.fixture
 async def payment_context(tmp_path):
     db = SQLiteClient(str(tmp_path / "storefront.db"))
-    payments = FakePaymentsClient()
+    payments = FakePaymentsClient(signer=SERVICE)
     kit_stage = servicing_stage(
         ArkhaiPaymentsConfig(
             enabled=True, service_url="http://127.0.0.1:3180",
             service_identity=SERVICE.identity, fee_bps=0,
-            dispute_authority=DISPUTE, development_auth=True,
+            development_auth=True,
         ),
         client_for_owner=payments,
     )
@@ -88,10 +88,16 @@ async def payment_context(tmp_path):
         fulfillment_resource=None, max_duration_seconds=None,
         storefront_url="http://storefront.local", seller_principal=SELLER.identity,
     )
-    params = {"payee_account": PAYEE, "asset": "USD/2", "window": "P7D", "deposit_agreement": True}
+    params = {"payee_account": PAYEE, "window": "P7D", "deposit_agreement": True}
     option = SettlementOption(
-        option_id=derive_settlement_option_id(mechanism=ARKHAI_PAYMENTS_MECHANISM, asset="USD/2", rates=[], params=params),
-        mechanism=ARKHAI_PAYMENTS_MECHANISM, asset="USD/2", rates=[], params=params,
+        option_id=derive_settlement_option_id(
+            price={"asset": "USD/2", "rates": []},
+            settlement={"schema": ARKHAI_PAYMENTS_MECHANISM, **(params or {})},
+            lifecycle=dispute_lifecycle(DISPUTE),
+        ),
+        price={"asset": "USD/2", "rates": []},
+        settlement={"schema": ARKHAI_PAYMENTS_MECHANISM, **(params or {})},
+        lifecycle=dispute_lifecycle(DISPUTE),
     )
     terms = make_api_credits_provision_terms(quantity=3, key_mode="new")
     agreement = Agreement(

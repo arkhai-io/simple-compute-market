@@ -28,6 +28,9 @@ from market_arkhai_payments import (  # noqa: E402
     verify_receipt,
 )
 
+from market_arkhai_payments.fixtures import dispute_lifecycle  # noqa: E402
+from market_deal_lifecycle.terms import LifecycleTerms  # noqa: E402
+
 PAYER = "00000000-0000-4000-8000-000000000011"
 PAYEE = "00000000-0000-4000-8000-000000000012"
 
@@ -65,7 +68,6 @@ def main() -> int:
     }
     option = PaymentsOptionParams(
         payee_account=PAYEE,
-        asset="USD/2",
         window="P7D",
         deposit_agreement=True,
     )
@@ -78,7 +80,7 @@ def main() -> int:
         amount="100",
         asset="USD/2",
         fee_bps=fee_bps,
-        dispute_authority=dispute_authority,
+        lifecycle=LifecycleTerms.model_validate(dispute_lifecycle(dispute_authority)),
     )
     mandate = derive_mandate(agreement, policy)
     check(mandate, agreement, policy)

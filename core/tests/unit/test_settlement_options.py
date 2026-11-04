@@ -21,14 +21,13 @@ def _option() -> SettlementOption:
         "condition": {"protocol": "arkhai.condition.v1"},
     }
     option_id = derive_settlement_option_id(
-        mechanism="example.payment.v1", asset="usd", rates=rates, params=params
+        price={"asset": "usd", "rates": rates},
+        settlement={"schema": "example.payment.v1", **(params or {})},
     )
     return SettlementOption(
         option_id=option_id,
-        mechanism="example.payment.v1",
-        asset="usd",
-        rates=rates,
-        params=params,
+        price={"asset": "usd", "rates": rates},
+        settlement={"schema": "example.payment.v1", **(params or {})},
     )
 
 
@@ -42,7 +41,7 @@ def test_settlement_option_identity_is_canonical_and_stable() -> None:
 
 def test_settlement_option_rejects_payload_drift() -> None:
     raw = _option().model_dump()
-    raw["asset"] = "eur"
+    raw["price"]["asset"] = "eur"
     with pytest.raises(ValidationError, match="canonical payload"):
         SettlementOption.model_validate(raw)
 
@@ -50,8 +49,8 @@ def test_settlement_option_rejects_payload_drift() -> None:
 def test_settlement_selection_is_exact_and_expiry_bounded() -> None:
     option = _option()
     selection = SettlementSelection(
-        mechanism=option.mechanism,
         option_id=option.option_id,
+        settlement={"schema": option.settlement_schema},
         expiration_unix=2_000_000_000,
     )
     assert selection.option_id == option.option_id

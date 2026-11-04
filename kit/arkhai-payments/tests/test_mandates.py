@@ -29,9 +29,12 @@ def _wire(mandate):
 def test_hold_rounds_the_start_interval_up_and_keeps_the_agreement_unchanged():
     terms, mandate = _derived()
     before = dict(terms)
-    # ceil(10.25 s to start) + 3600 s service + 7 days window
+    # Absolute term end rounds up; delayed approval cannot shift it.
     assert _wire(mandate)["parts"] == [
-        {"kind": "once", "asset": "USD/2", "amount": "10000", "hold": {"for": "P7DT1H11S"}}
+        {"kind": "once", "asset": "USD/2", "amount": "10000",
+         "end": {"at": 1791378011, "partialPeriod": "returned"},
+         "hold": {"afterStop": "P7D"}, "maxHoldExtension": None,
+         "authorities": {"stop": [], "reverse": [PAYEE, DISPUTE], "extend": [DISPUTE]}}
     ]
     assert terms == before
     assert _wire(mandate)["deal"] == agreement_hash(terms)
@@ -46,12 +49,10 @@ def test_approval_expiry_rounds_acceptance_down():
 def test_authorities_nonce_and_fee_follow_policy():
     _, mandate = _derived()
     wire = _wire(mandate)
-    assert wire["authorities"] == {
-        "start": [BUYER, PAYEE],
-        "stop": [BUYER, PAYEE],
-        "reverse": [PAYEE, DISPUTE],
+    assert wire["parts"][0]["authorities"] == {
+        "stop": [], "reverse": [PAYEE, DISPUTE], "extend": [DISPUTE],
     }
-    assert BUYER not in wire["authorities"]["reverse"]
+    assert BUYER not in wire["parts"][0]["authorities"]["reverse"]
     assert wire["nonce"] == "arkhai.payments.v1"
     assert wire["fee"] == {"bps": 250}
 

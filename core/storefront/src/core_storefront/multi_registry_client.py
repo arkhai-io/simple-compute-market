@@ -34,6 +34,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, TypedDict
 
+from market_core import RegistryDescriptor
 from market_identity import Signer, TrustedIdentitySet
 
 
@@ -195,6 +196,23 @@ class MultiRegistryClient:
     # ------------------------------------------------------------------
     # Reads — fan-in
     # ------------------------------------------------------------------
+
+    async def get_descriptors(self) -> dict[str, RegistryDescriptor | None]:
+        """Read signed descriptors independently under each registry's pin."""
+        results = await asyncio.gather(
+            *(self._bound(client.get_registry_descriptor()) for client in self._clients),
+            return_exceptions=True,
+        )
+        descriptors: dict[str, RegistryDescriptor | None] = {}
+        for url, result in zip(self._urls, results):
+            if isinstance(result, BaseException):
+                logger.warning(
+                    "registry descriptor unavailable for %s (%s)", url, type(result).__name__
+                )
+                descriptors[url] = None
+            else:
+                descriptors[url] = result
+        return descriptors
 
     async def list_listings(self, **kwargs: Any) -> ListingListResponse:
         """Concurrent ``list_listings`` over every registry; merged and

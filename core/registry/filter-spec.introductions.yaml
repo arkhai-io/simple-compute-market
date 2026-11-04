@@ -9,11 +9,11 @@
 # so sparse entries stay discoverable despite the strict default profile's
 # fail-closed posture. Deploy by pointing REGISTRY_FILTER_SPEC_PATH here.
 
-version: 2
+version: 3
 
 schema:
   id: introductions.market
-  version: 1
+  version: 2
 
 listing_shape:
   $schema: "https://json-schema.org/draft/2020-12/schema"
@@ -31,8 +31,19 @@ listing_shape:
       additionalProperties: true
 
 filters:
-  # Every filter is underreport-friendly: a listing that does not state a
-  # field is not excluded by a query about it.
+
+  # Common lifecycle projections are evaluated by the neutral term codec.
+  # All predicates, including the asset, must match one settlement option.
+  - {name: option_asset, query_name: asset, path: "$.settlement_options[*].price.asset", op: in, value_type: string, on_missing: fail}
+  - {name: adjudication.dispute.interface, path: "$.settlement_options[*].lifecycle.adjudication.dispute.interface", op: in, value_type: string, on_missing: fail}
+  - {name: adjudication.dispute.account, path: "$.settlement_options[*].lifecycle.adjudication.dispute.account", op: in, value_type: string, on_missing: fail}
+  - {name: early_termination.payer, path: "$.settlement_options[*].lifecycle.early_termination.entitlements.payer", op: in, value_type: boolean, on_missing: fail}
+  - {name: early_termination.payee, path: "$.settlement_options[*].lifecycle.early_termination.entitlements.payee", op: in, value_type: boolean, on_missing: fail}
+  - {name: early_termination.payee.notice_seconds, path: "$.settlement_options[*].lifecycle.early_termination.entitlements.payee.notice_seconds", op: range, value_type: integer, on_missing: fail}
+  - {name: early_termination.premature_stop_penalty, path: "$.settlement_options[*].lifecycle.early_termination.premature_stop_penalty", op: range, value_type: integer, on_missing: fail, requires: [option_asset]}
+  - {name: delivery_deadline_seconds, path: "$.settlement_options[*].lifecycle.delivery_deadline_seconds", op: range, value_type: integer, on_missing: fail}
+  # Descriptive fields remain underreport-friendly. Explicit lifecycle queries
+  # require the requested rights rather than inferring a commitment from omission.
   - {name: region,    path: $.listing_resource.region,                    op: in, value_type: string, on_missing: pass}
-  - {name: mechanism, path: "$.settlement_options[*].mechanism",        op: in, value_type: string, on_missing: pass}
-  - {name: channel,   path: "$.settlement_options[*].params.channel",   op: in, value_type: string, on_missing: pass}
+  - {name: mechanism, path: "$.settlement_options[*].settlement.schema",        op: in, value_type: string, on_missing: pass}
+  - {name: channel,   path: "$.settlement_options[*].settlement.channel",   op: in, value_type: string, on_missing: pass}

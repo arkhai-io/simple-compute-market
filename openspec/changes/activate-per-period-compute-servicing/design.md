@@ -38,7 +38,7 @@ and published mapping. The seller half files with the Agreement dispute authorit
 journaled with the end, never future-dated. Pre-start failure journals immediately
 and files at Agreement start. Seller sends no stop/reverse for this path.
 Arkhai mediation's mechanical delivery-end rule is payee agreement under the foundation's guards; its cause=payee branch is the standard self-penalty
-(`openspec/changes/agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`), requalified here against the hosted authority step by step and never
+(`openspec/changes/archive/2026-11-03-agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`), requalified here against the hosted authority step by step and never
 restated; seller exit requires that complete dispute-recorded package, not direct
 partial restitution, and the authority records disputes to act on bad sellers,
 including bans.
@@ -48,7 +48,7 @@ exit files delivery_end. No seller PT0S/returned restitution entry, implicit
 favourable-stop permission, payee notice waiver, payer early release or several-
 stop-entries dependency remains. On-demand non-preemption is remedied by buyer case
 over held money plus the premature-stop penalty, not by mandate enforcement. The buyer's end and its
-`delivery_end` case are requalified exactly as the foundation states them (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-buyers-end`).
+`delivery_end` case are requalified exactly as the foundation states them (`openspec/changes/archive/2026-11-03-agreed-evidence-and-early-termination/design.md#the-buyers-end`).
 
 A deployment must demonstrate semantics, not merely advertise a version. Check
 vendored schema/proof/vectors through the existing SOURCE record and reuse current
@@ -94,9 +94,9 @@ is an internal product prerequisite, not a request for another payments capabili
 Missing credentials or an unavailable target block the live checks; they are not
 passing double evidence.
 
-The hosted dispute authority is qualified against the foundation's published description: repeated/concurrent-case and dismissal policy, plus key-retention and origin-continuity through deal life, window and open cases. Missing these blocks activation. A mediation response bound is an EULA/advertising matter with no code consequence, not an activation gate or open question.
+The hosted dispute authority is qualified against the foundation's published description: repeated/concurrent-case and dismissal policy, plus key-retention and origin-continuity through deal life, window and open cases. Missing these blocks activation. No response bound is asked of the authority: a binding one would end unruled cases in default judgements against someone, and an unbounded one is no bound; a seller mistreated by its chosen authority picks another for its next deals. The authority may publish an advisory expected time to rule, which qualification records as advisory if present and as absent otherwise, and the terms display shows the same.
 
-The baseline arkhai.mediation.v1 is published on arkhai-payments main b98fed26 (payments 3be127e4). Its delivery_end revision is proposed and not yet published. Foundation 12.1 gates its signed payload, concurrence, respondent read, mapping and ed25519/eip191 vectors; live claim qualification and setup-bearing presets wait for that revision, not another payments wire change.
+The arkhai.mediation.v1 contract, delivery_end revision included, is published and vendored by the foundation (its `kit/arkhai-mediation/schema/SOURCE.md` identifies the revision by content); the hosted development service still runs an older revision. Live claim qualification and setup-bearing presets wait for the deployed authorities to run the vendored revision, not for another payments wire change.
 
 After hosted checks pass, both production compositions declare servicing against
 the published revision. The same declaration is checked at publication, acceptance

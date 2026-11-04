@@ -10,6 +10,7 @@ from typing import Annotated, Any
 from urllib.parse import quote, urlencode
 
 from arkhai_bare_metal import CanonicalPrincipal
+from compute_provisioning_contracts.lease_ends import LEASE_ENDED_CALLBACK
 from arkhai_bare_metal.evidence_routes import (
     EVIDENCE_OPERATION,
     EVIDENCE_PATH,
@@ -128,6 +129,7 @@ from .models import (
 from .negotiation_runtime import BareMetalNegotiationRefusal, exact_selection
 from .response_auth import bind_response_auth, bind_response_contract
 from .runtime import BareMetalStorefrontRuntime
+from .lifecycle_records import acceptance_envelope
 from .settlement_composition import ALKAHEST_MECHANISM
 from .settlement_service import (
     PaymentSettleResult,
@@ -164,6 +166,14 @@ async def _principal(
     now: int | None = None,
 ) -> Identity:
     bind_response_contract(request, operation=operation, resource=resource)
+
+    def capture(envelope):
+        acceptance_envelope.set(envelope)
+        request.state.acceptance_envelope = envelope
+        sink = getattr(request.app.state, "envelope_capture", None)
+        if sink is not None:
+            sink(envelope)
+
     try:
         authenticated = await authenticate_request(
             headers=request.headers,
@@ -172,6 +182,8 @@ async def _principal(
             resource=resource,
             body=body,
             expected_role=expected_role,
+            raw_body=await request.body(),
+            capture=capture,
             replay_store=runtime.db,
             expected_principal=expected_principal,
             allowed_principals=allowed_principals,
@@ -1134,33 +1146,6 @@ async def fulfillment_result(
         raise _fulfillment_error(exc) from exc
 
 
-@router.post(
-    "/api/v1/fulfillments/{negotiation_id}/teardown",
-    response_model=BareMetalFulfillmentResponse,
-)
-async def teardown_fulfillment(
-    negotiation_id: str,
-    request: Request,
-) -> BareMetalFulfillmentResponse:
-    runtime = _runtime(request)
-    try:
-        identity = await _fulfillment_identity(
-            request=request,
-            runtime=runtime,
-            negotiation_id=negotiation_id,
-            operation="bare_metal_fulfillment_teardown",
-        )
-        lifecycle = await runtime.fulfillment_service().teardown(
-            negotiation_id=negotiation_id,
-            buyer_principal=identity,
-        )
-        return BareMetalFulfillmentResponse.model_validate(
-            {**lifecycle, "escrow_uid": lifecycle["settlement_ref"]}
-        )
-    except BareMetalFulfillmentError as exc:
-        raise _fulfillment_error(exc) from exc
-
-
 def _evidence_route_service(runtime: BareMetalStorefrontRuntime) -> Any:
     """The evidence route service over this storefront's store, trust, and signer."""
 
@@ -1416,6 +1401,35 @@ async def capacity_released(
     except CapacityAdminRouteError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     return BareMetalCapacityEventResponse.model_validate(recorded)
+
+
+@router.post(LEASE_ENDED_CALLBACK["path"])
+async def lease_ended(capacity_reservation_id: str, request: Request) -> dict[str, str]:
+    runtime = _runtime(request)
+    row = await runtime.db.load_bare_metal_fulfillment_lifecycle_by_reservation(
+        capacity_reservation_id=capacity_reservation_id,
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="reservation is not this storefront's")
+    operation = LEASE_ENDED_CALLBACK["operation"]
+    now = int(time.time())
+    await _principal(
+        request=request, runtime=runtime, operation=operation,
+        resource=capacity_reservation_id, expected_role="service",
+        allowed_principals=_site_authority_principals(
+            request, runtime, operation=operation, resource=capacity_reservation_id,
+            site_ids=(row["site_id"],), now=now,
+        ), body=await _request_body(request), now=now,
+    )
+    try:
+        await asyncio.to_thread(
+            runtime.lifecycle.ingress.site_report,
+            row["negotiation_id"], body=await request.body(), headers=dict(request.headers),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await runtime.lifecycle.end.drive_physical(row["negotiation_id"])
+    return {"status": "recorded"}
 
 
 # -- marketplace identity ------------------------------------------------------

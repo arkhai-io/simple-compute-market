@@ -59,6 +59,18 @@ HELD_RESERVATION_STATES = (
 
 
 
+class LeaseEndedEvent(Base):
+    """Immutable intended-end events; acknowledgements belong to a separate outbox."""
+
+    __tablename__ = "site_lease_ended_events"
+    __table_args__ = (UniqueConstraint("capacity_reservation_id", "transition_key"),)
+
+    event_id = Column(String, primary_key=True)
+    capacity_reservation_id = Column(String, nullable=False, index=True)
+    transition_key = Column(String, nullable=False)
+    payload = Column(JSON, nullable=False)
+
+
 class CapacityBucket(Base):
     """Provisioning-private per-declaration capacity accounting boundary.
 

@@ -104,6 +104,8 @@ class DealState(ComputeDealState):
     tenant_credentials: Optional[dict[str, Any]] = None
     seller_listing_final_status: Optional[str] = None
     lease_status: Optional[str] = None
+    # The second deal observes buyer surrender independently of natural expiry.
+    lifecycle_purchase: Optional[Any] = None
 
 
 # ---------------------------------------------------------------------------

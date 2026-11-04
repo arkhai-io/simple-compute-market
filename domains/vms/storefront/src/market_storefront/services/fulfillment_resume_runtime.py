@@ -22,6 +22,7 @@ from compute_provisioning_contracts import (
     FulfillmentRequestBody,
     FulfillmentScheduleRequest,
 )
+from market_core.schemas import settlement_option_schema
 from market_capacity_publication import CapacityEffects, PublicationBinding
 from market_core import SettlementEvidence, VersionedEnvelope
 from market_fulfillment import (
@@ -52,7 +53,7 @@ from market_storefront.utils.sqlite_client import SQLiteClient
 
 logger = logging.getLogger(__name__)
 
-_TERMINAL_DELIVERY_STATUSES = {"ready", "failed", "refunded"}
+_TERMINAL_DELIVERY_STATUSES = {"ready", "failed", "refunded", "ended"}
 
 
 def _validated_context(raw: str | None) -> dict[str, Any] | None:
@@ -197,6 +198,9 @@ async def converge_post_physical_delivery(
     """
     negotiation_id = str(delivery["negotiation_id"])
     listing_id = context.get("listing_id")
+    await sqlite_client.update_vm_delivery(
+        negotiation_id=negotiation_id, fulfillment_phase="disclose",
+    )
     await _store_fulfillment_credentials(
         sqlite_client=sqlite_client,
         negotiation_id=negotiation_id,
@@ -482,6 +486,9 @@ async def converge_delivery_once(
         != plan.provision_terms.ssh_public_key
     ):
         raise ValueError("delivery SSH key differs from verified evidence")
+    await sqlite_client.update_vm_delivery(
+        negotiation_id=negotiation_id, fulfillment_phase="context_persisted",
+    )
     reservation_id, resource_id = await _ensure_recovery_capacity(
         negotiation_id=negotiation_id,
         context=context,
@@ -502,6 +509,9 @@ async def converge_delivery_once(
             capacity_client=capacity_client,
             binding=binding,
         )
+    await sqlite_client.update_vm_delivery(
+        negotiation_id=negotiation_id, fulfillment_phase="dispatch",
+    )
     fulfillment_id, resource_id = await _ensure_recovery_fulfillment_started(
         negotiation_id=negotiation_id,
         request_envelope=request_envelope or {},
@@ -594,8 +604,8 @@ async def resume_incomplete_fulfillments_once(
                 negotiation_id=negotiation_id
             )
             thread = await db.load_negotiation_thread_row(negotiation_id=negotiation_id)
-            # A delivery that started before a refund still completes; its
-            # evidence keeps the verified facts while the status records the refund.
+            # Refund states retain verified facts for recovery; admission still
+            # prevents further delivery after their durable final request.
             if (
                 evidence is None
                 or evidence.status not in VERIFIED_EVIDENCE_STATUSES
@@ -603,7 +613,7 @@ async def resume_incomplete_fulfillments_once(
             ):
                 continue
             agreement = json.loads(thread["agreement_bytes"])
-            stage = composition.seller_stages[agreement["settlement"]["mechanism"]]
+            stage = composition.seller_stages[settlement_option_schema(agreement["settlement"])]
             await stage.recover_evidence(
                 evidence=evidence, thread=thread, composition=composition, db=db
             )

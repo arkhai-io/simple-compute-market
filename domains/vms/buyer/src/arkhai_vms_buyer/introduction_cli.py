@@ -9,6 +9,8 @@ recovery, transport, run log, and sinks to them.
 
 from __future__ import annotations
 
+from .evidence import evidence_store
+
 import json
 import time
 from typing import Any
@@ -156,13 +158,13 @@ def request_introduction(
     if len(matches) != 1:
         raise typer.BadParameter("option_id must identify one advertised option")
     selected = matches[0]
-    if selected.mechanism != CONTACT_MECHANISM or selected.rates:
+    if selected.settlement_schema != CONTACT_MECHANISM or selected.price_rates:
         raise typer.BadParameter(
             "option is not a rateless introduction; use `buy` for priced options"
         )
     selection = SettlementSelection(
-        mechanism=selected.mechanism,
         option_id=selected.option_id,
+        settlement={"schema": selected.settlement_schema},
         expiration_unix=int(time.time()) + expiration_seconds,
     )
     run_log = RunLog.start(
@@ -181,6 +183,7 @@ def request_introduction(
         source_registry_authority=registry_authority,
     )
     outcome = negotiate_with_seller(
+        capture=evidence_store().capture,
         seller_url=storefront_url,
         principal=identity.principal,
         signer=identity.signer,

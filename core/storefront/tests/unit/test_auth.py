@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from market_identity import (
     REQUEST_PROTOCOL,
@@ -113,6 +115,8 @@ async def test_ed25519_v2_request_reserves_replay_before_dispatch() -> None:
     body = {"buyer_principal": signer.identity.model_dump(mode="json")}
     headers = _signed_headers(signer=signer, body=body)
 
+    envelopes = []
+    raw = json.dumps(body, indent=2).encode()
     first = await authenticate_request(
         headers=headers,
         method="POST",
@@ -123,6 +127,8 @@ async def test_ed25519_v2_request_reserves_replay_before_dispatch() -> None:
         expected_principal=signer.identity,
         replay_store=store,
         now=1_000,
+        capture=envelopes.append,
+        raw_body=raw,
     )
     retry = await authenticate_request(
         headers=headers,
@@ -136,6 +142,9 @@ async def test_ed25519_v2_request_reserves_replay_before_dispatch() -> None:
         now=1_000,
     )
 
+    assert envelopes[0].body == raw
+    assert envelopes[0].headers == headers
+    assert envelopes[0].envelope.resource == "listing-1"
     assert first.dispatch_allowed is True
     assert retry.exact_retry is True
     assert retry.dispatch_allowed is False
@@ -148,6 +157,7 @@ async def test_v2_rejects_body_mutation_and_cross_role_reuse() -> None:
     body = {"buyer_principal": signer.identity.model_dump(mode="json")}
     headers = _signed_headers(signer=signer, body=body)
 
+    envelopes = []
     with pytest.raises(AuthError):
         await authenticate_request(
             headers=headers,
@@ -159,6 +169,8 @@ async def test_v2_rejects_body_mutation_and_cross_role_reuse() -> None:
             expected_principal=signer.identity,
             replay_store=store,
             now=1_000,
+            capture=envelopes.append,
+            raw_body=json.dumps(body).encode(),
         )
     with pytest.raises(AuthError):
         await authenticate_request(
@@ -171,7 +183,10 @@ async def test_v2_rejects_body_mutation_and_cross_role_reuse() -> None:
             expected_principal=signer.identity,
             replay_store=store,
             now=1_000,
+            capture=envelopes.append,
+            raw_body=json.dumps(body).encode(),
         )
+    assert envelopes == []
 
 
 @pytest.mark.asyncio

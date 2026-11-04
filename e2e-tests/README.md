@@ -63,10 +63,13 @@ The API-credit payment scenario reads the `PAYMENTS` section (environment
 prefix `ARKHAI_PAYMENTS__`) through `tests/e2e/roles/helpers/payments.py`, which
 other payment scenarios may reuse. SERVICE_URL names the payments target; leave
 it blank and the scenario reports `blocked` and skips. With it set, supply the
-other five: SERVICE_IDENTITY (public Ed25519 receipt signer), DISPUTE_AUTHORITY,
-BUYER_ACCOUNT, BUYER_MARKETPLACE_CREDENTIAL and SELLER_MARKETPLACE_CREDENTIAL;
+other four: SERVICE_IDENTITY (public Ed25519 receipt signer), BUYER_ACCOUNT,
+BUYER_MARKETPLACE_CREDENTIAL and SELLER_MARKETPLACE_CREDENTIAL;
 a missing one fails the scenario, naming it. Marketplace credentials are
-independent of payment account IDs.
+independent of payment account IDs. Dispute authorities are role preferences
+or signed registry recommendations, not a payments-helper setting; configure the
+seller and the buyer's registry accordingly. The shared buyer profile writer
+explicitly opts into registry recommendations.
 
 FEE_BPS defaults to 250. LIVEMODE and DEVELOPMENT_AUTH default to false and
 must be `true` or `false`; generated buyer tables explicitly pin the receipt
@@ -183,6 +186,30 @@ running; `make e2e-<lane>-down` takes it down. `make test-e2e` runs all three in
 turn, taking each stack down before the next. The compute lanes' provisioning
 services run the mock profile unless `PROVISIONING_MODE=real`.
 
+### Hosted VM servicing
+
+`e2e_vm_payment_deal` runs in the VM lane, gated by the shared `PAYMENTS`
+configuration. It publishes a hosted-only one-hour VM option, approves the exact
+accepted mandate, commits through `LifecycleClient`, replays commitment and
+steps servicing. An administrator then ends delivery without payee stop rights;
+the seller files one mediation case while teardown is gated. Finally, a seller
+refund reverses the held payment, separately from callback-proven capacity return.
+The mock executor proves the service wiring, not a real guest or SSH access.
+
+Supply healthy payment and mediation authorities, exact signed-registry
+recommendations, seller recommendation consent and an identity-bound
+`[[DisputeCredential]]` for the accepted mediation authority. Its `api_key_env`
+names the seller bearer credential variable; forward that variable into the
+storefront. A running authority without a usable party credential is not enough.
+Development-auth adapters belong to the disposable authority setup, not SCM.
+Before pytest, check Compose health, payment health from host/seller/buyer,
+mediation health and an authenticated publication using
+`option["settlement"]["schema"]`, not the retired option-level mechanism key.
+The [VM readiness gate](../docs/attachments/vm-end-classification/readiness.py)
+and [hosted qualification packet](../docs/attachments/aeet-vm-hosted/index.md)
+provide the direct entry point and observed stages. Without a configured payment
+target all four stages report blocked skips; no Alkahest fallback is used.
+
 ### Real VM provisioning
 
 `e2e_vm_real_provisioning` runs the canonical compute deal against a real KVM
@@ -246,14 +273,21 @@ the purchase buyer is a separate wallet-free Ed25519 profile. An unconfigured
 public CI run reports a named blocked payments prerequisite, not success.
 
 The fixture declares a distinct backed whole host and publishes only a USD
-1.00/hour option for a one-hour term. The installed `market bare-metal buy`
-emits `run_started → agreement_accepted → payment_approved →
-run_ended(status=agreed)`. Delivery reads use that purchase's signer and
-fulfillment transport. Re-drive recovers the original run's retained profile
-and calls the shared `settle_agreement` client, keeping both transaction and
-fulfillment unchanged; there is no bare-metal settle command. Seller refund
-reverses the held once payment, then a separate buyer teardown converges mock
-reclaim and site capacity release. Unless the refund stage completed the deal's
+1.00/hour option for a one-hour term. The registry must recommend the ready
+mediation authority; the option includes a 300-second delivery deadline,
+a 15-day dispute window and an unbounded case hold. The dispute window covers
+the delivery deadline plus the authority's minimum filing window; the payment
+`window=P7D` is a separate input.
+
+The installed `market bare-metal buy` emits
+`run_started → negotiation_completed(status=agreed) → payment_approved →
+run_ended(status=agreed)`. It commits through `BuyerLifecycle` after approval.
+Delivery reads use that purchase's signer and fulfillment transport. Re-drive
+recovers the original run's retained profile and repeats canonical lifecycle
+`commit`, keeping both transaction and fulfillment unchanged; there is no
+bare-metal settle command. Seller refund reverses the held once payment;
+idempotent canonical buyer surrender and convergence establish mock reclaim
+and proven site capacity release separately. Unless the refund stage completed the deal's
 teardown, the module's cleanup finds the purchase in the buyer's run log; when
 the log records the payment approved, it refunds the payment (a repeat refund
 returns the same result), then reads the purchase's fulfillment and releases a

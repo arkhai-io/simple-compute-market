@@ -219,15 +219,19 @@ def _option_listing() -> dict:
         "listing_id": "L1",
         "max_duration_seconds": 7200,
         "settlement_options": [
-            {"option_id": _OPTION_ID, "mechanism": "arkhai.payments.v1", "asset": "USD/2"}
+            {
+                "option_id": _OPTION_ID,
+                "price": {"asset": "USD/2", "rates": []},
+                "settlement": {"schema": "arkhai.payments.v1"},
+            }
         ],
     }
 
 
 def _selection(**extra) -> dict:
     return {
-        "mechanism": "arkhai.payments.v1",
         "option_id": _OPTION_ID,
+        "settlement": {"schema": "arkhai.payments.v1"},
         "expiration_unix": 1_900_000_000,
         **extra,
     }
@@ -237,22 +241,28 @@ def test_selection_with_mechanism_params_is_accepted_with_them():
     """A payment selection carries the buyer's payer account as params."""
     params = {"payer_account": "11111111-1111-4111-8111-111111111111"}
     decision, context = round_zero_opening_guard(
-        _selection_round(_selection(params=params)), _context(_option_listing())
+        _selection_round(
+            _selection(settlement={"schema": "arkhai.payments.v1", **params})
+        ),
+        _context(_option_listing()),
     )
     assert decision is None
-    assert context.intermediate["accepted_settlement_selection"]["params"] == params
+    assert context.intermediate["accepted_settlement_selection"]["settlement"] == {
+        "schema": "arkhai.payments.v1",
+        **params,
+    }
 
 
 def test_selection_with_empty_params_is_accepted():
-    """A storefront serializes a parameterless selection with params set to None."""
+    """A parameterless selection carries only its schema tag."""
     decision, _context_out = round_zero_opening_guard(
-        _selection_round(_selection(params=None)), _context(_option_listing())
+        _selection_round(_selection()), _context(_option_listing())
     )
     assert decision is None
 
 
 def test_selection_with_unknown_fields_or_non_mapping_params_is_rejected():
-    for selection in (_selection(amount="5"), _selection(params=["payer"])):
+    for selection in (_selection(amount="5"), _selection(settlement=["payer"])):
         decision, _context_out = round_zero_opening_guard(
             _selection_round(selection), _context(_option_listing())
         )

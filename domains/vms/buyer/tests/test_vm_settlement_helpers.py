@@ -215,8 +215,8 @@ def test_current_accepted_state_without_provision_terms_never_uses_config():
     deal = SimpleNamespace(
         accepted_provision_terms=None,
         settlement_selection={
-            "mechanism": "alkahest.v1",
             "option_id": "a" * 64,
+            "settlement": {"schema": "alkahest.v1"},
             "expiration_unix": 2_000_000_000,
         },
         settlement_plan={"obligations": []},
@@ -237,8 +237,8 @@ def test_recovery_never_falls_back_for_uninstalled_accepted_mechanism(
     deal = SimpleNamespace(
         agreement=None,
         settlement_selection={
-            "mechanism": "future.settlement.v1",
             "option_id": "a" * 64,
+            "settlement": {"schema": "future.settlement.v1"},
             "expiration_unix": 2_000_000_000,
         },
         settlement_plan={

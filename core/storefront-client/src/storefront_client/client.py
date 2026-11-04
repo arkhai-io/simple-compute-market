@@ -40,6 +40,8 @@ Usage (async)::
 
 from __future__ import annotations
 
+from market_identity import EnvelopeCapture, capture_envelope
+
 import logging
 import time
 import urllib.parse
@@ -274,6 +276,7 @@ class _StorefrontClientBase:
         caller_role: str | None,
         expected_publishers: TrustedIdentitySet | None,
         timeout: float,
+        capture: EnvelopeCapture | None = None,
     ) -> None:
         if signer is not None and not isinstance(signer, Signer):
             raise TypeError("signer must implement market_identity.Signer")
@@ -305,6 +308,7 @@ class _StorefrontClientBase:
         self._caller_role = caller_role
         self._expected_publishers = expected_publishers
         self._timeout = timeout
+        self._capture = capture
         self._signed_requests: dict[str, SignedRequest] = {}
 
     def _url(self, path: str) -> str:
@@ -397,9 +401,11 @@ class _StorefrontClientBase:
                 request=request,
                 status=response.status_code,
                 body=body,
+                raw_body=response.content,
+                capture=self._capture,
             )
         except StorefrontAuthenticationError as exc:
-            raise StorefrontClientError(str(exc)) from exc
+            raise StorefrontClientError(str(exc), status_code=response.status_code) from exc
 
     def _authenticated_payload(
         self,
@@ -413,7 +419,7 @@ class _StorefrontClientBase:
             payload = resp.json()
         except ValueError as exc:
             raise StorefrontClientError(
-                f"{method} {url} returned non-JSON response authentication body"
+                f"{method} {url} returned non-JSON response authentication body", status_code=resp.status_code,
             ) from exc
         self._verify_response(resp, signed, payload)
         self._raise_for_status(method, url, resp.status_code, resp.text)
@@ -465,6 +471,7 @@ class StorefrontClient(_StorefrontClientBase):
         expected_publishers: TrustedIdentitySet | None = None,
         timeout: float = 60.0,
         transport: httpx.AsyncBaseTransport | None = None,
+        capture: EnvelopeCapture | None = None,
     ) -> None:
         super().__init__(
             base_url,
@@ -472,6 +479,7 @@ class StorefrontClient(_StorefrontClientBase):
             caller_role,
             expected_publishers,
             timeout,
+            capture,
         )
         self._client = httpx.AsyncClient(
             base_url=self._base,
@@ -1721,6 +1729,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         expected_publishers: TrustedIdentitySet | None = None,
         timeout: float = 60.0,
         transport: httpx.BaseTransport | None = None,
+        capture: EnvelopeCapture | None = None,
     ) -> None:
         super().__init__(
             base_url,
@@ -1728,6 +1737,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
             caller_role,
             expected_publishers,
             timeout,
+            capture,
         )
         self._client = httpx.Client(
             base_url=self._base,

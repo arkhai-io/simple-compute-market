@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from market_core import RegistryDescriptor
 from market_identity import Identity
+from market_deal_lifecycle.configuration import DisputeEntry
 
 from core_registry.api.filter_spec import FilterSpec
 
@@ -18,6 +19,7 @@ def build_registry_descriptor(
     filter_spec: FilterSpec,
     require_read_api_key: bool,
     acquisition_pointer: str | None,
+    recommended_dispute_authorities: list[dict] | None = None,
 ) -> RegistryDescriptor:
     """Build one descriptor without duplicating signer, schema, or gate state."""
 
@@ -55,6 +57,12 @@ def build_registry_descriptor(
         access = {"posture": "public"}
     return RegistryDescriptor.model_validate(
         {
+            "recommendedDisputeAuthorities": [
+                DisputeEntry.model_validate(item).model_dump(
+                    mode="json", exclude={"not_offered", "not_accepted"}
+                )
+                for item in recommended_dispute_authorities or []
+            ],
             "access": access,
             "authority": {
                 "name": authority_name,

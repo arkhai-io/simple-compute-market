@@ -11,7 +11,19 @@ from typing import Any
 
 import httpx
 from market_core.query_dsl import ComparisonOperator, FieldDescriptor, QueryValueType
-from market_core.schemas import RateValue, SettlementOption, derive_settlement_option_id
+from market_core.schemas import (
+    RateValue,
+    SettlementOption,
+    SettlementPrice,
+    derive_settlement_option_id,
+    settlement_option_asset,
+    settlement_option_params,
+    settlement_option_lifecycle,
+)
+from market_deal_lifecycle.configuration import DisputeEntry
+from market_deal_lifecycle.terms import (
+    Adjudication, LifecycleTerms, TermContext, encode_terms, validate_terms,
+)
 from market_identity import Identity, IdentityScheme
 from market_settlement_runtime import (
     MechanismReadiness,
@@ -25,7 +37,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from market_arkhai_payments.client import PaymentsClient
 from market_arkhai_payments.mandates import PaymentsOptionParams
-from market_arkhai_payments.models import AccountId
+from market_arkhai_payments.models import AccountId, Asset
+from market_arkhai_payments.receipts import ReceiptIdentity
 
 ARKHAI_PAYMENTS_MECHANISM = "arkhai.payments.v1"
 ARKHAI_PAYMENTS_CONFIG_KEY = "arkhai_payments"
@@ -54,8 +67,8 @@ class ArkhaiPaymentsConfig(BaseModel):
     enabled: bool = False
     service_url: str | None = None
     service_identity: Identity | None = None
+    receipt_identities: list[ReceiptIdentity] = Field(default_factory=list)
     fee_bps: int | None = Field(default=None, ge=0, le=10_000)
-    dispute_authority: str | None = None
     api_key_env: str | None = None
     development_auth: bool = False
     # The service mode whose receipts this role accepts. Live payments services
@@ -65,6 +78,21 @@ class ArkhaiPaymentsConfig(BaseModel):
     # default because the Agreement discloses both parties and provision terms
     # to the payments service, and a deposit cannot be withdrawn.
     attach_agreement: bool = False
+
+    @property
+    def receipt_trust(self) -> tuple[ReceiptIdentity, ...]:
+        if self.receipt_identities:
+            return tuple(self.receipt_identities)
+        return (ReceiptIdentity(identity=self.service_identity),) if self.service_identity else ()
+
+    @model_validator(mode="after")
+    def current_receipt_identity(self) -> ArkhaiPaymentsConfig:
+        if self.receipt_identities and not any(
+            item.identity == self.service_identity and not item.retiring
+            for item in self.receipt_identities
+        ):
+            raise ValueError("receipt_identities must include the current service_identity")
+        return self
 
     @field_validator("service_url")
     @classmethod
@@ -95,12 +123,15 @@ class ArkhaiPaymentsConfig(BaseModel):
             raise ValueError("payments receipt identity must use Ed25519")
         return value
 
-    @field_validator("dispute_authority")
+    @model_validator(mode="before")
     @classmethod
-    def validate_dispute_authority(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        return AccountId.model_validate(value).root
+    def refuse_retired_dispute_authority(cls, value: Any) -> Any:
+        if isinstance(value, Mapping) and "dispute_authority" in value:
+            raise ValueError(
+                "[Settlement.arkhai_payments].dispute_authority is retired; "
+                "configure [[Dispute]] preferences or use_registry_dispute_authorities instead"
+            )
+        return value
 
     @field_validator("api_key_env")
     @classmethod
@@ -127,6 +158,21 @@ class ArkhaiPaymentsConfig(BaseModel):
 
 class ArkhaiPaymentsPublicationInput(PaymentsOptionParams):
     """Public payment parameters accepted by a seller publication clause."""
+
+    asset: str
+    dispute_window_seconds: int = Field(ge=0)
+    case_hold_max_seconds: int | None = Field(default=None, ge=0)
+    delivery_deadline_seconds: int | None = Field(default=None, gt=0)
+
+    @field_validator("dispute_window_seconds", "case_hold_max_seconds", "delivery_deadline_seconds", mode="before")
+    @classmethod
+    def parse_seconds_clause(cls, value: Any) -> Any:
+        return int(value) if isinstance(value, str) and value.isdecimal() else value
+
+    @field_validator("asset")
+    @classmethod
+    def validate_asset(cls, value: str) -> str:
+        return Asset.model_validate(value).root
 
     @field_validator("deposit_agreement", mode="before")
     @classmethod
@@ -237,13 +283,6 @@ async def arkhai_payments_preflight(
                 "a payments fee policy is required",
             )
         )
-    if config.dispute_authority is None:
-        blockers.append(
-            _blocker(
-                "arkhai_payments.dispute_authority_missing",
-                "the trusted payments dispute authority is required",
-            )
-        )
     if not config.development_auth:
         if config.api_key_env is None:
             blockers.append(
@@ -272,19 +311,12 @@ async def arkhai_payments_preflight(
     )
 
 
-def _value(source: Any, name: str, default: Any = None) -> Any:
-    return (
-        source.get(name, default)
-        if isinstance(source, Mapping)
-        else getattr(source, name, default)
-    )
-
-
 def _option_params(option: Any) -> PaymentsOptionParams | None:
-    raw = _value(option, "params", {})
+    raw = settlement_option_params(option)
     if not isinstance(raw, Mapping):
         return None
     try:
+        Asset.model_validate(settlement_option_asset(option))
         return PaymentsOptionParams.model_validate(raw)
     except (TypeError, ValueError):
         return None
@@ -300,14 +332,42 @@ def arkhai_payments_option_builder(
     config = ArkhaiPaymentsConfig.model_validate(section)
     if role != "seller" or not config.enabled or not readiness.ready:
         raise ValueError("Arkhai payments is not ready for seller publication")
-    clause = SettlementPublicationClause.model_validate(
-        resources.get("publication_clause")
-    )
+    raw_clause = resources.get("publication_clause")
+    if raw_clause is None:
+        # Enabling payments does not select it for every listing. Other
+        # mechanisms may publish without a payment price or payee clause.
+        return {"accepted_escrows": [], "settlement_options": []}
+    clause = SettlementPublicationClause.model_validate(raw_clause)
     if clause.mechanism != ARKHAI_PAYMENTS_MECHANISM:
         raise ValueError("publication clause does not select Arkhai payments")
     params = ArkhaiPaymentsPublicationInput.model_validate(clause.mechanism_input)
     if params.asset != clause.asset:
         raise ValueError("payment option asset must match the publication clause")
+
+    authorities = tuple(DisputeEntry.model_validate(item) for item in resources.get("dispute_authorities", ()))
+    if not authorities:
+        return {"accepted_escrows": [], "settlement_options": []}
+    entry = next((item for item in authorities
+                  if ARKHAI_PAYMENTS_MECHANISM in item.advertisement.mechanisms), None)
+    if entry is None:
+        raise ValueError("no offered dispute authority advertises arkhai.payments.v1")
+    AccountId.model_validate(entry.account)
+    lifecycle = LifecycleTerms.model_validate({
+        "adjudication": Adjudication(
+            version=1, dispute=entry.authority,
+            dispute_window_seconds=params.dispute_window_seconds,
+            case_hold_max_seconds=params.case_hold_max_seconds,
+        ),
+        **({"delivery_deadline_seconds": params.delivery_deadline_seconds}
+           if params.delivery_deadline_seconds is not None else {}),
+    })
+    validate_terms(encode_terms(lifecycle), TermContext(
+        mechanism=ARKHAI_PAYMENTS_MECHANISM, has_adapter=True,
+        dispute_interfaces=frozenset(resources.get("dispute_interfaces", ())),
+        authority=entry.requirements, compute=bool(resources.get("compute", False)),
+    ))
+    if resources.get("compute") and lifecycle.delivery_deadline_seconds is None:
+        raise ValueError("compute option requires delivery_deadline_seconds")
 
     rates: list[RateValue] = []
     if clause.rate is not None:
@@ -329,23 +389,40 @@ def arkhai_payments_option_builder(
             value = int(clause.rate)
         rates.append(RateValue(field="amount", per=clause.per, value=value))
 
-    option_params = params.model_dump(mode="json")
+    option_params = params.model_dump(mode="json", exclude={
+        "asset", "dispute_window_seconds", "case_hold_max_seconds", "delivery_deadline_seconds",
+    })
+    price = SettlementPrice(asset=params.asset, rates=rates)
+    settlement = {"schema": ARKHAI_PAYMENTS_MECHANISM, **option_params}
     option = SettlementOption(
         option_id=derive_settlement_option_id(
-            mechanism=ARKHAI_PAYMENTS_MECHANISM,
-            asset=params.asset,
-            rates=rates,
-            params=option_params,
+            price=price, settlement=settlement, lifecycle=encode_terms(lifecycle),
         ),
-        mechanism=ARKHAI_PAYMENTS_MECHANISM,
-        asset=params.asset,
-        rates=rates,
-        params=option_params,
+        price=price,
+        settlement=settlement,
+        lifecycle=encode_terms(lifecycle),
     )
     return {
         "accepted_escrows": [],
         "settlement_options": [option.model_dump(mode="json")],
     }
+
+
+def validate_payment_lifecycle(
+    option: Any, *, authorities: tuple[DisputeEntry, ...],
+    dispute_interfaces: frozenset[str], compute: bool = False,
+) -> LifecycleTerms:
+    """Admit only an exact accepted authority with compatible advertised minima."""
+    terms = LifecycleTerms.model_validate(settlement_option_lifecycle(option))
+    entry = next((item for item in authorities if item.authority == terms.adjudication.dispute), None)
+    validate_terms(encode_terms(terms), TermContext(
+        mechanism=ARKHAI_PAYMENTS_MECHANISM, has_adapter=True,
+        dispute_interfaces=dispute_interfaces, authority=entry.requirements if entry else None,
+        buyer=True, accepted_authorities=tuple(item.authority for item in authorities),
+        compute=compute,
+    ))
+    AccountId.model_validate(terms.adjudication.dispute.account)
+    return terms
 
 
 def arkhai_payments_buyer_compatibility(
@@ -357,8 +434,12 @@ def arkhai_payments_buyer_compatibility(
     config = ArkhaiPaymentsConfig.model_validate(section)
     if not config.enabled:
         return False
-    params = _option_params(option)
-    return params is not None and params.asset == _value(option, "asset")
+    try:
+        terms = LifecycleTerms.model_validate(settlement_option_lifecycle(option))
+        AccountId.model_validate(terms.adjudication.dispute.account)
+    except ValueError:
+        return False
+    return _option_params(option) is not None
 
 
 def _payee_projection(option: Any) -> str | None:

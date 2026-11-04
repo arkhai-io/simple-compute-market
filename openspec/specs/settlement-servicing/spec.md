@@ -259,14 +259,52 @@ The `arkhai.payments.v1` seller kit MUST derive a mandate from the exact accepte
 - **WHEN** the seller polls the transaction ID and receives a receipt
 - **THEN** it verifies the Arkhai signature and matching transaction and Agreement deal before provisioning, and rejects an invalid, absent, or mismatched receipt
 
+### Requirement: The mandate binds the deal and its parties
+
+The mandate's `deal` MUST be `sha256(JCS(agreement))` and its transaction ID `sha256(JCS(mandate))`. It MUST name `settlement_params.payer_account` as `from` and the selected option's payee account as `to`, use the service's published fee policy and the fixed nonce `arkhai.payments.v1`, and, on once-only options, carry one `once` part for the agreed amount and asset, with per-part authorities.
+
+#### Scenario: A once-only mandate is bound
+
+- **WHEN** buyer and seller derive the mandate of an accepted once-only payments Agreement
+- **THEN** both derive the same `deal`, transaction ID, `from` and `to`, with one `once` part for the agreed amount and asset
+
+### Requirement: Mandate holds and approval follow the option's timing
+
+Every `once` hold MUST last at least its part end plus the option's `adjudication.dispute_window_seconds`; prepaid service ends at Agreement term end, and setup encodes its end at Agreement start, clamped effectively to approval if later. Approval MUST expire after the option's `approval_window`. Each part MUST carry `maxHoldExtension` from `adjudication.case_hold_max_seconds`, `null` when unbounded. A hosted option MUST NOT carry `bond` until payments can hold a seller-funded part.
+
+#### Scenario: An unbounded case hold
+
+- **WHEN** an option's `adjudication.case_hold_max_seconds` is `null`
+- **THEN** every part of its mandate carries `maxHoldExtension: null`
+
+### Requirement: A once-only mandate authorizes the seller and the dispute authority
+
+A `once`-only mandate MUST authorize no `start` and no `stop`. It MUST authorize `reverse` for the seller and the agreement's dispute authority, the account the option's `adjudication.dispute` names rather than one from `[Settlement.arkhai_payments]`, and MUST list only that authority under the one `extend` authorities key, which also authorizes `lift`. A `reverse` MAY name a part and an amount up to what that part still holds.
+
+#### Scenario: The buyer is never a reverse authority
+
+- **WHEN** a once-only mandate is derived
+- **THEN** its `reverse` authorities are the seller and the option's dispute authority, and the buyer is neither
+
 ### Requirement: The payments mandate is derived exactly from the Agreement
 
-The mandate's `deal` MUST be `sha256(JCS(agreement))` and its transaction ID `sha256(JCS(mandate))`. It MUST name `settlement_params.payer_account` as `from`, the selected option's payee account as `to`, and one `once` part for the agreed amount and asset. It MUST use the service's published fee policy and the fixed nonce `arkhai.payments.v1`, and authorize `start` and `stop` for buyer and seller and `reverse` for the seller and Arkhai dispute authority.
+The mandate MUST be derived only from the exact accepted Agreement, binding its JCS hash, deterministic transaction ID, parties, asset, amounts, part shapes, authorities, holds, caps and approval window. Buyer and seller MUST derive the same mandate under the selected mechanism's vendored contract; unsupported bonds or terms MUST refuse.
 
 #### Scenario: Hold and approval expiry follow the accepted timing
 
 - **WHEN** a seller derives a mandate from an Agreement accepted at `accepted_at`
-- **THEN** the hold is `ceil(start_utc - accepted_at) + duration_seconds + window` whole seconds, approval expires at `floor(accepted_at) + window`, and fractional timestamps stay unchanged in the Agreement and its deal hash
+- **THEN** each prepaid once part has absolute end start_utc + duration_seconds and hold {afterStop: dispute_window}; approval expires at floor(accepted_at) + approval_window, and fractional Agreement timestamps stay unchanged in its deal hash
+- **AND** delayed approval does not shift the part end or replace the stop-relative hold with a duration from acceptance
+
+#### Scenario: A once mandate is derived
+
+- **WHEN** a mandate is derived from an option with one `once` part and no `early_termination`
+- **THEN** it has no `start` or `stop` authority, only the dispute authority may `extend` or `lift`, and its hold ends no earlier than the dispute window after the term end
+
+#### Scenario: A hosted option names a bond
+
+- **WHEN** a seller configures a hosted option with `bond`
+- **THEN** the builder refuses to emit it, naming the unsupported term
 
 ### Requirement: The buyer approves only a mandate it has checked
 
@@ -289,9 +327,9 @@ If the selected option sets `deposit_agreement` and the transaction has no Agree
 - **THEN** the seller attaches the exact Agreement before any delivery effect,
   and a deposit failure returns retryable unavailable without delivery
 
-### Requirement: Only the seller reverses a held payment
+### Requirement: Only the seller refunds a held payment
 
-A refund MUST be seller-initiated through `reverse`, which is authorized for the seller and the Arkhai dispute authority and never for the buyer. The payments service releases an un-reversed hold without a settlement-service call.
+A refund MUST be seller-initiated through `reverse`. `reverse` is authorized for the seller and the agreement's dispute authority, which uses it only to apply outcomes, and never for the buyer. A full refund MUST keep its ordering against delivery start; a partial `reverse` that leaves money held, such as a discount on a running deal, MUST record no refund intent and change no deal status. The payments service releases an un-reversed hold without a settlement-service call.
 
 #### Scenario: Seller operator refunds a held payment
 
@@ -308,13 +346,15 @@ A refund MUST be seller-initiated through `reverse`, which is authorized for the
   delivery does not start; if delivery started first, the refund proceeds and
   the deal records both the delivery and the refund
 
+#### Scenario: A seller discounts a running deal
+
+- **WHEN** a seller submits a `reverse` of a quarter of a delivered deal's held payment
+- **THEN** the storefront sends one partial `reverse` for that amount, records no refund intent, and leaves the deal's status and lease unchanged
+
 #### Scenario: Only the seller initiates a refund
 
-- **WHEN** delivery fails or a buyer requests settlement after any outcome
-- **THEN** no storefront issues `reverse` unless a seller-authenticated refund
-  request names the deal, or the seller has enabled the `refund` failure action
-  and the deal failed before any delivery; the buyer's recourse is a dispute
-  through the payments service
+- **WHEN** delivery fails, the seller voluntarily corrects an unentitled end, or a buyer requests settlement after any outcome
+- **THEN** no storefront issues `reverse` unless a seller-authenticated refund request names the deal, or the seller has enabled the `refund` failure action and the deal failed before any delivery; otherwise a committed deal's failure or correction is filed as delivery_end with the agreement's dispute authority, with no stop or reverse for it, and a buyer disputing the account files a case
 
 ### Requirement: Negotiation-scoped payment settlement converges
 
@@ -547,6 +587,15 @@ the deadline report `ready: false` with the last error.
 
 - **WHEN** every status read until the deadline fails
 - **THEN** the wait reports `ready: false` with the last error, rather than failing
+
+### Requirement: Snapshot verification accepts bounded identity history
+
+Hosted snapshot verification MUST accept configured current/retiring identities with validity windows, embedded-receipt attestation and a caller-supplied minimum sequence. It MUST refuse unverified, cross-deal, mode-changed or regressing state. A fresh current-key snapshot MAY attest an embedded old receipt while retaining original bytes; consumers MUST NOT implement a parallel verifier.
+
+#### Scenario: Rotation re-anchors an old receipt
+
+- **WHEN** a current-key snapshot attests an old receipt during the configured identity overlap
+- **THEN** verification checks identity windows, commitment and mode binding and minimum sequence before supplying re-anchoring evidence
 
 ## Evidence
 

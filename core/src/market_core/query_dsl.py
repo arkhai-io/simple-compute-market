@@ -484,15 +484,15 @@ def validate_query(
                 span=comparison.span,
             )
         )
-    for comparison in validated:
-        descriptor = canonical[comparison.field]
+    for validated_comparison in validated:
+        descriptor = canonical[validated_comparison.field]
         missing = tuple(target for target in descriptor.requires if target not in seen)
         if missing:
             raise QueryValidationError(
                 "missing_co_requirement",
                 f"field {descriptor.name!r} requires {', '.join(missing)} "
                 "to also be supplied",
-                position=comparison.span.start,
+                position=validated_comparison.span.start,
                 field=descriptor.name,
                 accepted_fields=accepted,
             )

@@ -625,7 +625,7 @@ PY
 
 This section creates or validates platform-level GCP and Kubernetes
 infrastructure. Terraform owns these resources. Apply `api-gateway` here, but
-do not run `scripts/validate/api-gateway.sh` until section 20; that validator
+do not run the operations checkout's API gateway validator until section 20; it
 probes application routes that do not exist yet.
 
 Authenticate first:
@@ -645,7 +645,7 @@ create command and run the validator.
 ```bash
 make bootstrap-apis ENV="$ENV"
 make bootstrap-tfstate ENV="$ENV"
-bash scripts/validate/tfstate.sh "$ENV"
+bash "$OPS_REPO"/scripts/validate/tfstate.sh "$ENV"
 ```
 
 Use component validators as you go. Do not use full `make validate-env` as an
@@ -654,20 +654,20 @@ early gate; it checks resources that do not exist until later in this sequence.
 ```bash
 make tf-init  ENV="$ENV" COMPONENT=artifact-registry
 make tf-apply ENV="$ENV" COMPONENT=artifact-registry
-bash scripts/validate/artifact-registry.sh "$ENV"
+bash "$OPS_REPO"/scripts/validate/artifact-registry.sh "$ENV"
 
 make tf-init  ENV="$ENV" COMPONENT=networking
 make tf-apply ENV="$ENV" COMPONENT=networking
-bash scripts/validate/networking.sh "$ENV"
+bash "$OPS_REPO"/scripts/validate/networking.sh "$ENV"
 
 make tf-init  ENV="$ENV" COMPONENT=gke
 make tf-apply ENV="$ENV" COMPONENT=gke
 make get-credentials ENV="$ENV"
-bash scripts/validate/gke.sh "$ENV"
+bash "$OPS_REPO"/scripts/validate/gke.sh "$ENV"
 
 make tf-init  ENV="$ENV" COMPONENT=secret-shells
 make tf-apply ENV="$ENV" COMPONENT=secret-shells
-bash scripts/validate/secrets.sh "$ENV"
+bash "$OPS_REPO"/scripts/validate/secrets.sh "$ENV"
 
 make tf-init  ENV="$ENV" COMPONENT=api-gateway
 make tf-apply ENV="$ENV" COMPONENT=api-gateway
@@ -823,7 +823,7 @@ kubectl get pods -n kong
 make forward ENV="$ENV"
 curl -sf http://localhost:8081/health | jq
 curl -sf http://localhost:8081/api/v1/system/status | jq
-bash scripts/validate/api-gateway.sh "$ENV"
+bash "$OPS_REPO"/scripts/validate/api-gateway.sh "$ENV"
 make unforward
 ```
 
@@ -964,9 +964,12 @@ failing with the executors it found before anything is held or registered.
 
 ## 24. Describe The Target
 
+Create a local target file from the committed example; the destination is generated
+operator configuration, not a file shipped by this branch:
+
 ```bash
-cp e2e-tests/config/config-real-vm-target.yml.example \
-  e2e-tests/config/config-real-vm-target.yml
+TARGET_CONFIG="$APP_REPO"/e2e-tests/config/config-real-vm-target.yml
+cp "$APP_REPO"/e2e-tests/config/config-real-vm-target.yml.example "$TARGET_CONFIG"
 ```
 
 Fill in the copy's `REAL_VM_TARGET` section:
@@ -1032,6 +1035,6 @@ section 21 made, wherever it was provided:
 
 ```bash
 rm -f /tmp/kvm-hosts.ini
-rm -f e2e-tests/config/config-real-vm-target.yml
+rm -f "$TARGET_CONFIG"
 ```
 

@@ -17,6 +17,10 @@ def test_evm_resources_are_opt_in_for_buyer_template(monkeypatch, tmp_path):
     )
     assert result.exit_code == 0
     rendered = path.read_text()
+    assert "use_registry_dispute_authorities = true" in rendered
+    assert "[[Dispute]]" not in rendered
+    assert "dispute_authority" not in rendered
+    assert "record_key" not in rendered
     assert "[Wallet]" in rendered
     assert "[Chains.ethereum_sepolia]" in rendered
 

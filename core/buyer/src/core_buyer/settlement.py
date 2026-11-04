@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -12,6 +12,8 @@ from market_core.schemas import SettlementOption, SettlementSelection
 from market_settlement_runtime import (
     CompiledSettlementClause,
     MechanismRegistration,
+    SettlementCandidate,
+    SettlementClauseResult,
     SettlementConfig,
     SettlementConfigurationRegistry,
     compile_settlement_clause,
@@ -107,6 +109,7 @@ class BuyerSettlementPolicy:
     registry: SettlementConfigurationRegistry = field(repr=False)
     stages: SettlementStageTable[Any] = field(repr=False)
     public_context: Mapping[str, Any] = field(default_factory=dict, repr=False)
+    option_preference: Callable[[SettlementOption, Mapping[str, Any]], int | None] | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         self.registry.validate(self.config, role="buyer")
@@ -136,29 +139,42 @@ class BuyerSettlementPolicy:
             for source in sources
         )
 
+    def _candidates(
+        self, advertised: Iterable[SettlementOption | Mapping[str, Any]], *,
+        listing: Mapping[str, Any], clauses: Iterable[str | CompiledSettlementClause],
+    ) -> tuple[SettlementClauseResult, tuple[SettlementCandidate, ...]]:
+        supported = []
+        ranks = {}
+        for option in _decode_options(tuple(advertised)):
+            if option.settlement_schema not in self.stages:
+                continue
+            rank = self.option_preference(option, listing) if self.option_preference is not None else 0
+            if rank is None:
+                continue
+            supported.append(option)
+            ranks[option.option_id] = rank
+        result = select_settlement_candidates(
+            supported, registry=self.registry, config=self.config,
+            clauses=clauses, public_context=self.public_context,
+        )
+        mechanism_order = {registration.mechanism_id: index
+                           for index, registration in enumerate(self.ordered_registrations())}
+        return result, tuple(sorted(result.candidates, key=lambda candidate: (
+            mechanism_order[candidate.registration.mechanism_id], ranks[candidate.option.option_id],
+            candidate.option.option_id,
+        )))
+
     def compatible_options(
         self,
         advertised: Iterable[SettlementOption | Mapping[str, Any]],
         *,
         clauses: Iterable[str | CompiledSettlementClause] = (),
+        listing: Mapping[str, Any] | None = None,
     ) -> tuple[tuple[MechanismRegistration, SettlementOption], ...]:
         """Return first-clause survivors in configured mechanism order."""
 
-        supported = tuple(
-            option for option in _decode_options(tuple(advertised))
-            if option.mechanism in self.stages
-        )
-        result = select_settlement_candidates(
-            supported,
-            registry=self.registry,
-            config=self.config,
-            clauses=clauses,
-            public_context=self.public_context,
-        )
-        return tuple(
-            (candidate.registration, candidate.option)
-            for candidate in result.candidates
-        )
+        _, candidates = self._candidates(advertised, listing=listing or {}, clauses=clauses)
+        return tuple((candidate.registration, candidate.option) for candidate in candidates)
 
     def select(
         self,
@@ -169,25 +185,18 @@ class BuyerSettlementPolicy:
     ) -> SelectedSettlementOption | None:
         """Select the first compatible option from the first surviving clause."""
 
-        result = select_settlement_candidates(
-            tuple(
-                option for option in _decode_options(listing.get("settlement_options"))
-                if option.mechanism in self.stages
-            ),
-            registry=self.registry,
-            config=self.config,
-            clauses=clauses,
-            public_context=self.public_context,
+        result, candidates = self._candidates(
+            listing.get("settlement_options") or (), listing=listing, clauses=clauses,
         )
-        if not result.candidates:
+        if not candidates:
             return None
-        candidate = result.candidates[0]
+        candidate = candidates[0]
         option = candidate.option
         return SelectedSettlementOption(
             option=option,
             selection=SettlementSelection(
-                mechanism=option.mechanism,
                 option_id=option.option_id,
+                settlement={"schema": option.settlement_schema},
                 expiration_unix=expiration_unix,
             ),
             registration=candidate.registration,
@@ -232,7 +241,7 @@ class BuyerSettlementPolicy:
                 registration.mechanism_id
                 for registration in self.ordered_registrations()
                 if any(
-                    choice.selection.mechanism == registration.mechanism_id
+                    choice.selection.settlement_schema == registration.mechanism_id
                     for _, choice in selected
                 )
             ),
@@ -240,11 +249,17 @@ class BuyerSettlementPolicy:
         )
         if preferred_mechanism is None:
             return ()
-        return tuple(
+        preferred = tuple(
             (listing, choice)
             for listing, choice in selected
-            if choice.selection.mechanism == preferred_mechanism
+            if choice.selection.settlement_schema == preferred_mechanism
         )
+        if self.option_preference is None:
+            return preferred
+        ranked = tuple((listing, choice, self.option_preference(choice.option, listing))
+                       for listing, choice in preferred)
+        first_rank = min(rank for _, _, rank in ranked if rank is not None)
+        return tuple((listing, choice) for listing, choice, rank in ranked if rank == first_rank)
 
     def explain_listings(
         self,
@@ -266,13 +281,14 @@ class BuyerSettlementPolicy:
             _decode_options(listing.get("settlement_options"))
             for listing in listing_set
         )
-        compatible = tuple(self.compatible_options(options) for options in decoded)
+        compatible = tuple(self.compatible_options(options, listing=listing)
+                           for options, listing in zip(decoded, listing_set, strict=True))
         compatible_listing_count = sum(bool(options) for options in compatible)
         stages: list[SettlementClauseStage] = []
         for index, clause in enumerate(compiled):
             survivors = tuple(
-                self.compatible_options(options, clauses=(clause,))
-                for options in decoded
+                self.compatible_options(options, clauses=(clause,), listing=listing)
+                for options, listing in zip(decoded, listing_set, strict=True)
             )
             stages.append(
                 SettlementClauseStage(
@@ -292,7 +308,9 @@ class BuyerSettlementPolicy:
             (stage.index for stage in stages if stage.option_count),
             None,
         )
-        policy_mechanism = selected[0][1].selection.mechanism if selected else None
+        policy_mechanism = (
+            selected[0][1].selection.settlement_schema if selected else None
+        )
 
         rejection_categories = {
             "no_settlement_options": sum(not options for options in decoded),

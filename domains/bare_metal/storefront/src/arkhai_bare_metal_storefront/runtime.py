@@ -52,6 +52,7 @@ from market_settlement_runtime import (
     SettlementServicingWorker,
     SettlementSQLiteRepository,
 )
+from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
 from market_storefront_kit import (
     AlkahestChain,
     AlkahestClientPolicy,
@@ -101,6 +102,7 @@ from .site_clients import (
     parse_site_bindings,
 )
 from .sqlite_client import SQLiteClient
+from .lifecycle import BareMetalLifecycle
 from .startup_refusal import require_publishable_storefront
 
 logger = logging.getLogger(__name__)
@@ -268,6 +270,7 @@ class BareMetalStorefrontRuntime:
     settlement_clients: Mapping[str, Any] = field(init=False, repr=False)
     settlement_runtime: SettlementRuntime = field(init=False, repr=False)
     contact_exchange: ContactExchangeComposition = field(init=False, repr=False)
+    lifecycle: BareMetalLifecycle = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "loops", self.loop_controller_factory())
@@ -336,6 +339,7 @@ class BareMetalStorefrontRuntime:
                 seller_stages=self.domain.settlement.seller_stages,
             ),
         )
+        object.__setattr__(self, "lifecycle", BareMetalLifecycle(self))
         self._compose_settlement_servicing()
         register_bare_metal_lifecycle_steps(self)
 
@@ -365,6 +369,8 @@ class BareMetalStorefrontRuntime:
             await servicing.ready(record, worker_id)
 
         async def on_terminal(record: Any, state: str, reason: str | None) -> None:
+            if state in {"expired", "reclaimed", "failed"}:
+                await self.lifecycle.local_end(record.agreement_ref, cause="settlement_" + state)
             servicing = await self._accepted_servicing(record)
             await servicing.terminal(record, state, reason)
 
@@ -399,7 +405,7 @@ class BareMetalStorefrontRuntime:
         agreement = Agreement.model_validate_json(thread["agreement_bytes"])
         if agreement.settlement is None:
             raise RuntimeError("accepted Agreement has no settlement selection")
-        mechanism = agreement.settlement.mechanism
+        mechanism = agreement.settlement.settlement_schema
         if record.obligation.get("mechanism") != mechanism:
             raise RuntimeError(
                 "serviced obligation names another mechanism than its Agreement"
@@ -441,7 +447,7 @@ class BareMetalStorefrontRuntime:
             accepted = Agreement.model_validate_json(thread["agreement_bytes"])
             if accepted.settlement is None:
                 raise ValueError("accepted Agreement has no settlement selection")
-            self.domain.settlement.seller_stages[accepted.settlement.mechanism]
+            self.domain.settlement.seller_stages[accepted.settlement.settlement_schema]
             plan = SettlementPlan.model_validate(thread.get("settlement_plan"))
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError(
@@ -455,7 +461,7 @@ class BareMetalStorefrontRuntime:
             or buyer != Identity.model_validate(thread.get("buyer_principal"))
             or seller != Identity.model_validate(thread.get("seller_principal"))
             or len(plan.obligations) != 1
-            or plan.obligations[0].mechanism != accepted.settlement.mechanism
+            or plan.obligations[0].mechanism != accepted.settlement.settlement_schema
             or Identity.model_validate(plan.obligations[0].payer_principal) != buyer
             or Identity.model_validate(plan.obligations[0].claimant_principal) != seller
         ):
@@ -494,6 +500,7 @@ class BareMetalStorefrontRuntime:
             ),
             stages=self.domain.settlement.seller_stages,
             begin_fulfillment=begin_fulfillment,
+            end_delivery=self.lifecycle.local_end,
         )
 
     def settlement_service(self) -> BareMetalSettlementService:
@@ -519,6 +526,7 @@ class BareMetalStorefrontRuntime:
             capacity_client=self.capacity_client,
             fulfillment_client=self.fulfillment_client,
             read_verified_evidence=self._settlement_service().verified_evidence,
+            lifecycle=self.lifecycle,
         )
 
     def contact_settlement_config(self) -> ContactSettlementConfig | None:
@@ -878,6 +886,7 @@ def build_runtime_from_configuration(
         chain_probe = None
     settlement_composition = BareMetalStorefrontSettlementComposition.from_raw_config(
         settlement_config,
+        disputes=RegistryDisputePolicy.from_document(active.model_dump()),
         resources={
             "marketplace_signer": signer,
             "claimant_principal": principal,

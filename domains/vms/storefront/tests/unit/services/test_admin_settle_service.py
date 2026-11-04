@@ -93,7 +93,9 @@ def _accepted_thread(*, mechanism: str = "alkahest.v1", terminal: str = "success
     return {
         "negotiation_id": _NEGOTIATION_ID,
         "terminal_state": terminal,
-        "agreement_bytes": json.dumps({"settlement": {"mechanism": mechanism}}).encode(),
+        "agreement_bytes": json.dumps(
+            {"settlement": {"settlement": {"schema": mechanism}}}
+        ).encode(),
         "settlement_data": {
             "accepted_escrow_proposal": {
                 "chain_name": "anvil",

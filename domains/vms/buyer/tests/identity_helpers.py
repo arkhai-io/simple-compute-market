@@ -27,22 +27,29 @@ def alkahest_option(proposal: dict[str, Any] | None = None) -> SettlementOption:
     token = (proposal or {}).get("fields", {}).get("token") or "usd"
     return SettlementOption(
         option_id=derive_settlement_option_id(
-            mechanism="alkahest.v1", asset=token, rates=[], params=params,
+            price={"asset": token, "rates": []},
+            settlement={"schema": "alkahest.v1", **(params or {})},
         ),
-        mechanism="alkahest.v1", asset=token, rates=[], params=params,
+        price={"asset": token, "rates": []},
+        settlement={"schema": "alkahest.v1", **(params or {})},
     )
 
 
 def accepted_alkahest_agreement(negotiation_id, listing_id, amount, provision, proposal):
     option = alkahest_option(proposal.model_dump(mode="json"))
     return Agreement(
-        negotiation_id=negotiation_id, listing_id=listing_id, listing_hash="0" * 64,
+        negotiation_id=negotiation_id,
+        listing_id=listing_id,
+        listing_hash="0" * 64,
         buyer=BUYER_SIGNER.identity.model_dump(mode="json"),
         seller=SELLER_SIGNER.identity.model_dump(mode="json"),
-        settlement=option, asset=option.asset, amount=amount,
+        settlement=option,
+        asset=option.price_asset,
+        amount=amount,
         duration_seconds=provision.duration_seconds,
         provision_terms=provision.model_dump(mode="json"),
-        start_utc="2025-01-01T00:00:00Z", accepted_at="2025-01-01T00:00:00Z",
+        start_utc="2025-01-01T00:00:00Z",
+        accepted_at="2025-01-01T00:00:00Z",
     )
 
 
@@ -81,7 +88,7 @@ def with_accepted_agreement(request: Any, body: dict[str, Any]) -> dict[str, Any
         buyer=buyer,
         seller=seller,
         settlement=alkahest_option(body.get("accepted_escrow_proposal")),
-        asset=alkahest_option(body.get("accepted_escrow_proposal")).asset,
+        asset=alkahest_option(body.get("accepted_escrow_proposal")).price_asset,
         amount=amount,
         duration_seconds=int(duration),
         start_utc=start_utc,
@@ -115,6 +122,9 @@ def signed_response_headers(
             resource = str(json.loads(request.data.decode("utf-8"))["listing_id"])
     elif url.endswith("/status") and "/settle/" in url:
         operation = "settle_status"
+        resource = url.rsplit("/", 2)[-2]
+    elif url.endswith("/lifecycle"):
+        operation = "lifecycle_peer" if request.get_method() == "POST" else "lifecycle_buyer_read"
         resource = url.rsplit("/", 2)[-2]
     elif "/settle/" in url:
         operation = "settle_escrow"

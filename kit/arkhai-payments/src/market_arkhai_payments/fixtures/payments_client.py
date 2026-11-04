@@ -12,7 +12,7 @@ import hashlib
 from collections.abc import Mapping
 from typing import Any
 
-from market_identity import Signer
+from market_identity import Ed25519Signer, Signer
 
 from market_arkhai_payments.canonical import jcs_bytes
 from market_arkhai_payments.errors import (
@@ -21,6 +21,7 @@ from market_arkhai_payments.errors import (
     PaymentsTransportError,
 )
 from market_arkhai_payments.fixtures.receipts import build_signed_receipt
+from market_arkhai_payments.fixtures.authority import PaymentsAuthority, sign_snapshot
 from market_arkhai_payments.mandates import PaymentsOptionParams
 from market_arkhai_payments.models import (
     Mandate,
@@ -30,9 +31,8 @@ from market_arkhai_payments.models import (
     StoredEvent,
 )
 
-# Sellers trust only the independently signed receipt inside a snapshot, so the
-# snapshot's own proof is a structurally valid placeholder.
-_PLACEHOLDER_PROOF = {"scheme": "ed25519", "value": "A" * 86}
+# Public deterministic development identity; never use on a public network.
+_FIXTURE_SIGNER = Ed25519Signer(bytes([7]) * 32)
 
 
 class FakePaymentsClient:
@@ -59,6 +59,10 @@ class FakePaymentsClient:
         self.reverse_error: str | None = None
         self.read_error: tuple[int, str] | None = None
         self.reversed = False
+        self.engine = PaymentsAuthority(
+            signer=signer or _FIXTURE_SIGNER, clock=lambda: self.observed_at,
+            livemode=livemode,
+        )
 
     # ``client_for_owner`` factory and context-manager protocol -----------------
 
@@ -77,10 +81,18 @@ class FakePaymentsClient:
 
     # Test controls --------------------------------------------------------------
 
-    def serve(self, receipt: SignedReceipt | None) -> None:
+    def serve(
+        self, receipt: SignedReceipt | None, *, mandate: Mandate | Mapping[str, Any] | None = None
+    ) -> None:
         """Serve this receipt for whatever transaction is read, or none at all."""
 
         self.receipt = receipt
+        if receipt is not None:
+            self.engine.livemode = receipt.receipt.livemode
+            if mandate is None:
+                self.engine.load_receipt(receipt)
+            else:
+                self.engine.load(mandate, receipt)
 
     def count(self, name: str) -> int:
         return sum(1 for call, _ in self.calls if call == name)
@@ -98,6 +110,9 @@ class FakePaymentsClient:
             self.receipt = build_signed_receipt(
                 signer=self.signer, mandate=mandate, livemode=self.livemode
             )
+            # Approval fixtures seed an immutable receipt at their chosen instant;
+            # admission/expiry/funding scenarios use the authority's approve directly.
+            self.engine.load(mandate, self.receipt)
         if agreement is not None:
             self._store_attachment(agreement)
         assert self.receipt is not None
@@ -150,15 +165,33 @@ class FakePaymentsClient:
             raise PaymentsAPIError(409, self.reverse_error)
         if self.receipt is None:
             raise PaymentsAPIError(404, "transaction_not_found")
-        self.reversed = True
-        return StoredEvent.model_validate(
-            {
-                "account": self.receipt.receipt.to.root,
-                "requestId": f"reverse-{transaction}",
-                "event": {"kind": "reverse"},
-                "receivedAt": self.observed_at,
-            }
+        result = self.engine.submit(
+            self.receipt.receipt.transaction.root,
+            {"account": self.receipt.receipt.to.root, "requestId": f"reverse-{transaction}",
+             "event": {"kind": "reverse"}},
         )
+        self.reversed = True
+        return StoredEvent.model_validate(result)
+
+    def submit_event(
+        self, transaction: str, event: Mapping[str, Any], *, request_id: str,
+    ) -> StoredEvent:
+        self.calls.append(("reverse" if event.get("kind") == "reverse" else "submit_event", transaction))
+        self._require_available()
+        if self.reverse_error is not None and event.get("kind") == "reverse":
+            raise PaymentsAPIError(409, self.reverse_error)
+        if self.receipt is None:
+            raise PaymentsAPIError(404, "transaction_not_found")
+        return self.submit(transaction, {
+            "account": self.owners[-1] if self.owners else self.receipt.receipt.to.root,
+            "requestId": request_id, "event": dict(event),
+        })
+
+    def submit(self, transaction: str, request: Mapping[str, Any]) -> StoredEvent:
+        """Exercise the same authority command path used by an HTTP double."""
+
+        self._require_available()
+        return StoredEvent.model_validate(self.engine.submit(transaction, request))
 
     # Internals ------------------------------------------------------------------
 
@@ -186,37 +219,23 @@ class FakePaymentsClient:
 
     def _snapshot(self, transaction: str) -> SignedTransactionSnapshot:
         assert self.receipt is not None
-        receipt = self.receipt.model_dump(mode="json", by_alias=True, exclude_none=True)
-        state = "reversed" if self.reversed else "held"
-        parts = [
-            {
-                "part": index,
-                "asset": part["asset"],
-                "gross": part["gross"],
-                "held": "0" if self.reversed else part["net"],
-                "released": "0",
-                "reversed": part["gross"] if self.reversed else "0",
-                "feePaid": "0" if self.reversed else part["fee"],
-                "hold": part["hold"],
-                "status": state,
-            }
-            for index, part in enumerate(receipt["receipt"]["parts"])
-        ]
-        return SignedTransactionSnapshot.model_validate(
-            {
-                "snapshot": {
-                    "transaction": transaction,
-                    "receipt": receipt,
-                    "observedAt": self.observed_at,
-                    "parts": parts,
-                    "events": [],
-                    "attachments": list(self.attachments),
-                    "issuer": receipt["receipt"]["issuer"],
-                    "livemode": receipt["receipt"]["livemode"],
-                },
-                "proof": _PLACEHOLDER_PROOF,
-            }
-        )
+        reference = self.receipt.receipt.transaction.root
+        if self.reversed:
+            # Explicit fault/state controls remain outside the authority algorithm.
+            try:
+                self.engine.submit(reference, {
+                    "account": self.receipt.receipt.to.root,
+                    "requestId": f"reverse-{transaction}", "event": {"kind": "reverse"},
+                })
+            except PaymentsAPIError as exc:
+                if exc.code != "hold_not_reversible":
+                    raise
+        snapshot = self.engine.snapshot(reference)
+        wire = snapshot.model_dump(mode="json", by_alias=True, exclude_none=True)
+        wire["snapshot"]["attachments"] = list(self.attachments)
+        # serve() may deliberately supply another transaction/mode/key as a fault.
+        wire["snapshot"]["transaction"] = transaction
+        return sign_snapshot(self.engine.signer, wire["snapshot"])
 
 
 __all__ = ["FakePaymentsClient"]

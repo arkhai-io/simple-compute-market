@@ -606,14 +606,23 @@ A domain composition that supports Arkhai payments MUST register `arkhai.payment
 - **WHEN** a domain installs Alkahest without the Arkhai payments kit
 - **THEN** it publishes no Arkhai payment option and acquires no Arkhai payment-service dependency
 
+### Requirement: Domains compose the stages they support
+
+Core MUST NOT prescribe the actors' order or require separate buyer-confirm and seller-verify steps. Domains MUST compose only supported stages; settlement and delivery MAY be fused.
+
+#### Scenario: A domain fuses settlement and delivery
+
+- **WHEN** a domain composes settlement and delivery as one stage
+- **THEN** core accepts the composition without a separate buyer-confirm or seller-verify step
+
 ### Requirement: Deals compose negotiate, settle, and provision stages
 
-Negotiation MUST pass its exact accepted Agreement to the domain's selected settlement stage. Protected delivery MUST consume that stage's verified SettlementEvidence rather than compare mechanism IDs or infer payment from an escrow's presence. Core MUST NOT prescribe the actors' order or require separate buyer-confirm and seller-verify steps. Domains MUST compose only supported stages; settlement and delivery MAY be fused.
+Negotiation MUST pass its exact accepted Agreement to the domain's selected settlement stage, the post-commitment handoff by which the seller learns of and verifies the mechanism's commitment; it is not a protocol step. Protected delivery MUST consume that stage's verified SettlementEvidence rather than compare mechanism IDs or infer payment from an escrow's presence.
 
 #### Scenario: Arkhai payment gates domain provisioning
 
-- **WHEN** the seller settles an accepted Agreement through `arkhai.payments.v1`
-- **THEN** VM, bare-metal or API-credit delivery remains blocked until its stage verifies a signed receipt matching the transaction ID and Agreement deal hash and produces verified evidence
+- **WHEN** a VM seller receives `commit` for an Agreement settled through `arkhai.payments.v1`
+- **THEN** delivery remains blocked until its stage verifies a signed receipt matching the transaction ID and Agreement deal hash and produces verified evidence
 
 ### Requirement: Domains compose only the stages they support
 
@@ -634,23 +643,47 @@ A domain MUST compose only mechanism stages it supports, and each stage MUST und
 - **WHEN** a supporting domain composes a stage whose first effect belongs to the seller
 - **THEN** core dispatches that role's entry without requiring a prior buyer deposit, confirmation or escrow proposal
 
+### Requirement: The payments service and dispute authority keep their authority
+
+The payments service MUST remain the authority for its ledger, account credentials, fees, hold release and hold extensions, and payment-provider operations. Cases and their outcomes MUST belong to the agreement's dispute authority, an independent party that acts at the payments service only through its own authorities and answers parties in its own protocol.
+
+#### Scenario: A hosted case's outcome is observed
+
+- **WHEN** a buyer's case on an `arkhai.payments.v1` deal is ruled
+- **THEN** the buyer half reads the outcome from the dispute authority's signed record, not from a payments-service response
+
 ### Requirement: Arkhai payments authority remains external
 
-`kit/arkhai-payments` MUST consume the payments service's published HTTP and JSON Schema contract, vendored with its conformance vectors and identified by content hash rather than by source location, and generate its Python wire models from it, rather than importing the service implementation or copying a TypeScript contract. The payments service MUST remain the authority for its ledger, account credentials, fees, hold release, dispute attachment, and payment-provider operations.
+`kit/arkhai-payments` MUST consume the payments service's published HTTP and JSON Schema contract, vendored with its conformance vectors and identified by content hash rather than by source location, and generate its Python wire models from it, rather than importing the service implementation or copying a TypeScript contract.
+
+#### Scenario: A payments contract revision is vendored
+
+- **WHEN** `kit/arkhai-payments` vendors a published payments contract revision
+- **THEN** the revision is identified by its content hash, not a source location, and the kit's Python wire models are generated from its JSON Schemas
 
 #### Scenario: Payments service owns the ledger
 
 - **WHEN** a marketplace domain composes `arkhai.payments.v1`
 - **THEN** it uses the external payments API and signed receipt as authority and keeps no local ledger, payment-provider integration, or settlement daemon
 
+#### Scenario: A case is filed on a hosted deal
+
+- **WHEN** a buyer files a case on an `arkhai.payments.v1` deal
+- **THEN** it files with the agreement's dispute authority and sends the payments service no case or effect of its own
+
 ### Requirement: Marketplace roles hold no payment ledger
 
-Marketplace roles MUST NOT own ledger state or implement cash movement, Stripe top-ups, payouts, or provider recovery. The kit MUST keep no settlement servicing state or daemon; headless callers supply owner-scoped credentials per request and verify service-signed receipts through the identity kit.
+Marketplace roles MUST NOT own ledger state or implement cash movement, Stripe top-ups, payouts, or provider recovery. Mechanism kits MUST keep no settlement servicing state or daemon; headless callers supply owner-scoped credentials per request and verify service-signed receipts through the identity kit. A storefront MAY keep lifecycle observation state (watch cursors, funding timers, the end-service journal, and evidence records), which records what an authority reported and never a balance.
 
 #### Scenario: A headless caller checks a payment
 
 - **WHEN** a buyer or seller process checks a payment
 - **THEN** it supplies its owner-scoped credential for that request and verifies the service-signed receipt through the identity kit, keeping no servicing state between calls
+
+#### Scenario: A storefront watches a deal
+
+- **WHEN** a storefront watches a hosted deal
+- **THEN** it stores the payment authority's event sequence and the dispute authority's record sequence as its cursors and stores no balance or settled amount of its own
 
 ### Requirement: Buyer dispatch preserves Agreement-only settlement
 

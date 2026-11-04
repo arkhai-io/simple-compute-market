@@ -161,12 +161,22 @@ During identity overlap the loop MUST request spot's verified re-anchoring evide
 
 ### Requirement: The seller half lists deals
 
-The seller half MUST offer submit, read, bounded paginated list with a continuation token and watch. Each listed deal MUST carry negotiation ID, commitment reference, domain, mechanism, entitlements, lifecycle state, current deadline, open-extension status and open cases, plus the completion diagnostics and rotation dependencies defined here. Once-only deals MUST run from verified commitment until delivery ends. Lifecycle states MUST be unstarted, running, ending, ended or repair required.
+The seller half MUST offer submit, read, bounded paginated list with a continuation token and watch. Each listed deal MUST carry negotiation ID, commitment reference, domain, mechanism, entitlements, lifecycle state, current deadline, open-extension status and open cases, plus the completion diagnostics and rotation dependencies defined here. Once-only deals MUST run from verified commitment until delivery ends. Rejected required filings MUST remain terminal, set repair required, expose every filing outcome in read/list and MUST NOT auto-resubmit. Lifecycle states MUST be unstarted, running, ending, ended or repair required.
+
+#### Scenario: A rejected filing is visible after restart
+
+- **WHEN** the authority rejects a required seller filing and servicing restarts
+- **THEN** the rejection remains visible under repair required, every filing outcome is returned, and the refused filing is not sent again
 
 #### Scenario: A seller lists its deals
 
 - **WHEN** the seller has no committed deals
 - **THEN** list returns an empty page, not an error
+
+#### Scenario: Listed lifecycle states are explicit
+
+- **WHEN** a deal is returned by `list`
+- **THEN** its lifecycle state is unstarted, running, ending, ended or repair required
 
 #### Scenario: An ended deal receives earlier evidence
 

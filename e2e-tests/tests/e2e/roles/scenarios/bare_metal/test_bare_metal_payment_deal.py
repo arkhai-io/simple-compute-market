@@ -11,6 +11,7 @@ holds are released.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import os
 import time
@@ -29,6 +30,8 @@ from market_arkhai_payments import (
     payments_client_for_owner,
 )
 from market_core.schemas import SettlementOption, compute_rate_total
+from market_deal_lifecycle_client import LifecycleClient
+from market_deal_lifecycle_contracts.models import CommitMessage
 from market_identity import (
     Ed25519Signer,
     Identity,
@@ -169,7 +172,8 @@ def payment_fulfillment(payment_buyer_cli) -> BareMetalFulfillmentTransport:
 
 def _release(transport, negotiation_id, fulfillment_id, provisioning_client, admin) -> dict:
     teardown = transport.teardown(negotiation_id)
-    assert teardown["fulfillment_id"] == fulfillment_id
+    assert teardown["delivery"]["progress"] in {"tearing_down", "released"}, teardown
+    assert transport.status(negotiation_id)["fulfillment_id"] == fulfillment_id
     advance_fulfillment_to(provisioning_client, fulfillment_id, "torn_down", max_advances=8)
     provisioning_client.check_leases()
     wait_for_stage_event(
@@ -228,6 +232,11 @@ def payment_supply(
                 "mechanism_input": {
                     "payee_account": str(payment_setting("SELLER_ACCOUNT")),
                     "asset": "USD/6", "window": str(payment_setting("DISPUTE_WINDOW")),
+                    # Compute dispute coverage includes delivery latency in
+                    # addition to the authority's minimum filing window.
+                    "dispute_window_seconds": 15 * 86400,
+                    "case_hold_max_seconds": None,
+                    "delivery_deadline_seconds": 300,
                 },
             }],
         })
@@ -304,12 +313,15 @@ def test_payment_deal_delivers_after_a_verified_receipt(
     options = [SettlementOption.model_validate(item) for item in listing.settlement_options]
     assert len(options) == 1
     option = options[0]
-    assert option.mechanism == "arkhai.payments.v1"
-    assert option.params["payee_account"] == str(payment_setting("SELLER_ACCOUNT"))
-    assert option.params["window"] == str(payment_setting("DISPUTE_WINDOW"))
-    assert option.asset == "USD/6"
-    assert option.rates[0].per == "hour"
-    assert compute_rate_total(option.rates[0], 3600) == 1000000
+    assert option.settlement_schema == "arkhai.payments.v1"
+    assert option.settlement_params["payee_account"] == str(payment_setting("SELLER_ACCOUNT"))
+    assert option.settlement_params["window"] == str(payment_setting("DISPUTE_WINDOW"))
+    assert option.lifecycle["adjudication"]["dispute_window_seconds"] == 15 * 86400
+    assert option.lifecycle["adjudication"]["case_hold_max_seconds"] is None
+    assert option.lifecycle["delivery_deadline_seconds"] == 300
+    assert option.price_asset == "USD/6"
+    assert option.price_rates[0].per == "hour"
+    assert compute_rate_total(option.price_rates[0], 3600) == 1000000
     payment_deal_state.complete(DealStage.DISCOVERY, listing_id=str(listing.id))
     buy = payment_buyer_cli.run([
         "bare-metal", "buy", str(listing.id),
@@ -321,7 +333,7 @@ def test_payment_deal_delivers_after_a_verified_receipt(
     payment_run["buy"] = buy
     assert_market_run_succeeded(buy, command="market bare-metal buy (arkhai.payments.v1)")
     started, accepted, approved, ended = ordered_events(
-        buy.read_events(), "run_started", "agreement_accepted", "payment_approved", "run_ended",
+        buy.read_events(), "run_started", "negotiation_completed", "payment_approved", "run_ended",
     )
     assert ended["status"] == "agreed"
     assert started["listing_id"] == payment_deal_state.listing_id
@@ -376,19 +388,23 @@ def test_settlement_re_driven_from_the_run_log_is_idempotent(
     signer = _purchase_signer(payment_buyer_cli, payment_run["run_id"])
     events = read_run(payment_run["run_id"], signer=signer, directory=payment_buyer_cli.run_dir)
     _, accepted, approved, ended = ordered_events(
-        events, "run_started", "agreement_accepted", "payment_approved", "run_ended",
+        events, "run_started", "negotiation_completed", "payment_approved", "run_ended",
     )
     assert accepted["negotiation_id"] == payment_deal_state.negotiation_id
     assert approved["transaction_id"] == ended["transaction_id"] == payment_deal_state.settlement_id
-    assert accepted["agreement_bytes"] == payment_run["buy"].wait_for_event("agreement_accepted")["agreement_bytes"]
+    assert accepted["agreement_bytes"] == payment_run["buy"].wait_for_event("negotiation_completed")["agreement_bytes"]
     assert signer.identity == payment_fulfillment.principal
-    with SyncStorefrontClient(
-        lane_setting("storefront_url"), signer=signer, caller_role="buyer",
-        expected_publishers=_pins("storefront"),
-    ) as buyer:
-        again = buyer.settle_agreement(accepted["negotiation_id"])
-    assert not again.pending
-    assert again.settlement_ref == payment_deal_state.settlement_id
+    async def commit():
+        async with LifecycleClient(lane_setting("storefront_url"), signer, _pins("storefront")) as buyer:
+            again = await buyer.commit(CommitMessage(
+                negotiation_id=accepted["negotiation_id"],
+                commitment_ref=payment_deal_state.settlement_id,
+                operation_key="commit:" + payment_deal_state.settlement_id,
+            ))
+            assert again.outcome.status == "accepted"
+            assert (await buyer.read(accepted["negotiation_id"])).commitment_ref == payment_deal_state.settlement_id
+
+    asyncio.run(commit())
     status = payment_fulfillment.status(accepted["negotiation_id"])
     assert status["fulfillment_id"] == payment_deal_state.fulfillment_ref
     assert payment_fulfillment.result(accepted["negotiation_id"]) == payment_deal_state.delivery

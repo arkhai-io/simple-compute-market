@@ -387,14 +387,14 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     (alkahest_option,) = [
         dict(option)
         for option in registry_client.get_listing(listing_id).settlement_options
-        if dict(option)["mechanism"] == "alkahest.v1"
+        if dict(option)["settlement"]["schema"] == "alkahest.v1"
     ]
     negotiate_resp = storefront_client.negotiate_new(
         listing_id=listing_id,
         initial_amount=_BUYER_INITIAL_AMOUNT,
         settlement_selection={
-            "mechanism": "alkahest.v1",
             "option_id": alkahest_option["option_id"],
+            "settlement": {"schema": "alkahest.v1"},
             "expiration_unix": expiration_unix,
         },
         escrow_expiration_unix=expiration_unix,

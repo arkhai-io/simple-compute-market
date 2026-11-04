@@ -9,6 +9,7 @@ dependencies = [
     "arkhai-core-storefront>=0.11.0",
     "arkhai-kit-alkahest>=0.7.0",
     "arkhai-kit-identity==0.4.0",
+    "arkhai-kit-deal-lifecycle>=0.1.0",
     "arkhai-kit-negotiation-runtime>=0.5.0",
     "alkahest-py==1.1.2",
 ]

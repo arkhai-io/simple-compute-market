@@ -6,7 +6,7 @@ continued payment authorization: a rate part starts after provisioning and ends 
 an authority-recorded stop, at exhaustion, or at the agreed maximum term.
 
 The lifecycle foundation,
-[`agreed-evidence-and-early-termination`](../agreed-evidence-and-early-termination/),
+[`agreed-evidence-and-early-termination`](../archive/2026-11-03-agreed-evidence-and-early-termination/),
 supplies the terms, the payment and dispute adapter boundary, the evidence stores
 and end service. This change completes its hosted payment adapter for rate parts
 and supplies both domains' presets and the seller notice command. The storefront's
@@ -76,7 +76,7 @@ continuation is a separate, dependent change.
   adapter to the Agreement's dispute authority, never future-dated: a pre-start
   failure journals at once and files at the Agreement start, and the seller sends
   no stop or reverse. Mediation's payee-agreed rule, whose cause=payee branch is the standard self-penalty
-  (`openspec/changes/agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`), applies. The adapter consumes the
+  (`openspec/changes/archive/2026-11-03-agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`), applies. The adapter consumes the
   foundation's dispute intent, request vocabulary and published mapping, and
   neither calculates nor partially applies the package.
 - Service-identity overlap and re-anchoring run through the foundation's
@@ -190,7 +190,7 @@ domain or the persistence-owning servicing kit.
   `openspec/specs/storefront-publication/spec.md` and its architecture companion.
 - The seller notice command, pending-stop observation and the rate buyer end: the
   foundation-created `deal-lifecycle` `spec.md` (see its
-  [delta](../agreed-evidence-and-early-termination/specs/deal-lifecycle/spec.md))
+  [delta](../archive/2026-11-03-agreed-evidence-and-early-termination/specs/deal-lifecycle/spec.md))
   and its architecture companion.
 - External payment contract context and guarantee limits:
   `openspec/specs/deal-lifecycle/architecture.md`.

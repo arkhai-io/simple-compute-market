@@ -11,6 +11,10 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta
 import sqlite3
+import json
+from types import SimpleNamespace
+from market_storefront.deal_lifecycle import VmDealLifecycle
+from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
 
 import httpx
 import pytest
@@ -224,9 +228,16 @@ async def _upsert_bound_listing(
         })
     options = []
     for each in entries:
-        body = {"mechanism": "alkahest.v1", "asset": _TOKEN,
+        body = {
+            "price": {
+                "asset": _TOKEN,
                 "rates": [RateValue.model_validate(rate) for rate in each["rates"]],
-                "params": {"accepted_escrow": each}}
+            },
+            "settlement": {
+                "schema": "alkahest.v1",
+                **({"accepted_escrow": each} or {}),
+            },
+        }
         options.append(
             SettlementOption(option_id=derive_settlement_option_id(**body), **body)
         )
@@ -273,9 +284,11 @@ async def _upsert_bound_listing(
 
 async def _selection(db, listing_id, index: int = 0):
     listing = await db.load_listing(listing_id=listing_id)
-    return {"mechanism": "alkahest.v1",
-            "option_id": listing["settlement_options"][index]["option_id"],
-            "expiration_unix": 1_800_000_000}
+    return {
+        "option_id": listing["settlement_options"][index]["option_id"],
+        "settlement": {"schema": "alkahest.v1"},
+        "expiration_unix": 1_800_000_000,
+    }
 
 
 async def _seed_listing(
@@ -309,6 +322,8 @@ async def client(db, monkeypatch):
     _container.resolved_sqlite_client = db
     _container.resolved_domain_registry = db.domain_registry
     _container.resolved_marketplace_signer = _SELLER_SIGNER
+    deal_lifecycle = VmDealLifecycle(db, _SELLER_SIGNER, None, RegistryDisputePolicy.from_document({}))
+    monkeypatch.setattr(_container, "resolved_settlement_composition", SimpleNamespace(lifecycle=deal_lifecycle))
     monkeypatch.setattr(
         _admin_identity,
         "get_administrator_configs",
@@ -654,6 +669,11 @@ class TestNegotiateNew:
         _assert_canonical_owners(result)
 
         assert result["action"] == "accept"
+        record = await _container.resolved_settlement_composition.lifecycle.evidence.read(result["negotiation_id"])
+        assert len(record.items) == 2
+        assert any(json.loads(item.body) == result and any(
+            key.lower() == "x-market-signature" for key in item.headers
+        ) for item in record.items)
         assert "amount" not in result["proposal"]["fields"]
         assert result["accepted_escrow_proposal"]["literal_fields"] == literals
 
@@ -792,9 +812,18 @@ class TestCounterNamingAnotherOption:
             "literal_fields": {"token": _TOKEN},
             "rates": [{"field": "amount", "per": "hour", "value": "6000"}],
         }
-        body = {"mechanism": "alkahest.v1", "asset": _TOKEN,
-                "rates": [RateValue.model_validate(rate) for rate in repriced_entry["rates"]],
-                "params": {"accepted_escrow": repriced_entry}}
+        body = {
+            "price": {
+                "asset": _TOKEN,
+                "rates": [
+                    RateValue.model_validate(rate) for rate in repriced_entry["rates"]
+                ],
+            },
+            "settlement": {
+                "schema": "alkahest.v1",
+                **({"accepted_escrow": repriced_entry} or {}),
+            },
+        }
         repriced = SettlementOption(option_id=derive_settlement_option_id(**body), **body)
         await db.update_listing(
             listing_id="neg-repriced",

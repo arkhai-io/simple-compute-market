@@ -19,7 +19,7 @@ from market_storefront.settlement_stages import (
 
 
 def _option(mechanism):
-    return {"option_id": mechanism, "mechanism": mechanism}
+    return {"option_id": mechanism, "settlement": {"schema": mechanism}}
 
 
 def _composition():

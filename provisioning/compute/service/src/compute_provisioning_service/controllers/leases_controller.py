@@ -18,7 +18,7 @@ from compute_provisioning_contracts import (
     LeaseTermination,
     LeaseView,
 )
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 
 from compute_provisioning_service import container as _container_module
 from compute_provisioning_service.controllers.route_errors import routed, routed_async
@@ -54,10 +54,13 @@ def get_lease(
 )
 async def terminate_lease(
     capacity_reservation_id: str,
+    request: Request,
     body: LeaseTermination,
     service: LeaseRouteService = Depends(_service),
 ) -> LeaseView:
-    return await routed_async(lambda: service.terminate(capacity_reservation_id, body))
+    return await routed_async(lambda: service.terminate(
+        capacity_reservation_id, body, caller=request.state.marketplace_principal.model_dump(mode="json"),
+    ))
 
 
 @router.post(
@@ -93,7 +96,10 @@ async def retry_release(
 )
 async def force_release(
     capacity_reservation_id: str,
+    request: Request,
     body: LeaseForceRelease,
     service: LeaseRouteService = Depends(_service),
 ) -> LeaseView:
-    return await routed_async(lambda: service.force_release(capacity_reservation_id, body))
+    return await routed_async(lambda: service.force_release(
+        capacity_reservation_id, body, caller=request.state.marketplace_principal.model_dump(mode="json"),
+    ))

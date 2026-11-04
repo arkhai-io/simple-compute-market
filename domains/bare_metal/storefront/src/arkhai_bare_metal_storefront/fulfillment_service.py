@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime, timedelta, timezone
@@ -29,6 +30,8 @@ from market_capacity_publication import (
 )
 from market_core import VersionedEnvelope
 from market_identity import Identity
+from market_deal_lifecycle.delivery import DeliveryPhase
+from market_deal_servicing import PhysicalResult
 from market_resource_pools_contracts.backing import CapacityNotAdmittedError
 from market_core import SettlementEvidence
 from .settlement_evidence import EvidencePayload
@@ -74,6 +77,14 @@ class BareMetalFulfillmentService:
     capacity_client: Any
     fulfillment_client: Any
     read_verified_evidence: Callable[..., Awaitable[SettlementEvidence]]
+    lifecycle: Any = None
+
+    async def _admit(self, negotiation_id: str, phase: DeliveryPhase) -> None:
+        if self.lifecycle is not None:
+            try:
+                await asyncio.to_thread(self.lifecycle.admit, negotiation_id, phase)
+            except ValueError as exc:
+                raise BareMetalFulfillmentError(str(exc)) from exc
 
     async def _effect(
         self,
@@ -205,7 +216,16 @@ class BareMetalFulfillmentService:
         self.capacity_client.reservation_sites[reservation_id] = site_id
         return {**reservation, "site": site_id}
 
-    async def begin(
+    async def begin(self, *, negotiation_id: str, settlement_ref: str | None = None, buyer_principal: Identity) -> dict[str, Any]:
+        if self.lifecycle is None:
+            return await self._begin(negotiation_id=negotiation_id, settlement_ref=settlement_ref, buyer_principal=buyer_principal)
+        try:
+            async with self.lifecycle.lock(negotiation_id):
+                return await self._begin(negotiation_id=negotiation_id, settlement_ref=settlement_ref, buyer_principal=buyer_principal)
+        finally:
+            await self.lifecycle.end.drive_physical(negotiation_id)
+
+    async def _begin(
         self,
         *,
         negotiation_id: str,
@@ -227,6 +247,7 @@ class BareMetalFulfillmentService:
             )
         settlement_ref = evidence.settlement_ref
 
+        await self._admit(negotiation_id, DeliveryPhase.RESERVE)
         # Starting delivery is ordered against refund intent in one
         # transaction, so a refund recorded first stops delivery here.
         lifecycle = await self.db.ensure_bare_metal_fulfillment_lifecycle(
@@ -329,17 +350,20 @@ class BareMetalFulfillmentService:
         # returns. Committed until the fulfillment begins: the first commit
         # records the window and the deal's escrow, and a repeat returns the
         # window unchanged.
+        await self._admit(negotiation_id, DeliveryPhase.COMMIT)
         lease_start = datetime.now(timezone.utc)
+        requested_start, requested_end = (
+            await asyncio.to_thread(self.lifecycle.lease_window, negotiation_id) if self.lifecycle is not None
+            else (lease_start.isoformat(), (lease_start + timedelta(seconds=terms.duration_seconds)).isoformat())
+        )
         committed_window = committed_lease_window(
             await self._effect(
                 lambda effects, binding: effects.commit(
                     binding,
                     resource_id=None,
                     capacity_reservation_id=str(reservation_id),
-                    lease_start_utc=lease_start.isoformat(),
-                    lease_end_utc=(
-                        lease_start + timedelta(seconds=terms.duration_seconds)
-                    ).isoformat(),
+                    lease_start_utc=requested_start,
+                    lease_end_utc=requested_end,
                     idempotency_ref=settlement_ref,
                     deal_ref={"escrow_uid": settlement_ref},
                 ),
@@ -380,6 +404,7 @@ class BareMetalFulfillmentService:
             raise BareMetalFulfillmentError(
                 "recorded materialization conflicts with accepted bare-metal terms"
             )
+        await self._admit(negotiation_id, DeliveryPhase.DISPATCH)
         accepted = await self.fulfillment_client.begin_fulfillment(
             FulfillmentRequestBody(
                 capacity_reservation_id=str(reservation_id),
@@ -503,6 +528,7 @@ class BareMetalFulfillmentService:
         )
 
         if remote.state == "active":
+            await self._admit(negotiation_id, DeliveryPhase.DISCLOSE)
             delivery, endpoint = await self._active_delivery(
                 capacity_reservation_id=str(reservation_id),
                 fulfillment_id=str(fulfillment_id),
@@ -516,6 +542,8 @@ class BareMetalFulfillmentService:
                 )
             # The stored result names no endpoint: where to connect is served
             # live by ``access`` while the lease is active.
+            if self.lifecycle is not None:
+                await asyncio.to_thread(self.lifecycle.available, negotiation_id, self.lifecycle.clock())
             await self._record_result(
                 negotiation_id=negotiation_id,
                 result=BareMetalResult(
@@ -572,6 +600,7 @@ class BareMetalFulfillmentService:
         materialization = await self.db.load_bare_metal_materialization(
             negotiation_id=negotiation_id
         )
+        await self._admit(negotiation_id, DeliveryPhase.DISCLOSE)
         return {
             "negotiation_id": negotiation_id,
             "method": "ssh",
@@ -583,27 +612,33 @@ class BareMetalFulfillmentService:
             ),
         }
 
-    async def teardown(
-        self,
-        *,
-        negotiation_id: str,
-        buyer_principal: Identity,
-    ) -> dict[str, Any]:
-        lifecycle = await self.status(
-            negotiation_id=negotiation_id,
-            buyer_principal=buyer_principal,
-        )
-        if lifecycle["state"] in _TEARDOWN_STATES | {TERMINATING, "released"}:
-            return lifecycle
-        reservation_id = lifecycle.get("capacity_reservation_id")
-        fulfillment_id = lifecycle.get("fulfillment_id")
-        if not reservation_id or not fulfillment_id:
-            raise BareMetalFulfillmentError("bare-metal fulfillment has not begun")
-        return await self.end_lease(
-            negotiation_id=negotiation_id,
-            capacity_reservation_id=str(reservation_id),
-            reason="buyer_teardown",
-        )
+    async def apply_end(self, negotiation_id: str, *, terminate: bool, at: int, operation_key: str, reason: str) -> PhysicalResult:
+        row = await self.db.load_bare_metal_fulfillment_lifecycle(negotiation_id=negotiation_id)
+        if row is None or row.get("state") == "released":
+            return PhysicalResult(progress="released", done=True)
+        if row.get("state") in _TEARDOWN_STATES | {TERMINATING}:
+            return PhysicalResult(progress="tearing_down", done=True)
+        reservation = row.get("capacity_reservation_id")
+        if not reservation:
+            return PhysicalResult(progress="released", done=True)
+        context = await self.db.load_bare_metal_fulfillment_context(negotiation_id=negotiation_id)
+        if not terminate:
+            await self._effect(lambda effects, binding: effects.truncate_lease(
+                binding, capacity_reservation_id=reservation,
+                lease_end_utc=datetime.fromtimestamp(at, timezone.utc).isoformat(),
+            ), context)
+            return PhysicalResult(progress="end_recorded", done=True)
+        materialization = await self.db.load_bare_metal_materialization(negotiation_id=negotiation_id)
+        if materialization is None:
+            await self._effect(lambda effects, binding: effects.release(
+                binding, capacity_reservation_id=reservation, failure_reason=operation_key,
+            ), context)
+            await self.db.update_bare_metal_fulfillment_lifecycle(negotiation_id=negotiation_id, state="released")
+            return PhysicalResult(progress="released", done=True)
+        else:
+            await self.fulfillment_client.terminate_lease(reservation, reason=reason)
+        await self.db.update_bare_metal_fulfillment_lifecycle(negotiation_id=negotiation_id, state=TERMINATING)
+        return PhysicalResult(progress="tearing_down", done=True)
 
     async def end_lease(
         self,
@@ -617,6 +652,9 @@ class BareMetalFulfillmentService:
         The site converges teardown through the lease's fulfillment and releases
         the capacity once; terminating a lease already ending returns it as it is.
         """
+        if self.lifecycle is not None:
+            await self.lifecycle.local_end(negotiation_id, cause=reason)
+            return await self.db.load_bare_metal_fulfillment_lifecycle(negotiation_id=negotiation_id)
         await self.fulfillment_client.terminate_lease(
             capacity_reservation_id, reason=reason
         )

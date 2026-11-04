@@ -31,15 +31,9 @@ def _option(**param_overrides: Any) -> dict[str, Any]:
     params.update(param_overrides)
     return {
         "option_id": derive_settlement_option_id(
-            mechanism=MECHANISM,
-            asset=INTRODUCTION_ASSET,
-            rates=[],
-            params=params,
+            settlement={"schema": MECHANISM, **(params or {})}
         ),
-        "mechanism": MECHANISM,
-        "asset": INTRODUCTION_ASSET,
-        "rates": [],
-        "params": params,
+        "settlement": {"schema": MECHANISM, **(params or {})},
     }
 
 

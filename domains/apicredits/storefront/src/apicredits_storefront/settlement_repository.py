@@ -17,6 +17,7 @@ from typing import Any
 
 from arkhai_apicredits.settlement.fulfillment import credit_delivery
 from market_core import SettlementEvidence
+from market_core.schemas import AGREEMENT_SETTLEMENT_SCHEMA_PATH
 
 #: Statuses whose verified facts are fixed; only the refund transitions move between them.
 _SETTLED = frozenset({"verified", "refunding", "refunded"})
@@ -204,7 +205,7 @@ class SettlementRepository:
                 WHERE t.terminal_state = 'success'
                   AND t.agreement_bytes IS NOT NULL
                   AND CASE WHEN json_valid(CAST(t.agreement_bytes AS TEXT))
-                      THEN json_extract(CAST(t.agreement_bytes AS TEXT), '$.settlement.mechanism')
+                      THEN json_extract(CAST(t.agreement_bytes AS TEXT), ?)
                       END = ?
                   AND (
                     ev.negotiation_id IS NULL
@@ -214,6 +215,6 @@ class SettlementRepository:
                 ORDER BY t.created_at ASC, t.negotiation_id ASC
                 LIMIT ?
                 """,
-                (mechanism, limit),
+                (AGREEMENT_SETTLEMENT_SCHEMA_PATH, mechanism, limit),
             ).fetchall()
         return [str(row[0]) for row in rows]

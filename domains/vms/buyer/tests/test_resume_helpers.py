@@ -325,7 +325,8 @@ def test_load_deal_context_recovers_accepted_proposal_and_demands():
         accepted_escrow_proposal=proposal,
         accepted_provision_terms=provision,
         settlement_selection={
-            "mechanism": "alkahest.v1", "option_id": "a" * 64,
+            "option_id": "a" * 64,
+            "settlement": {"schema": "alkahest.v1"},
             "expiration_unix": 1_800_000_000,
         },
     )

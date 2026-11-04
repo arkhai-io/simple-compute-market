@@ -79,6 +79,14 @@ Phase 11 — Fulfillment convergence and resource release
   11a  Run one fulfillment cycle → tearing_down while capacity remains held.
   11b  Complete provider teardown, converge to torn_down, run one lease cycle →
        released; observe storefront release, capacity reuse, and cleanup.
+
+Phase 12 — Buyer CLI surrender on a second deal
+  12a  Republish the freed capacity; negotiate and settle through real CLI
+       subprocesses, then converge the second delivery to active.
+  12b  Run `market end` twice; keep its receipt and verify the current signed
+       site report through bounded wait/read mode before physical completion.
+  12c  Complete teardown, then prove capacity return through its callback;
+       repeated surrender retains one end, report, teardown handle and release.
 """
 
 from __future__ import annotations
@@ -122,6 +130,17 @@ from tests.e2e.roles.scenarios.vms.conftest import (
     require_state,
     signed_listing_read_headers,
 )
+
+from tests.e2e.roles.scenarios.vms.lifecycle_deal import (
+    CliLifecycleBuyer, Stage12a_SecondDealActive, Stage12b_BuyerSurrendersTwice,
+    Stage12c_CapacityReleasedOnce,
+)
+
+
+@pytest.fixture(scope="module")
+def vm_lifecycle_buyer(buyer_cli, storefront_client, storefront_admin_client, site_capacity):
+    return CliLifecycleBuyer(buyer_cli, storefront_client, storefront_admin_client, site_capacity)
+
 
 log = logging.getLogger(__name__)
 
@@ -1545,3 +1564,15 @@ class TestStage11b_TeardownCompletion:
             site_id=capacity_site_id(),
         )
         deal_state.lease_status = "released"
+
+
+class TestStage12a_SecondDealActive(Stage12a_SecondDealActive):
+    pass
+
+
+class TestStage12b_BuyerSurrendersTwice(Stage12b_BuyerSurrendersTwice):
+    pass
+
+
+class TestStage12c_CapacityReleasedOnce(Stage12c_CapacityReleasedOnce):
+    pass

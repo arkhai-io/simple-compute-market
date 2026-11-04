@@ -18,6 +18,7 @@ An architecture companion does not replace a normative requirement. When explana
 | Change workflow | [Spec](change-workflow/spec.md) | [Architecture](change-workflow/architecture.md) |
 | CLI query language | [Spec](cli-query-language/spec.md) | [Architecture](cli-query-language/architecture.md) |
 | Compute provisioning contract | [Spec](compute-provisioning-contract/spec.md) | — |
+| Deal lifecycle | [Spec](deal-lifecycle/spec.md) | [Architecture](deal-lifecycle/architecture.md) |
 | Deployment and state | [Spec](deployment-state/spec.md) | [Architecture](deployment-state/architecture.md) |
 | Fulfillment | [Spec](fulfillment/spec.md) | [Architecture](fulfillment/architecture.md) |
 | Introduction delivery | [Spec](introduction-delivery/spec.md) | [Architecture](introduction-delivery/architecture.md) |
@@ -43,7 +44,8 @@ An architecture companion does not replace a normative requirement. When explana
 |---|---|
 | Peer mechanism registration, typed configuration, readiness, and account/credential separation | [Settlement configuration](settlement-configuration/spec.md) and [architecture](settlement-configuration/architecture.md) |
 | Exact Agreement bytes and shared opaque `settlement_data` persistence | [Negotiation protocol](negotiation-protocol/spec.md) |
-| Mandate derivation, transaction identity, signed receipts, retry, and refund authority | [Settlement servicing](settlement-servicing/spec.md) and [architecture](settlement-servicing/architecture.md) |
+| Post-commitment counterparts, lifecycle terms, end/admission journals, evidence, cases and current limits | [Deal lifecycle architecture](deal-lifecycle/architecture.md) |
+| Mandate derivation, transaction identity, signed receipts/snapshots, retry, and refund authority | [Settlement servicing](settlement-servicing/spec.md) and [architecture](settlement-servicing/architecture.md) |
 | Negotiate → settle → provision composition and external payments authority | [Market composition](market-composition/spec.md) and [repository architecture](../../docs/development/ARCHITECTURE.md) |
 | Receipt-gated selected-site execution and idempotent credit issuance | [Physical provisioning](physical-provisioning/spec.md) and [API credits](api-credits/spec.md) |
 | Package/deployment ownership and scoped validation evidence | [Deployment](deployment-state/spec.md) and [testing](test-compatibility/spec.md) |

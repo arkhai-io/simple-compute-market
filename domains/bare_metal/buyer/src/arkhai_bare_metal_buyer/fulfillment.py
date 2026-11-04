@@ -8,6 +8,9 @@ from typing import Any
 
 from core_buyer import DEFAULT_HTTP_TIMEOUT, signed_storefront_json
 from market_identity import Identity, Signer, TrustedIdentitySet
+from market_deal_lifecycle_client import LifecycleClient
+
+from .lifecycle import run_sync
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,12 +66,22 @@ class BareMetalFulfillmentTransport:
         )
 
     def teardown(self, negotiation_id: str) -> dict[str, Any]:
-        return self._request(
-            negotiation_id,
-            "teardown",
-            "bare_metal_fulfillment_teardown",
-            method="POST",
-        )
+        async def end():
+            async with LifecycleClient(
+                self.seller_url, self.signer, self.resolve_seller_principals(), timeout=self.timeout,
+            ) as client:
+                return (await client.end_delivery(negotiation_id)).model_dump(mode="json")
+
+        return run_sync(end)
+
+    def delivery(self, negotiation_id: str) -> dict[str, Any]:
+        async def read():
+            async with LifecycleClient(
+                self.seller_url, self.signer, self.resolve_seller_principals(), timeout=self.timeout,
+            ) as client:
+                return (await client.read(negotiation_id)).model_dump(mode="json")
+
+        return run_sync(read)
 
 
 __all__ = ["BareMetalFulfillmentTransport"]

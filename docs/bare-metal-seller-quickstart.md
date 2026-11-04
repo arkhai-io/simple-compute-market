@@ -399,9 +399,10 @@ maximum lease duration is held and reported instead, and one whose override and
 configuration state no settlement clause has its machines refused as
 `no_settlement_option`, closing any listing it had open. An Alkahest section that
 cannot settle — no `[Chains]` or wallet key, a `[Wallet].address` naming another
-account than the key's, an address book for a chain not under `[Chains]`, or the
-`interruptible` release model — leaves Alkahest unready, its options unpublished,
-rather than stopping the storefront. Its administrator's system status
+account than the key's, or an address book for a chain not under `[Chains]` — leaves
+Alkahest unready, its options unpublished, rather than stopping the storefront. A
+section listing the `interruptible` release model, which bare metal cannot deliver,
+refuses startup, enabled or not. Its administrator's system status
 (`get_system_status()` through the canonical storefront client) reports each
 lifecycle loop's state and last cycle as `lifecycle`, each settlement mechanism's
 readiness and blockers as `settlement`, and as `publication_derivation` each
@@ -465,7 +466,7 @@ refusal, and registry repair. It publishes independent typed
 settlement options; it does not manufacture availability or substitute a
 different site or resource.
 
-While the configuration has an Alkahest section, enabled or not, it settles with at least one `[Chains.<name>]` and the overlay's `[Wallet].private_key`, since a disabled section still services accepted deals; Alkahest readiness names each one missing. The key's account is the seller's address, so `[Wallet].address` is optional, and one naming another account is a blocker too. With no Alkahest section they must be absent, or the storefront refuses to start. Payments-only startup constructs no wallet, RPC, chain, or Alkahest client, and with Alkahest configured, startup constructs no chain client either: the `alkahest-chain-probe` loop builds each and probes each chain every `[Settlement.alkahest].probe_interval_seconds`, so the storefront starts while a chain is down and its Alkahest listings wait for it. The public `[Settlement]` section contains service, account, and trust settings only. An Alkahest listing advertises the release condition its escrow will use on each chain, the recipient arbiter paying the seller's wallet by default; configured for the interruptible release model, which bare metal cannot deliver, Alkahest is unready. The runtime composes obligation servicing for Alkahest and contact exchange, and receipt-based settlement and reconciliation for Arkhai payments.
+While the configuration has an Alkahest section, enabled or not, it settles with at least one `[Chains.<name>]` and the overlay's `[Wallet].private_key`, since a disabled section still services accepted deals; Alkahest readiness names each one missing. The key's account is the seller's address, so `[Wallet].address` is optional, and one naming another account is a blocker too. With no Alkahest section they must be absent, or the storefront refuses to start. Payments-only startup constructs no wallet, RPC, chain, or Alkahest client, and with Alkahest configured, startup constructs no chain client either: the `alkahest-chain-probe` loop builds each and probes each chain every `[Settlement.alkahest].probe_interval_seconds`, so the storefront starts while a chain is down and its Alkahest listings wait for it. The public `[Settlement]` section contains service, account, and trust settings only. An Alkahest listing advertises the release condition its escrow will use on each chain, the recipient arbiter paying the seller's wallet by default; configured for the interruptible release model, which bare metal cannot deliver, the storefront refuses to start. The runtime composes obligation servicing for Alkahest and contact exchange, and receipt-based settlement and reconciliation for Arkhai payments.
 
 ### Resetting the storefront database
 

@@ -343,7 +343,9 @@ async def test_payment_selection_places_quota_hold(db, monkeypatch):
         terms=SimpleNamespace(decoded=SimpleNamespace(payload={"quantity": 3})),
         pinned_proposal=None,
         policy_state={
-            "accepted_settlement_selection": {"mechanism": "arkhai.payments.v1"}
+            "accepted_settlement_selection": {
+                "settlement": {"schema": "arkhai.payments.v1"}
+            }
         },
         binding=None,
     )
@@ -409,10 +411,15 @@ async def _start_payment(db, *, amount=250, quantity=3):
 @pytest.mark.parametrize(
     "changed",
     [
-        {"mechanism": "alkahest.v1"},
+        {"settlement": {"schema": "alkahest.v1"}},
         {"option_id": "f" * 64},
         {"expiration_unix": 1_900_000_001},
-        {"params": {"payer_account": "33333333-3333-4333-8333-333333333333"}},
+        {
+            "settlement": {
+                "schema": "arkhai.payments.v1",
+                "payer_account": "33333333-3333-4333-8333-333333333333",
+            }
+        },
     ],
 )
 async def test_counter_rejects_opening_selection_switch(db, fake_capacity, key_records, changed):

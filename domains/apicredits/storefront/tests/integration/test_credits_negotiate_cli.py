@@ -57,6 +57,7 @@ from tests.integration.credit_negotiation import (
     SELLER_SIGNER,
     QuotaHolds,
     payment_option,
+    payment_authority,
 )
 from tests.loopback import serving
 
@@ -78,7 +79,6 @@ async def storefront(db, fake_capacity, key_records, monkeypatch):
             service_url="http://127.0.0.1:9",
             service_identity=PAYMENTS_SERVICE.identity,
             fee_bps=250,
-            dispute_authority=DISPUTE_ACCOUNT,
             development_auth=True,
         ),
         client_for_owner=FakePaymentsClient(),
@@ -88,7 +88,7 @@ async def storefront(db, fake_capacity, key_records, monkeypatch):
         _DOMAIN,
         accepted_obligation_dispatch={ARKHAI_PAYMENTS_MECHANISM: None},
         settlement_artifacts_builder=lambda agreement: SELLER_STAGES[
-            agreement["settlement"]["mechanism"]
+            agreement["settlement"]["settlement"]["schema"]
         ].agreement_artifacts(agreement, composition),
     )
     holds = QuotaHolds()
@@ -151,6 +151,7 @@ def buyer(storefront, monkeypatch, tmp_path):
             "arkhai_payments": {"enabled": True},
         },
         "apicredits": {"payer_account": PAYER_ACCOUNT},
+        "Dispute": [payment_authority()],
     }
     monkeypatch.setattr(settlement_composition, "load_user_config", lambda: config)
     monkeypatch.setattr(payments, "load_user_config", lambda: config)
@@ -179,7 +180,10 @@ async def test_payment_negotiation_is_accepted_and_recorded(
     negotiation_id = accepted["negotiation_id"]
     selection = accepted["settlement_selection"]
     assert selection["option_id"] == payment_option().option_id
-    assert selection["params"] == {"payer_account": PAYER_ACCOUNT}
+    assert selection["settlement"] == {
+        "schema": "arkhai.payments.v1",
+        "payer_account": PAYER_ACCOUNT,
+    }
     agreement = json.loads(base64.b64decode(accepted["agreement_bytes"]))
     assert agreement["amount"] == str(amount)
     assert agreement["settlement_params"] == {"payer_account": PAYER_ACCOUNT}

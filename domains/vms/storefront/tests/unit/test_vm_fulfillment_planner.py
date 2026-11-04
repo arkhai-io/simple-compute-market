@@ -60,7 +60,12 @@ def test_payment_fulfillment_plan_does_not_require_alkahest_token_terms():
             "region": "local",
             "sla": 99.9,
         },
-        "settlement_options": [{"mechanism": "arkhai.payments.v1", "asset": "USD/2"}],
+        "settlement_options": [
+            {
+                "price": {"asset": "USD/2", "rates": []},
+                "settlement": {"schema": "arkhai.payments.v1"},
+            }
+        ],
     }
     plan = build_vm_fulfillment_plan(
         evidence=vm_evidence(
