@@ -268,7 +268,7 @@ payout or case close. Sellers file delivery_end for failed/non-started delivery;
 the buyer's stop/case is its backstop. The buyer's end — stop first, hint, `end_delivery` as end-now, the journaled retry while
 billing runs, the receipt-backed `delivery_end(cause=payer)` or triage — is the foundation's (`openspec/changes/archive/2026-11-03-agreed-evidence-and-early-termination/design.md#the-buyers-end`); the display
 explains each step as that statement gives it. The setup charge is
-owed from approval; a payment stop alone does not reverse it. A qualified delivery_end returns it iff delivered=false for either cause, keeping it iff true.
+owed from approval; a payment stop alone does not reverse it. A qualified delivery_end returns it iff delivered=false for either cause, keeping it iff true — which is the F14 ground with the filer generalized: it returns only when the seller never delivered, by its own filing, its signature on the buyer's claim, or a person's ruling on the buyer's evidence. The display says so before approval: stopping keeps the setup charge with the seller; only the seller's non-delivery returns it.
 
 ### D8. Churn is seller pricing/policy, not a protocol gate
 
