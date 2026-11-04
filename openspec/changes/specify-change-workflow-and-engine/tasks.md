@@ -1142,19 +1142,51 @@ Delivers the convention as written guidance: how an indexed capability's documen
 are organized, and what closeout writes into `index.md` (D15; D14's round 2). Touches
 `openspec/README.md` and `openspec/specs/README.md`.
 
-- [ ] 10.1 `openspec/README.md#capability-documentation-pattern`: a capability may
+- [x] 10.1 `openspec/README.md#capability-documentation-pattern`: a capability may
       be organized by an index — `README.md`, `index.md`, `spec.md`, `diagrams/` as
       D15 lays them out — with the id rule, retired ids, citing by id, and the
       check (D15).
-- [ ] 10.2 `openspec/README.md#plan-closeout-requirements`, part 9: promotion writes
+      Done as a subsection, "A capability organized by an index", so the section's
+      anchor, which the check, the `Makefile`, and the closeout skill cite, still
+      resolves. It states the index's shape as `scripts/check_spec_index.py` reads
+      it (the `Prefix:` line, upper-case; an entry's first cell the id's link; the
+      `## Retired ids` items) and the check's failures, the missing prefix among
+      them. The same document's opening list, its placement table, and its
+      companion paragraphs now name `README.md` as the companion where `index.md`
+      exists, as D15 asks of `openspec/README.md`. The ids are said to be unlikely,
+      not certain, to collide across branches, with the check catching a
+      collision; D15's "never collide" said more than four random characters
+      guarantee.
+- [x] 10.2 `openspec/README.md#plan-closeout-requirements`, part 9: promotion writes
       the `index.md` entries for the ids a change adds and retires the ids it
       removes (D15).
-- [ ] 10.3 `openspec/specs/README.md`'s description of a capability's files: the
+      Done, and also a renamed requirement's link moved to its new heading and a
+      modified one's summary revised, without which a closeout renaming a
+      requirement would fail the index check on the old anchor.
+- [x] 10.3 `openspec/specs/README.md`'s description of a capability's files: the
       companion is `README.md` where `index.md` exists (D15).
-- [ ] 10.4 Verification: `make check-doc-citations
+      Done, with the reading order's companion and the promotion sentence naming
+      `index.md`.
+- [x] 10.4 Verification: `make check-doc-citations
       CHANGE=specify-change-workflow-and-engine`, failing only on files the change
       creates; `make check-change CHANGE=specify-change-workflow-and-engine`.
       End-to-end: none, and none is owed.
+      Evidence: the scoped `make check-doc-citations` failed only on the files
+      closeout creates (the two `index.md`, `market-change-workflow`'s `spec.md`);
+      it reads only the change's own documents, so an unscoped run was read too,
+      and it reports nothing in `openspec/README.md` or `openspec/specs/README.md`;
+      `make check-change` failed only on that check, as before; `make test`
+      passed. The anchors the new text cites were checked by the fresh-context
+      check, by reading, as GitHub writes them; no tool checks a fragment.
+
+Notes for the next session. The fresh-context check found no defect; fixed: the
+missing-prefix failure and the prefix's case, the renames and modifications part 9
+left out, the collision wording, and `openspec/specs/README.md`'s promotion
+sentence. Owed elsewhere: `.agents/skills/change-closeout/SKILL.md`'s promotion part
+(section 5's text) also names only the ids added and removed; the renamed link and
+the revised summary are for the round's triage to carry into it. Closeout's own
+additions to these documents (11.9: the two principles, the proposal's interface
+rule) are not here.
 
 ## 11. Closeout
 
