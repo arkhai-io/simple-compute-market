@@ -510,7 +510,7 @@ This is a lesser goal because it changes how changes are made, not what the mark
 - **Skills:** ten leaf skills under [`.agents/skills/`](../../.agents/skills/), linked into Claude Code's and Codex's project skill directories.
 - **Engine:** [`scripts/change_workflow/`](../../scripts/change_workflow/), [`scripts/run_change_step.py`](../../scripts/run_change_step.py), and [`scripts/change_next_step.py`](../../scripts/change_next_step.py).
 - **Entry points:** the make targets.
-- **Contract:** the [`change-workflow` specification](../specs/change-workflow/spec.md) and its [architecture companion](../specs/change-workflow/architecture.md).
+- **Contract:** the [`change-workflow` specification](../specs/change-workflow/spec.md) and its [`README.md`](../specs/change-workflow/README.md).
 
 The workflow has no version of its own: a change to it ships with whichever commit of this repository carries it.
 

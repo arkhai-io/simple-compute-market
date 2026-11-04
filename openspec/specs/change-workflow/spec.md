@@ -1900,7 +1900,7 @@ checked, and one that failed or was inconclusive MUST be brought to the owner.
 ## Evidence
 
 - Contributor guide to each step, the review directory, and the ledger:
-  `docs/agents/change-workflow.md`; rationale: `architecture.md`.
+  `docs/agents/change-workflow.md`; rationale: `README.md`.
 - Leaf skills: `.agents/skills/change-design/`, `change-plan/`, `change-review/`,
   `change-triage/`, `change-implement/`, `change-validate/`, `change-closeout/`, and
   `change-archive-cleanup/`, and the orchestrating skill,

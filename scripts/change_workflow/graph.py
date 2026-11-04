@@ -39,7 +39,7 @@ The change-workflow architecture shows the table as a diagram laid out by hand,
 `openspec/specs/change-workflow/diagrams/change-workflow-graph.drawio`, held to the
 boxes and edges the table draws (`drawing`; see `diagram`). A durable
 change to the workflow is a change to this table, made as an OpenSpec change. See
-openspec/specs/change-workflow/architecture.md, "Routing is code, with the model as
+openspec/specs/change-workflow/README.md, "Routing is code, with the model as
 backstop".
 """
 

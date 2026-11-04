@@ -919,6 +919,67 @@ cannot see those edits: it is scoped to a change's own documents, and the index'
 links are relative directory links. The check covers active changes only; archived
 rows are recent history and may be pruned at any time.
 
+## What an adopting repository provides
+
+The workflow runs in a repository that fills a set of roles: commands it runs,
+documents it reads, branches and remotes it relies on. Each is stated here by what
+it does, with the skills that use it and the change expected to make it a declared
+capability rather than a name the skills know. How a repository fills each is its
+own statement; this repository's is
+[`market-change-workflow`'s](../market-change-workflow/README.md#how-this-repository-provides-the-workflows-roles).
+A test fails when a make target or repository path the skills, the step table, or
+the make fragment name, the fragment's own targets among them, is missing from that
+statement, or when a role here has no provision there, or one there no role here.
+
+| Role | Used by | Expected to be replaced by |
+|---|---|---|
+| Local validation of a commit: the repository's own checks and suites against the commit, built from it | `change-validate` | `add-workflow-capability-contract` |
+| Validation in a deployed environment: the change's services built and run as the repository deploys them | `change-validate`, `change-plan` | `add-workflow-capability-contract` |
+| The end-to-end pipeline: a run whose head is the commit, its logs fetched | `change-validate`, `change-implement`, `change-merge`, `change-plan` | `add-workflow-capability-contract` |
+| CI evidence only a push produces: the workflows validation may dispatch, from a fixed list | `change-validate`, `change-implement`, `change-plan` | `add-workflow-capability-contract` |
+| Removing a change's validation resources, and recording what they used, at archive cleanup | `change-archive-cleanup` | `add-workflow-capability-contract` |
+| The repository's tests and environments: the suites, locks, builds, and environment refreshes a change's work runs | `change-implement`, `change-triage`, `change-merge`, `change-validate`, `change-plan` | `add-workflow-capability-contract` |
+| The packaging check before closeout | `change-implement`, `change-triage`, `change-merge`, `change-closeout`, `change-validate` | `add-workflow-capability-contract` |
+| The closing checks a step ends with | every step that commits | `add-workflow-capability-contract` |
+| A snapshot of the code for the owner's reading | `change-triage` | `add-workflow-capability-contract` |
+| The change index at a known path | every step | `add-workflow-capability-contract` |
+| The guidance documents every step reads | every step | `add-workflow-capability-contract` |
+| Where specifications and documentation live | every step | `add-workflow-capability-contract` |
+| Protected branches the guarded push refuses | every step that pushes | `add-workflow-capability-contract` |
+| The `origin` remote the guarded push and the pipeline use | every step that pushes, `change-validate` | `add-workflow-capability-contract` |
+| The branch a change lands on, merged before closeout and reviewed against | `change-design`, `change-implement`, `change-merge`, `change-review`, `change-validate`, `change-orchestrate` | `add-workflow-capability-contract` |
+| The clone's bootstrap: one command that readies a fresh clone | `change-orchestrate` | `add-workflow-capability-contract` |
+| The make fragment's targets, included by the repository's `Makefile` | `change-orchestrate` and every skill naming a target | `extract-change-workflow-repository` |
+
+### The engine's own assumptions
+
+What the engine itself holds about the repository it runs in, beside the roles; some
+fix in the engine a value a role leaves to the repository, until the roles are
+declared capabilities. The test reads a repository's statement of these as
+provisions too, but whether this table names everything the engine holds is kept by
+review: a module's constant or a tool it invokes is not collected.
+
+| Assumption | Where the engine holds it |
+|---|---|
+| The protected branches the guarded push refuses, and the remote it pushes to | `push.PROTECTED`, `push.DEFAULT_REMOTE` |
+| The branch a review reads the change against | `review.DEFAULT_BASE` |
+| The change index's path | `index.INDEX` |
+| The guidance documents a session re-reads after its context is compacted | `hook.REQUIRED` |
+| The documentation a commit may change after a pre-closeout review without a validation | `records.DOCUMENTATION` |
+| Where validation's and the pipeline's evidence is, which history copies | `history.VALIDATION`, `history.E2E_LOGS` |
+| Its command and package, beside each other under `scripts/` | the command's own path, and the skills that name it |
+| The step table, at a fixed path, in Claude Code's permission-rule syntax | `steps.STEP_TABLE`; provisional, replaced by `sandbox-unattended-workflow-steps` and `add-workflow-harness-adapters` |
+| The outcome schema, at a fixed path | `outcome.SCHEMA` |
+| The skills' one source, linked into each harness's directory | `skills` |
+| The harness's local settings, which a clone links to the workspace's | `clone.SETTINGS` |
+| The changes' directory, its archive, and each change's records under `reviews/` | `common.CHANGES`, `find`, `records` |
+| The graph diagram's place in this capability | `diagram.DIAGRAMS` |
+| The branch a new change's clone starts from, and the merge's default | `clone.DEFAULT_FROM`, the fragment's `CHANGE_WORKFLOW_MERGE_FROM` |
+| The clone's bootstrap command, run as the clone is made | `clone.BOOTSTRAP_COMMAND` |
+| The `workspace` remote a clone names the owner's workspace by | `find.WORKSPACE_REMOTE` |
+| The harness's session id in the environment, `CLAUDE_CODE_SESSION_ID` | `cli.SESSION_ID` |
+| The tools it invokes, `git`, `claude`, `codex`, and `make`, and `gh`, which its skills invoke | `harness`, `cli`, and `review` for the harnesses, `clone` and `push` for `git`, `clone.BOOTSTRAP_COMMAND` for `make`; `gh` in the validation skill |
+
 ## Current limits
 
 - One orchestrating session advances one change. Several changes run at once, each

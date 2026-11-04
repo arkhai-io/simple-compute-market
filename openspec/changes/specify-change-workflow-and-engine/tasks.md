@@ -811,8 +811,8 @@ only once section 10 writes it.
 Delivers the graph diagram in `openspec/specs/change-workflow/diagrams/`, still held
 to the graph table (D12). Touches
 `docs/development/diagrams/change-workflow-graph.drawio` and `.svg`,
-`scripts/change_workflow/diagram.py`, `graph.py`,
-`openspec/specs/change-workflow/architecture.md`, and
+`scripts/change_workflow/diagram.py`, `graph.py`, the capability's companion (then
+`architecture.md`, now `README.md`), and
 `scripts/tests/test_change_workflow_graph.py`.
 
 - [x] 6.1 `git mv` the diagram's `.drawio` and `.svg` to
@@ -850,18 +850,29 @@ Delivers the inventory written two-sided — the roles in `change-workflow`'s
 `README.md`, this repository's provision of each in `market-change-workflow`'s — and
 the test that holds the targets and paths the skills, the step table, and the
 fragment name to it (D13; D15's rename; CW-m4ps, MCW-5tgp). Touches
-`openspec/specs/change-workflow/architecture.md` → `README.md`, a new
+`change-workflow`'s companion, `architecture.md` → `README.md`, a new
 `openspec/specs/market-change-workflow/README.md`, every citation of the companion's
 old path, and a new `scripts/tests/test_change_workflow_assumptions.py`.
 
-- [ ] 7.1 `git mv openspec/specs/change-workflow/architecture.md
-      openspec/specs/change-workflow/README.md` (D15), and move every citation of
-      the old path: `openspec/specs/README.md`, `docs/agents/change-workflow.md`,
+- [x] 7.1 `git mv` the companion, `architecture.md` in
+      `openspec/specs/change-workflow/`, to `README.md` beside it (D15), and move
+      every citation of the old path: `openspec/specs/README.md`, `docs/agents/change-workflow.md`,
       `openspec/changes/README.md`, the spec's own Evidence, `diagram.py`,
       `graph.py`, the graph test, and any other `make check-doc-citations` finds.
       The content is rewritten at closeout (11.9); this section adds only the
       section of 7.2.
-- [ ] 7.2 `change-workflow`'s `README.md` gains "What an adopting repository
+      Done, with each listed citation, and the index row's link now titled
+      `README.md`. Correction to the plan's text: 7.1 itself, and the "Touches" of
+      sections 6 and 7, named the old path as a path, which the scoped citation
+      check reads as a citation once the file is gone; they now name the file
+      without forming one, as 7.5 asks for no citation of the old path. Left as they
+      are: the documents of four other active changes that cite the old path
+      (`add-workflow-harness-adapters`, `remove-workflow-log-conversion`,
+      `sandbox-unattended-workflow-steps`, `workflow-round-review-without-merges`),
+      for each one's own reverification once this change lands, as section 3 left
+      their citations of the removed scripts; an unscoped `make check-doc-citations`
+      lists them.
+- [x] 7.2 `change-workflow`'s `README.md` gains "What an adopting repository
       provides": a table of each role (a command validating a commit locally, the
       packaging check before closeout, the change index at its path, the guidance
       documents every step reads, the protected branches, the `origin` remote, the
@@ -871,25 +882,105 @@ old path, and a new `scripts/tests/test_change_workflow_assumptions.py`.
       branch, the `workspace` remote, `CLAUDE_CODE_SESSION_ID`, and the tools it
       invokes (`git`, `claude`, `codex`, `gh`) — marked as maintained by review
       (D13; CW-m4ps).
-- [ ] 7.3 A new `openspec/specs/market-change-workflow/README.md` with "How this
+      Seventeen roles, placed before "Current limits": beside D13's, the deployed
+      validation, the end-to-end pipeline, CI evidence, removing a change's
+      validation resources, the tests and environments, the closing checks, the
+      code snapshot, where specifications and documentation live, the branch a
+      change lands on, and the make fragment's targets. Each names
+      `add-workflow-capability-contract` as its replacement but the fragment's,
+      `extract-change-workflow-repository`. The engine's own assumptions are a
+      second table, each with the module attribute holding it, among them the
+      values the engine fixes where a role leaves them to the repository
+      (`push.PROTECTED`, `push.DEFAULT_REMOTE`, `review.DEFAULT_BASE`,
+      `index.INDEX`, `hook.REQUIRED`, `records.DOCUMENTATION`,
+      `history.VALIDATION` and `E2E_LOGS`). The test reads a repository's
+      statement of them as provisions too; whether the table is complete is
+      review's. Corrected against the code: the engine invokes no `gh`, which only
+      the validation skill names; it invokes `make` for the bootstrap; the local
+      settings path is `clone.SETTINGS`'s.
+- [x] 7.3 A new `openspec/specs/market-change-workflow/README.md` with "How this
       repository provides the workflow's roles": each role of 7.2 and the target,
       path, branch, or document that fills it here (`make validate-local`, `make
       check-packaging`, `openspec/changes/README.md`, `dev` and `main`, `make init`,
       …), the engine's own assumptions marked as maintained by review; the rest of
       the document is written at closeout (D13; MCW-5tgp).
-- [ ] 7.4 `scripts/tests/test_change_workflow_assumptions.py`, unit: collects every
+      The provisions name every target and path the test collects, each in code,
+      and, uncollected, `.snapshot/validation/` and `.snapshot/e2e-logs/`
+      (validation's untracked output). `make reinit*` and `make typecheck*`, which
+      the step table grants, are projects' targets, not the root `Makefile`'s, and
+      the row says so. The engine's own assumptions as met here are its second
+      table.
+- [x] 7.4 `scripts/tests/test_change_workflow_assumptions.py`, unit: collects every
       `make <target>` and repository path the skills under `.agents/skills/change-*`,
       `.claude/change-steps.toml`, and `scripts/change_workflow/workflow.mk` name,
       and fails, naming each and where it is named, on one the provision table does
       not list; and fails on a role either table lacks. It reads the two tables'
       Markdown and claims nothing of the engine's own assumptions (D13; CW-m4ps's
       scenarios).
-- [ ] 7.5 Verification: the assumptions test, unit, passing, and failing on a
+      What it collects: from a skill, only its code — inline spans of one backtick
+      or more, one wrapped across lines included, and fenced blocks — so prose
+      ("make the change") names nothing; from the step table, every `allow` and
+      `deny` rule of `[common]` and each `[steps.*]`; from the fragment, its whole
+      text, comments included, and each target it defines as a rule. A
+      target is the word after `make` and its flags, kept with the directory `-C`
+      names (`make -C helm test-render`, `make -C <clone> push-branch`) and its
+      wildcard as the table grants it (`make check-*`). A path is a word under a
+      directory Git tracks at the root, or a root file but `README.md` (a skill
+      naming it means a capability's), its anchor and line number dropped; a bare
+      directory name is not one, since in code it is a command (`openspec`) or a
+      `-C` argument. Provisions are the code spans of both tables under the
+      provision heading, read the same way, and must match exactly. Not collected:
+      a path Git does not track (`.snapshot/…`), whose existence depends on the
+      checkout, and a path outside the repository (`../*-proposal/**`). Roles are
+      each document's first table's first column, compared both ways
+      (`role_problems`). The parsing functions take the root's entries as an
+      argument, so their tests run on a tree of their own; only the two tests of
+      the real documents read Git's tracked root. A provision no source names any
+      longer is not reported: D13 asks only that every named one is listed.
+- [x] 7.5 Verification: the assumptions test, unit, passing, and failing on a
       temporary skill naming an unlisted target; `make test-release-tooling`; `make
       test`; `make check-doc-citations CHANGE=specify-change-workflow-and-engine`
       reporting no citation of the old companion path; `make check-change
       CHANGE=specify-change-workflow-and-engine`, failing only on the citations of
       files a later section creates. End-to-end: none, and none is owed.
+      Evidence: `test_change_workflow_assumptions.py` (unit; two tests read the real
+      skills, step table, fragment, and documents, with Git's tracked root; the
+      rest parse texts and trees of their own), 10 passed, among them a temporary
+      skill naming `make check-something` reported as unlisted with where it is
+      named, while the `make test` beside it, listed, is not; a temporary step
+      table and fragment whose targets and paths are collected, the fragment's
+      rule among them; and a role missing a provision and a provision missing a
+      role, both named through the function the real test runs. The graph tests
+      at the companion's new path pass (79 with the assumptions test); the scripts
+      suite (`scripts/tests`, as `make test-release-tooling` runs it) and `make
+      test` — see the section's notes; `make check-doc-citations
+      CHANGE=specify-change-workflow-and-engine` reports no citation of the old
+      companion path; `make check-change` failed only on `check-doc-citations`,
+      every miss a file a later section creates (`trace.md`, the two `index.md`,
+      `market-change-workflow`'s `spec.md`).
+
+Notes for the next session. Results: the scripts suite, 2085 passed; `make test`
+passed; `make check-packaging` passed. The fresh-context check's findings were fixed,
+those this section owns: a double-backtick span in `change-design` that hid every
+span after it, the fragment's own targets not collected, engine constants missing
+from the second table, `gh` attributed to the orchestration skill, incomplete "Used
+by" cells, the test reading Git at import, and the role check not driven through the
+real assertion. Left, and owed elsewhere:
+
+- `.agents/skills/change-implement/SKILL.md` says "only `dev` is protected" where
+  `push.PROTECTED` refuses `main` and `dev`; a skill's text, outside this section,
+  for the round's triage to settle.
+- Until closeout writes `change-workflow`'s `index.md`, the rule the skills and
+  `openspec/config.yaml` state — the companion is `README.md` where `index.md`
+  exists, `architecture.md` elsewhere — points at an `architecture.md` that is gone.
+  The window is the plan's (the rename here, the index at closeout), and a reader
+  finds `README.md` beside the spec.
+- Sections 8 and 9 rewrite the specifications. The roles here are what CW-m4ps
+  states; a requirement 8 or 9 writes about a role should use these names, or the
+  tables follow it.
+- The engine's report text names fragment targets (`make round-done`, `make
+  change-clone`); section 3 left that for this inventory, and it is listed in the
+  fragment's row of the provisions, not as a role of its own.
 
 ## 8. The `change-workflow` specification rewritten, with its trace
 

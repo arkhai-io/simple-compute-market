@@ -20,7 +20,7 @@ from change_workflow.graph import (ARCHIVE_CLEANUP, CLOSEOUT_TRIAGE, DESIGN, NOD
                                    TABLE, WAIT, Node)
 
 ROOT = Path(__file__).resolve().parents[2]
-ARCHITECTURE = Path("openspec/specs/change-workflow/architecture.md")
+ARCHITECTURE = Path("openspec/specs/change-workflow/README.md")
 
 EXITS = [(declaration.node, exit_) for declaration in TABLE for exit_ in declaration.exits]
 

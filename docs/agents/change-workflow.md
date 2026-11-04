@@ -9,7 +9,7 @@ what it waits on, are in its row of the
 [change index](../../openspec/changes/README.md). The workflow's contract is the
 [`change-workflow` specification](../../openspec/specs/change-workflow/spec.md),
 and why it is shaped as it is, its
-[architecture companion](../../openspec/specs/change-workflow/architecture.md).
+[`README.md`](../../openspec/specs/change-workflow/README.md).
 
 ## Skills
 

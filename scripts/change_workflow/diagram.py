@@ -13,7 +13,7 @@ caught there.
 
 `scripts/change-workflow check graph` reports where the source departs from the table
 (`drift`), which is what whoever redraws it after a change to the table needs. See
-openspec/specs/change-workflow/architecture.md, "Routing is code, with the model as
+openspec/specs/change-workflow/README.md, "Routing is code, with the model as
 backstop".
 """
 
