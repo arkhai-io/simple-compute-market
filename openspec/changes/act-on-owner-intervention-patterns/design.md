@@ -540,7 +540,12 @@ node, no step-table row, no outcome. It:
    recommendations and acceptances — and the proposal it wrote, or `none`.
 
 The period ledger is an untracked file in the owner's workspace beside the cleaned-up
-change records it measures; planning fixes its path. A review that picks nothing stays
+change records it measures: `openspec/changes/archive/guidance-reviews.jsonl`, one JSON
+object per line, ignored by a `.gitignore` entry this change adds. The archive's
+readers take only directories as archived changes (`scripts/find_change.py`,
+`scripts/check_comment_hygiene.py`), so a file there is read by none of them, and the
+`openspec/changes/**/reviews/` ignore rule does not reach it, hence its own entry. A
+review that picks nothing stays
 a read-only session apart from that line, and the next review starts where the last
 line ends and has the earlier figures to compare with (D21).
 
