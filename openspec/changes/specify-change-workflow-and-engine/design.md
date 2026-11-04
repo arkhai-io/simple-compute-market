@@ -1,8 +1,8 @@
 # Design: specify the change workflow and its engine
 
-Status: design settled, revised by the triage of design review 18 (F1–F4);
-awaiting another design review. The decisions below are the owner's, reached in
-the design discussion and that triage. The ledger (`interventions.jsonl`) records
+Status: design settled, revised by the triages of design reviews 18 (F1–F4) and
+25 (F1–F3); ready for planning. The decisions below are the owner's, reached in
+the design discussion and those triages. The ledger (`interventions.jsonl`) records
 where the owner decided otherwise than the agent recommended.
 
 ## Context
@@ -50,7 +50,7 @@ where the owner decided otherwise than the agent recommended.
   lines (`records.py`), and a review's reviewed commit.
 - **Harnesses.** `harness` runs a step as headless Claude Code (`claude -p`) and a
   review in Codex's read-only sandbox (`codex exec`) first.
-- **The specification as it stands.** `change-workflow`'s specification has 22
+- **The specification as it stands.** `change-workflow`'s specification has 24
   requirements in 1,952 lines, every one over the 500 characters that
   `@fission-ai/openspec` 1.14.1 rejects under `--strict`. Some hold for any
   repository; others, such as "Each Helm validation is isolated in its change's
@@ -232,15 +232,18 @@ A repository calls the engine only as the command. The four importers move to it
 `find --json <change>`, which prints `name`, `directory`, `archived`, `records`
 (the records directory, or `null` when this checkout holds none), and `format`
 (D8), and refuses an unknown change, naming it; `validate_parallel.py` through
-`clone where <change>`, which tells three cases apart:
+`clone where <change>`, which, refusing an unknown change before it looks for a
+clone (25 F2), tells four cases apart:
 
 | Case | Exit | Output |
 |---|---|---|
+| The change does not exist | 1 | the change's name, on standard error |
 | The change's clone exists and is usable | 0 | the clone's path |
 | No clone directory exists: the change is worked in place | 0 | nothing |
 | A clone directory exists but is unusable — not a clone of the workspace, its branch not checked out, its bootstrap not succeeded | 1 | the reason, on standard error |
 
-so that a broken clone is never taken for a change worked in place.
+so that neither a broken clone nor a misspelled name is taken for a change worked
+in place.
 
 Rejected: everything reachable public, which would freeze plumbing and the
 fragment; only what a repository's files name, which would leave `record`,
@@ -265,10 +268,10 @@ which its presence in every outcome and log rules out.
 
 The log's `format` versions everything the engine writes and reads for one change:
 the log lines and the outcomes and decisions they embed, the records' layout and
-names, the fields parsed from records, and the ledger line. It moves when any of
-them changes incompatibly, with a migration command. `next` and `find --json`
-output carry the same `format`, and the outcome schema states its format in its
-`$id`. An engine refuses a format it does not read, naming it.
+names, the fields parsed from records, and, where a log exists, the ledger line.
+It moves when any of them changes incompatibly, with a migration command. `next`
+and `find --json` output carry the same `format`, and the outcome schema states
+its format in its `$id`. An engine refuses a format it does not read, naming it.
 
 A reader tells older, current, and newer formats apart before it routes or writes
 (18 F2): a log line with no `format`, or a lower one, is older, and the owner
@@ -278,9 +281,18 @@ format's only authority, so the engine marks a change's format before anything
 else records: `start` opens the log, before any step it starts runs, interactive or
 unattended, with a line carrying the format, which the next-step computation reads
 for no route. With no log, or an empty one, numbered records under `reviews/` are
-older, as today; a ledger alone, or nothing, is read as the reader's format. Only a
-step started outside the command, by a slash command, can leave a ledger with no
-log, and that ledger is read as current.
+older, as today; a ledger alone, or nothing, is read as the reader's format.
+
+A ledger with no log carries no format (25 F1). A step started outside the
+command, by a slash command, can append ledger lines before its closing `record`
+opens the log, or leave them with no log if the session ends unrecorded, and
+nothing the engine runs can make such a session mark the format first. The
+workflow therefore handles the absence rather than promising it away: the format
+versions the ledger only where a log exists, a ledger with no log is read in the
+reader's format, and `change-workflow`'s `README.md` names the case in "Current
+limits" — an older release reading a newer slash-command-only change's ledger
+cannot tell it is newer. The session's closing `record` ends the case, since the
+log it opens then governs the ledger.
 
 The step table is
 provisional and unversioned; the change index and the task list are public inputs
@@ -289,7 +301,7 @@ beside `format` on each line.
 
 | Format | Tier |
 |---|---|
-| Log line, outcome schema, records layout and names, parsed record fields, ledger line, `next` and `find --json` output | public |
+| Log line, outcome schema, records layout and names, parsed record fields, ledger line (versioned where a log exists), `next` and `find --json` output | public |
 | Change index row and status legend, `tasks.md` section layout | public input |
 | Step table schema | provisional |
 | Transcripts' and progress files' contents, runs-in-progress records, round-view state, clone bootstrap status | internal |
@@ -298,7 +310,11 @@ Rejected: a marker per format, whose combinations a reader would have to handle
 for records read together; no markers beyond the log's, which would need a table
 from engine versions to formats; for a change with no log (18 F2), inference alone,
 which cannot tell a newer engine's unlogged records from older ones, and a manifest
-file in `reviews/`, a second marker beside the log's.
+file in `reviews/`, a second marker beside the log's; for a ledger with no log
+(25 F1), the engine as the ledger's only writer, opening the log before the first
+line, which nothing could enforce on a session that edits the file itself, and a
+`format` on every ledger line, which agents would write by hand and every existing
+ledger lacks.
 
 ### D9. Semantic versioning
 
@@ -462,7 +478,7 @@ one module of constants, a structural fix D5 leaves to that change.
 Two rounds, each of two sessions:
 
 - **Round 1, the engine consolidated** (D4, D5, D6). Session one: the package, the
-  command, its exit categories, `find --json`'s fields and `clone where`'s three
+  command, its exit categories, `find --json`'s fields and `clone where`'s four
   cases (D6; `format` joins `find --json` in round 2), the make fragment, and the
   four fixes, with the engine's tests. Session
   two: every caller moved to the command — the skills, the step table's rules, the

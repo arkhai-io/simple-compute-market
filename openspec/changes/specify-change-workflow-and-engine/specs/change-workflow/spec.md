@@ -15,12 +15,13 @@ directory, when run outside one.
 - **THEN** it runs `scripts/change-workflow find --json <change>` and reads the
   `directory` and `archived` fields, and imports nothing of the engine
 
-#### Scenario: A change's checkout holds no records
+#### Scenario: A change's checkout holds no records, or the change does not exist
 
 - **WHEN** `find --json` runs for a change whose directory exists and whose
   checkout holds no `reviews/`
-- **THEN** it exits 0 with `records` as `null`; for a change that does not exist it
-  exits 1, naming the change
+- **THEN** it exits 0 with `records` as `null`; for a change that does not exist,
+  `find --json` and `clone where` each exit 1, naming the change, and `clone
+  where` looks for no clone
 
 #### Scenario: A change's clone exists but is unusable
 
@@ -98,12 +99,13 @@ error.
 
 ### Requirement: CW-x7jd A change's record set carries one format version
 
-The workflow log's `format` MUST version a change's whole record set: its lines,
-the records' layout, names, and parsed fields, and the ledger's lines. The `next`
-and `find --json` outputs MUST carry it, and the outcome schema's `$id` MUST state
-it. A line with no `format` or a lower one MUST be read as older, to be converted;
-a higher one MUST be refused by the reader and the converter, naming it. With no
-log, numbered records MUST be read as older, and a ledger alone as current.
+The workflow log's `format` MUST version a change's record set: its lines, the
+records' layout, names, and parsed fields, and, where a log exists, the ledger's
+lines. `next` and `find --json` MUST carry it, and the outcome schema's `$id` MUST
+state it. A line with no `format` or a lower one MUST be read as older; a higher
+one MUST be refused by the reader and the converter, naming it. With no log,
+numbered records MUST be read as older, and a ledger alone, which carries no
+format, in the reader's format.
 
 #### Scenario: A runner reads the next step
 
@@ -139,8 +141,9 @@ The next-step computation MUST route on no such line.
 #### Scenario: A ledger with no log
 
 - **WHEN** a discussion started by slash command leaves a ledger and no log
-- **THEN** the record set is read in the reader's format, not as older records to
-  convert
+- **THEN** the ledger, which carries no format, is read in the reader's format, not
+  as older records to convert, until a recorded outcome opens the log that then
+  governs it
 
 ### Requirement: CW-c2tw Compatibility is judged by semantic versioning
 

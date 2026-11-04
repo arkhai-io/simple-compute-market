@@ -42,7 +42,7 @@ implicit.
   understand the workflow without knowing this repository: its phases and steps,
   the owner's touchpoints, the graph, the records, and the engine that runs them.
   `change-workflow`'s specification grew one requirement at a time as this
-  repository needed each (22 requirements, about 1,900 lines). It is reviewed and
+  repository needed each (24 requirements, about 1,900 lines). It is reviewed and
   restructured into a specification of the workflow as a whole. Requirements
   that hold only for this repository, such as Helm validation in a change's own
   namespace, are separated from those that hold for any adopting repository.
