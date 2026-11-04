@@ -15,7 +15,8 @@ from change_workflow.review import (ReviewError, claim_record, prior_session, re
                                     review_models, run_review)
 from change_workflow.running import Terminated, live_runs
 from change_workflow.steps import Model, load_steps
-from change_workflow_fixtures import (CHANGE, HEAD, RECORDS, VALIDATED, FakeClaude,
+from change_workflow_fixtures import (ALTERNATIVES, CHANGE, FINDING, HEAD, RECORDS, VALIDATED,
+                                      FakeClaude,
                                       claude_review, clock, codex_missing, codex_saying,
                                       not_installed, option, option_rules, repository,
                                       review_text, reviews_of, validation_text, writing)
@@ -171,6 +172,15 @@ def test_a_review_with_no_findings_is_accepted(tmp_path: Path) -> None:
     (review_text().replace("- **Basis:** evidence\n", ""), 0, "F1 has no Basis"),
     (review_text().replace("blocking", "urgent"), 0, "F1 has Severity 'urgent'"),
     (review_text("implementation"), 0, "title"),
+    # An empty field, or one whose alternatives are a nested list, states none.
+    (review_text(findings=FINDING.replace(ALTERNATIVES, "- **Alternatives:**")), 0,
+     "F1 has no Alternatives"),
+    (review_text(findings=FINDING.replace(ALTERNATIVES, "- **Alternatives:**\n  - a field\n"
+                                                        "  - a table")), 0,
+     "F1 has no Alternatives"),
+    # An empty field's value is never the line after it.
+    (review_text().replace("- **Evidence:** `kit/pool-overrides/records.py:43`",
+                           "- **Evidence:**"), 0, "F1 has no Evidence"),
 ])
 def test_output_that_is_not_a_review_publishes_nothing(
     tmp_path: Path, text: str, status: int, reason: str
@@ -182,6 +192,35 @@ def test_output_that_is_not_a_review_publishes_nothing(
 
     assert [p.name for p in reviews_of(root).iterdir()] == ["transcripts"]
     assert (reviews_of(root) / "transcripts" / "01-design.log").is_file()
+
+
+def test_a_finding_stating_its_one_evident_fix_is_published(tmp_path: Path) -> None:
+    """A finding has one evident fix: the publisher admits alternatives that say
+    none, and why. That the reason is given is the reviewer's to write; the check
+    asks only for a value."""
+    root = repository(tmp_path)
+    evident = FINDING.replace(ALTERNATIVES,
+                              "- **Alternatives:** none — the heading has one current name")
+
+    path = run_review(CHANGE, "design", root=root, runner=writing(review_text(findings=evident)),
+                      head=lambda _: HEAD)
+
+    assert "- **Alternatives:** none — the heading has one current name" in path.read_text(
+        "utf-8")
+
+
+def test_a_review_missing_alternatives_is_kept_beside_its_transcript(tmp_path: Path) -> None:
+    """A finding states no alternatives: nothing is published, and the output is
+    kept beside the transcript."""
+    root = repository(tmp_path)
+    text = review_text(findings=FINDING.replace(ALTERNATIVES + "\n", ""))
+
+    with pytest.raises(ReviewError, match="F1 has no Alternatives"):
+        run_review(CHANGE, "design", root=root, runner=writing(text), head=lambda _: HEAD)
+
+    assert not list(reviews_of(root).glob("*.md"))
+    assert (reviews_of(root) / "transcripts" / "01-design.rejected.md").read_text(
+        "utf-8") == text
 
 
 def test_rejected_output_is_kept_with_its_transcript(tmp_path: Path) -> None:

@@ -1,6 +1,6 @@
 ---
 name: change-review
-description: Review an OpenSpec change as an independent reviewer — a design, implementation, pre-closeout, or closeout review — and produce one Markdown review whose findings each carry a lens, a basis, a severity, and evidence. Use when asked to review a change ("review <change>", "design review of <change>"), or when `make review` invokes you. Review only; never edit files.
+description: Review an OpenSpec change as an independent reviewer — a design, implementation, pre-closeout, or closeout review — and produce one Markdown review whose findings each carry a lens, a basis, a severity, evidence, and its alternatives. Use when asked to review a change ("review <change>", "design review of <change>"), or when `make review` invokes you. Review only; never edit files.
 ---
 
 # Reviewing an OpenSpec change
@@ -242,6 +242,16 @@ and why it holds. The reader must be able to tell "no issue" from "not examined"
 - `should` — resolved within this change unless the owner defers it.
 - `minor` — optional; the implementing agent may decline with a reason.
 
+**Alternatives** — the fixes a reasonable owner might choose, each with its
+trade-off; or `none — <why the fix is evident>`, when only one fix is reasonable,
+such as a citation to a heading that has one current name. Every finding states
+the field: "none" is a statement, and a finding without the field is not
+published, since an absent line cannot tell "none" from "not considered". A
+direction finding lists here the alternatives its prose weighs. Like every field,
+its value is the rest of its own line: separate several alternatives inline, each
+after `; or`, never as a nested list, which the publishing check reads as an empty
+field.
+
 A finding that is a written rule broken but never mechanically checked is worth
 saying so in its text: it tells the owner a check is missing.
 
@@ -289,9 +299,10 @@ semantics walk for each interface.>
 - **Basis:** <specification | guidance | evidence | judgement>
 - **Severity:** <blocking | should | minor>
 - **Evidence:** <`path:line` references and requirement or heading citations>
+- **Alternatives:** <each fix a reasonable owner might choose, with its trade-off; or none — why the fix is evident>
 
 <The finding: what is wrong or missing and why it matters. For a direction finding,
-the context, alternatives, and trade-offs.>
+the context, alternatives, and trade-offs, its alternatives also listed above.>
 
 **Suggested action:** <what you would do>
 

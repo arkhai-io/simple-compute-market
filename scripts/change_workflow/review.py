@@ -51,15 +51,21 @@ from find_change import ChangeNotFound, change_directory, is_archived
 
 DEFAULT_BASE = "dev"
 SECTIONS = ("Summary", "Assessment", "Questions", "Findings", "Readiness")
+# Each finding's fields, and the values each admits; None admits any non-empty
+# value. A finding with one evident fix states `Alternatives: none — <why>`, so an
+# absent field never stands for "none".
 FIELDS = {
     "Lens": {"direction", "consistency", "testing", "documentation", "architecture",
              "scope", "readiness"},
     "Basis": {"specification", "guidance", "evidence", "judgement"},
     "Severity": {"blocking", "should", "minor"},
     "Evidence": None,
+    "Alternatives": None,
 }
 _FINDING = re.compile(r"^### F\d+\b", re.M)
-_FIELD = re.compile(r"^- \*\*(\w+):\*\*\s*(.*?)\s*$", re.M)
+# A field's value is the rest of its own line: an empty field never takes the line
+# after it for its value.
+_FIELD = re.compile(r"^- \*\*(\w+):\*\*[ \t]*(.*?)[ \t\r]*$", re.M)
 _SESSION_LINE = re.compile(r"^session id: (\S+)\s*$", re.M)
 _SESSION_MARKER = re.compile(r"<!-- reviewer-session: (\S+) -->")
 _REVIEWER = re.compile(r"<!-- reviewer: (\S+) (\S+)(?: (\S+))? -->")

@@ -468,7 +468,8 @@ read-only sandbox first, and `change-review` on Claude, held to reading, when Co
 is not installed, not signed in, or at its usage limit; the record and its log line
 name the reviewer's harness and model. It captures the reviewer's final message,
 checks that it is a review of the kind and change asked for — its sections in
-order, and every finding carrying a lens, a basis, a severity, and evidence — and
+order, and every finding carrying a lens, a basis, a severity, evidence, and its
+alternatives — and
 only then publishes it under the next number. A review continues the previous
 reviewer's session of the same kind on the same harness, so a second design review
 knows what the first asked; `FRESH=1` starts a new one. `REVIEW_BASE` is the branch

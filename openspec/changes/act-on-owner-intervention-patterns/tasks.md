@@ -194,19 +194,50 @@ Delivers the required `Alternatives:` field in the review publishing check and i
 its publisher checks. Implements D17 and the delta requirement "Review records".
 Touches `scripts/change_workflow/review.py` and `.agents/skills/change-review/SKILL.md`.
 
-- [ ] 3.1 Add `Alternatives` to `review.py`'s required finding fields, accepting any
+- [x] 3.1 Add `Alternatives` to `review.py`'s required finding fields, accepting any
   non-empty value, so a finding missing it is refused and its output kept beside the
   transcript (D17). Verify: unit tests in `scripts/tests/test_change_workflow_review.py`
   for a review missing the field rejected ("A finding states no alternatives") and one
   stating `none — <reason>` published ("A finding has one evident fix").
-- [ ] 3.2 Add `- **Alternatives:**` to `change-review`'s finding format in section 6,
+  Done: `FIELDS["Alternatives"] = None`. Outside the plan, a defect the new tests
+  found, fixed here as small and understood: `_FIELD`'s `\s*` ran past the line's
+  end, so an empty field took the next line as its value — an empty
+  `- **Alternatives:**` passed on the prose below it, and an empty Evidence swallowed
+  the Alternatives line. The value is now the rest of the field's own line. Unit tests
+  through `run_review` with a fake runner: "A finding states no alternatives"
+  (`test_a_review_missing_alternatives_is_kept_beside_its_transcript`: refused, nothing
+  published, the output kept as `01-design.rejected.md`); an empty field and a nested
+  list each refused as no Alternatives; an empty Evidence refused as no Evidence; "A
+  finding has one evident fix" (`test_a_finding_stating_its_one_evident_fix_is_published`:
+  the publisher admits `none — <reason>`; that a reason is given is the reviewer's, the
+  check asking only for a value). The shared `FINDING` fixture gained the field.
+- [x] 3.2 Add `- **Alternatives:**` to `change-review`'s finding format in section 6,
   with the rule that it holds `none — <why the fix is evident>` or each option a
   reasonable owner might choose with its trade-off, and that the direction finding's
   prose alternatives are listed there too (D17). Verify: `make check-agent-skills`
   passes, and the format block in the skill carries every field `review.py` requires.
-- [ ] 3.3 Verification: `pytest -q scripts/tests/test_change_workflow_review.py` (unit)
+  Done: the field in section 6's format block, and its rule as an **Alternatives**
+  paragraph in section 4 beside basis and severity: options with trade-offs or `none —
+  <why>`, "none" a statement, a direction finding's alternatives listed there too, and
+  the value on the field's own line, several separated by `; or`, since the check reads
+  a nested list as empty. The skill's description names the field too. The skill says
+  nothing of triage reading the field: that is section 9's. Outside the plan,
+  `docs/agents/change-workflow.md`'s "Reviews" sentence listing what the publishing
+  check requires now names alternatives, so it stays true before section 7. The format
+  block carries all five of `FIELDS`: Lens, Basis, Severity, Evidence, Alternatives.
+  `make check-agent-skills` passes.
+- [x] 3.3 Verification: `pytest -q scripts/tests/test_change_workflow_review.py` (unit)
   passes; `make check-agent-skills` passes; `make test` passes. End-to-end: none; no
   scenario exercises the review tooling.
+  Done: the review suite, 76 passed; `make check-agent-skills` passes; `make test`
+  passed, run before the fresh-context check's fixes, which touched only the skill's
+  wording, one sentence of `docs/agents/change-workflow.md`, and the review tests;
+  `make test-release-tooling` 1928 passed after them. `make test` rewrote the same 52
+  locks to revision 3 again, and they were put back. `make check-change` fails only on
+  the citations sections 5 and 8 create. End-to-end confirmed: none.
+  Handoff: the round's own review is the first written in this format. Section 9's
+  Rule E reads the field; section 7's "Reviews" text describes it more fully than the
+  one sentence corrected here.
 
 ## 4. One lock revision, and a uv minimum every lock writer checks (D24 item 7)
 
