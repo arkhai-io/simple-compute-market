@@ -10,7 +10,7 @@ siblings by relative import:
   the next-step computation interprets, and the steps and review kinds it declares,
   the engine's only list of either;
 - `diagram` — the architecture's hand-laid diagram of the graph, held to the table
-  (`make change-graph`);
+  (`scripts/change-workflow check graph`);
 - `outcome` — the outcome a step ends with, checked against its schema, and the
   records a triage's outcome names;
 - `log` — the change's workflow log, the orchestrating session's notes, and the

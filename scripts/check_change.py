@@ -25,7 +25,7 @@ from typing import Callable, Sequence
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from change_workflow.find import ChangeNotFound, change_directory, is_archived  # noqa: E402
+from workflow_command import WorkflowRefused, found_change  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 # The validator version openspec/README.md pins, run through whichever package
@@ -69,8 +69,8 @@ def run_checks(change: str, *, root: Path = ROOT, runner: Runner = _run,
                echo: Callable[[str], None] = print) -> int:
     """Run every check, print each failure with its output, and return the exit status."""
     try:
-        archived = is_archived(root, change_directory(root, change))
-    except ChangeNotFound as exc:
+        archived = bool(found_change(root, change)["archived"])
+    except WorkflowRefused as exc:
         echo(f"ERROR: {exc}")
         return 1
     planned = checks(change, archived, which)

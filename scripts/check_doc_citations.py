@@ -34,8 +34,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from change_workflow.find import ChangeNotFound, change_directory, is_archived  # noqa: E402
 from tombstones import is_tombstone  # noqa: E402
+from workflow_command import WorkflowRefused, found_change  # noqa: E402
 
 #: Directories whose paths `AGENTS.md` requires to resolve when cited.
 CITED_ROOTS = ("openspec", "docs", "tools", "scripts", "e2e-tests", ".agents")
@@ -51,6 +51,15 @@ CITATION = re.compile(
     r"(?<![\w./-])((?:%s)/[\w./-]+?\.(?:%s))(?![\w/-])"
     % ("|".join(map(re.escape, CITED_ROOTS)), "|".join(CITED_SUFFIXES))
 )
+
+
+def _found(root: Path, change: str) -> dict:
+    """The change as the workflow's command finds it, active or archived; a change it
+    does not find ends the check with its reason."""
+    try:
+        return found_change(root, change)
+    except WorkflowRefused as exc:
+        raise SystemExit(str(exc)) from exc
 
 
 def _change_documents(directory: Path) -> list[Path]:
@@ -75,10 +84,7 @@ def documents(root: Path, change: str | None = None) -> list[Path]:
 
     changes = root / "openspec" / "changes"
     if change is not None:
-        try:
-            return _change_documents(change_directory(root, change))
-        except ChangeNotFound as exc:
-            raise SystemExit(str(exc)) from exc
+        return _change_documents(root / _found(root, change)["directory"])
 
     found: list[Path] = []
     for pattern in ("openspec/specs/**/*.md", "docs/**/*.md"):
@@ -98,12 +104,9 @@ def unresolvable(
 
     own: tuple[str, Path] | None = None
     if change is not None:
-        try:
-            directory = change_directory(root, change)
-        except ChangeNotFound as exc:
-            raise SystemExit(str(exc)) from exc
-        if is_archived(root, directory):
-            own = (f"openspec/changes/{change}/", directory)
+        found = _found(root, change)
+        if found["archived"]:
+            own = (f"openspec/changes/{change}/", root / found["directory"])
     problems: list[tuple[str, str, str]] = []
     for document in documents(root, change):
         text = document.read_text(encoding="utf-8", errors="ignore")

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -141,12 +140,3 @@ def test_a_table_without_a_status_column_is_checked_only_for_its_shape(tmp_path:
 
     (problem,) = _problems(root)
     assert "1 cells under a header of 2" in problem
-
-
-def test_make_target_runs_the_checker() -> None:
-    command = subprocess.run(
-        ["make", "-n", "--no-print-directory", "check-change-index"],
-        cwd=Path(__file__).resolve().parents[2], capture_output=True, text=True, check=True,
-    ).stdout
-
-    assert "scripts/check_change_index.py" in command

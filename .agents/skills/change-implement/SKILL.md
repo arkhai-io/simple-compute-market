@@ -25,7 +25,7 @@ branch may have moved, and follow every step below for the new work.
 Run interactively, as most runs are, this section does not apply but for the
 outcome it describes, which an interactive run records itself ("Running
 interactively"); nothing else in the skill changes.
-When this skill runs through `scripts/run_change_step.py` —
+When this skill runs through `scripts/change-workflow start --unattended` —
 `make implement UNATTENDED=1`, or the orchestrating session — nobody can answer in
 the session, and every turn ends with an outcome matching
 `.agents/change-outcome.schema.json`, whose `message` the owner reads as written:
@@ -92,7 +92,7 @@ slash command — no wrapper records the run, so its last act records the outcom
 it would end with unattended, as "Running unattended" gives it:
 
 ```text
-python3 scripts/run_change_step.py record <change> implement --outcome '<the outcome, as JSON>'
+scripts/change-workflow record <change> implement --outcome '<the outcome, as JSON>'
 ```
 
 `record` checks the outcome against `.agents/change-outcome.schema.json` and
@@ -109,10 +109,10 @@ proposed: the computation reads a round's progress from the task list and the
 records, not from its outcome, and names what they say comes next.
 
 The round's join reads the round from its line in the log, which the orchestrating
-session writes as a round starts. Interactively you write it: when `python3
-scripts/change_next_step.py <change>` names `round`, record that round, as it
-names it, before implementing — `python3 scripts/run_change_step.py note <change>
-round --sections '<its sessions, as 1,2;3>' --by <its by>` — and implement its
+session writes as a round starts. Interactively you write it: when
+`scripts/change-workflow next <change>` names `round`, record that round, as it
+names it, before implementing — `scripts/change-workflow note <change> round
+--sections '<its sessions, as 1,2;3>' --by <its by>` — and implement its
 first session. When it names `implement`, the round is recorded already.
 
 ## Resolving a merge's conflicts
@@ -144,13 +144,13 @@ and it checks no task.
 5. **Conclude.** `git commit -m "<Git's merge subject>" -m "<resolutions>"`
    concludes the merge without opening an editor: the subject is the one Git
    wrote for it (`Merge branch 'dev' into <branch>`), and the paragraph names each
-   conflicted file and how it was resolved. Push it with `make push-branch`; if it refuses, stop and report its
-   reasons. Report each file's resolution, and end `finished`. A merge is the
+   conflicted file and how it was resolved. Push it with `scripts/change-workflow
+   push`; if it refuses, stop and report its reasons. Report each file's resolution, and end `finished`. A merge is the
    owner's intervention, so where the change goes after it is theirs, not this
    run's: `next` is `{"step": "round"}`, an exit implementation does not declare,
    which the computation brings to the owner rather than taking, and `message`
-   says where the change stood — what `python3 scripts/change_next_step.py
-   <change>` names once the merge is concluded — for the owner to direct it.
+   says where the change stood — what `scripts/change-workflow next <change>`
+   names once the merge is concluded — for the owner to direct it.
 
 ## 1. Check that this section may start
 
@@ -159,7 +159,7 @@ and it checks no task.
   change's latest planning commits, or its name belongs to another change, stop and
   ask the owner — unless the change's log holds the owner's decision that it runs
   on this branch: run `git branch --show-current`, then
-  `python3 scripts/run_change_step.py log <change> --branch <that branch>`; a line
+  `scripts/change-workflow log <change> --branch <that branch>`; a line
   it prints is that decision, and the branch is accepted.
 - **Status.** The change's row in `openspec/changes/README.md` is
   `ready for implementation` or `in implementation`, and no dependency in its
@@ -167,7 +167,8 @@ and it checks no task.
   return to implementation the owner has confirmed is set `in implementation`.
 - **Worktree.** It is clean, or holds only changes the owner confirms are this
   section's, or the edit under `.claude/` that a task of this section gives the
-  orchestrator (section 3). `make round-view-closed` passes: while the owner reads a round
+  orchestrator (section 3). `scripts/change-workflow check round-view` passes:
+  while the owner reads a round
   (`make round-view`), the branch points at the round's base and its changes are
   uncommitted, so committing a section then would squash the round into it.
 - **Task list.** `make check-tasks CHANGE=<change>` passes. A task numbered for
@@ -261,8 +262,8 @@ the design does not make, do not guess and do not work around it:
    the change returns. No check need pass first: only `dev` is protected, and a
    commit known not to work harms nothing on the change's branch, while no session
    is left to commit the work, and a dirty checkout blocks every later step's
-   guarded push. Push it with `make push-branch`; if it refuses, stop and report
-   its reasons, leaving the commit as it is.
+   guarded push. Push it with `scripts/change-workflow push`; if it refuses, stop
+   and report its reasons, leaving the commit as it is.
 3. Tell the owner, and recommend the way back: a design question returns the change
    to design (`change-design`); a plan defect goes to planning (`change-plan`); an
    external input the change cannot supply makes it `blocked in implementation`,
@@ -320,8 +321,8 @@ each other.
 
 Commit the section's work, `tasks.md` included, as one commit, unreviewed: review
 findings land as later commits. The message names the change and the section and
-says what it delivers. Then push it with `make push-branch`, the guarded push of
-exactly `HEAD`; if it refuses, stop and report its reasons. A pushed branch starts
+says what it delivers. Then push it with `scripts/change-workflow push`, the
+guarded push of exactly `HEAD`; if it refuses, stop and report its reasons. A pushed branch starts
 nothing: validation dispatches the pipeline itself.
 
 ## 8. Continue or stop

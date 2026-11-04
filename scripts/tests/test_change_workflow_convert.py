@@ -136,7 +136,7 @@ def _design_reviewed(root: Path) -> list[dict]:
 def test_a_change_is_converted(tmp_path: Path) -> None:
     root = _repository(tmp_path)
     older = _design_reviewed(root)
-    assert _next(root)["convert"] == f"python3 scripts/run_change_step.py convert {CHANGE}"
+    assert _next(root)["convert"] == f"scripts/change-workflow convert {CHANGE}"
 
     shown = _convert(root)
 

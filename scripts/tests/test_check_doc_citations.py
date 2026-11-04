@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,13 @@ _SPEC = importlib.util.spec_from_file_location(
 assert _SPEC and _SPEC.loader
 checker = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(checker)
+
+
+@pytest.fixture(autouse=True)
+def _checkout(tmp_path: Path) -> None:
+    """Each test's root is a Git repository, where the workflow's command finds a
+    change by name."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
 
 
 def _change(root: Path) -> Path:

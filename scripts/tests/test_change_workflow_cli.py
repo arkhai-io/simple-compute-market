@@ -19,8 +19,8 @@ from typing import Callable, Sequence
 
 import pytest
 
-from change_workflow import (clone, cli, cost_report, find, history, hook, index, next_step, push,
-                             round_view, skills, tasks)
+from change_workflow import (clone, cli, cost_report, diagram, find, history, hook, index,
+                             next_step, push, round_view, skills, tasks)
 from change_workflow.common import StepError
 from change_workflow.steps import load_orchestrator, load_steps
 from change_workflow_fixtures import (CHANGE, VALID, FakeClaude, event_lines, make_wrapper,
@@ -145,6 +145,21 @@ def test_a_subcommand_hands_its_module_every_argument(
     assert cli.delegated(cli._parser().parse_args(subcommand)) == (module, arguments)
 
 
+def test_check_graph_compares_the_repositorys_own_diagram(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    subcommand = cli._parser().parse_args(["check", "graph"])
+    assert cli.delegated(subcommand) == (cli._graph, None)
+    # This checkout's diagram draws the table, so the command says so as the module
+    # does; a repository with no diagram is refused, naming the file.
+    expected = _printed(capsys, lambda: diagram.main(root=REPO))
+    assert expected[0] == 0
+    assert _printed(capsys, lambda: cli.main(["check", "graph"], root=REPO)) == expected
+    status, out, err = _printed(capsys, lambda: cli.main(
+        ["check", "graph"], root=_repository(tmp_path / "bare")))
+    assert (status, out) == (1, "")
+    assert f"cannot read the graph's diagram {diagram.SOURCE}" in err
+
+
 def test_the_subcommands_this_module_runs_reach_no_other() -> None:
     for subcommand in (["start", "design", "c"], ["clone", "where", "c"], ["log", "c"],
                        ["record", "c", "plan", "--outcome", "{}"], ["watch", "c"]):
@@ -210,8 +225,7 @@ def test_start_takes_an_archived_change_for_a_step_that_may_follow_the_archive(
     _archive(root)
     (root / ".claude").mkdir()
     (root / ".claude/change-steps.toml").write_text(
-        (REPO / ".claude/change-steps.toml").read_text("utf-8")
-        + '\n[orchestrator]\nmodel = "claude-opus-5-5"\neffort = "medium"\n', "utf-8")
+        (REPO / ".claude/change-steps.toml").read_text("utf-8"), "utf-8")
     monkeypatch.chdir(root)
     launched = Launched()
 
@@ -417,6 +431,14 @@ def test_an_orchestrator_row_is_a_model_and_effort_and_nothing_else(
         load_steps(table)
 
 
+def test_this_repositorys_orchestrator_row_is_opus_at_medium_effort() -> None:
+    # The orchestrating session relays and routes rather than judging: it needs a
+    # large context for a change's relayed turns, not a high effort.
+    model = load_orchestrator(REPO / ".claude/change-steps.toml")
+    assert (model.harness, model.model, model.effort) == ("claude", "claude-opus-5-5", "medium")
+    load_steps(REPO / ".claude/change-steps.toml")
+
+
 def test_an_orchestrator_row_gives_its_model_and_effort(tmp_path: Path) -> None:
     table = tmp_path / "change-steps.toml"
     table.write_text('[orchestrator]\nmodel = "claude-opus-5-5"\neffort = "medium"\n', "utf-8")
@@ -603,7 +625,7 @@ COMMAND = "scripts/change-workflow"
     ("check-agent-skills", [], [f"{COMMAND} check skills"]),
     ("check-push-ready", [], [f"{COMMAND} check round-view", f"{COMMAND} check push"]),
     ("push-branch", [], [f"{COMMAND} push"]),
-    ("change-graph", [], ["PYTHONPATH=scripts/ python3 -m change_workflow.diagram"]),
+    ("change-graph", [], [f"{COMMAND} check graph"]),
 ])
 def test_a_fragment_target_runs_the_command(tmp_path: Path, target: str,
                                             variables: list[str], commands: list[str]) -> None:

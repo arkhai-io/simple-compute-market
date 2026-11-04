@@ -129,8 +129,8 @@ _SUPPLIES = {ROUND_VIEW: "implementation-owner", VALIDATE: "validation",
              IMPLEMENTATION_REVIEW: "implementation"}
 # The target a validation in a round's join is given: the round's triage.
 _ROUND_TRIAGE = {"step": IMPLEMENTATION_TRIAGE.step, "kind": IMPLEMENTATION_TRIAGE.kind}
-CONVERT = "python3 scripts/run_change_step.py convert {change}"
-RECORD = "python3 scripts/run_change_step.py record {change} {step} --outcome '<its outcome>'"
+CONVERT = "scripts/change-workflow convert {change}"
+RECORD = "scripts/change-workflow record {change} {step} --outcome '<its outcome>'"
 
 # How the log routes the change (`Route.how`): a step's exit; the owner's direction;
 # a round started, by the line recording it; a directed validation that ran, naming
@@ -1517,7 +1517,7 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None, **seams: A
     as_text = "--plain" in args
     args = [arg for arg in args if arg != "--plain"]
     if len(args) != 1:
-        print("usage: change_next_step.py <change> [--plain]", file=sys.stderr)
+        print("usage: next <change> [--plain]", file=sys.stderr)
         return 2
     try:
         root = repository_root() if root is None else root

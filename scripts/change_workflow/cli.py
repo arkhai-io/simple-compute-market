@@ -20,8 +20,10 @@ The others reach the module that holds them: `next` the next-step computation,
 `find` a change's directory and records, `clone`, `clone where`, and `clone-remove`
 a change's clone, `round-view` and `round-done` the round view, `history` the copy
 of a change's history, `cost` its cost report, `push` the guarded push, `check` the
-index, task-list, push, skill, and round-view checks, and `hook post-compaction`
-the post-compaction hook.
+index, task-list, push, skill, and round-view checks and the graph diagram's
+comparison with the graph table, and `hook post-compaction` the post-compaction
+hook. `check graph` is internal: it maintains the engine's own diagram, and no
+repository or runner relies on it.
 
 The repository is found once, from the working directory, and every subcommand acts
 on it. Every exit status is one of three: 0 for success; 1 for a refusal or a failed
@@ -42,8 +44,8 @@ from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
 from . import clone as clones
-from . import (cost_report, find, graph, history, hook, index, next_step, push, round_view,
-               skills, tasks)
+from . import (cost_report, diagram, find, graph, history, hook, index, next_step, push,
+               round_view, skills, tasks)
 from .clone import clone_of
 from .common import ORCHESTRATOR, StepError, repository_root
 from .convert import convert_change
@@ -336,6 +338,7 @@ def _parser() -> argparse.ArgumentParser:
     checks.add_parser("push", help="whether HEAD may be pushed to its own branch")
     checks.add_parser("skills", help="every agent skill loaded from its one source")
     checks.add_parser("round-view", help="fail while a round view is open")
+    checks.add_parser("graph", help="where the graph's diagram departs from the graph table")
     hook_ = commands.add_parser("hook", help="run a harness hook")
     hooks = hook_.add_subparsers(dest="hook", required=True)
     hooks.add_parser("post-compaction",
@@ -487,8 +490,14 @@ def delegated(args: argparse.Namespace) -> Delegated | None:
         return {"index": (index.main, None), "skills": (skills.main, None),
                 "tasks": (tasks.main, [getattr(args, "change", "")]),
                 "push": (push.main, ["check"]),
-                "round-view": (round_view.main, ["check"])}[args.check]
+                "round-view": (round_view.main, ["check"]),
+                "graph": (_graph, None)}[args.check]
     return None
+
+
+def _graph(root: Path) -> int:
+    """The diagram's comparison with the graph table, on the repository's own diagram."""
+    return diagram.main(root=root)
 
 
 def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,

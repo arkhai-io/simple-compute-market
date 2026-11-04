@@ -9,9 +9,9 @@ to the section before it, and nothing else in the file says so. A task numbered
 names each such task and the heading it sits under. Only tasks under a
 recognised `## N.` heading are checked, so a list in another format passes.
 
-Run as `make check-tasks CHANGE=<change>` by the skills that act on a task list
-before they do; its check, `task_problems`, is also the next-step computation's
-own backstop where it routes on sections. Prints each problem with its line and
+Run as `scripts/change-workflow check tasks <change>` (`make check-tasks`) by the
+skills that act on a task list before they do; its check, `task_problems`, is also
+the next-step computation's own backstop where it routes on sections. Prints each problem with its line and
 exits non-zero, or prints OK.
 
 Contract: openspec/specs/change-workflow/spec.md, "The next step is computed from
@@ -31,7 +31,7 @@ from .next_step import TASKS_FILE, task_problems
 def main(argv: list[str] | None = None, root: Path | None = None) -> int:
     args = sys.argv[1:] if argv is None else list(argv)
     if len(args) != 1 or not args[0]:
-        print("usage: check_tasks.py <change>", file=sys.stderr)
+        print("usage: check tasks <change>", file=sys.stderr)
         return 2
     try:
         root = repository_root() if root is None else root

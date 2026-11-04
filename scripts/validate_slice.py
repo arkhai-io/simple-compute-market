@@ -80,7 +80,7 @@ from typing import Callable, Sequence
 
 import change_namespace
 import ci_evidence
-from change_workflow.find import REVIEWS, ChangeNotFound, change_directory
+from workflow_command import WorkflowRefused, found_change
 
 ROOT = Path(__file__).resolve().parents[1]
 LOG_ROOT = Path(".snapshot/validation")
@@ -344,11 +344,11 @@ def latest_helm_summary(root: Path, change: str) -> tuple[Path | None, str]:
     """The `summary.json` of the latest Helm attempt of the commit the change's latest
     validation record names, or None with why there is none."""
     try:
-        reviews = change_directory(root, change) / REVIEWS
-    except ChangeNotFound as exc:
+        records = found_change(root, change)["records"]
+    except WorkflowRefused as exc:
         raise ValidationError(str(exc)) from exc
     numbered = sorted((int(match[1]), entry) for entry in
-                      (reviews.iterdir() if reviews.is_dir() else [])
+                      ((root / records).iterdir() if records is not None else [])
                       if (match := _RECORD_NUMBER.match(entry.name)))
     if not numbered:
         return None, f"{change} has no validation record"

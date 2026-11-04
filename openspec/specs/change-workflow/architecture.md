@@ -88,8 +88,8 @@ copy that drifts. Codex has no equivalent.
 ## Steps run headless and resume with the owner's answers
 
 A step the orchestrating session delegates runs as a headless Claude Code process
-through one wrapper, `scripts/run_change_step.py`, which each step's `make` target
-reaches with `UNATTENDED=1`. The wrapper gives the run the step's skill, its
+through one wrapper, `scripts/change-workflow start --unattended`, which each
+step's `make` target reaches with `UNATTENDED=1`. The wrapper gives the run the step's skill, its
 permissions, and the outcome schema, records the run's session, and appends one
 line to the change's workflow log. A step the orchestrating session runs and one the
 owner runs by hand with `UNATTENDED=1` are the same process, and the owner can take
@@ -136,8 +136,8 @@ as in progress rather than skipped, since only its outcome carries its exit — 
 plan's carries its rounds too. A proposed return does not move the status: the owner
 confirms it as a decision line, and the step it directs sets its phase's status.
 
-An interactive run records its own outcome as its last act, through `python3
-scripts/run_change_step.py record`, which appends it with the session's id, read
+An interactive run records its own outcome as its last act, through
+`scripts/change-workflow record`, which appends it with the session's id, read
 from the harness's environment (`CLAUDE_CODE_SESSION_ID`), `HEAD`, and
 `interactive: true`. Interactive steps so stay plain sessions under the owner's own
 permissions; wrapping them too, to record an outcome file when the session exits,
@@ -157,8 +157,8 @@ The log is written through one module, `scripts/change_workflow/log.py`, by four
 writers — the wrapper, `record`, the decision writer (`note`), and `convert` — and
 every line carries the log's format marker, `"format": 2`. The computation reads
 only that format: a log holding a line without the marker, or numbered records and
-no log, is brought to the owner with `python3 scripts/run_change_step.py convert
-<change>` and read as nothing else. A change worked on another branch runs that
+no log, is brought to the owner with `scripts/change-workflow convert <change>`
+and read as nothing else. A change worked on another branch runs that
 branch's tooling until it merges the code that reads the format, so its records are
 converted at the one point safe for it, when its branch first carries that code. A
 reader of both formats would have kept the older routing — triage tokens and file
@@ -189,7 +189,7 @@ workspace receives the clone's records only when archive cleanup copies them.
 ## Routing is code, with the model as backstop
 
 Where a change stands, and what runs next, is computed by
-`scripts/change_next_step.py` from the index row, the reviews and their triage, the
+`scripts/change-workflow next` from the index row, the reviews and their triage, the
 task list, the workflow log, and the round view's state, and printed as data. The
 transitions are each skill's entry check and handoff written once as rules, so they
 can be tested under `scripts/tests`, and the owner can run the same computation
@@ -965,7 +965,7 @@ rows are recent history and may be pruned at any time.
   that needs a code correction stops for the owner.
 - A direction may name a node that makes no sense from where the change stands;
   only its unwaivable entry guards and the owner hold it.
-- `python3 scripts/run_change_step.py convert` and the computation's detection of a
+- `scripts/change-workflow convert` and the computation's detection of a
   change not yet converted stay until every change not yet cleaned up has taken the
   code that reads the log's format;
   [`remove-workflow-log-conversion`](../../changes/remove-workflow-log-conversion/proposal.md)

@@ -118,8 +118,5 @@ check-push-ready: round-view-closed ## Fail unless HEAD is a clean, attached cha
 push-branch: ## Push exactly HEAD, unforced, to the current branch's own name once it may be pushed and no round view is open
 	@$(CHANGE_WORKFLOW) push
 
-# The graph's diagram is compared with the graph table by the engine's own module,
-# which the command does not expose: the comparison is the diagram's maintenance,
-# not an operation a repository or a runner relies on.
 change-graph: ## Report where the workflow's graph diagram departs from the graph — each box and edge to add, change, or remove — to redraw it from; fails while it does
-	@PYTHONPATH=$(dir $(CHANGE_WORKFLOW)) python3 -m change_workflow.diagram
+	@$(CHANGE_WORKFLOW) check graph

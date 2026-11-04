@@ -39,7 +39,7 @@ Reached = tuple[str, str] | None
 # What an unattended run is told beside its skill: that nobody can answer it, and
 # how it ends a turn.
 UNATTENDED = (
-    "This step runs unattended through scripts/run_change_step.py: nobody can answer a "
+    "This step runs unattended through scripts/change-workflow: nobody can answer a "
     "permission prompt or a question in this session. Follow your skill's instructions for "
     "running unattended. End every turn with an outcome matching the JSON schema you were "
     "given. Where your skill says to stop and ask the owner, end the turn with a `question` "

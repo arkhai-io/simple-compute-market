@@ -205,9 +205,9 @@ change, the review files, and the intervention ledger.
 
 A change worked in its own clone keeps its records there until archive cleanup
 copies them into the owner's workspace, which holds the history of every
-cleaned-up change. A change's records are untracked: find them with `python3
-scripts/find_change.py --records <change>`, which looks in the current checkout,
-then in the owner's workspace.
+cleaned-up change. A change's records are untracked: find them with
+`scripts/change-workflow find --records <change>`, which looks in the current
+checkout, then in the owner's workspace.
 
 ### Issue tracker
 

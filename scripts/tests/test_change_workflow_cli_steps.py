@@ -361,164 +361,74 @@ def test_the_review_command_exits_non_zero_when_it_stops(
     assert json.loads(captured.out)["outcome"] == "stopped"
 
 
-# The workflow targets, interactive and unattended.
+# This repository's Makefile: the engine's fragment included, set to this
+# repository's branches, beside the repository's own targets.
 
-def _make_n(*arguments: str, keep_checks: bool = False) -> list[str]:
-    """`make -n` of a target, with no step variable inherited from the caller.
+COMMAND = "scripts/change-workflow"
+
+
+def _make_n(*arguments: str) -> list[str]:
+    """`make -n` of a target of the root Makefile, with no step variable inherited
+    from the caller.
 
     A make that ran these tests passes its own command-line variables down through
     MAKEFLAGS, so those are dropped too.
     """
     env = {key: value for key, value in os.environ.items()
            if key not in ("UNATTENDED", "SECTION", "SECTIONS", "FRESH", "HELM_ALL_SCENARIOS",
-                          "ALLOW", "ARGUMENTS", "SESSION_ID",
+                          "ALLOW", "ARGUMENTS", "SESSION_ID", "FROM", "BASE", "BRANCH",
                           "REVIEW_BASE", "REVIEW_MODEL", "REVIEW_EFFORT", "UNVALIDATED",
+                          "CHANGE_WORKFLOW", "CHANGE_WORKFLOW_MERGE_FROM",
+                          "CHANGE_WORKFLOW_REVIEW_BASE",
                           "MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKELEVEL")}
     output = subprocess.run(["make", "-n", "--no-print-directory", *arguments],
                             cwd=Path(__file__).resolve().parents[2], capture_output=True,
                             text=True, check=True, env=env).stdout
-    return [line for line in output.splitlines() if keep_checks
-            or ("find_change.py" not in line and "round_view.py" not in line)]
+    return output.splitlines()
 
 
-def test_make_review_passes_the_override() -> None:
-    command = "\n".join(_make_n("review", f"CHANGE={CHANGE}", "KIND=pre-closeout",
-                                "UNVALIDATED=1"))
-
-    assert "scripts/run_change_step.py review" in command and "--unvalidated" in command
-
-
-def test_make_closeout_opens_the_closeout_skill() -> None:
-    command = "\n".join(_make_n("closeout", f"CHANGE={CHANGE}", keep_checks=True))
-
-    assert "scripts/find_change.py" in command and "--active" not in command
-    assert f"\"/change-closeout {CHANGE}\"" in command
-
-
-def test_make_archive_cleanup_takes_only_an_archived_change() -> None:
-    command = "\n".join(_make_n("archive-cleanup", f"CHANGE={CHANGE}", keep_checks=True))
-
-    assert "scripts/find_change.py --archived" in command
-    assert f"\"/change-archive-cleanup {CHANGE}\"" in command
-
-
-@pytest.mark.parametrize("target,interactive,unattended", [
-    ("design", 'claude "/change-design X"', 'run design "X"'),
-    ("plan", 'claude "/change-plan X"', 'run plan "X"'),
-    ("triage", 'claude "/change-triage X"', 'run triage "X"'),
-    ("validate", 'claude "/change-validate X"', 'run validate "X"'),
-    ("closeout", 'claude "/change-closeout X"', 'run closeout "X"'),
-    ("archive-cleanup", 'claude "/change-archive-cleanup X"', 'run archive-cleanup "X"'),
-    ("implement", 'claude "/change-implement X"', 'run implement "X"'),
+@pytest.mark.parametrize("target,variables,commands", [
+    # A change lands on dev, so the merge brings dev in unless FROM names another.
+    ("merge", [], [f"{COMMAND} start merge \"X\" --arguments 'from dev'"]),
+    ("merge", ["FROM=release/2.1", "UNATTENDED=1"],
+     [f"{COMMAND} start merge \"X\" --arguments 'from release/2.1' --unattended"]),
+    # A review reads the change against dev.
+    ("review", ["KIND=design"], [f'{COMMAND} review "X" --kind "design" --base "dev"    ']),
+    ("design", ["UNATTENDED=1", "ALLOW=Bash(make lock)"],
+     [f"{COMMAND} start design \"X\" --unattended --allow 'Bash(make lock)'"]),
+    ("orchestrate", [], [f'{COMMAND} start orchestrate "X"']),
+    ("change-next", [], [f'{COMMAND} find "X" >/dev/null', f'{COMMAND} next "X" --plain']),
+    ("check-change-index", [], [f"{COMMAND} check index"]),
+    ("check-agent-skills", [], [f"{COMMAND} check skills"]),
+    ("check-push-ready", [], [f"{COMMAND} check round-view", f"{COMMAND} check push"]),
+    ("push-branch", [], [f"{COMMAND} push"]),
+    ("change-graph", [], [f"{COMMAND} check graph"]),
+    ("check-change", [], ['python3 scripts/check_change.py "X"']),
 ])
-def test_a_step_target_is_interactive_unless_unattended(
-        target: str, interactive: str, unattended: str) -> None:
-    assert _make_n(target, "CHANGE=X") == [interactive]
-    assert _make_n(target, "CHANGE=X", "UNATTENDED=1") == [
-        f"python3 scripts/run_change_step.py {unattended}"]
+def test_the_root_makefile_runs_the_command_through_the_fragment(
+        target: str, variables: list[str], commands: list[str]) -> None:
+    assert _make_n(target, "CHANGE=X", *variables) == commands
 
 
-@pytest.mark.parametrize("variables,branch", [((), "dev"), (("FROM=release/2.1",), "release/2.1")])
-def test_the_merge_target_names_the_branch_it_merges_dev_by_default(
-        variables: tuple[str, ...], branch: str) -> None:
-    assert _make_n("merge", "CHANGE=X", *variables) == [
-        f'claude "/change-merge X from {branch}"']
-    assert _make_n("merge", "CHANGE=X", *variables, "UNATTENDED=1") == [
-        f"python3 scripts/run_change_step.py run merge \"X\" --arguments 'from {branch}'"]
+@pytest.mark.parametrize("target", ["code-snapshot", "validate-local", "run-ci"])
+def test_a_repository_target_refuses_while_a_round_view_is_open(target: str) -> None:
+    # The repository's own targets that read or publish HEAD keep the fragment's
+    # round-view check as their first prerequisite.
+    assert _make_n(target, "WORKFLOW=tests.yml")[0] == f"{COMMAND} check round-view"
 
 
-@pytest.mark.parametrize("variable,interactive,unattended", [
-    ("SECTION=2", "section 2", '--sections "2"'),
-    ("SECTIONS=1-3", "sections 1-3", '--sections "1-3"'),
-])
-def test_implementation_targets_pass_their_sections(
-        variable: str, interactive: str, unattended: str) -> None:
-    assert _make_n("implement", "CHANGE=X", variable) == [
-        f'claude "/change-implement X {interactive}"']
-    assert _make_n("implement", "CHANGE=X", variable, "UNATTENDED=1") == [
-        f'python3 scripts/run_change_step.py run implement "X" {unattended}']
-
-
-@pytest.mark.parametrize("target", ["design", "plan", "implement", "triage", "validate",
-                                    "closeout", "archive-cleanup"])
-def test_an_unattended_step_target_passes_each_granted_rule_as_its_own_allow(
-        target: str) -> None:
-    assert _make_n(target, "CHANGE=X", "UNATTENDED=1",
-                   "ALLOW=Bash(gh run download *);Bash(make check-packaging)") == [
-        f'python3 scripts/run_change_step.py run {target} "X" '
-        "--allow 'Bash(gh run download *)' --allow 'Bash(make check-packaging)'"]
-    # Interactive sessions are not held to the table, so a grant means nothing there.
-    assert "--allow" not in _make_n(target, "CHANGE=X", "ALLOW=Bash(make lock)")[0]
-
-
-def test_implementation_is_given_its_arguments_beside_its_grants() -> None:
-    assert _make_n("implement", "CHANGE=X", "UNATTENDED=1",
-                   "ARGUMENTS=resolve the merge conflicts in scripts/a.py",
-                   "ALLOW=Bash(make lock)") == [
-        'python3 scripts/run_change_step.py run implement "X" '
-        "--arguments 'resolve the merge conflicts in scripts/a.py' --allow 'Bash(make lock)'"]
-
-
-def test_implementation_continues_the_session_it_is_given() -> None:
-    assert _make_n("implement", "CHANGE=X", "UNATTENDED=1", "SECTIONS=8B",
-                   "SESSION_ID=7847eee6-37e9-4d7c-9e01-6fc854509adf") == [
-        'python3 scripts/run_change_step.py run implement "X" --sections "8B" '
-        "--session '7847eee6-37e9-4d7c-9e01-6fc854509adf'"]
-    # An interactive session is the owner's own; it continues none.
-    assert "--session" not in _make_n("implement", "CHANGE=X", "SESSION_ID=s-1")[0]
-
-
-def test_a_granted_rule_and_arguments_reach_the_script_as_written(tmp_path: Path) -> None:
+def test_a_granted_rule_and_arguments_reach_the_command_as_written(tmp_path: Path) -> None:
     """The shell quoting `make` writes, run by a real shell: quotes, `*`, and
     backticks arrive untouched, and an empty part of `ALLOW` is dropped by the
-    script."""
+    command."""
     rule, other = "Bash(git commit -m 'wip' *)", 'Bash(echo "`id`" *)'
-    command = _make_n("implement", "CHANGE=X", "UNATTENDED=1",
-                      "ARGUMENTS=resolve `scripts/a.py`'s conflicts",
-                      f"ALLOW={rule};;{other}")[0]
+    (command,) = _make_n("implement", "CHANGE=X", "UNATTENDED=1",
+                         "ARGUMENTS=resolve `scripts/a.py`'s conflicts",
+                         f"ALLOW={rule};;{other}")
     printed = subprocess.run(
-        ["sh", "-c", command.replace("python3 scripts/run_change_step.py run",
-                                     "printf '%s\\n'")],
+        ["sh", "-c", command.replace(f"{COMMAND} start", "printf '%s\\n'")],
         cwd=tmp_path, capture_output=True, text=True, check=True).stdout.splitlines()
 
     assert printed == ["implement", "X", "--arguments", "resolve `scripts/a.py`'s conflicts",
-                       "--allow", rule, "--allow", "", "--allow", other]
+                       "--unattended", "--allow", rule, "--allow", "", "--allow", other]
     assert split_rules([rule, "", other]) == [rule, other]
-
-
-def test_unattended_planning_may_start_fresh_and_validation_take_every_scenario() -> None:
-    assert _make_n("plan", "CHANGE=X", "UNATTENDED=1", "FRESH=1") == [
-        'python3 scripts/run_change_step.py run plan "X" --fresh']
-    assert _make_n("validate", "CHANGE=X", "UNATTENDED=1", "HELM_ALL_SCENARIOS=1") == [
-        'python3 scripts/run_change_step.py run validate "X" '
-        '--arguments "with HELM_ALL_SCENARIOS=1"']
-
-
-def test_make_review_runs_the_wrappers_review() -> None:
-    assert _make_n("review", "CHANGE=X", "KIND=design") == [
-        'python3 scripts/run_change_step.py review "X" --kind "design" --base "dev"    ']
-
-
-def test_make_review_passes_the_owners_model_for_one_run() -> None:
-    assert _make_n("review", "CHANGE=X", "KIND=design", "REVIEW_MODEL=claude-fable-5-1",
-                   "REVIEW_EFFORT=low") == [
-        'python3 scripts/run_change_step.py review "X" --kind "design" --base "dev" '
-        '--model "claude-fable-5-1" --effort "low"  ']
-
-
-def test_make_check_change_runs_the_changes_closing_checks() -> None:
-    assert _make_n("check-change", "CHANGE=X") == ['python3 scripts/check_change.py "X"']
-
-
-def test_make_change_cost_reports_the_changes_runs() -> None:
-    assert _make_n("change-cost", "CHANGE=X") == ['python3 scripts/change_cost.py "X"']
-
-
-def test_make_orchestrate_opens_the_session_on_opus_at_medium_effort() -> None:
-    assert _make_n("orchestrate", "CHANGE=X") == [
-        'claude --model claude-opus-5-5 --effort medium "/change-orchestrate X"']
-
-
-def test_planning_starts_fresh_only_for_fresh_1() -> None:
-    assert _make_n("plan", "CHANGE=X", "UNATTENDED=1", "FRESH=0") == [
-        'python3 scripts/run_change_step.py run plan "X"']

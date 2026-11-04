@@ -1905,32 +1905,39 @@ checked, and one that failed or was inconclusive MUST be brought to the owner.
   `change-triage/`, `change-implement/`, `change-validate/`, `change-closeout/`, and
   `change-archive-cleanup/`, and the orchestrating skill,
   `.agents/skills/change-orchestrate/`, linked for each harness and held by
-  `make check-agent-skills` (`scripts/check_agent_skills.py`).
-- Unattended runs, the workflow log, and reviews: `scripts/run_change_step.py`, the
-  entry point of the `scripts/change_workflow/` package, reached through each step's
-  `make` target with `UNATTENDED=1` and through `make review`; the outcome schema:
-  `.agents/change-outcome.schema.json`; each step's permissions and models:
-  `.claude/change-steps.toml`; finding a change by name, active or archived:
-  `scripts/find_change.py`.
+  `make check-agent-skills` (`scripts/change-workflow check skills`,
+  `scripts/change_workflow/skills.py`).
+- The engine's command: `scripts/change-workflow`, its subcommands in
+  `scripts/change_workflow/cli.py`, and the make fragment whose targets call it,
+  `scripts/change_workflow/workflow.mk`, which the root `Makefile` includes.
+- Unattended runs, the workflow log, and reviews: `scripts/change-workflow start
+  --unattended` and `review`, the `scripts/change_workflow/` package, reached through
+  each step's `make` target with `UNATTENDED=1` and through `make review`; the
+  outcome schema: `.agents/change-outcome.schema.json`; each step's permissions and
+  models, and the orchestrating session's model: `.claude/change-steps.toml`;
+  finding a change by name, active or archived: `scripts/change-workflow find`
+  (`scripts/change_workflow/find.py`).
 - The workflow graph: `scripts/change_workflow/graph.py`; its diagram,
   `docs/development/diagrams/change-workflow-graph.drawio` and its SVG export, held
-  to the table by `scripts/change_workflow/diagram.py` (`make change-graph`).
-- An interactive run's outcome recorded: `python3 scripts/run_change_step.py
-  record`; a change's records converted to the log's format: `python3
-  scripts/run_change_step.py convert` (`scripts/change_workflow/convert.py`).
-- The next-step computation: `scripts/change_next_step.py` (`make change-next`);
-  the orchestrating session: `make orchestrate`; following a run:
-  `make change-watch`; the cost report: `make change-cost`
-  (`scripts/change_cost.py`); completion of change names on the workflow targets:
-  `scripts/completions/make-change.bash`.
+  to the table by `scripts/change_workflow/diagram.py` (`make change-graph`,
+  `scripts/change-workflow check graph`).
+- An interactive run's outcome recorded: `scripts/change-workflow record`; a
+  change's records converted to the log's format: `scripts/change-workflow convert`
+  (`scripts/change_workflow/convert.py`).
+- The next-step computation: `scripts/change-workflow next`
+  (`scripts/change_workflow/next_step.py`, `make change-next`); the orchestrating
+  session: `make orchestrate`; following a run: `make change-watch`; the cost
+  report: `make change-cost` (`scripts/change_workflow/cost_report.py`); completion
+  of change names on the workflow targets: `scripts/completions/make-change.bash`.
 - A change's closing checks: `make check-change` (`scripts/check_change.py`); its
-  task list's sections: `make check-tasks` (`scripts/check_tasks.py`).
+  task list's sections: `make check-tasks` (`scripts/change_workflow/tasks.py`).
 - Validation: `make validate-local`, `make validate-helm`, and `make validate-ci`
   (`scripts/validate_slice.py`); run selection for the validated commit:
   `scripts/fetch-e2e-logs.py`; the workflows validation may dispatch and the
   comparison of a CI run's failures with `dev`'s: `make run-ci`
   (`scripts/ci_evidence.py`); the push guard: `make check-push-ready` and
-  `make push-branch` (`scripts/check_push_ready.py`).
+  `make push-branch` (`scripts/change-workflow check push` and `push`,
+  `scripts/change_workflow/push.py`).
 - A change's validation namespace and image tags: `scripts/change_namespace.py`,
   with `CHANGE=` on every `helm/Makefile` target and `IMAGE_SUFFIX` on the build
   targets; manual access: `make -C helm forward` and `make -C helm resume`;
@@ -1938,14 +1945,15 @@ checked, and one that failed or was inconclusive MUST be brought to the owner.
   `helm/validation-capacity.toml`, written by `make record-capacity`; two clones'
   Helm parts at once: `make validate-parallel` (`scripts/validate_parallel.py`).
 - A change's clone: `make change-clone` and `make change-clone-remove`
-  (`scripts/change_clone.py`); its history in the owner's workspace: `make
-  change-history` (`scripts/change_history.py`) and `python3
-  scripts/find_change.py --records`; a run in progress in a checkout:
-  `scripts/change_workflow/running.py`.
-- Reading a round: `make round-view` and `make round-done` (`scripts/round_view.py`).
-- Index edits checked: `make check-change-index` (`scripts/check_change_index.py`).
-- The post-compaction hook: `.claude/settings.json` and
-  `scripts/post_compaction_context.py`.
+  (`scripts/change_workflow/clone.py`), and `scripts/change-workflow clone where`;
+  its history in the owner's workspace: `make change-history`
+  (`scripts/change_workflow/history.py`) and `scripts/change-workflow find
+  --records`; a run in progress in a checkout: `scripts/change_workflow/running.py`.
+- Reading a round: `make round-view` and `make round-done`
+  (`scripts/change_workflow/round_view.py`).
+- Index edits checked: `make check-change-index` (`scripts/change_workflow/index.py`).
+- The post-compaction hook: `.claude/settings.json`, running
+  `scripts/change-workflow hook post-compaction` (`scripts/change_workflow/hook.py`).
 - Tests for each script under `scripts/tests/`.
 
 The skills are instructions to an agent; that a session follows them is shown by the

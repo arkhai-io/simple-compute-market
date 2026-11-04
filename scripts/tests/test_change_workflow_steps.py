@@ -194,9 +194,9 @@ def test_every_step_may_run_the_read_only_utilities_but_not_a_find_that_writes()
 
 def test_validation_may_run_its_skills_commands_one_per_call_or_chained() -> None:
     rules = load_steps()["validate"]
-    chained = ("make round-view-closed; echo rc=$?; git status --porcelain "
+    chained = ("scripts/change-workflow check round-view; echo rc=$?; git status --porcelain "
                "--untracked-files=all; git rev-parse HEAD; git branch --show-current; "
-               f"python3 scripts/find_change.py {CHANGE}; gh auth status 2>&1 | head -5")
+               f"scripts/change-workflow find {CHANGE}; gh auth status 2>&1 | head -5")
 
     assert _allows_chain(rules, chained)
     assert _allows(rules, "gh run view 38723279321 --json headSha,conclusion,jobs")
@@ -228,8 +228,8 @@ def test_validation_may_write_only_its_own_record() -> None:
     assert _allows_edit(rules, "Write", record)
     assert _allows_edit(rules, "Edit", record)
     assert not _allows_edit(rules, "Write", "openspec/changes/shape-bounds/reviews/08-closeout.md")
-    assert not _allows_edit(rules, "Write", "scripts/run_change_step.py")
-    assert not _allows_edit(rules, "Edit", "scripts/run_change_step.py")
+    assert not _allows_edit(rules, "Write", "scripts/change-workflow")
+    assert not _allows_edit(rules, "Edit", "scripts/change-workflow")
     assert "Edit" not in rules.deny
     assert not any(rule.startswith("Write(") for rule in rules.allow)
 
@@ -263,10 +263,42 @@ def test_the_merge_merges_a_fetched_branch_and_never_abandons_a_merge() -> None:
         assert not _allows(rules, command), command
 
 
-def test_every_step_may_compute_the_next_step_and_read_the_log() -> None:
+def test_every_step_may_reach_the_workflow_through_its_command() -> None:
+    """Every step computes the next step, reads the log, finds a change's records,
+    records an interactive outcome, and checks the index and the round view, through
+    the command; none opens or closes a round view, which is the owner's."""
     for name, rules in load_steps().items():
-        assert _allows(rules, f"python3 scripts/change_next_step.py {CHANGE}"), name
-        assert _allows(rules, f"python3 scripts/run_change_step.py log {CHANGE} --last 3"), name
+        for command in (f"next {CHANGE}", f"log {CHANGE} --last 3",
+                        f"log {CHANGE} --branch feat/x", f"find --records {CHANGE}",
+                        f"find --json {CHANGE}", f"cost {CHANGE}",
+                        f"record {CHANGE} plan --outcome '{{}}'", "check index",
+                        "check round-view"):
+            assert _allows(rules, f"scripts/change-workflow {command}"), (name, command)
+        assert {"Bash(scripts/change-workflow round-view*)",
+                "Bash(scripts/change-workflow round-done*)"} <= set(rules.deny), name
+        for command in (f"round-view {CHANGE}", "round-done"):
+            assert not _allows(rules, f"scripts/change-workflow {command}"), (name, command)
+
+
+def test_every_step_that_pushes_may_push_through_the_command() -> None:
+    for name, rules in load_steps().items():
+        assert _allows(rules, "scripts/change-workflow push") == (name != "review"), name
+
+
+def test_a_steps_own_workflow_commands_are_the_ones_its_skill_runs() -> None:
+    steps = load_steps()
+    assert _allows(steps["validate"], "scripts/change-workflow check push")
+    # Closeout runs any of the workflow's checks.
+    assert _allows(steps["closeout"], f"scripts/change-workflow check tasks {CHANGE}")
+    assert _allows(steps["closeout"], "scripts/change-workflow check push")
+    assert _allows(steps["archive-cleanup"], f"scripts/change-workflow history {CHANGE}")
+    for name in ("design", "plan", "implement", "triage", "merge", "archive-cleanup",
+                 "review"):
+        assert not _allows(steps[name], "scripts/change-workflow check push"), name
+        assert not _allows(steps[name], f"scripts/change-workflow check tasks {CHANGE}"), name
+    for name in ("design", "plan", "implement", "triage", "merge", "validate", "closeout",
+                 "review"):
+        assert not _allows(steps[name], f"scripts/change-workflow history {CHANGE}"), name
 
 
 def test_no_step_may_edit_its_own_permissions() -> None:

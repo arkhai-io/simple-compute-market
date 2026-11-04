@@ -159,13 +159,13 @@ Notes for the next session. The engine's mains take `root: Path | None = None`
 and resolve it with `repository_root()`; section 2's `cli` should resolve it once
 and pass it to each subcommand. The old entry points' usage strings
 (`find_change.py`, `change_next_step.py`, `check_tasks.py`) and the step prompts
-naming `scripts/run_change_step.py` (`harness.py`, `review.py`, `convert.py`'s
+naming the old `run_change_step.py` (`harness.py`, `review.py`, `convert.py`'s
 `convert` command, which `next` prints) are left for the command: changing them is
 section 2's and 3's. `tasks.main` exits 2 for an unknown change, where D6 calls it
 a refusal (1): section 2.2 settles the exit categories.
 
 For section 3: the orchestrate skill runs a clone's engine by path from the
-workspace (`python3 <clone>/scripts/change_next_step.py`, `…/run_change_step.py
+workspace (`python3 <clone>/…/change_next_step.py`, `…/run_change_step.py
 note`, `… record`); the command acts on its working directory's repository, so
 those calls must run in the clone — `make -C <clone> change-next`, or the command
 started with the clone as its working directory — not `<clone>/scripts/change-workflow`
@@ -196,7 +196,7 @@ D6; CW-r3ka, CW-h8vm, CW-5qne, CW-w2ld). Touches a new `scripts/change-workflow`
       schema from the working directory, as section 1 left them; in production the
       two are one. `cli.delegated` names the module command line and arguments
       each delegating subcommand reaches, a seam the tests read directly.
-      `run` is gone from the command: `scripts/run_change_step.py` maps its
+      `run` is gone from the command: the old `run_change_step.py` maps its
       `run <step> <change> …` onto `start … --unattended` until section 3 removes
       it, so `start`'s refusals now run there too, after the make target's own.
       The file is staged as mode 100755; the worktree copy could not be made
@@ -317,8 +317,8 @@ D6; CW-r3ka, CW-h8vm, CW-5qne, CW-w2ld). Touches a new `scripts/change-workflow`
       section 1; `make test-release-tooling`; `make test`; `make check-change
       CHANGE=specify-change-workflow-and-engine`, failing only on the citations of
       files a later section creates; by hand, `scripts/change-workflow next
-      specify-change-workflow-and-engine` prints what `python3
-      scripts/change_next_step.py specify-change-workflow-and-engine` prints.
+      specify-change-workflow-and-engine` prints what the old
+      `change_next_step.py specify-change-workflow-and-engine` printed.
       End-to-end: none, and none is owed.
       Evidence so far: `test_change_workflow_cli.py` (unit, real repositories in a
       temporary directory, `make -n` of the fragment), 138 passed;
@@ -346,6 +346,8 @@ choose between a `check graph` subcommand (recommended, internal) and narrowing
 CW-r3ka, the owner answered "a.", read as the first option, `check graph`; its
 tier and its wording in the `change-workflow` delta are still to be written down,
 in design or in section 3's plan, before 3.2 drops the `Makefile`'s own target.
+Correction: the owner set its tier, internal, before section 3, and D4's mapping
+and D6's table record it; its wording in the delta is section 8's.
 
 ## 3. Every caller moved to the command, and the old scripts removed
 
@@ -360,7 +362,7 @@ command"; CW-r3ka, CW-w2ld). Touches `.claude/change-steps.toml`,
 `docs/agents/change-workflow.md`, `AGENTS.md`'s "Agent skills", `openspec/README.md`'s
 citations of the scripts, and `scripts/tests/`.
 
-- [ ] 3.1 The orchestrator's, before the session starts, on the owner's word:
+- [x] 3.1 The orchestrator's, before the session starts, on the owner's word:
       `.claude/change-steps.toml` gains, beside each rule naming an old script or a
       moved make target, the rule naming the command (`Bash(scripts/change-workflow
       find*)`, `Bash(scripts/change-workflow next*)`, `Bash(scripts/change-workflow
@@ -371,40 +373,128 @@ citations of the scripts, and `scripts/tests/`.
       (D5, 3; CW-w2ld). `.claude/settings.json`'s post-compaction hook runs
       `"$CLAUDE_PROJECT_DIR/scripts/change-workflow" hook post-compaction`. The
       session commits both with the section.
-- [ ] 3.2 The root `Makefile`: sets `CHANGE_WORKFLOW_MERGE_FROM := dev` and
+      Done by the orchestrator once the owner approved it, after this section's
+      first run stopped on its absence; committed with the section. The rules the
+      edit added: `find*`, `next*`, `cost*`, `log*`, `record*`, `check round-view`,
+      and `check index` for every step; `push` wherever `make push-branch` was
+      allowed; `check push` for validation, `check *` for closeout, `history*` for
+      archive cleanup; `round-view*` and `round-done*` denied to every step.
+      `test_change_workflow_steps.py` pins them (unit, the real table read): each
+      common rule and the deny rules for every step, `push` for every step but the
+      review, `check push` for validation and closeout only, `check tasks` for
+      closeout only, and `history` for archive cleanup only.
+- [x] 3.2 The root `Makefile`: sets `CHANGE_WORKFLOW_MERGE_FROM := dev` and
       `CHANGE_WORKFLOW_REVIEW_BASE := dev`, includes
       `scripts/change_workflow/workflow.mk`, and drops the targets the fragment now
       holds; its own targets that ran `round-view-closed` keep it, now the
       fragment's (D4; CW-h8vm). `make help` lists the fragment's targets.
-- [ ] 3.3 Every skill under `.agents/skills/change-*` names the command where it
+      Done; `HELM_ALL_SCENARIOS` reaches validation as the fragment's `ARGUMENTS`
+      through a target-specific `validate: ARGUMENTS += …`, interactive and
+      unattended, so a validation session's invocation reads as before.
+      `change-graph` now runs `scripts/change-workflow check graph`: the owner chose
+      the subcommand and its tier, internal (recorded in D4's mapping and D6's
+      table), and `diagram.main` refuses a missing diagram with exit 1, naming it,
+      where it raised. The repository has no `make help` target; the targets' `##`
+      descriptions live in the fragment, and Bash completion lists its targets
+      (3.5).
+- [x] 3.3 Every skill under `.agents/skills/change-*` names the command where it
       named an old script or `run_change_step.py`: `scripts/change-workflow find
       --records`, `next`, `log`, `record`, `note`, `push` (for `make push-branch`),
       `check round-view` (for `make round-view-closed`), `check index`, and the
       rest; the orchestrate skill starts steps through the make targets as before
       (D4).
-- [ ] 3.4 The four importers call the command and import nothing of the engine:
+      Done, and also `check index` for `make check-change-index`, `history` for
+      `make change-history` in archive cleanup, and each skill's unattended
+      preamble names `scripts/change-workflow start --unattended`. Kept as make
+      targets, since no rule names the command for them: `make check-tasks`,
+      `make check-agent-skills`, `make check-change`, the owner's own targets
+      (`make round-view`, `make round-done`, `make change-watch`), and design's
+      `make -C ../<prerequisite>-proposal check-change-index`. The orchestrate
+      skill runs the command for a change worked in its clone as `cd <clone> &&
+      scripts/change-workflow …` and says why: the command acts on its working
+      directory's repository; it keeps `make -C <clone> push-branch` and
+      `change-history`.
+- [x] 3.4 The four importers call the command and import nothing of the engine:
       `check_change.py`, `check_doc_citations.py`, and `validate_slice.py` read
       `find --json`'s `directory`, `archived`, and `records`; `validate_parallel.py`
       reads `clone where`, telling its four cases apart by exit status and output
       (D6; CW-r3ka's first scenario).
-- [ ] 3.5 `scripts/completions/make-change.bash` completes change names on the
+      Done through a new `scripts/workflow_command.py`, which the plan did not name:
+      it runs the command beside it as a process in the checkout asked about and
+      returns `found_change`'s object or `clone_where`'s path, raising
+      `WorkflowRefused` with the command's reason (or, with none, the command and
+      its status; or output that is no JSON object), so the three readers of `find
+      --json` share one call; `test_workflow_command.py` tests it directly, against
+      the real command on a temporary repository and a stand-in executable for the
+      answers the command never gives. It is this repository's, not the engine's:
+      closeout's promotion names it in `market-change-workflow`'s Evidence. `validate_slice.py` reads `records` (the change's
+      `reviews/` in this checkout), where it read `<directory>/reviews`.
+      `validate_parallel.py` asks `clone where` from inside the clone: a refusal
+      (unknown change, unusable clone) and an empty answer (no clone of that change
+      there) are both refused, and a path other than the clone is too, each case
+      tested. Its tests now make their clones with `scripts/change-workflow clone`,
+      whose bootstrap is the fixture's own `make init`, waiting for it through
+      `clone where` (bounded at 30 s), rather than through the engine's module with
+      an injected spawn, which the import rule now forbids a repository script's
+      test. The wait polls until `clone where` stops reporting the bootstrap as
+      running, which is the engine's report text, outside its promise: should it
+      be reworded, the wait ends early and the failed-bootstrap test may race its
+      bootstrap. The tests of all four now run on real Git repositories,
+      since the command refuses outside one.
+- [x] 3.5 `scripts/completions/make-change.bash` completes change names on the
       fragment's targets as it did on the `Makefile`'s.
-- [ ] 3.6 `docs/agents/change-workflow.md`, `AGENTS.md`'s "Agent skills", and
+      Needed no edit: target names come from bash-completion's own `make -npq`
+      reading, which follows the include. Two tests added against a Makefile that
+      includes the real fragment.
+- [x] 3.6 `docs/agents/change-workflow.md`, `AGENTS.md`'s "Agent skills", and
       `openspec/README.md`'s closeout part 11 name the command where they named
       the old scripts.
-- [ ] 3.7 Remove the old scripts: `scripts/run_change_step.py`,
+      Done; and the permanent `change-workflow` documents, which the plan left to
+      section 8 and closeout: `spec.md`'s Evidence and five passages of
+      `architecture.md` cited the removed scripts by path, which `AGENTS.md`'s
+      cross-reference rule makes a blocking defect once they are gone, so they now
+      name the command and the modules. The outcome schema's description and the
+      engine's own strings (the unattended prompts, `next`'s `convert` and
+      `record` commands, usage lines, docstrings) name the command too.
+- [x] 3.7 Remove the old scripts from `scripts/`: `run_change_step.py`,
       `change_next_step.py`, `change_clone.py`, `round_view.py`,
       `change_history.py`, `find_change.py`, `change_cost.py`,
       `check_change_index.py`, `check_tasks.py`, `check_push_ready.py`,
       `check_agent_skills.py`, and `post_compaction_context.py` (D4).
-- [ ] 3.8 Tests: `test_make_change_completion.py`,
+      Done, with `git rm`.
+- [x] 3.8 Tests: `test_make_change_completion.py`,
       `test_change_build_and_helm_targets.py`, `test_run_change_step.py`,
       `test_validate_parallel.py`, `test_check_change.py`, and any test naming an
       old script or a moved target, follow the command and the fragment; a new unit
       test fails when a file under `scripts/` other than the engine's own modules
       and tests imports `change_workflow` (D6, "A repository calls the engine only
       as the command").
-- [ ] 3.9 Verification: the section's tests, unit; `make test-release-tooling`;
+      Done. `test_run_change_step.py` became `test_change_workflow_cli_steps.py`;
+      its root-Makefile tests now read the fragment's commands from `make -n` of
+      the root Makefile (this repository's branches, a repository target's
+      round-view prerequisite, a grant's quoting through a real shell), the
+      fragment's own forms staying in `test_change_workflow_cli.py`.
+      `test_change_workflow_entry_points.py` became `test_change_workflow_command.py`:
+      the command's process runs (`check skills` inside and outside a repository,
+      `find --json` from a subdirectory, `check graph` on this checkout) and its
+      mode, and the import rule — an AST scan of every `.py` under `scripts/` but
+      the package and the engine's own tests, a test that imports one of this
+      repository's scripts or names its file (as a load by path does) counting as
+      the repository's, finding an import at module level, in a function, under
+      `TYPE_CHECKING`, or in a `try`, itself tested on sources of each shape. It
+      does not see `importlib.import_module`, which no script uses, and a test that
+      checks this repository's files (the step table, the root Makefile) while
+      importing the engine, as `test_change_workflow_steps.py` and the root-Makefile
+      tests do, counts as the engine's. `test_check_change_index.py`'s and
+      `test_check_push_ready.py`'s Makefile assertions moved into the root-Makefile
+      tests. `test_change_build_and_helm_targets.py` names no old script or moved
+      target, so it needed no edit. Also updated: `test_change_next_step.py` and
+      `test_change_workflow_convert.py` (the `convert`/`record` commands),
+      `test_change_workflow_steps.py` (the command's rules),
+      `test_validate_slice.py` (Git repositories; `HELM_ALL_SCENARIOS` by `make
+      -n`), `test_check_doc_citations.py`, and `test_change_workflow_cli.py`
+      (`check graph`, the real table's orchestrator row).
+- [x] 3.9 Verification: the section's tests, unit; `make test-release-tooling`;
       `make test`; `make check-agent-skills`; `make check-change
       CHANGE=specify-change-workflow-and-engine`, failing only on the citations of
       files a later section creates; by hand, `make change-next
@@ -416,6 +506,62 @@ citations of the scripts, and `scripts/tests/`.
       `AGENTS.md`, and `openspec/README.md` finds no old script's name. The
       round's validation runs the rewritten step table. End-to-end: none, and none
       is owed.
+      Evidence: the scripts suite (`scripts/tests`: unit as the plan's preamble
+      sets the engine's tests, with real files, Git repositories, and clones in a
+      temporary directory, and beyond it the subprocess boundaries proven against
+      the real thing — `make -n` of the root Makefile and the fragment, the command
+      run as an executable in `test_change_workflow_command.py`,
+      `test_workflow_command.py`, and the importers' tests, and the clones'
+      background bootstrap in `test_validate_parallel.py`), 1999 passed after both
+      fresh-context checks' fixes; `make test` passed on the final code;
+      `make check-packaging` passed;
+      `make check-change` failed only on `check-doc-citations`, every miss a file a
+      later section creates (`trace.md`, `check_spec_index.py`, the assumptions and
+      index tests, the two capabilities' new documents), with comment hygiene and
+      the agent skills check passing. By hand: `scripts/change-workflow find --json
+      specify-change-workflow-and-engine` printed the four fields;
+      `scripts/change-workflow next … --plain` printed the computation's plain form
+      (the stopped run of this section, waiting on the owner); `make
+      check-change-index` and `scripts/change-workflow check index` passed;
+      `scripts/change-workflow check round-view` passed. Denied in this session, as
+      no rule names them: `make change-next`, `make -n design … UNATTENDED=1`,
+      `make -n orchestrate …`, and `scripts/change-workflow check graph`. In their
+      place the root-Makefile tests (unit, `make -n` of the real Makefile) show
+      what `change-next`, `design … UNATTENDED=1`, and `orchestrate` would run,
+      without running them, and `test_change_workflow_command.py` runs `check
+      graph` as the executable on this checkout. Section 2's owed side-by-side
+      comparison cannot be made now that `change_next_step.py` is gone; what
+      stands for it is `test_change_workflow_cli.py` calling `cli.main` and
+      `next_step.main` in-process on one temporary repository, and the `next`
+      run above on this change. Running a clone's command from the workspace
+      with `cd <clone> && …`, as the orchestrate skill now says, is shown only by
+      section 1's root tests (the root resolved in a clone); no test runs that
+      form. The grep finds no old script's name in `.agents`, `docs`, `Makefile`,
+      `AGENTS.md`, or `openspec/README.md`; in `.claude` it finds the old rules 3.1
+      kept for this run and the step table's header comment, both 4.1's.
+
+Notes for the next session. Owed to 4.1, the orchestrator's: beside the old rules,
+the step table's header comment still says unattended steps run through the
+removed `run_change_step.py`, and its comment on the push names only `make
+push-branch`. Other changes' documents still cite the removed scripts by path
+(`add-skill-extension-points`, `add-workflow-harness-adapters`,
+`add-workflow-model-gateway`, `extract-change-workflow-repository`,
+`host-change-workflow-runner`, `remove-workflow-log-conversion`,
+`workflow-round-review-without-merges`), as does this change's campaign row in
+`openspec/changes/README.md`: an unscoped `make check-doc-citations` lists them.
+They are left to each change's own redesign once this change lands, and the
+campaign row to closeout's 11.6. The engine's report text still names fragment
+targets (`make round-done`, `make change-clone` in `next`'s commands and the round
+view's refusals): report text is outside the promise (D6), but an adopter not
+including the fragment would read targets it lacks, which section 7's inventory
+should list. A fragment variable a repository sets for one target only goes in a
+target-specific assignment after the include, as `validate: ARGUMENTS += …` does;
+`make -n` of a root target is how the tests read what it runs, and is denied to the
+implementation step as a Bash call, so the by-hand checks of a later section that
+need it run through those tests. Five engine tests keep the old scripts' names
+(`test_find_change.py`, `test_check_tasks.py`, `test_check_push_ready.py`,
+`test_post_compaction_context.py`, `test_round_view.py`); renaming them was left,
+as they name what they test well enough and no rule asks it.
 
 ## 4. The record set's format, read and marked
 

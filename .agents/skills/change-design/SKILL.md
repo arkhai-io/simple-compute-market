@@ -19,7 +19,7 @@ ledger, and a prerequisite's proposal and dependency (both in section 4).
 Run interactively, as most runs are, this section does not apply but for the
 outcome it describes, which an interactive run records itself ("Running
 interactively"); nothing else in the skill changes.
-When this skill runs through `scripts/run_change_step.py` —
+When this skill runs through `scripts/change-workflow start --unattended` —
 `make design UNATTENDED=1`, or the orchestrating session — nobody can answer in
 the session, and every turn ends with an outcome matching
 `.agents/change-outcome.schema.json`, whose `message` the owner reads as written:
@@ -76,7 +76,7 @@ command — no wrapper records the run, so its last act records the outcome it w
 end with unattended, as "Running unattended" gives it:
 
 ```text
-python3 scripts/run_change_step.py record <change> design --outcome '<the outcome, as JSON>'
+scripts/change-workflow record <change> design --outcome '<the outcome, as JSON>'
 ```
 
 `record` checks the outcome against `.agents/change-outcome.schema.json` and
@@ -112,7 +112,7 @@ places that matter, so read all of this first, in full:
   `design.md`.
 - Another change's records, where the design rests on them — a dependency's
   reviews, an earlier change's findings or validation. They are untracked, so they
-  are where that change was worked: `python3 scripts/find_change.py --records
+  are where that change was worked: `scripts/change-workflow find --records
   <change>` prints where, this checkout's or, from a change's clone, the owner's
   workspace's, which holds the history of every cleaned-up change.
 
@@ -295,13 +295,13 @@ through dev, never written here:
 4. Once the proposal has merged to dev and dev has been merged into this branch,
    record the dependency: add the prerequisite to this change's `Depends on`
    gating `design` (`` `<prerequisite>` (design) ``), name it in `Notes`, keep the
-   status `in design`, and run `make check-change-index`. `blocked in design` is
+   status `in design`, and run `scripts/change-workflow check index`. `blocked in design` is
    for reasons that are not another change; the dependency itself holds design,
    through section 1's entry check, and the design halts again until it lands.
 5. Once the prerequisite is archived and dev is merged in again, the index check
    refuses this change's dependency on an archived change. On the owner's word,
    drop only that dependency, leaving the status `in design`, run
-   `make check-change-index`, and resume the discussion.
+   `scripts/change-workflow check index`, and resume the discussion.
 
 ## 5. Check the whole before recording
 
@@ -355,7 +355,7 @@ Only when the owner says the design is settled:
 - Commit the recorded design as one commit — the change's documents, the index
   row, and the ledger lines this step wrote — whose message names the change and
   says its design is settled, so the design review reads a committed design. Then
-  push it with `make push-branch`, the guarded push of exactly `HEAD`; if it
+  push it with `scripts/change-workflow push`, the guarded push of exactly `HEAD`; if it
   refuses, stop and report its reasons.
 
 Do not write or amend `tasks.md`: planning is a separate phase and starts only

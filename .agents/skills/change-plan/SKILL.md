@@ -27,7 +27,7 @@ design.
 Run interactively, as most runs are, this section does not apply but for the
 outcome it describes, which an interactive run records itself ("Running
 interactively"); nothing else in the skill changes.
-When this skill runs through `scripts/run_change_step.py` —
+When this skill runs through `scripts/change-workflow start --unattended` —
 `make plan UNATTENDED=1`, or the orchestrating session — nobody can answer in
 the session, and every turn ends with an outcome matching
 `.agents/change-outcome.schema.json`, whose `message` the owner reads as written:
@@ -77,7 +77,7 @@ the session, and every turn ends with an outcome matching
   owner confirms the return, and the design step then sets the status. Before
   ending, commit what planning has written — what `design.md` gained, the plan so
   far — as one work-in-progress commit naming the change and why it returns, and
-  push it with `make push-branch`: no session is left to commit it, and a dirty
+  push it with `scripts/change-workflow push`: no session is left to commit it, and a dirty
   checkout blocks every later step's guarded push. A stop, by contrast, commits
   nothing: its work waits uncommitted for the resumed session, and one stopped
   because a repository guard refused or `HEAD` moved leaves the checkout as it
@@ -90,7 +90,7 @@ command — no wrapper records the run, so its last act records the outcome it w
 end with unattended, as "Running unattended" gives it, `rounds` included:
 
 ```text
-python3 scripts/run_change_step.py record <change> plan --outcome '<the outcome, as JSON>'
+scripts/change-workflow record <change> plan --outcome '<the outcome, as JSON>'
 ```
 
 `record` checks the outcome against `.agents/change-outcome.schema.json` and
@@ -114,13 +114,13 @@ the design discussion: the session's memory of a triage can be out of date, and
 reviews and triage may have happened elsewhere. Read the change's row in
 `openspec/changes/README.md` — status, `Depends on`, notes. Then confirm:
 
-- `python3 scripts/change_next_step.py <change>` names `plan`, whatever the status
+- `scripts/change-workflow next <change>` names `plan`, whatever the status
   says: the exit the design review's triage recorded, or the owner's direction to
   planning — a confirmed return of the change to planning, or the waiver of another
   design review for what the design step settled after a confirmed return to
   design, which the orchestrating session records on the owner's word as a
-  direction naming no run, with a ledger line. `python3 scripts/run_change_step.py
-  log <change>` shows the line the computation's reason names. Commit a waiver's
+  direction naming no run, with a ledger line. `scripts/change-workflow log
+  <change>` shows the line the computation's reason names. Commit a waiver's
   ledger line with the plan (section 7). Whatever else the computation names — a
   design review, a triage in progress, the owner — is the step that comes first,
   and its reason says why.
@@ -148,7 +148,7 @@ the files are what the implementer will see:
 - the code each decision changes: enough to name the files, the package
   boundaries, and the existing tests a section extends;
 - another change's records, where a section rests on them — a dependency's
-  validation evidence, say — wherever `python3 scripts/find_change.py --records
+  validation evidence, say — wherever `scripts/change-workflow find --records
   <change>` says they are: this checkout, or, from a change's clone, the owner's
   workspace, which holds the history of every cleaned-up change.
 
@@ -181,7 +181,7 @@ plan on an answer the design review did not cover.
    than design, the seq being the one `record` printed:
 
    ```text
-   python3 scripts/run_change_step.py note <change> orchestrator --by owner --resolves <seq> --next review --kind design --decision "return confirmed: another design review of <the decision>" --reason "<the owner's words>"
+   scripts/change-workflow note <change> orchestrator --by owner --resolves <seq> --next review --kind design --decision "return confirmed: another design review of <the decision>" --reason "<the owner's words>"
    ```
 
    Planning starts afresh once that review's triage names it.
@@ -321,8 +321,8 @@ and closeout are examined by the first implementation review.
 
 Commit the plan as one commit — `tasks.md`, what you recorded into `design.md`,
 the index row, and the ledger lines planning wrote or the waiver left — whose
-message names the change and says it is planned. Then push it with `make
-push-branch`, the guarded push of exactly `HEAD`; if it refuses, stop and report
+message names the change and says it is planned. Then push it with
+`scripts/change-workflow push`, the guarded push of exactly `HEAD`; if it refuses, stop and report
 its reasons.
 
 Map the cadence onto the sections: a list of rounds, each a list of the sessions

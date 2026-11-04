@@ -40,7 +40,7 @@ memory.
 
 Every step but the review opens an interactive Claude Code session. With
 `UNATTENDED=1` the same target runs the step headless instead, through
-`scripts/run_change_step.py`: held to its step's permissions in
+`scripts/change-workflow start <step> <change> --unattended`: held to its step's permissions in
 `.claude/change-steps.toml`, on its step's models, ending with an outcome appended
 to the change's workflow log. `make plan` unattended resumes the design step's
 session; `FRESH=1` starts a fresh one. The review always runs unattended.
@@ -53,7 +53,7 @@ one naming no node is refused. Run interactively, a
 step records its own outcome as its last act:
 
 ```text
-python3 scripts/run_change_step.py record <change> <step> --outcome '<the outcome, as JSON>'
+scripts/change-workflow record <change> <step> --outcome '<the outcome, as JSON>'
 ```
 
 It checks the outcome as the wrapper checks an unattended run's, and appends it with
@@ -76,8 +76,8 @@ name its path from the repository root. A wrapper stopped by SIGTERM logs its ru
 leaves no line.
 
 Every step that commits — design, planning, implementation, triage, closeout, and
-archive cleanup — pushes each commit right after through `make push-branch`, the
-guarded push of exactly `HEAD`, the only push a step may make. A pushed branch
+archive cleanup — pushes each commit right after through `scripts/change-workflow
+push` (`make push-branch`), the guarded push of exactly `HEAD`, the only push a step may make. A pushed branch
 starts nothing: validation dispatches the end-to-end pipeline itself.
 
 Validation dispatches CI workflows too, for evidence only a run of one produces.
@@ -127,7 +127,7 @@ edge the table does not, or misses one. A change to the table redraws the source
 draw.io, from what `make change-graph` reports — each box and edge to add, change,
 or remove — and exports the SVG again with the source embedded; the SVG is never
 edited by hand.
-`scripts/change_next_step.py` routes on the exit the last step named, and on your
+`scripts/change-workflow next` routes on the exit the last step named, and on your
 latest direction, checking each against the table, as the `change-workflow`
 specification's "The next step is computed from the files" requires: an unmet
 guard names the step that satisfies it, and an exit the table does not allow comes
@@ -137,7 +137,7 @@ A step that finds the change in the wrong state refuses and says why. Design and
 implementation take only an active change. Closeout archives the change as its last
 step, so every step after it — the closeout review, its triage, validation, archive
 cleanup — finds the change under `openspec/changes/archive/` by its name
-(`python3 scripts/find_change.py <change>`). `make review KIND=closeout` refuses a
+(`scripts/change-workflow find <change>`). `make review KIND=closeout` refuses a
 change that is not archived, and `make archive-cleanup` one that is not. Planning,
 the merge, closeout, and archive cleanup ask the next-step computation as they
 start, and go on only when it names them — archive cleanup also when it names a validation
@@ -155,7 +155,7 @@ Ask the owner questions in prose, never through a multiple-choice selector
 ## Orchestrating a change
 
 `make orchestrate CHANGE=<change>` opens one Claude Code session that carries the
-change through its steps: it runs the step `scripts/change_next_step.py` computes,
+change through its steps: it runs the step `scripts/change-workflow next` computes,
 each unattended through its `make` target, shows each step's message as written,
 and sends your reply back as written. It forms no view of a finding or a design
 question. It commits nothing while a step runs. It also creates the change's clone
@@ -207,7 +207,7 @@ guard that is not met, a confirmed return — by telling the orchestrating sessi
 which records your direction, `by: owner`:
 
 ```text
-python3 scripts/run_change_step.py note <change> orchestrator --by owner --next validate --target closeout --decision "validate HEAD before closeout" --reason "<why, and what it skips>"
+scripts/change-workflow note <change> orchestrator --by owner --next validate --target closeout --decision "validate HEAD before closeout" --reason "<why, and what it skips>"
 ```
 
 `--next` names the step, `--kind` a review's kind or the kind of review a triage
@@ -230,7 +230,7 @@ named their exits — or which has numbered records and no log, is read as nothi
 until it is converted, and the computation brings it to you with the command:
 
 ```text
-python3 scripts/run_change_step.py convert <change>
+scripts/change-workflow convert <change>
 ```
 
 Run between steps, never while one runs. Alone, it writes nothing: it shows the
@@ -250,7 +250,7 @@ effort. No step may edit it: a rule or model changes as a tracked edit, which yo
 commit, or which the orchestrating session commits on your word in the change's
 clone.
 The orchestrating session reads each run's denials from its log line
-(`python3 scripts/run_change_step.py denials <change> <seq>`) and proposes the
+(`scripts/change-workflow denials <change> <seq>`) and proposes the
 narrowest rule for a gap, either granted for one run or as a table edit. After a
 deny-rule denial no other tool may do the work, except where the rule exists only
 to keep file writes on the Edit and Write tools — the table's comments name those
@@ -265,13 +265,13 @@ and `REVIEW_EFFORT` (below) are yours for a review run by hand, not the table's.
 resumed, and is never added to the table: the run's log line records it as
 `granted`, and the step's next run is held to its table again. A fresh run takes
 it through its step's target, several rules separated by `;`, each passed to the
-script as its own `--allow`:
+command as its own `--allow`:
 
 ```text
 make validate CHANGE=<change> UNATTENDED=1 ALLOW='Bash(gh run download *);Bash(make check-packaging)'
 ```
 
-A resumed run takes it as `--allow` on `python3 scripts/run_change_step.py resume`.
+A resumed run takes it as `--allow` on `scripts/change-workflow resume`.
 Since a grant commits nothing, it recovers a stop met between a round's sections
 being committed and its triage, when no table edit may be committed. A deny rule is
 never granted.
@@ -425,8 +425,8 @@ change-history CHANGE=<change>` in the clone, which copies the archived change's
 `reviews/` and the validation evidence its records name
 (`.snapshot/validation/<commit>/`, `.snapshot/e2e-logs/<run>/`) into your
 workspace at the same paths. Your workspace therefore holds the history of every
-cleaned-up change, and a session working another change finds it with `python3
-scripts/find_change.py --records <change>`, which looks in its own checkout first,
+cleaned-up change, and a session working another change finds it with
+`scripts/change-workflow find --records <change>`, which looks in its own checkout first,
 then in your workspace. The copy is safe to run again: it copies what is missing,
 leaves what is the same, extends a file the clone has since grown — the workflow log
 and transcripts only grow — and refuses, naming it and overwriting nothing, any file
@@ -549,13 +549,13 @@ the directory in place; for a change worked in its own clone it also copies it i
 your workspace, which holds the history of every cleaned-up change ("History and
 removal", above).
 
-`workflow.jsonl` is written by `scripts/run_change_step.py` alone: each unattended
+`workflow.jsonl` is written by `scripts/change-workflow` alone: each unattended
 run's outcome with its session, commit, model, cost, and denials; each interactive
 run's outcome as `record` appends it, marked `interactive`; each `round` line; each
 `orchestrator` line, a decision naming the run it resolves or whose denials it read
 and, for your direction, the target it directs; and a conversion's `convert` line.
-Every line carries the log's format marker, `"format": 2`. `python3
-scripts/run_change_step.py log <change>` prints it.
+Every line carries the log's format marker, `"format": 2`.
+`scripts/change-workflow log <change>` prints it.
 
 The three steps that edit the index — triage when a phase-closing review's triage
 advances the change, closeout, and archive cleanup — run `make check-change-index`

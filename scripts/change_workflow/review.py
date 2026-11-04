@@ -72,7 +72,7 @@ _REVIEWED_COMMIT = re.compile(r"<!-- reviewed-commit: (\S+) -->")
 # What a review on Claude is told beside its prompt: nobody can answer it, and its
 # final message is the review, which the wrapper checks and publishes.
 REVIEW_UNATTENDED = (
-    "This review runs unattended through scripts/run_change_step.py: nobody can answer a "
+    "This review runs unattended through scripts/change-workflow: nobody can answer a "
     "permission prompt or a question in this session. Follow the change-review skill's "
     "instructions for running unattended. Your final message is the review, in the skill's "
     "format, and nothing else; the wrapper checks it and publishes it. Run one command per "

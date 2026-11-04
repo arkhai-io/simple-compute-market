@@ -10,8 +10,8 @@ by hand: draw.io draws its visible part from the source it embeds, and a test ho
 that copy equal to the source, so an export not redone after the source changed is
 caught there.
 
-`make change-graph` reports where the source departs from the table (`drift`), which
-is what whoever redraws it after a change to the table needs. See
+`scripts/change-workflow check graph` reports where the source departs from the table
+(`drift`), which is what whoever redraws it after a change to the table needs. See
 openspec/specs/change-workflow/architecture.md, "Routing is code, with the model as
 backstop".
 """
@@ -93,8 +93,13 @@ def main(source: Path | None = None,
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     source = root / SOURCE if source is None else source
-    problems = drift(source.read_text("utf-8"), table)
     shown = source.relative_to(root) if source.is_relative_to(root) else source
+    try:
+        text = source.read_text("utf-8")
+    except OSError as exc:
+        print(f"ERROR: cannot read the graph's diagram {shown}: {exc.strerror}", file=sys.stderr)
+        return 1
+    problems = drift(text, table)
     if not problems:
         print(f"{shown} draws the table.")
         return 0

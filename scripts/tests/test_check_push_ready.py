@@ -15,8 +15,6 @@ import pytest
 
 from change_workflow import push as guard
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-
 
 def _git(cwd: Path, *args: str) -> str:
     env = {**os.environ, "GIT_AUTHOR_NAME": "test", "GIT_AUTHOR_EMAIL": "test@example.invalid",
@@ -145,10 +143,3 @@ def test_every_refusal_is_reported_at_once(repo: Path) -> None:
     _, problems = guard.check(repo)
 
     assert len(problems) == 2
-
-
-def test_make_targets_delegate_to_the_script() -> None:
-    makefile = (REPO_ROOT / "Makefile").read_text("utf-8")
-
-    assert "scripts/check_push_ready.py check" in makefile
-    assert "scripts/check_push_ready.py push" in makefile

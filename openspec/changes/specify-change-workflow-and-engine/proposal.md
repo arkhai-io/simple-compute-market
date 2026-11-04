@@ -20,10 +20,10 @@ repository with rules for this one. Its only diagram is the graph.
 
 The engine is also split across places nobody has reconciled. Its package,
 `scripts/change_workflow/`, documents its own modules. The next-step computation
-(`scripts/change_next_step.py`), clones (`scripts/change_clone.py`), round views
-(`scripts/round_view.py`), history (`scripts/change_history.py`), record lookup
-(`scripts/find_change.py`), and cost reporting (`scripts/change_cost.py`) sit
-beside it as standalone scripts. Validation namespaces
+(`change_next_step.py`), clones (`change_clone.py`), round views
+(`round_view.py`), history (`change_history.py`), record lookup
+(`find_change.py`), and cost reporting (`change_cost.py`) sit beside it in
+`scripts/` as standalone scripts. Validation namespaces
 (`scripts/change_namespace.py`) are specific to this repository's Helm
 validation, and nothing marks that difference. `scripts/` is outside the
 architecture checks (`docs/development/ARCHITECTURE.toml` skips it), so no layer

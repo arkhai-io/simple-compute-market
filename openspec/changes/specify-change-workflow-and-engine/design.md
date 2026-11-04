@@ -11,8 +11,8 @@ where the owner decided otherwise than the agent recommended.
   the standard library alone. Its `__init__.py` lists fifteen of them and omits
   `common` and `subagents`. `common.py` hardcodes `STEPS` and `KINDS` apart from
   `graph`, and anchors the engine to its place in this repository with
-  `ROOT = Path(__file__).resolve().parents[2]`. `scripts/run_change_step.py` runs
-  its command line.
+  `ROOT = Path(__file__).resolve().parents[2]`. `run_change_step.py`, beside it in
+  `scripts/`, runs its command line.
 - **The engine is not a package with scripts beside it.** The package imports the
   standalone scripts: `cli.py` imports `change_clone`; `log.py`, `review.py`, and
   `convert.py` import `find_change`; `convert.py` imports `change_next_step`, which
@@ -143,7 +143,7 @@ whose name extraction installs unchanged and which nothing can import:
 scripts/change-workflow start <step> <change> [--unattended] [--allow …] [--sections …] [--session …] [--arguments …] [--fresh]
 scripts/change-workflow next | record | note | review | find | clone | clone-remove | clone where
 scripts/change-workflow round-view | round-done | watch | cost | history | push
-scripts/change-workflow check index | check tasks | check push | check skills
+scripts/change-workflow check index | check tasks | check push | check skills | check graph
 scripts/change-workflow hook post-compaction | convert
 ```
 
@@ -179,6 +179,7 @@ subcommand not classified otherwise by name in D6 is public (CW-5qne):
 | `check_change_index.py`, `check_tasks.py`, `check_push_ready.py check`, `check_agent_skills.py` | `check index`, `check tasks`, `check push`, `check skills` |
 | `check_push_ready.py push` | `push` |
 | `post_compaction_context.py` | `hook post-compaction` |
+| `python3 -m change_workflow.diagram` in `make change-graph` | `check graph` |
 
 `check round-view` is what the repository's own targets that refuse while a round
 view is open (`validate-local`, `run-ci`, `code-snapshot`, …) and the skills call;
@@ -237,6 +238,7 @@ the engine and its shipped skills use it).
 | Skill names `change-<step>` and `change-orchestrate`, and their argument forms (`<change>`, `<change> sections 3-4`, `<change> from <branch>`) | public |
 | `hook post-compaction` | provisional: the installer and the harness adapters take its wiring |
 | `convert` | provisional: `remove-workflow-log-conversion` removes it |
+| `check graph` | internal: it holds the engine's own graph diagram to the graph table (D12), which no adopter, person, or runner relies on |
 | The unattended-run marker in a step's environment | internal |
 | The make fragment's targets and `CHANGE_WORKFLOW_*` variables | a convenience outside the surface, with no compatibility promise |
 
