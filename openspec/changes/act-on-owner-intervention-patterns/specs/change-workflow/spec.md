@@ -137,9 +137,11 @@ list; when a package version differs from its version at the merge-base with the
 branch the change lands on by more than one SemVer step; when an import its diff adds
 inside a function has no comment giving its reason; or when a capability with a
 specification has no row in the capability index, or a row links no capability. The
-public-content checks MUST refuse a private key in added content through a maintained
-secret scanner at a pinned release, whether the key is wrapped at any length or written
-as one escaped string, reporting its location without its content. The packaging
+public-content checks MUST refuse a private key in added content, a merge's own
+resolution included, through a maintained secret scanner at a pinned release, whether
+the key is wrapped at any length or written as one escaped string, reporting its
+location without its content; they MUST pass a key block whose short body holds no key
+material, however many such blocks share a file. The packaging
 checks MUST fail when a committed lock carries a lock revision other than the one the
 repository's minimum uv writes, and every command that may rewrite a lock MUST first
 refuse a uv older than that minimum.
@@ -182,6 +184,20 @@ refuse a uv older than that minimum.
 
 - **WHEN** a test fixture holds a private-key block whose body is the word `fixture`
 - **THEN** the public-content checks pass it
+
+#### Scenario: Two key fixtures share a file
+
+- **WHEN** an added file holds two private-key blocks, each with a short fixture body,
+  one after the other
+- **THEN** the public-content checks pass it, reading neither block as running into
+  the other
+
+#### Scenario: A key is added in a merge resolution
+
+- **WHEN** an outgoing merge commit adds a private-key block with key material that
+  neither of its parents holds
+- **THEN** the public-content checks refuse it, naming the file and line without
+  echoing the key
 
 #### Scenario: A real key is staged
 

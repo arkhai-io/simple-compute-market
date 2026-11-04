@@ -162,7 +162,9 @@ None.
   - Private keys: a pinned gitleaks beside `scripts/check_public_content.py`, in
     `scripts/hooks/pre-commit`, `scripts/hooks/pre-push`, the guarded push
     (`scripts/check_push_ready.py`), `make check-public-content`, and
-    `.github/workflows/public-content.yml`.
+    `.github/workflows/public-content.yml`, its commit scans reading merge patches; a
+    new `.gitleaks.toml` replacing the default private-key rule with one that cannot
+    join two key blocks.
   - `scripts/check_locks.py`: one lock revision. `scripts/check_uv_version.py`: the
     raised minimum. `scripts/uv_project.py`: `lock` and `reinit` check the uv version.
     `.github/workflows/tests.yml` and `e2e.yml`: the uv they install. The `uv.lock`
@@ -193,8 +195,9 @@ None.
     guidance.
   - `openspec/README.md`: defects found during a change, and the scope-creep sentence.
   - `docs/development/ARCHITECTURE.md`: the guard-code and library rules, and, under
-    "Public repository content checks", gitleaks, its installation, and the edit
-    beneath an existing key header it cannot see.
+    "Public repository content checks", gitleaks, its installation, the repository's
+    key rule and why it replaces the default, and the edit beneath an existing key
+    header it cannot see.
   - `openspec/specs/README.md`: the `contact-exchange-settlement` row.
   - `docs/development/BUILD_AND_PACKAGING.md`: the raised uv minimum, the lock-revision
     check, and drift in both directions.

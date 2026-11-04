@@ -11,7 +11,9 @@ D17's place in the cadence, D20 (a period ledger), and D24 (the key-block measur
 a seventh check for the lock revision). The triage of design review 31 made D15 record
 the window between its last lock check and the signal as an accepted risk, gave D24's
 private-key check to gitleaks, and put D24's uv-version guard in `uv_project.py` for
-every lock writer.
+every lock writer. The triage of design review 38 replaced gitleaks' default
+private-key rule with a repository rule that cannot join two blocks, and made its
+commit scans read merge patches.
 
 ## Context
 
@@ -778,19 +780,44 @@ every step that commits already runs:
    the pre-push hook on every outgoing commit, and the Public content workflow on every
    commit since the event base — with its output redacted, so a finding names its
    location without the key. `check_public_content.py` keeps its own rules (home paths,
-   planning paths, the private denylist), which no general scanner knows. Its
-   private-key rule is understood to match a whole `BEGIN … PRIVATE KEY` block with a
-   minimum body, so a key wrapped at any length or written as one escaped string is
-   refused and the existing fixtures, whose bodies are `fixture`, `material` and
-   `legacy-fixture`, pass; that understanding is unverified against gitleaks' source.
-   So the first work on this check runs the pinned release against the repository's
-   tree, a key wrapped at short lines, a key embedded as one escaped string, and a key
-   added in an intermediate outgoing commit that a later commit deletes. If a fixture
-   is refused or a key passes, the change returns to design rather than working around
-   it. A body edited into an existing block beneath an unchanged header is a known
+   planning paths, the private denylist), which no general scanner knows.
+
+   Gitleaks' default `private-key` rule does not serve as it stands (38 F1). It accepts
+   any 64 or more characters between a `BEGIN … PRIVATE KEY-----` header and the next
+   `KEY-----`, so a short fixture's own END marker comes too soon to end the match, and
+   the match runs on to the next block's header: the two fixtures in
+   `provisioning/compute/service/tests/integration/test_hosts_api.py`, at lines 521 and
+   749, join into one false key whenever a scan sees both — the tree, a commit adding
+   the file, any hunk holding both. So a repository `.gitleaks.toml` extends gitleaks'
+   default configuration, turns its `private-key` rule off, and adds a block rule of its
+   own: the same 64-character minimum body, but a body that holds no run of five dashes,
+   so a match ends at its own block's END marker and never reaches the next header —
+   roughly `-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY-----(?:[^-]|-{1,4}[^-]){64,}-----END`.
+   A real key, wrapped at any length or written as one escaped string, has a body of
+   base64 and `\n` escapes well past 64 characters and is refused; a fixture whose body
+   is `fixture`, `material` or `legacy-fixture` passes, however many share a file. The
+   repository owns that one rule; the scan modes, the redaction, and every other rule
+   stay gitleaks'.
+
+   Every commit-range invocation passes `--diff-merges=separate` through gitleaks'
+   `--log-opts` (38 F2). Gitleaks reads commits through `git log -p -U0`, which prints
+   no patch for a merge unless a merge-diff option is given, so a key written only while
+   resolving a merge would reach no patch it inspects. `separate`, git's `-m`, is the
+   comparison with every parent that `check_public_content.py` makes.
+
+   The first work on this check runs the pinned release, with the repository rule,
+   against the repository's tree, two fixtures in one file, a key wrapped at short
+   lines, a key embedded as one escaped string, a key added in an intermediate outgoing
+   commit that a later commit deletes, and a key introduced only in a merge resolution.
+   If the pinned release cannot turn off or replace its default rule from an extending
+   configuration, a fixture is refused, or a key passes, the change returns to design
+   rather than working around it.
+
+   A body edited into an existing block beneath an unchanged header is a known
    limitation: a diff-reading scanner sees no header in that patch.
-   `ARCHITECTURE.md`'s "Public repository content checks" records it with how to
-   install the pinned release, and review remains the safeguard there.
+   `ARCHITECTURE.md`'s "Public repository content checks" records it, with how to
+   install the pinned release and why the repository replaces the default key rule, and
+   review remains the safeguard there.
 5. **Local imports.** An import inside a function that the diff adds to a `.py` file
    has a comment on its own line or the line above giving its reason
    (`openspec/README.md`, closeout part 2). Whether the reason is sound stays with
@@ -846,6 +873,17 @@ runs the workflow's steps needs a uv at or above the new minimum.
   are understood to match the header alone, so both refuse the fixtures: the first
   would need a baseline of them, and the second has no commit-range mode for outgoing
   commits and CI.
+- **Rejected: gitleaks' default rule, with `test_hosts_api.py`'s fixtures rewritten**
+  (38 F1). It fixes that file only: the next file with two short fixtures, or a fixture
+  followed by any later key header, fails again, and only when a scan's diff happens to
+  hold both blocks.
+- **Rejected: gitleaks' default rule, with the fixtures allowlisted** (38 F1), by a
+  `gitleaks:allow` comment on each or a configuration allowlist. Each new fixture needs
+  an entry, as 20 F4 found for fixture words, and D9 refuses exception markers; an
+  allowlist by path would admit a real key in a test.
+- **Rejected: another scanner, such as TruffleHog** (38 F1), whose key detector drops
+  blocks it cannot parse. It is AGPL-3.0 and much heavier, and its staged and
+  commit-range behaviour would have to be proven again.
 - **Rejected: keeping the uv minimum at 0.12 and relocking back to revision 3** (21 R1).
   The owner raises the minimum instead, toward the release that already writes the
   repository's locks.
@@ -879,8 +917,8 @@ evidence serves the guidance review alone, so it lives in that skill (D20).
   publishing check and in `change-review`'s required finding format together (D17), so
   round 1's own review is written in the format its publisher checks. One session for
   the seven checks and the capability-index row (D24), the lock revision first, with
-  the raised uv minimum and the relock, and gitleaks' fixture and key cases confirmed
-  before it is wired in. Skills should describe tooling that exists, so
+  the raised uv minimum and the relock, and gitleaks' repository rule and merge-patch
+  scan confirmed against the fixture and key cases before it is wired in. Skills should describe tooling that exists, so
   the code comes first; the two sessions are independent, and are reviewed and
   validated together.
 - **Round 2 — the skills and guidance, two sessions.** One session for the workflow
