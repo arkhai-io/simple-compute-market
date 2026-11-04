@@ -4,11 +4,11 @@
   "files": {
     "mediation.schema.json": {
       "source": "schema/mediation.schema.json",
-      "sha256": "f75d58b29e9d5cf9e523175ddb4afe5ddb88b4db202450a2f638230b472dc80c"
+      "sha256": "f4923db68ba7e26bd5759a40ce7afae35eb61a62bbec4d199802a48adb3755fe"
     },
     "mediation.vectors.json": {
       "source": "test-vectors/mediation.json",
-      "sha256": "813b0f18acc07fc6a3a29f0861d510c4f106ea0760da2b3b8e35ce4320fd16b1"
+      "sha256": "7bf4a8fdf635f1ff813fd8dcceb74f6fcf1e543cada0dd68a297bd180bcc1fd5"
     }
   },
   "capabilities": [

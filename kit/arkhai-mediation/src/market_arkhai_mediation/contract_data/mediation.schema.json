@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/arkhai-io/arkhai-payments/schema/mediation.schema.json",
+  "$id": "urn:arkhai:mediation:v1",
   "title": "arkhai.mediation.v1 wire contract",
   "$defs": {
     "AccountId": {
@@ -471,6 +471,11 @@
         "dispute": {
           "$ref": "#/$defs/DisputeAuthority"
         },
+        "contact": {
+          "type": "string",
+          "pattern": "^(?:mailto:|https:)",
+          "description": "Where parties can reach the authority's people; a mailto: or https: URI."
+        },
         "payment_mechanisms": {
           "minItems": 1,
           "type": "array",
@@ -517,6 +522,7 @@
       },
       "required": [
         "dispute",
+        "contact",
         "payment_mechanisms",
         "minimum_dispute_window_seconds",
         "minimum_case_hold_max_seconds",
@@ -1596,6 +1602,27 @@
       "additionalProperties": false,
       "description": "The record key and origin pinned by an Agreement remain valid and reachable for the life of the deal, its dispute window, and as long as any case remains open."
     },
+    "RecordWebhook": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "record.appended"
+        },
+        "timestamp": {
+          "$ref": "#/$defs/MediationTime"
+        },
+        "data": {
+          "$ref": "#/$defs/SignedRecordEntry"
+        }
+      },
+      "required": [
+        "type",
+        "timestamp",
+        "data"
+      ],
+      "additionalProperties": false
+    },
     "Request": {
       "oneOf": [
         {
@@ -1887,6 +1914,75 @@
       ],
       "additionalProperties": false,
       "description": "Evidence for an operator, not a filing refusal. No automatic delivery-end effects can be inferred."
+    },
+    "WebhookEndpoint": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/WebhookEndpointId"
+        },
+        "url": {
+          "$ref": "#/$defs/WebhookUrl"
+        }
+      },
+      "required": [
+        "id",
+        "url"
+      ],
+      "additionalProperties": false
+    },
+    "WebhookEndpointCreated": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/WebhookEndpointId"
+        },
+        "url": {
+          "$ref": "#/$defs/WebhookUrl"
+        },
+        "secret": {
+          "$ref": "#/$defs/WebhookSecret"
+        }
+      },
+      "required": [
+        "id",
+        "url",
+        "secret"
+      ],
+      "additionalProperties": false
+    },
+    "WebhookEndpointId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "WebhookEndpointRequest": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "$ref": "#/$defs/WebhookUrl"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "additionalProperties": false
+    },
+    "WebhookEndpoints": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/WebhookEndpoint"
+      }
+    },
+    "WebhookSecret": {
+      "type": "string",
+      "pattern": "^whsec_[A-Za-z0-9+/]{43}=$"
+    },
+    "WebhookUrl": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "pattern": "^https?:\\/\\/[^\\s]+$",
+      "description": "HTTPS receiver URL; development permits HTTP loopback only."
     },
     "WindowSeconds": {
       "type": "integer",

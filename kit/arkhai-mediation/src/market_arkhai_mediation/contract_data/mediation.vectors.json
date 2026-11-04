@@ -65245,6 +65245,7 @@
         "procedure": "optimistic"
       }
     },
+    "contact": "mailto:mediation@example.test",
     "payment_mechanisms": [
       "arkhai.payments.v1"
     ],
@@ -66605,6 +66606,16 @@
       }
     }
   ],
+  "webhook": {
+    "fixture_notice": "Public deterministic test fixture: the webhook key is 32 bytes of 0x09; never use it on a public network.",
+    "secret": "whsec_CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=",
+    "body": "{\"type\":\"record.appended\",\"timestamp\":1800001800,\"data\":{\"entry\":{\"agreement\":\"dcded4ec8138615e43086c55a5810749670d83dffd81625389f937130c9e58b2\",\"transaction\":\"adb61762c4165c8810f25ab7fc752cafb2dad5372fc6c2874f298d51d76fae7e\",\"case_ref\":\"case-vector-1\",\"sequence\":1,\"record_ref\":\"record-vector-1\",\"actor\":\"22222222-2222-4222-8222-222222222222\",\"at\":1800001800,\"parts\":[{\"part\":0,\"status\":\"held\",\"extension_ref\":1},{\"part\":1,\"status\":\"held\",\"extension_ref\":2}],\"issuer\":{\"scheme\":\"ed25519\",\"identifier\":\"6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\"},\"kind\":\"filed\",\"filing\":{\"transaction\":\"adb61762c4165c8810f25ab7fc752cafb2dad5372fc6c2874f298d51d76fae7e\",\"agreement\":{\"seller\":{\"scheme\":\"ed25519\",\"identifier\":\"6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\"},\"start_utc\":\"2027-01-15T08:00:00Z\",\"duration_seconds\":3600,\"settlement\":{\"price\":{\"asset\":\"USD/6\",\"rates\":[{\"field\":\"amount\",\"per\":\"hour\",\"value\":\"7200\"}]},\"settlement\":{\"schema\":\"arkhai.payments.v1\"},\"lifecycle\":{\"adjudication\":{\"version\":1,\"dispute\":{\"interface\":\"arkhai.mediation.v1\",\"origin\":\"https://mediation.example\",\"account\":\"33333333-3333-4333-8333-333333333333\",\"record_key\":\"ed25519:6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\",\"params\":{\"procedure\":\"optimistic\"}},\"dispute_window_seconds\":1209600,\"case_hold_max_seconds\":null}}}},\"request\":{\"kind\":\"delivery_end\",\"ended_at\":1800001800,\"delivered\":true,\"cause\":\"payee\"},\"claim\":\"End delivery with the agreed self-penalty.\",\"items\":[{\"kind\":\"statement\",\"producer\":\"22222222-2222-4222-8222-222222222222\",\"at\":1800001800,\"sha256\":\"d66d5644df6a47c417797c7ac5b11ef31d7dc8c88c3eca6c82fcfb115ab5b1e6\",\"bytes\":\"U2VsbGVyIHN0YXRlbWVudDogaGFyZHdhcmUgZmFpbGVkLgo\"}]}},\"proof\":{\"scheme\":\"ed25519\",\"value\":\"A_p8hi2JfQckFl8cjBd6BK6nHNWKL9xd1wzukyyPtfp6LWmotH7B1qsjcZ1MuNovhHBuoDvq5ACJT7fg7bwhDQ\"}}}",
+    "headers": {
+      "webhook-id": "record-vector-1",
+      "webhook-timestamp": "1800001800",
+      "webhook-signature": "v1,yv6mBgL3GSg039yOby3dfr3GBcVVk0isvOjtK1AYf6w="
+    }
+  },
   "respondent": {
     "request": {
       "after": "",
