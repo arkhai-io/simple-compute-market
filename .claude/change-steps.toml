@@ -1,5 +1,5 @@
 # The skill and permissions of each step of an OpenSpec change when it runs
-# unattended, through scripts/run_change_step.py.
+# unattended, through `scripts/change-workflow start --unattended`.
 #
 # An unattended run uses Claude Code's `dontAsk` permission mode with only the
 # project's settings loaded: a tool call no `allow` rule names is denied and
@@ -7,7 +7,7 @@
 # not given ends `stopped` instead of waiting on a prompt nobody will answer. A
 # chained command runs only when every command in it is allowed. `deny`
 # rules win over `allow` rules; they are the "never" lines of each step's skill,
-# and a push other than the guarded `make push-branch` is denied to every step.
+# and a push other than the guarded `scripts/change-workflow push` is denied to every step.
 #
 # Interactive runs of a step do not read this file: the owner's own permission
 # settings apply to them, with prompts. A step's permissions change here, by the
@@ -25,15 +25,13 @@
 [common]
 allow = [
   "Read", "Glob", "Grep", "Skill",
-  "Bash(python3 scripts/find_change.py --records *)", "Bash(scripts/change-workflow find*)",
+  "Bash(scripts/change-workflow find*)",
   "Bash(git status*)", "Bash(git log*)", "Bash(git diff*)", "Bash(git show*)",
   "Bash(git rev-parse*)", "Bash(git branch --show-current)", "Bash(git ls-files*)",
   "Bash(git merge-base*)", "Bash(git check-ignore*)",
-  "Bash(python3 scripts/find_change.py*)", "Bash(python3 scripts/change_next_step.py*)", "Bash(make change-cost*)",
   "Bash(scripts/change-workflow next*)", "Bash(scripts/change-workflow cost*)",
-  "Bash(python3 scripts/run_change_step.py log*)", "Bash(scripts/change-workflow log*)",
+  "Bash(scripts/change-workflow log*)",
   "Bash(scripts/change-workflow record*)",
-  "Bash(make round-view-closed*)", "Bash(make check-change-index)",
   "Bash(scripts/change-workflow check round-view)", "Bash(scripts/change-workflow check index)",
   "Bash(openspec validate *)", "Bash(openspec instructions *)", "Bash(openspec list*)",
   "Bash(openspec show *)", "Bash(openspec status*)",
@@ -113,7 +111,7 @@ allow = [
   "Read(../*-proposal/**)",
   "Edit(../*-proposal/openspec/**)", "Edit(../*-proposal/docs/development/ROADMAP.md)",
   "Bash(helm version*)",
-  "Bash(git add *)", "Bash(git commit *)", "Bash(make push-branch)", "Bash(scripts/change-workflow push)",
+  "Bash(git add *)", "Bash(git commit *)", "Bash(scripts/change-workflow push)",
 ]
 
 # Planning resumes the design step's session, which holds the design's context.
@@ -125,7 +123,7 @@ allow = [
   "Edit(openspec/**)", "Edit(docs/**)",
   "Bash(bunx @fission-ai/openspec@1.14.0 *)",
   "Bash(npx --yes @fission-ai/openspec@1.14.0 *)", "Bash(npx -y @fission-ai/openspec@1.14.0 *)", "Bash(make check-*)",
-  "Bash(git add *)", "Bash(git commit *)", "Bash(make push-branch)", "Bash(scripts/change-workflow push)",
+  "Bash(git add *)", "Bash(git commit *)", "Bash(scripts/change-workflow push)",
 ]
 
 # Triage fixes what the owner accepts and commits it, so it has implementation's
@@ -140,7 +138,7 @@ allow = [
   "Bash(make test*)", "Bash(make -C * test*)", "Bash(make lock*)", "Bash(make dist*)",
   "Bash(make reinit*)", "Bash(uv run pytest *)",
   "Bash(uv run --no-project --with pytest pytest *)", "Bash(uv sync*)",
-  "Bash(git add *)", "Bash(git commit *)", "Bash(git rm *)", "Bash(make push-branch)", "Bash(scripts/change-workflow push)",
+  "Bash(git add *)", "Bash(git commit *)", "Bash(git rm *)", "Bash(scripts/change-workflow push)",
   "Bash(git pull --ff-only workspace *)",
   "Bash(make -C * dist*)", "Bash(make init*)", "Bash(make -C * init*)", "Bash(make validate-*)",
   "Bash(helm version*)",
@@ -158,7 +156,7 @@ allow = [
   "Bash(make dist*)", "Bash(make -C * dist*)", "Bash(make reinit*)", "Bash(uv run pytest *)",
   "Bash(uv run --no-project --with pytest pytest *)", "Bash(uv sync*)",
   "Bash(git add *)", "Bash(git commit *)", "Bash(git mv *)", "Bash(git rm *)",
-  "Bash(make typecheck*)", "Bash(make push-branch)", "Bash(scripts/change-workflow push)", "Bash(make helm-values-schema)",
+  "Bash(make typecheck*)", "Bash(scripts/change-workflow push)", "Bash(make helm-values-schema)",
   "Bash(git pull --ff-only workspace *)",
   "Bash(make init*)", "Bash(make -C * init*)", "Bash(make validate-*)", "Bash(helm version*)",
 ]
@@ -171,9 +169,9 @@ skill = "change-validate"
 models = [{ harness = "claude", model = "claude-sonnet-5-5", effort = "medium" }]
 allow = [
   "Edit(openspec/changes/**/reviews/*-validation.md)",
-  "Bash(make validate-*)", "Bash(make check-push-ready)", "Bash(scripts/change-workflow check push)",
+  "Bash(make validate-*)", "Bash(scripts/change-workflow check push)",
   "Bash(make check-uv-version)",
-  "Bash(make push-branch)", "Bash(scripts/change-workflow push)",
+  "Bash(scripts/change-workflow push)",
   "Bash(make run-e2e)", "Bash(make run-ci *)", "Bash(make fetch-e2e-logs*)",
   "Bash(make dist-clean)",
   "Bash(gh run list*)", "Bash(gh run view *)", "Bash(gh auth status*)",
@@ -199,7 +197,7 @@ allow = [
   "Bash(make dist*)", "Bash(make -C * dist*)", "Bash(make reinit*)", "Bash(uv run pytest *)",
   "Bash(uv run --no-project --with pytest pytest *)", "Bash(uv sync*)",
   "Bash(git add *)", "Bash(git commit *)", "Bash(git mv *)", "Bash(git rm *)",
-  "Bash(make typecheck*)", "Bash(make push-branch)", "Bash(scripts/change-workflow push)", "Bash(make helm-values-schema)",
+  "Bash(make typecheck*)", "Bash(scripts/change-workflow push)", "Bash(make helm-values-schema)",
   "Bash(make init*)", "Bash(make -C * init*)", "Bash(make validate-*)", "Bash(helm version*)",
 ]
 deny = ["Bash(make run-e2e*)", "Bash(git merge --abort*)", "Bash(git merge --quit*)"]
@@ -215,7 +213,7 @@ allow = [
   "Bash(bunx @fission-ai/openspec@1.14.0 *)",
   "Bash(npx --yes @fission-ai/openspec@1.14.0 *)", "Bash(npx -y @fission-ai/openspec@1.14.0 *)", "Bash(openspec archive *)",
   "Bash(make check-*)", "Bash(python3 scripts/check_*)", "Bash(scripts/change-workflow check *)",
-  "Bash(git add *)", "Bash(git commit *)", "Bash(make push-branch)", "Bash(scripts/change-workflow push)",
+  "Bash(git add *)", "Bash(git commit *)", "Bash(scripts/change-workflow push)",
 ]
 
 # Archive cleanup drafts the pull request; the orchestrating session opens it.
@@ -226,8 +224,8 @@ allow = [
   "Edit(openspec/changes/README.md)",
   "Edit(openspec/changes/archive/*/reviews/pull-request.md)",
   "Edit(openspec/changes/archive/*/interventions.jsonl)",
-  "Bash(make check-*)", "Bash(git add *)", "Bash(git commit *)", "Bash(make push-branch)", "Bash(scripts/change-workflow push)",
-  "Bash(make change-history*)", "Bash(scripts/change-workflow history*)",
+  "Bash(make check-*)", "Bash(git add *)", "Bash(git commit *)", "Bash(scripts/change-workflow push)",
+  "Bash(scripts/change-workflow history*)",
   "Bash(make -C helm teardown*)",
   "Bash(make record-capacity*)",
 ]

@@ -93,9 +93,13 @@ def test_no_step_writes_through_the_diff_familys_output(reading: str, writing: s
         assert _allows(rules, reading) and not _allows(rules, writing), name
 
 
-def test_every_step_may_run_the_cost_report() -> None:
-    assert all(_allows(rules, f"make change-cost CHANGE={CHANGE}")
-               for rules in load_steps().values())
+def test_no_rule_names_a_make_target_the_command_stands_behind() -> None:
+    """The fragment's targets carry no promise and a step reaches the workflow through
+    the command, so no step's rules name the targets the command stands behind."""
+    for name, rules in load_steps().items():
+        for command in (f"make change-cost CHANGE={CHANGE}", "make round-view-closed",
+                        "make push-branch", f"make change-history CHANGE={CHANGE}"):
+            assert not _allows(rules, command), (name, command)
 
 
 @pytest.mark.parametrize("models,problem", [
@@ -121,9 +125,9 @@ def test_a_row_naming_models_the_policy_forbids_is_refused(
     assert "triage row" in str(refused.value)
 
 
-PUSHES = ["git push origin HEAD", "make push-branch", "uv run git push",
+PUSHES = ["git push origin HEAD", "scripts/change-workflow push", "uv run git push",
           "uv run bash -c 'git push'", "make run-e2e", "docker push registry/image",
-          "helm push chart.tgz oci://registry", "make push-branch FORCE=1",
+          "helm push chart.tgz oci://registry", "scripts/change-workflow push --force",
           "git -C ../workspace push"]
 COMMITTING = {"design", "plan", "implement", "triage", "merge", "closeout", "archive-cleanup"}
 
@@ -134,8 +138,9 @@ def test_each_committing_step_pushes_only_through_the_guarded_push() -> None:
     for name, rules in load_steps().items():
         assert "Bash(git push*)" in rules.deny
         allowed = [command for command in PUSHES if _allows(rules, command)]
-        assert allowed == (["make push-branch", "make run-e2e"] if name == "validate"
-                           else ["make push-branch"] if name in COMMITTING
+        assert allowed == (["scripts/change-workflow push", "make run-e2e"]
+                           if name == "validate"
+                           else ["scripts/change-workflow push"] if name in COMMITTING
                            else []), name
 
 
@@ -170,10 +175,8 @@ def test_no_step_runs_git_in_another_checkout() -> None:
         assert not _allows(rules, "git -C ../workspace log --oneline"), name
 
 
-def test_every_step_may_check_that_no_round_view_is_open() -> None:
+def test_no_step_may_open_or_close_a_round_view_by_its_make_target() -> None:
     for name, rules in load_steps().items():
-        assert _allows(rules, "make round-view-closed"), name
-        assert _allows(rules, "make round-view-closed CHANGE=x"), name
         assert not _allows(rules, "make round-view CHANGE=x"), name
         assert not _allows(rules, "make round-done"), name
 

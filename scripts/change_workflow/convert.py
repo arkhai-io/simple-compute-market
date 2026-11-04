@@ -37,7 +37,9 @@ triage whose interactive session closed before it recorded its outcome cannot be
 told from a finished one in the older format, whose words may begin the same way. A
 change already in the format is refused, and so is one with a triage in progress —
 a triage file holding neither `## Next` nor `## Gate` that no recorded outcome
-names — writing nothing.
+names — writing nothing. A log holding a line of a newer format is refused before
+anything else is read of it: a later engine wrote it, and nothing converts a log
+backwards.
 
 Contract: openspec/specs/change-workflow/spec.md, "The next step is computed from the
 files".
@@ -53,14 +55,14 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from . import graph
-from .common import ORCHESTRATOR, Clock, Entry, StepError, utc_now
+from .common import FORMAT, ORCHESTRATOR, Clock, Entry, StepError, utc_now
 from .find import ChangeNotFound
 from .graph import (IMPLEMENTATION_TRIAGE, PRE_CLOSEOUT_REVIEW, STEPS, VALIDATE, Node,
                     TargetError, entry_refusal, node_of)
-from .log import FORMAT, decision_line, log_path, numbered, ran, replace_log, unmarked
+from .log import (CONVERSION, decision_line, log_path, numbered, older, ran, refuse_newer,
+                  replace_log)
 from .next_step import EXIT, Computation, Record, Route, target_label
 
-CONVERSION = "convert"
 # The target a returned outcome's `return_to`, the phase it returns to, names.
 _RETURN_STEP = {"design": "design", "planning": "plan", "implementation": "round"}
 
@@ -177,10 +179,12 @@ def conversion(entries: Sequence[Entry], computation: Computation,
                clock: Clock = utc_now) -> Conversion:
     """The conversion of the log whose lines are `entries`, for the change
     `computation` has read; its state's log becomes the converted one, so its
-    guards read it. Refused, naming why, for a change already in the format, or
-    with a triage in progress."""
+    guards read it. Refused, naming why, for a log holding a line of a newer format,
+    which is never converted backwards; for a change already in the format; or with
+    a triage in progress."""
     state = computation.state
-    if unmarked(entries) is None and (entries or not state.records):
+    refuse_newer(f"{state.change}'s workflow log", entries)
+    if older(entries) is None and (entries or not state.records):
         raise StepError(f"{state.change}'s records are in the workflow log's format already: "
                         "there is nothing to convert")
     attested = _attested(entries)

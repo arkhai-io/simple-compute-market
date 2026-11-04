@@ -257,7 +257,7 @@ def test_implementation_is_given_its_sections(tmp_path: Path) -> None:
                 root=tmp_path, wrapper=make_wrapper(tmp_path, claude)) == 0
 
     assert claude.commands[0][2] == f"/change-implement {CHANGE} sections 1-3"
-    assert read_log(log_path(tmp_path, CHANGE))[0]["sections"] == [1, 2, 3]
+    assert read_log(log_path(tmp_path, CHANGE))[-1]["sections"] == [1, 2, 3]
 
 
 def test_the_command_continues_a_named_implementation_session(
@@ -275,7 +275,9 @@ def test_the_command_continues_a_named_implementation_session(
 
     assert claude.commands[1][2] == f"/change-implement {CHANGE} section 8B"
     assert option(claude.commands[1], "--resume") == "i-1"
-    assert read_log(log_path(tmp_path, CHANGE))[1]["continues"] == 1
+    first, continued = [entry for entry in read_log(log_path(tmp_path, CHANGE))
+                        if entry["step"] == "implement"]
+    assert continued["continues"] == first["seq"]
     assert "no implementation run of session other" in capsys.readouterr().err
 
 
@@ -303,7 +305,7 @@ def test_a_fresh_run_is_granted_each_rule_its_allow_values_hold(tmp_path: Path) 
 
     rules = ["Bash(gh run download *)", "Bash(make lock)", "Bash(helm version)"]
     assert option_rules(claude.commands[0], "--allowedTools")[-3:] == rules
-    assert read_log(log_path(tmp_path, CHANGE))[0]["granted"] == rules
+    assert read_log(log_path(tmp_path, CHANGE))[-1]["granted"] == rules
 
 
 def test_a_resumed_run_splits_its_allow_values_too(tmp_path: Path) -> None:

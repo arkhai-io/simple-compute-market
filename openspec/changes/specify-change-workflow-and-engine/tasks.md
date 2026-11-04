@@ -599,31 +599,126 @@ Touches `.claude/change-steps.toml` (the orchestrator's),
 `scripts/change_workflow/log.py`, `next_step.py`, `find.py`, `convert.py`, `cli.py`,
 `outcome.py`, `.agents/change-outcome.schema.json`, and `scripts/tests/`.
 
-- [ ] 4.1 The orchestrator's, before the session starts, on the owner's word:
+- [x] 4.1 The orchestrator's, before the session starts, on the owner's word:
       `.claude/change-steps.toml` drops the rules naming the removed scripts and
       make targets section 3 moved, keeping the command's.
-- [ ] 4.2 `next`'s data output and `find --json` carry `format`; the outcome
+      Done by the orchestrator, in the worktree as the session started, with the
+      table's header comment naming the command and its guarded push; committed
+      with the section. `test_change_workflow_steps.py` (unit, the real table read)
+      follows: the push test names `scripts/change-workflow push`, and a new test
+      shows no step's rules allow `make change-cost`, `make round-view-closed`,
+      `make push-branch`, or `make change-history`. `make check-change-index` and
+      `make check-push-ready` stay reachable through `make check-*`, which design,
+      planning, and closeout hold for checks of their own.
+- [x] 4.2 `next`'s data output and `find --json` carry `format`; the outcome
       schema's `$id` states the format it belongs to (D8; CW-x7jd).
-- [ ] 4.3 Reading a log: a line with no `format`, or a lower one, is older, named
+      `FORMAT` moved to `common`, since `find` cannot import `log`. `next`'s JSON
+      begins with `format` (added by `next_step.main`, so `compute`'s results and
+      the plain form are unchanged); `find.found` adds it last. The schema's `$id`
+      is `urn:change-workflow:change-outcome:format:2`; `outcome.load_schema`
+      refuses a schema whose `$id` states another format or none, and
+      `harness_schema` leaves the `$id` out of what Claude Code is given, as it
+      constrains nothing a step writes.
+- [x] 4.3 Reading a log: a line with no `format`, or a lower one, is older, named
       to the owner with `convert` as today; a higher one is refused, naming it, by
       the computation and by `convert`, which rewrites nothing. With no log, or an
       empty one, numbered records are older and a ledger alone, or nothing, is read
       in the reader's format (D8; CW-x7jd's scenarios; CW-k6qa's second).
-- [ ] 4.4 `start` ensures the change's log exists and appends a line carrying the
+      `log.older` replaces `unmarked`, and `log.newer` finds a higher format or a
+      mark that is no whole number (a string, a boolean), which is refused rather
+      than converted backwards. The computation refuses a newer log right after
+      reading it, before a branch decision is read, as `unclassified` (exit 1, the
+      reason on standard error), as it refuses an unknown change, and so during a
+      merge in progress, ahead of the merge's waiting run. `convert` refuses one before anything else,
+      shown or confirmed. Beyond the plan, the log's appender refuses a newer log
+      too (`NewerFormat`), so no line of this format follows one. The engine reads
+      no ledger, so a ledger alone was already read in the reader's format; a test
+      pins it.
+- [x] 4.4 `start` ensures the change's log exists and appends a line carrying the
       format before any step it starts runs, interactive or unattended; the
       computation routes on no such line (D8; CW-k6qa).
-- [ ] 4.5 The computation, the outcome check, and the log's writer report a node or
+      `log.open_log`, called by `cli.start` after its refusals and the round-view
+      check, before the session or the wrapper: `{"step": "start", "outcome":
+      "opened", "starts": <step>, "interactive": …}`. `start orchestrate` opens no
+      log, since the orchestrating session is no step. Decided within D8: `start`
+      refuses, writing nothing, records of an older format (a log with an older
+      line, or numbered records and no line), naming `convert`, since the opening
+      line would mark them current; and a newer log. An unattended start the
+      wrapper refuses after the opening (an unknown `--session`, say) leaves its
+      opening line: the line marks the format, not a run.
+- [x] 4.5 The computation, the outcome check, and the log's writer report a node or
       kind the graph does not declare by name and route on no line after it (D7;
       CW-9fbu's first scenario).
-- [ ] 4.6 Tests, unit: the format on `next` and `find --json` and in the schema's
+      `log.undeclared` names a line's step no node runs, a review's kind no node is
+      (none included), or an exit or owner's direction naming no node; the
+      conversion and opening lines are known. The computation checks every line of
+      the current format (an older one is the conversion's) right after the
+      newer-format refusal, before `locate` reads a branch decision, and at the
+      first undeclared one names the owner, the line's seq and what it names in the
+      reason, and routes on nothing, earlier lines included; a merge's waiting run
+      is not named past one either. The result adds no field, so `next`'s output
+      gains none. `record_outcome` refuses an undeclared line, so a review of an
+      unknown kind is refused; the outcome check and directions already named an
+      unknown node. The kinds are read from the graph's `NODES` at call time
+      (`graph.review_phase`) in `log.standing` and `outcome.triaged_problems`,
+      which used the `KINDS` tuple.
+- [x] 4.6 Tests, unit: the format on `next` and `find --json` and in the schema's
       `$id`; an older, a current, and a newer log, read and converted; a log with
       only a ledger beside it, and none; `start`'s opening line, interactive and
       unattended, and the computation ignoring it; an unknown node in an exit and a
       kind added to `graph` accepted with no other list edited.
-- [ ] 4.7 Verification: the section's tests, unit; `make test-release-tooling`;
+      In `test_change_workflow_log.py`: older and newer lines, the appender's
+      refusal, `undeclared`'s cases, a review of an unknown kind refused, the
+      opening line, a ledger alone opened, older and newer records not opened; and
+      a review kind added to the graph by putting a node in `graph.NODES`, the index
+      of the table's declarations (through `monkeypatch.setitem`), then accepted by
+      the writer, the outcome check, and the triage check. That shows those readers
+      take the kinds from the graph at call time; it does not reach `review --kind`
+      and `review.run_review`, which check `graph.KINDS`, a tuple derived from the
+      table at import, so they follow an edit of the table but not this patch. In
+      `test_change_next_step.py`: an empty log beside records is older, a ledger
+      with no log is not, a newer log refused in the result, on the command line,
+      and during a merge, `format` first in the output, an exit to an undeclared
+      node routing no later line, an undeclared line named before a branch decision
+      the checkout would match, and an unknown step, kind, and direction. In
+      `test_change_workflow_convert.py`: a newer log refused, shown or confirmed,
+      the log unchanged. In `test_change_workflow_cli.py`: the opening line before
+      an interactive session (read by the injected launcher) and before an
+      unattended run, the computation reading a log of the opening line alone as no
+      log and routing past a later one, `start` refusing older and
+      newer records and launching nothing, and `find --json`'s `format`. In
+      `test_change_workflow_outcome.py`: the `$id`'s format, and schemas stating
+      another or none refused. Three tests of `start --unattended` in
+      `test_change_workflow_cli_steps.py` read the run's line, not the opening one.
+- [x] 4.7 Verification: the section's tests, unit; `make test-release-tooling`;
       `make test`; `make check-change CHANGE=specify-change-workflow-and-engine`,
       failing only on the citations of files a later section creates. End-to-end:
       none, and none is owed.
+      Evidence: the section's suites — `test_change_workflow_log.py`,
+      `test_change_next_step.py`, `test_change_workflow_convert.py`,
+      `test_change_workflow_cli.py`, `test_change_workflow_outcome.py`,
+      `test_change_workflow_cli_steps.py`, `test_change_workflow_steps.py`, and
+      `test_workflow_command.py` (unit; real files in a temporary directory, the
+      command's `start` and `find` against temporary Git repositories, the real
+      step table read) — 682 passed after the fresh-context check's fixes; the
+      scripts suite (`scripts/tests`, as `make test-release-tooling` runs it), 2049
+      passed; `make test` passed before those fixes and again after them;
+      `make check-packaging` passed; `make check-change` failed only on
+      `check-doc-citations`, every miss a file a later section creates, with
+      comment hygiene passing. No typing check covers `scripts/`.
+
+Notes for the next session. The fresh-context check's findings were fixed but two:
+declined, the opening line written before the wrapper's own refusals, since moving
+it into `Wrapper.run` would add a line to every wrapper test's log for a run that
+never started either way, and the line creates no record the computation reads as
+one (a workspace's `reviews/` holding only a log already exists wherever a step was
+recorded there); and kept, with its reach stated in 4.6, the `graph.NODES` patch
+standing for a kind added to the table, since the table is a module constant with no
+seam and reloading the package around a rebuilt table would test the import machinery
+more than the readers. `records.RECORD` is now the one numbered-record pattern;
+`next_step` imports it as `_RECORD_FILE`, as its own `RECORD` is the `record`
+command's text. The section owes no evidence only a push produces, and no end-to-end
+scenario exercises it.
 
 ## 5. The index check, and the companion's two names
 

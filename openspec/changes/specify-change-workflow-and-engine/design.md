@@ -286,6 +286,12 @@ a node or kind it does not know reports it by name rather than routing, and the
 target shape admits new values of `step` and `kind`, so a later extension is
 additive.
 
+Settled in implementation (section 4): the next-step computation names the owner at
+the first line of the current format naming a step, node, or kind the graph does not
+declare, before it reads any branch decision, and routes on no line at all, earlier
+ones included; the log's writer refuses such a line, a review with no kind among
+them.
+
 Rejected: extension by declaration in a repository's configuration, which would
 turn the code table into data with no caller; treating the graph as internal,
 which its presence in every outcome and log rules out.
@@ -319,6 +325,15 @@ reader's format, and `change-workflow`'s `README.md` names the case in "Current
 limits" — an older release reading a newer slash-command-only change's ledger
 cannot tell it is newer. The session's closing `record` ends the case, since the
 log it opens then governs the ledger.
+
+What follows from these rules, settled in implementation (section 4): `start` refuses
+records of an older format — a log holding an older line, or numbered records with no
+line logged — naming `convert`, since its opening line would otherwise mark them
+current, and refuses a newer log; the log's appender refuses a newer log, so no line
+of this format follows one; the next-step computation refuses a newer log as it
+refuses an unknown change, exit 1 with the reason on standard error; and `start
+orchestrate` opens no log, since the orchestrating session is no step. A mark that is
+no whole number is read as newer, never converted backwards.
 
 The step table is
 provisional and unversioned; the change index and the task list are public inputs

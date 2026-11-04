@@ -35,7 +35,7 @@ import sys
 from pathlib import Path
 from typing import Callable, Sequence
 
-from .common import CHANGES, StepError, repository_root
+from .common import CHANGES, FORMAT, StepError, repository_root
 
 ARCHIVE = CHANGES / "archive"
 REVIEWS = "reviews"
@@ -134,12 +134,14 @@ def find_records(root: Path, name: str,
 
 def found(root: Path, name: str, directory: Path) -> dict[str, object]:
     """The change as `--json` prints it, for a program to read: its name, its
-    directory relative to the repository, whether it is archived, and its records
-    directory in this checkout, or None when this checkout holds none."""
+    directory relative to the repository, whether it is archived, its records
+    directory in this checkout, or None when this checkout holds none, and the
+    record-set format this engine reads and writes them in."""
     records = records_directory(root, name)
     return {"name": name, "directory": directory.relative_to(root).as_posix(),
             "archived": is_archived(root, directory),
-            "records": records.relative_to(root).as_posix() if records is not None else None}
+            "records": records.relative_to(root).as_posix() if records is not None else None,
+            "format": FORMAT}
 
 
 def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:

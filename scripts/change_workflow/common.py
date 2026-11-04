@@ -1,6 +1,6 @@
-"""What every part of the workflow tooling shares: the repository it acts on, its
-error, and its clock. The steps and review kinds it knows are the graph's
-(`graph.STEPS`, `graph.KINDS`)."""
+"""What every part of the workflow tooling shares: the repository it acts on, the
+format of a change's record set, its error, and its clock. The steps and review
+kinds it knows are the graph's (`graph.STEPS`, `graph.KINDS`)."""
 
 from __future__ import annotations
 
@@ -11,6 +11,12 @@ from typing import Any, Callable
 
 CHANGES = Path("openspec/changes")
 ORCHESTRATOR = "orchestrator"
+# The format of a change's record set: the workflow log's lines and the outcomes
+# and decisions they hold, the records' layout and names, the fields read from
+# records, and, where a log exists, the ledger's lines. Every log line carries it,
+# and so do `next`'s and `find --json`'s outputs and the outcome schema's `$id`; it
+# moves when any of them changes incompatibly, with a command converting the older.
+FORMAT = 2
 
 Clock = Callable[[], datetime]
 Entry = dict[str, Any]

@@ -184,6 +184,21 @@ def test_a_change_already_converted_is_refused(tmp_path: Path) -> None:
     assert _log(root).read_text("utf-8") == converted
 
 
+@pytest.mark.parametrize("confirm", [False, True])
+def test_a_log_of_a_newer_format_is_refused_and_nothing_rewritten(tmp_path: Path,
+                                                                    confirm: bool) -> None:
+    root = _repository(tmp_path)
+    _design_reviewed(root)
+    _older(root, {"format": FORMAT + 1, "step": "design", "outcome": "question",
+                  "message": "m", "awaiting": "a"})
+    before = _log(root).read_text("utf-8")
+
+    with pytest.raises(StepError, match=f"format {FORMAT + 1} at seq 7"):
+        _convert(root, confirm=confirm)
+
+    assert _log(root).read_text("utf-8") == before
+
+
 def test_a_change_is_converted_with_a_triage_in_progress(tmp_path: Path) -> None:
     root = _repository(tmp_path)
     _design_reviewed(root)

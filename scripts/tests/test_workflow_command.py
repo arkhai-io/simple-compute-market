@@ -37,7 +37,7 @@ def _stand_in(tmp_path: Path, script: str) -> Path:
 def test_a_change_is_found_with_the_fields_a_program_reads(checkout: Path) -> None:
     assert found_change(checkout, "shape-bounds") == {
         "name": "shape-bounds", "directory": "openspec/changes/shape-bounds",
-        "archived": False, "records": None}
+        "archived": False, "records": None, "format": 2}
 
 
 def test_a_refusal_carries_the_commands_reason(checkout: Path) -> None:

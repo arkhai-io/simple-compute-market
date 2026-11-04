@@ -29,8 +29,9 @@ log, and whether a round view is open, and prints one JSON object:
   map, a validation that did not pass, a prerequisite to land, a failed bootstrap,
   a change whose records are in the workspace but whose branch is not, an exit its
   node does not declare (`choice`, and the node's `exits`), an exit whose target
-  cannot be entered, or a change whose records predate the log's format, with the
-  command that converts them (`convert`); for a waiting run, its `seq` — a question
+  cannot be entered, a change whose records predate the log's format, with the
+  command that converts them (`convert`), or a log line naming a step, node, or kind
+  the graph does not declare; for a waiting run, its `seq` — a question
   or a stop is resumed by it; for a guard on an exit no step can satisfy, the exit
   as `target`;
 - `{"step": "done", …}` for an archived change, or once archive cleanup names it;
@@ -51,9 +52,13 @@ round's join is read from the records its members supply (`graph.ROUND_JOIN`). A
 review's triage file routes nothing: a review whose triage file exists while no
 triage outcome, and no conversion line, names it is a triage in progress.
 
-Every line the workflow tooling appends to a log carries the log's format marker. A
-change whose log holds a line without it, or that has numbered records and no log,
-is routed on none of them: the owner converts its records first.
+The JSON object printed begins with `format`, the record set's format this computation
+reads (`common.FORMAT`). Every line the workflow tooling appends to a log carries
+it. A change whose log holds a line of an older format — none, or a lower one — or
+that has numbered records and no log, is routed on none of them: the owner converts
+its records first. A log holding a line of a newer format is refused, naming it,
+before anything of it is read. A line naming what the graph does not declare names
+the owner, and nothing is routed on.
 
 The files hold the change's state and the log its route. A status set back by hand
 behind the log's last step is followed: the computation names the node its phase
@@ -93,19 +98,19 @@ from .clone import DEFAULT_FROM
 from .clone import FAILED as BOOTSTRAP_FAILED
 from .clone import RUNNING as BOOTSTRAP_RUNNING
 from .clone import Bootstrap, bootstrap_state, clone_of, default_branch, workspace_of
-from .common import ORCHESTRATOR, StepError, repository_root
+from .common import FORMAT, ORCHESTRATOR, StepError, repository_root
 from .find import ChangeNotFound, change_directory, is_archived
 from .graph import (CLOSEOUT, CLOSEOUT_REVIEW, DESIGN, DONE, IMPLEMENTATION_REVIEW,
                     IMPLEMENTATION_TRIAGE, MERGE, PHASES, ROUND, ROUND_JOIN, ROUND_VIEW, STEPS,
                     VALIDATE, Join, Node, Standing, TargetError, entry_refusal, node_of)
 from .graph import owner as _owner
 from .index import INDEX, Row, index_rows
-from .log import LOG, branch_decisions, log_path, ran, read_log, standing, unmarked
-from .records import (ChangedSince, changed_since, is_documentation, is_record,
+from .log import (LOG, NewerFormat, branch_decisions, log_path, older, ran, read_log,
+                  refuse_newer, standing, undeclared)
+from .records import (RECORD as _RECORD_FILE, ChangedSince, changed_since, is_documentation, is_record,
                       latest_validation, validation_problem, validation_result)
 from .round_view import RoundError, View, open_view
 
-_RECORD = re.compile(r"^(?P<number>\d+)-(?P<kind>[a-z-]+)\.md$")
 # A record as a triage's outcome names it, its file's name without `.md`.
 _RECORD_NAME = re.compile(r"^(?P<number>\d+)-(?P<kind>[a-z-]+)$")
 _REVIEWED_COMMIT = re.compile(r"<!-- reviewed-commit: (\S+) -->")
@@ -287,7 +292,7 @@ class Pass:
 def read_records(reviews: Path) -> list[Record]:
     records = []
     for entry in sorted(reviews.iterdir()) if reviews.is_dir() else []:
-        match = _RECORD.match(entry.name)
+        match = _RECORD_FILE.match(entry.name)
         if match and not entry.name.endswith(".triage.md"):
             records.append(Record(int(match["number"]), match["kind"], entry))
     return sorted(records, key=lambda r: (r.number, r.path.stat().st_mtime))
@@ -608,10 +613,20 @@ class Computation:
             self.read()
         except ChangeNotFound as exc:
             return self.unclassified(str(exc))
+        try:
+            # Before anything is read of the log, a branch decision included: a
+            # later engine's lines may mean what this one cannot tell.
+            refuse_newer(f"{state.change}'s workflow log", state.log)
+        except StepError as exc:
+            return self.unclassified(str(exc))
         if is_archived(self.root, state.directory) and (
                 state.row is None or state.row.status == "archived"):
             return {"step": "done", "reason": "archived" if state.row else
                     "archived, and its index row pruned"}
+        # Before a branch decision is read: no line is routed on past one this
+        # engine cannot read.
+        if unknown := self.undeclared():
+            return unknown
         if located := self.locate():
             return located
         if state.view is not None:
@@ -641,7 +656,12 @@ class Computation:
         progress."""
         try:
             log = read_log(log_path(self.root, self.state.change))
+            refuse_newer(f"{self.state.change}'s workflow log", log)
+        except NewerFormat as exc:
+            return self.unclassified(str(exc))
         except (ChangeNotFound, StepError):
+            return None
+        if self.first_undeclared(log) is not None:
             return None
         decisions = [e for e in log if e.get("outcome") == ORCHESTRATOR]
         last = next((e for e in reversed(log) if e.get("step") in STEPS), None)
@@ -679,8 +699,8 @@ class Computation:
         a return with no target, triage tokens in files — would be read as the new
         format's."""
         state = self.state
-        if (first := unmarked(state.log)) is not None:
-            why = f"its workflow log holds lines without the log's format, from seq " \
+        if (first := older(state.log)) is not None:
+            why = f"its workflow log holds lines of an older format, from seq " \
                   f"{first['seq']}"
         elif not state.log and state.records:
             why = "it has numbered records under reviews/ and no workflow log"
@@ -690,6 +710,26 @@ class Computation:
         return _owner(f"{state.change}'s records are not in the workflow log's format: {why}; "
                       f"the owner converts them, between steps, with `{command}`",
                       convert=command)
+
+    @staticmethod
+    def first_undeclared(log: Sequence[Entry]) -> tuple[Entry, str] | None:
+        """The first line of this format naming a step, node, or kind of review the
+        graph does not declare, and why; a line of an older format is the
+        conversion's to read."""
+        for entry in log:
+            if entry.get("format") == FORMAT and (why := undeclared(entry)):
+                return entry, why
+        return None
+
+    def undeclared(self) -> Result | None:
+        """The owner, naming it, for the first line of the log naming what the graph
+        does not declare; nothing is routed on, since what that line meant, and so
+        every line after it, cannot be read."""
+        if (found := self.first_undeclared(self.state.log)) is None:
+            return None
+        entry, why = found
+        return _owner(f"the line at seq {entry['seq']} names what the workflow graph does not "
+                      f"declare: {why}; no line is routed on until the owner settles it")
 
     # Where the change is worked.
 
@@ -1525,7 +1565,9 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None, **seams: A
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     result = compute(root, args[0], **seams)
-    print(plain(result) if as_text else json.dumps(result, ensure_ascii=False, default=str))
+    # The data output names the record set's format before anything a runner routes on.
+    print(plain(result) if as_text else json.dumps({"format": FORMAT, **result},
+                                                   ensure_ascii=False, default=str))
     if result["step"] != "unclassified":
         return 0
     # Exit 1 promises its reason on standard error, as every subcommand's refusal

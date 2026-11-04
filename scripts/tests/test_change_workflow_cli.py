@@ -21,7 +21,8 @@ import pytest
 
 from change_workflow import (clone, cli, cost_report, diagram, find, history, hook, index,
                              next_step, push, round_view, skills, tasks)
-from change_workflow.common import StepError
+from change_workflow.common import FORMAT, StepError
+from change_workflow.log import log_path, read_log, record_outcome
 from change_workflow.steps import load_orchestrator, load_steps
 from change_workflow_fixtures import (CHANGE, VALID, FakeClaude, event_lines, make_wrapper,
                                       option_rules)
@@ -376,6 +377,98 @@ def test_an_unattended_start_runs_the_step_through_the_wrapper(tmp_path: Path) -
     assert option_rules(claude.commands[0], "--allowedTools")[-1] == "Bash(make lock)"
 
 
+class Recorded(Launched):
+    """An interactive session that reads the change's log as it opens, as the step's
+    first record would follow whatever the log already holds."""
+
+    def __init__(self, log: Path) -> None:
+        super().__init__()
+        self.log = log
+        self.seen: list[list[dict]] = []
+
+    def __call__(self, command: Sequence[str], root: Path) -> int:
+        self.seen.append(read_log(self.log))
+        return super().__call__(command, root)
+
+
+def _opening(line: dict, step: str, interactive: bool) -> bool:
+    return (line["format"], line["step"], line["outcome"], line["starts"],
+            line["interactive"]) == (FORMAT, "start", "opened", step, interactive)
+
+
+def test_an_interactive_start_opens_the_log_before_the_session(tmp_path: Path) -> None:
+    root = _repository(tmp_path / "workspace", CHANGE)
+    log = log_path(root, CHANGE)
+    launched = Recorded(log)
+
+    assert cli.main(["start", "design", CHANGE], root=root, launch=launched) == 0
+
+    (opened,) = launched.seen[0]
+    assert _opening(opened, "design", True)
+    assert read_log(log) == [opened]
+
+
+def test_an_unattended_start_opens_the_log_before_the_run(tmp_path: Path) -> None:
+    root = _repository(tmp_path / "workspace", CHANGE)
+    claude = FakeClaude((event_lines(VALID["finished"]), 0))
+
+    assert cli.main(["start", "plan", CHANGE, "--unattended"], root=root,
+                    wrapper=make_wrapper(root, claude)) == 0
+
+    opened, run = read_log(log_path(root, CHANGE))
+    assert _opening(opened, "plan", False)
+    assert (run["step"], run["seq"]) == ("plan", opened["seq"] + 1)
+
+
+def test_the_next_step_routes_on_no_opening_line(tmp_path: Path) -> None:
+    root = _repository(tmp_path / "workspace", CHANGE)
+    (root / "openspec/changes/README.md").write_text(
+        "| Change | Status | Depends on | Notes | Acceptance boundary |\n|---|---|---|---|---|\n"
+        f"| [`{CHANGE}`]({CHANGE}/) | in design | — | n | x |\n", "utf-8")
+    seams = {"branch": lambda _: f"feat/{CHANGE}", "workspace": lambda _: None,
+             "clone": lambda *_: None}
+    before = next_step.compute(root, CHANGE, **seams)
+
+    assert cli.main(["start", "design", CHANGE], root=root, launch=Launched()) == 0
+    # A log holding the opening line alone reads as no log at all.
+    opened = next_step.compute(root, CHANGE, **seams)
+    record_outcome(log_path(root, CHANGE), "design",
+                   {**VALID["finished"], "next": {"step": "review", "kind": "design"}},
+                   session="s", commit="c")
+    assert cli.main(["start", "triage", CHANGE], root=root, launch=Launched()) == 0
+
+    assert before == opened == {"step": "design", "reason": "in design"}
+    # The design's exit stands after the triage's opening line, which routes nothing.
+    assert next_step.compute(root, CHANGE, **seams)["kind"] == "design"
+    assert next_step.compute(root, CHANGE, **seams)["step"] == "review"
+
+
+@pytest.mark.parametrize("prepare,named", [
+    (lambda reviews: (reviews / "03-implementation.md").write_text("x", "utf-8"),
+     "no workflow log"),
+    (lambda reviews: (reviews / "workflow.jsonl").write_text('{"seq": 1}\n', "utf-8"),
+     "an older format at seq 1"),
+    (lambda reviews: (reviews / "workflow.jsonl").write_text(
+        json.dumps({"seq": 1, "format": FORMAT + 1}) + "\n", "utf-8"),
+     f"format {FORMAT + 1}"),
+])
+def test_start_refuses_records_of_another_format_and_starts_nothing(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str], prepare, named: str) -> None:
+    root = _repository(tmp_path / "workspace", CHANGE)
+    reviews = root / "openspec/changes" / CHANGE / "reviews"
+    reviews.mkdir()
+    prepare(reviews)
+    before = {path.name: path.read_text("utf-8") for path in reviews.iterdir()}
+    launched = Launched()
+
+    status, _, err = _printed(capsys, lambda: cli.main(["start", "design", CHANGE], root=root,
+                                                       launch=launched))
+
+    assert status == 1 and named in err
+    assert launched.commands == []
+    assert {path.name: path.read_text("utf-8") for path in reviews.iterdir()} == before
+
+
 def test_start_orchestrate_opens_the_session_on_the_orchestrator_row(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = _repository(tmp_path / "workspace", CHANGE)
@@ -458,7 +551,8 @@ def test_find_json_prints_the_change_for_a_program(
     assert _printed(capsys, lambda: cli.main(["find", "--json", CHANGE], root=root))[0] == 0
     assert _printed(capsys, lambda: cli.main(["find", "--json", CHANGE], root=root))[1] == (
         json.dumps({"name": CHANGE, "directory": f"openspec/changes/{CHANGE}",
-                    "archived": False, "records": f"openspec/changes/{CHANGE}/reviews"}) + "\n")
+                    "archived": False, "records": f"openspec/changes/{CHANGE}/reviews",
+                    "format": FORMAT}) + "\n")
     status, out, _ = _printed(capsys, lambda: cli.main(["find", "--json", "other"], root=root))
     assert status == 0
     assert json.loads(out)["records"] is None
@@ -472,7 +566,7 @@ def test_find_json_says_an_archived_change_is_archived(
     status, out, _ = _printed(capsys, lambda: cli.main(["find", "--json", CHANGE], root=root))
     assert status == 0
     assert json.loads(out) == {"name": CHANGE, "directory": ARCHIVED, "archived": True,
-                               "records": f"{ARCHIVED}/reviews"}
+                               "records": f"{ARCHIVED}/reviews", "format": FORMAT}
     assert cli.main(["find", "--active", "--json", CHANGE], root=root) == 1
 
 

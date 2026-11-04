@@ -7,7 +7,9 @@ rules for that one run with `--allow`, and `--session` continues a named
 implementation session. Before either it refuses what the step cannot take — an
 archived change for a step whose node takes only an active one, an active change
 for archive cleanup — and, for implementation and every step after it, an open
-round view (`ROUND_VIEW_CLOSED`). `start orchestrate` opens the orchestrating session on the step
+round view (`ROUND_VIEW_CLOSED`); then it opens the change's workflow log with a line
+carrying the record set's format, refusing records of another format
+(`log.open_log`). `start orchestrate` opens the orchestrating session on the step
 table's `[orchestrator]` row. `resume` resumes a waiting run with the owner's answer;
 `review` runs a review; `log` and `note` read and write the workflow log; `watch`
 follows the steps as they run, and `denials` reports a run's denials. `record` is a
@@ -53,7 +55,7 @@ from .find import ChangeNotFound, change_directory, is_archived
 from .graph import KINDS, STEPS
 from .harness import UNATTENDED_RUN
 from .log import (branch_decisions, direction, history_log_path, last_entries, log_path,
-                  note_orchestrator, note_round, read_log, record_interactive)
+                  note_orchestrator, note_round, open_log, read_log, record_interactive)
 from .records import git_head
 from .review import DEFAULT_BASE, review_and_log
 from .steps import STEP_TABLE, load_orchestrator
@@ -391,6 +393,10 @@ def start(args: argparse.Namespace, root: Path, wrapper: Wrapper, launch: Launch
                    *(["--effort", model.effort] if model.effort else []),
                    f"/change-{ORCHESTRATE} {args.change}"]
         return 0 if launch(command, root) == 0 else 1
+    # The log is the record set format's only authority, so it is marked before the
+    # step can record anything, its ledger lines included.
+    open_log(log_path(root, args.change), args.change, args.step,
+             interactive=not args.unattended)
     if not args.unattended:
         # The skill a step's session opens is named for the step, so an interactive
         # session needs no step table, as no table restricts it.

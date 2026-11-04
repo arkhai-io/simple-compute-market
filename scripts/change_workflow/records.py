@@ -20,6 +20,8 @@ from .common import CHANGES
 
 TRANSCRIPTS = "transcripts"
 NUMBERED = re.compile(r"^(\d+)-")
+# A numbered record: a review, a validation, the owner's notes; not its triage file.
+RECORD = re.compile(r"^(?P<number>\d+)-(?P<kind>[a-z-]+)\.md$")
 _VALIDATION_COMMIT = re.compile(r"^- \*\*Commit:\*\*\s*([0-9a-f]{7,40})\b", re.M)
 _VALIDATION_RESULT = re.compile(r"^- \*\*Result:\*\*\s*(\w+)", re.M)
 
@@ -48,6 +50,11 @@ def is_record(path: str) -> bool:
 
 def is_documentation(path: str) -> bool:
     return path.startswith(DOCUMENTATION)
+
+
+def has_records(reviews: Path) -> bool:
+    """Whether `reviews` holds a numbered record."""
+    return reviews.is_dir() and any(RECORD.match(entry.name) for entry in reviews.iterdir())
 
 
 def next_number(reviews: Path) -> int:
