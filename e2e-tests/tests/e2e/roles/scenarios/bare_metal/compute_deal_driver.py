@@ -67,20 +67,98 @@ class BareMetalDealLease(DealLease):
 
 
 @dataclass
-class BareMetalComputeDealDriver:
-    """Bare metal's ``ComputeDealDriver`` and ``MockGates``, over the bare-metal
-    lane's clients."""
+class BareMetalDealDriverBase:
+    """Bare-metal commercial and lease behavior, independent of executor mocking."""
 
     site_operator: Any
     site_capacity_admin: Any
     provisioning_client: Any
-    provisioning_test_client: Any
     storefront_admin_client: Any
     fulfillment: Any
     site_capacity: SiteCapacity
     buyer_config: dict[str, str]
     site_id: str
+
+    @property
+    def listing_status_after_first_fulfillment(self) -> str:
+        return "closed"
+
+    def _held_generation(self) -> tuple[Any, Any]:
+        """The resource-pool generation the storefront holds for the lane's site."""
+        health = self.storefront_admin_client.get_health()
+        held = health.site_projections[self.site_id]["resource_pool"]
+        return held.get("revision"), held.get("digest")
+
+    def provision_terms(self) -> dict[str, Any]:
+        return {
+            "kind": "bare_metal.v2",
+            "version": 1,
+            "payload": {
+                "duration_seconds": DURATION_HOURS * 3600,
+                "access_method": "ssh",
+                "ssh_public_key": self.buyer_config["ssh_public_key"],
+            },
+        }
+
+    def evaluate_settle_arguments(self) -> dict[str, Any]:
+        return {"duration_seconds": DURATION_HOURS * 3600}
+
+    def check_evaluate_settle(self, result: dict[str, Any]) -> str:
+        # The preview names the listing's machine and the claim settlement
+        # would reserve for it.
+        assert result.get("physical_resource_id") == self.reserved_resource_id, result
+        claim = result.get("required_attributes") or {}
+        assert claim.get("resource_id") == self.reserved_resource_id, result
+        assert result.get("site_id") == self.site_id, result
+        return result.get("host_id")
+
+    def settle_dispatched(self, settle_response: Any, deal_state: Any, *, events_since: int) -> str:
+        """Bare metal's settle verifies; its first servicing pass begins delivery.
+
+        So the fulfillment exists when settle returns, and the buyer reads it
+        through the fulfillments route rather than settle status; with no event
+        to wait for, ``events_since`` goes unused.
+        """
+        assert settle_response.status == "settlement_verified", (
+            f"Expected status=settlement_verified, got: {settle_response.status!r}. "
+            f"Full response: {settle_response}"
+        )
+        status = self.fulfillment.status(deal_state.negotiation_id)
+        assert status.get("fulfillment_id"), (
+            f"the settlement's servicing pass began no fulfillment: {status}"
+        )
+        return str(status["fulfillment_id"])
+
+    def opening_selection(self, alkahest_option: dict, expiration_unix: int) -> None:
+        # The bare-metal storefront projects the Alkahest selection from the
+        # escrow carrier and refuses a selection stated beside it.
+        return None
+
+    def lease_view(self, deal_state: Any) -> BareMetalDealLease:
+        # Bare metal's Alkahest fulfillment commits its hold under the escrow.
+        return BareMetalDealLease(
+            self.provisioning_client,
+            self.site_capacity,
+            escrow_uid=deal_state.real_escrow_uid,
+        )
+
+    def release_reserved(self, reservation: Any) -> None:
+        # An administrative reservation exists only at the site, which releases
+        # it; the storefront records releases of its deals' leases alone.
+        released = self.site_capacity.release(reservation.capacity_reservation_id)
+        assert released is not None, (
+            f"the site did not release {reservation.capacity_reservation_id!r}"
+        )
+
+
+@dataclass
+class BareMetalComputeDealDriver(BareMetalDealDriverBase):
+    """Bare metal's ``ComputeDealDriver`` and ``MockGates``, over the bare-metal
+    lane's clients."""
+
+    provisioning_test_client: Any
     run: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
+
 
     def __post_init__(self) -> None:
         self.pool_id = f"bm-deal-{self.run}"
@@ -121,6 +199,7 @@ class BareMetalComputeDealDriver:
                 host_id=self.host_id,
                 connection=ConnectionSubmission(
                     kind="ssh",
+                    version=2,
                     public={
                         "ssh_host": MACHINE_ADDRESS,
                         "ssh_user": "stub",
@@ -163,24 +242,9 @@ class BareMetalComputeDealDriver:
         # not merely confirmed the one held before the supply was declared.
         assert (held["revision"], held["digest"]) != held_before, (held_before, stepped)
 
-    def _held_generation(self) -> tuple[Any, Any]:
-        """The resource-pool generation the storefront holds for the lane's site."""
-        health = self.storefront_admin_client.get_health()
-        held = health.site_projections[self.site_id]["resource_pool"]
-        return held.get("revision"), held.get("digest")
 
     # -- negotiation --------------------------------------------------------
 
-    def provision_terms(self) -> dict[str, Any]:
-        return {
-            "kind": "bare_metal.v2",
-            "version": 1,
-            "payload": {
-                "duration_seconds": DURATION_HOURS * 3600,
-                "access_method": "ssh",
-                "ssh_public_key": self.buyer_config["ssh_public_key"],
-            },
-        }
 
     # -- mock rules ---------------------------------------------------------
 
@@ -229,34 +293,8 @@ class BareMetalComputeDealDriver:
 
     # -- settlement and delivery -------------------------------------------
 
-    def evaluate_settle_arguments(self) -> dict[str, Any]:
-        return {"duration_seconds": DURATION_HOURS * 3600}
 
-    def check_evaluate_settle(self, result: dict[str, Any]) -> str:
-        # The preview names the listing's machine and the claim settlement
-        # would reserve for it.
-        assert result.get("physical_resource_id") == self.reserved_resource_id, result
-        claim = result.get("required_attributes") or {}
-        assert claim.get("resource_id") == self.reserved_resource_id, result
-        assert result.get("site_id") == self.site_id, result
-        return result.get("host_id")
 
-    def settle_dispatched(self, settle_response: Any, deal_state: Any, *, events_since: int) -> str:
-        """Bare metal's settle verifies; its first servicing pass begins delivery.
-
-        So the fulfillment exists when settle returns, and the buyer reads it
-        through the fulfillments route rather than settle status; with no event
-        to wait for, ``events_since`` goes unused.
-        """
-        assert settle_response.status == "settlement_verified", (
-            f"Expected status=settlement_verified, got: {settle_response.status!r}. "
-            f"Full response: {settle_response}"
-        )
-        status = self.fulfillment.status(deal_state.negotiation_id)
-        assert status.get("fulfillment_id"), (
-            f"the settlement's servicing pass began no fulfillment: {status}"
-        )
-        return str(status["fulfillment_id"])
 
     def assert_delivery(self, deal_state: Any) -> None:
         """An active lease, a result naming no endpoint, and live access."""
@@ -274,18 +312,7 @@ class BareMetalComputeDealDriver:
 
     # -- lease and release --------------------------------------------------
 
-    def opening_selection(self, alkahest_option: dict, expiration_unix: int) -> None:
-        # The bare-metal storefront projects the Alkahest selection from the
-        # escrow carrier and refuses a selection stated beside it.
-        return None
 
-    def lease_view(self, deal_state: Any) -> BareMetalDealLease:
-        # Bare metal's Alkahest fulfillment commits its hold under the escrow.
-        return BareMetalDealLease(
-            self.provisioning_client,
-            self.site_capacity,
-            escrow_uid=deal_state.real_escrow_uid,
-        )
 
     def reserve_released_capacity(
         self, storefront_admin_client: Any, *, listing_id: str, escrow_uid: str
@@ -296,12 +323,4 @@ class BareMetalComputeDealDriver:
             required_attributes={"gpu_model": GPU_MODEL},
             listing_id=listing_id,
             escrow_uid=escrow_uid,
-        )
-
-    def release_reserved(self, reservation: Any) -> None:
-        # An administrative reservation exists only at the site, which releases
-        # it; the storefront records releases of its deals' leases alone.
-        released = self.site_capacity.release(reservation.capacity_reservation_id)
-        assert released is not None, (
-            f"the site did not release {reservation.capacity_reservation_id!r}"
         )

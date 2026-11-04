@@ -151,6 +151,10 @@ The tree carries layer, scope, and kind in a package's path and name, and the ch
 
 The kind words are `contracts` and `client`; the role words `storefront`, `buyer`, `service`, and `app` make an executable. A word is read only when it is one of these, so `kit/capability-shape` is a library, and role words are not read under `kit/`, because a kit composes nothing: `kit/storefront` is a library. The scope directory names a family or a domain, a domain bringing its family when it has one, and a mechanism's name in `<last>` adds that mechanism. A project at a scope directory's root, or under a nested path such as `domains/apicredits/middleware/python`, reads the same way. Tooling projects — `e2e-tests`, `tools/`, `scripts`, and `dev-env` — and virtual projects are outside the architecture.
 
+A **standalone component** under `tools/` is outside it too, but stricter than any layer: it depends on no internal package at all, only on third-party distributions and the standard library, and names no market concept, so it can be lifted into a repository of its own as it stands. Because `make check-architecture` does not read `tools/`, each one holds that boundary in a structure test of its own, and its tests join `make test` through a root target ([`tools/README.md`](../../tools/README.md#standalone-infrastructure-components)). The frps admission plugin, [`tools/frp-grant-admission`](../../tools/frp-grant-admission/README.md), is one ([capability](../../openspec/specs/frp-grant-admission/architecture.md)).
+
+Generic infrastructure that is not specific to this marketplace does not belong in a market package. Having to build it at all is a warning sign, accepted only when no existing software fits; when it is built, it is a standalone component. Such a component publishes its interface — a specification, a test vector, a pins file — and market code conforms to it, and may check its own copies against it: the consumer reads the producer, and the component never reads market code or names a market concept.
+
 Two allowlists bound what a package may depend on. A **kind allowlist**, one per light kind in the rules file, names what a package of that kind may depend on: a **contracts** package on core, the identity, capability-shape, and capability-admissibility foundation kits, and its own family's vocabulary; a **client** on contracts, core, and the identity kit. A **package allowlist** belongs to one package whose lightness is part of its contract — the shape, pricing, and admissibility kits, which import only the standard library and the shape kit, the identity kit, the settlement runtime, and the thin contracts and clients — and is stated in its own `pyproject.toml`, as `allowed-dependencies` under `[tool.arkhai.architecture]`: every distribution, internal or third-party, it may declare or import beyond the standard library. Such a package must also declare every third-party distribution it imports. A third-party import matches the distribution of the same normalized name, or one an `import-roots` entry names; that alias is taken as the package states it, because checking it would need installed metadata. Outside packages with an allowlist, whether third-party declarations are complete rests on each project's own environment and tests, and removing a package's allowlist removes its constraint, which is a visible edit to that package. The table may only narrow or annotate its package; it cannot state a layer, kind, or scope, so nothing a package declares about itself widens what its path grants. The plugin entry-point groups are `market.buyer_domains`, `market.storefront_contributions`, and `market.delivery_sinks`, whose owner `kit/delivery` registers its built-in sinks without becoming a plugin.
 
 A project whose path does not yet say what it is carries an **override** row stating the layer, kind, and scope the path should yield and the change that will move or rename it. The row fails once the path yields the same, or once a mechanism it grants is known by none of the project's dependencies.
@@ -182,7 +186,7 @@ Placement tests, applied in order:
 
 Another market family needing apparently similar behaviour is a signal to evaluate extraction into a repository-wide kit, not an automatic promotion. Promotion is right only when the capability's vocabulary and authority semantics can be made family-neutral without depending on either family's identity or domain meaning; otherwise two family kits are correct.
 
-In the compute family, `domains/compute` (`arkhai_compute`) is the vocabulary and `provisioning/compute` (`compute_provisioning`) is the family kit for cross-domain physical provisioning: executor registration, provisioning jobs, the operational host registry, lease lifecycle, shared release, job-backed fulfillment support, and the mock mechanism. The family kit has three further distributions. `provisioning/compute/ansible` (`compute_provisioning_ansible`) is its optional Ansible implementation distribution: the SSH connection codec, the Ansible process and inventory mechanics, the Ansible job executor and its mock runner, and connectivity probes. It depends on the base kit's job, executor, and host contracts, never the reverse, so a consumer of jobs or hosts installs no Ansible. `provisioning/compute/contracts` (`compute_provisioning_contracts`) holds the family's wire models and route contracts, and `provisioning/compute/client` (`compute_provisioning_client`) the typed sync and async clients built on them. Both are thin, so a caller does not install the kit to call the service, and they are split so that the server never depends on its own client. The VM and bare-metal provisioning adapters contribute their execution preparation, codecs, playbooks, result interpretation, credentials, and provider semantics, and neither imports the other or the deployed service. The compute provisioning service is the composition root that wires them.
+In the compute family, `domains/compute` (`arkhai_compute`) is the vocabulary and `provisioning/compute` (`compute_provisioning`) is the family kit for cross-domain physical provisioning: executor registration, provisioning jobs, the operational host registry, lease lifecycle, shared release, job-backed fulfillment support, and the mock mechanism. The family kit owns the shared buyer-relay mechanism too: relay records and leases, port allocation and release, signed grant creation, reconciliation and administration, and integration with the standalone relay admission plugin. Its Ansible project owns the shared `frp-binary`, `relay-client`, `relay-proxy`, and `relay-server` roles; the client baseline and host-local proxy operations are family behavior, while each domain supplies its playbook call and delivery interpretation. Domain playbooks name these roles bare. Each domain's `ansible.cfg` adds the family roles directory to its search path for repository runs; the provisioning image sets `ANSIBLE_ROLES_PATH` to the packaged family roles directory beside the domain roles. The shared service Ansible configuration contains no domain paths. The family kit has three further distributions. `provisioning/compute/ansible` (`compute_provisioning_ansible`) is its optional Ansible implementation distribution: the SSH connection codec, the Ansible process and inventory mechanics, the Ansible job executor and its mock runner, and connectivity probes. It depends on the base kit's job, executor, and host contracts, never the reverse, so a consumer of jobs or hosts installs no Ansible. `provisioning/compute/contracts` (`compute_provisioning_contracts`) holds the family's wire models and route contracts, and `provisioning/compute/client` (`compute_provisioning_client`) the typed sync and async clients built on them. Both are thin, so a caller does not install the kit to call the service, and they are split so that the server never depends on its own client. The VM and bare-metal provisioning adapters contribute their execution preparation, codecs, playbooks, result interpretation, credentials, and provider semantics, and neither imports the other or the deployed service. The host registry owns host connection identity and composes its pool-change checks; the compute-family relay mechanism contributes the relay-binding rule. The compute provisioning service is the composition root that wires them.
 
 Executor selection is one table. `(offering_mode, action)` resolves to one complete job executor. Composition fills the table from each adapter bundle's contributions, refuses a key registered twice, and freezes it before the service accepts traffic. The job engine resolves a job's executor from the job's persisted offering mode and action, and it knows no playbook, inventory, or connection detail. Under the service's mock profile, each adapter composes its own mock executor. Every mock is built on the compute-family mock mechanism, `compute_provisioning.jobs.executor_mock`, which provides:
 
@@ -565,6 +569,7 @@ A domain that contributes routes to a service it does not compose declares their
 | Listing, negotiation, deal, and seller policy state | Storefront | Market-facing state, not physical inventory |
 | Capacity admission and reservation | Site authority | Serialization point for competing reservations |
 | Sellable capacity: each Physical Resource's declared shape, quantity, pool, and match attributes | Site authority | Declared only by registration, a capacity-definitions document, or capacity import; no host write declares capacity, and host records are connection identity only |
+| Host connection identity and membership changes | Compute provisioning host registry | A host record supplies the execution connection; the host authority composes checks, including the compute-family relay-binding rule |
 | VM listing shapes a storefront publishes | Storefront, within what the site declares | A storefront pool override, else the pool's `listing_shapes` hint, else the VM domain's default generator; constraints a stated shape carries, merged with the storefront's configured `[admissibility.defaults.vm]`, decide which shapes it would sell, and a site's constraints are advisory input to that policy; feasibility is judged against the site's declarations, and admission remains the site's |
 | A bare-metal listing's shape | Site authority, through the Physical Resource's declaration | Derived from the declared capacity and attributes; the storefront chooses nothing |
 | Resource-pool metadata and provider configuration | Resource-pool service | Provisioning routing metadata; the provider is fixed at creation, and disabled pools remain resolvable |
@@ -759,8 +764,11 @@ operator replaces the seed or disables it; a site that already holds pools is
 never seeded. See the
 [resource-pool management architecture](../../openspec/specs/resource-pool-management/architecture.md#administrative-reconciliation).
 
-No host write places a host in a pool or declares its capacity, whatever its entry
-point. A host names its pool, or is unplaced; a host's pool is placement intent,
+Hosts reach the registry through the host API, the Ansible INI import route, or a
+host definitions document, which startup reconciles when its digest changes, as it
+does the pool and capacity documents, and which the host routes also export and
+import. No host write places a host in a pool it does not name or declares its
+capacity, whatever its entry point. A host names its pool, or is unplaced; a host's pool is placement intent,
 read by the pool-change hooks and host reads, and nothing that admits, schedules,
 dispatches, or sells reads it. A host sells only through capacity an operator has
 explicitly declared, and a declaration names its own pool. So a host an
@@ -1077,9 +1085,12 @@ Every offering mode releases through the fulfillment aggregate. A lease delivers
 | `torn_down` | Free the capacity directly |
 | Absent, `assigned`, or `abandoned`, when provenance proves nothing was dispatched | Free the capacity directly, abandoning an `assigned` aggregate on the way |
 | `dispatch_pending` or `dispatching` | Wait for the create to settle, then follow the new state |
-| `failed`, or undelivered without that proof | `release_failed`, for an operator to verify and force-release |
+| `failed` and compensable: a dispatched create its provider reported failed, whose job metadata names its create job | Begin a compensating teardown, the domain's ordinary teardown, marked `create_compensation`; the lease is `releasing`, and capacity returns only at `torn_down` |
+| `failed` otherwise, or undelivered without that proof | `release_failed`, for an operator to verify and force-release |
 
 The proof that nothing was dispatched is that the reservation records no create handle and no job is bound to it.
+
+Whether a `failed` aggregate is compensable is one predicate, `compute_provisioning.release.compensable`, which the release decision, the status port, and the teardown port all ask, so compute provisioning alone interprets its own failure reasons and job metadata. The fulfillment kit owns the edge from `failed` and the marker, and keeps provider metadata opaque. A compensation that cannot be prepared — its create job missing, or its metadata naming another host or target — is refused, and the lease records `release_failed` with `compensation_refused` under its release handle. A compensated aggregate is one whose `failure_reason` is `create_compensation`; convergence keeps that reason through a teardown failure, and its requeue re-observes the same failed teardown job rather than running it again. See [physical provisioning](../../openspec/specs/physical-provisioning/architecture.md#proof-driven-release) and [fulfillment](../../openspec/specs/fulfillment/architecture.md#durable-persistence-and-recovery).
 
 Capacity is freed only behind a release guard. `kit/site`'s ledger consults a `CapacityReleaseGuard` inside every transaction that reclaims capacity: a release, a lapsed TTL hold, and a resize's supersede step. A refused reclaim changes nothing. The site cannot see what was delivered, so the guard is supplied by the provisioning composition. That guard, `FulfillmentReleaseGuard`, permits a `torn_down` aggregate, or an undelivered one whose provenance proof holds. Capacity therefore never returns to scheduling, whoever asks, until teardown is proven, nothing was dispatched, or an operator explicitly force-releases after external verification. The audit state distinguishes forced release from proven teardown.
 
@@ -1136,6 +1147,12 @@ One root `.python-version` fixes the interpreter for every environment and image
 
 Aggregate Make targets must run every included subproject's default tests. A standalone subproject target remains useful for focused work, but the aggregate contract is complete coverage, not a curated subset.
 
+### Accepted representations and application views
+
+A persisted protocol document may be projected into a validated application view without making that view the protocol evidence. The owner retains the canonical bytes and verifies their outer identity and any nested result identity before exposing typed fields. Publication, storage, and resolution preserve that original document; clients match the requested digest before converting it. This keeps defaults, omissions, explicit nulls, timestamp spelling, and other wire details stable even when the application view evolves.
+
+Compatibility applies while a retained record may still be read. A writer change must either preserve that representation or keep a compatible reader through the retention period. Deletion and tombstoning remain the owning subsystem's explicit lifecycle; unsupported mandate forms remain unsupported rather than being inferred from a compatible encoding. Zero nonterminal contracts does not establish that a reader is unused: retained terminal evidence and supported buyer recovery may still require it. These rules do not imply a repository-wide artifact inventory or automatic retirement measurements.
+
 Schema changes are additive by default. Non-additive changes use expand/contract
 across releases unless an explicit disposable-database reset contract applies.
 VM/bare-metal seller evidence/delivery and API-credit evidence/grant schemas
@@ -1155,7 +1172,7 @@ The compute provisioner runs three independent timer-driven workers, composed on
 | `FulfillmentConvergenceWatchdog` | Create and teardown dispatch/status convergence for the fulfillment aggregate (see "Fulfillment" and "Release" above) |
 | `LeaseWatchdog` | Lease expiry detection that triggers release |
 
-`FulfillmentConvergenceWatchdog` runs four handler passes each cycle — create-submission recovery, create-status convergence, teardown-submission recovery, teardown-status convergence — plus a `teardown_failed` requeue step, sharing one timer rather than one watchdog per pass. Each pass claims eligible rows durably (a short transaction reserving the row with a lease and worker identity), performs any provider call entirely outside a database transaction, and applies the outcome in a second short transaction only if the claim is still owned — a claim whose lease lapsed before the provider call returns is silently superseded, not double-applied. No attempt-count ceiling exists anywhere in this recovery path; a fresh worker instance resumes purely from durable claim state after a restart, with per-row exponential backoff and jitter between attempts.
+`FulfillmentConvergenceWatchdog` runs four handler passes each cycle — create-submission recovery, create-status convergence, teardown-submission recovery, teardown-status convergence — plus a `teardown_failed` requeue step, sharing one timer rather than one watchdog per pass. Each pass claims eligible rows durably (a short transaction reserving the row with a lease and worker identity), performs any provider call entirely outside a database transaction, and applies the outcome in a second short transaction only if the claim is still owned — a claim whose lease lapsed before the provider call returns is silently superseded, not double-applied. No attempt-count ceiling exists anywhere in this recovery path; a fresh worker instance resumes purely from durable claim state after a restart. A row's attempt count is its run of consecutive unproductive claims: exponential backoff and jitter space attempts that fail, an applied outcome or a provider answering "still pending" starts the count again, and a healthy pending poll keeps its claim only for the initial interval, so a fast operation is observed on the next cycle rather than after a backoff it never earned. Every reset happens under the claim's owner, so a worker whose lease lapsed changes nothing.
 
 ## Operator lifecycle controls
 
@@ -1186,3 +1203,42 @@ The fulfillment kit owns provider-neutral acceptance orchestration. It loads an 
 ### Atomic workload-lifecycle cutovers
 
 A schema cutover that transfers ownership of active workloads between persistence models must treat the workload and its known provider-operation identity as authoritative. The compute provisioner's legacy VM lease conversion validates the complete candidate population and writes fulfillment aggregates atomically before retiring the legacy table. Any unsafe ambiguity rolls back the entire conversion; unused pre-release reservation rows must not override or obscure an active lease.
+
+### Public repository content checks
+
+`make check-public-content` checks the staged index using
+`scripts/check_public_content.py`. The guarded branch push checks every outgoing
+commit, including intermediate additions and commit messages. The Public content
+CI workflow checks commits against the event base, using `origin/dev` for a
+new branch without a previous tip. This retains inspection of every commit outside
+the product branch, including intermediate changes, without treating existing
+product history as newly published work. It runs after publication and therefore
+provides detection rather than preventing the first upload.
+
+The scanner rejects literal personal home paths and private assistant
+planning/session paths. `example-user` is the synthetic fixture username;
+`appuser` and `ubuntu` are documented runtime-image accounts, and `you` is an
+example placeholder. These names do not authorize publishing actual operator
+paths. Machine-specific names, addresses and other operational identifiers require
+a private local literal denylist; arbitrary identifiers and secrets are not
+automatically recognizable. Binary additions are refused because this text
+scanner cannot inspect them. Review remains required. Diagnostics report location
+and rule without echoing matched content.
+
+Enable the repository-owned hooks in each checkout with
+`git config --local core.hooksPath scripts/hooks` after inspecting any existing
+hooks configuration; preserve or chain existing hooks instead of overwriting them.
+The pre-commit hook checks staged additions. The pre-push hook checks the actual
+refs being sent, including ref names and annotated tag content. Hooks require Python 3.10 or newer and may be bypassed by direct
+Git options; they are local safeguards, not server enforcement. Use the guarded
+`make push-branch` path for agent pushes.
+
+Configure deployment-specific literals with
+`git config --local scm.publicContentDenyFile /absolute/path/to/private-denylist.txt`.
+Keep that file outside the repository, one literal per line; blank lines and
+lines starting with `#` are ignored. Matching is case-insensitive. Never commit
+the denylist or use real identifiers in guard tests. A configured file that cannot
+be read fails the check. A CI runner without that private file runs the generic
+rules only. Fetch the target remote before checking outgoing commits. Use
+`python3 scripts/check_public_content.py --base <commit>` to inspect a known
+committed range; this is not a complete historical secret audit.

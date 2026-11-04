@@ -39,9 +39,8 @@ from vm_provisioning_adapter.codec import (
     VmAnsibleCodec,
     VmPlaybookOutput,
     build_result_payload,
+    create_fact_mismatch,
     create_result,
-    extract_ssh_port,
-    extract_tenant_user,
     extract_vm_fact,
     parse_vm_output,
     split_credentials,
@@ -59,7 +58,7 @@ _HOST = ExecutionHost(
     pool_id="default",
     connection=ConnectionEnvelope(
         kind="ssh",
-        version=1,
+        version=2,
         public={
             "ssh_host": "10.0.0.1",
             "public_host": "203.0.113.1",
@@ -69,6 +68,22 @@ _HOST = ExecutionHost(
         },
     ),
 )
+
+
+def _shipped(fact_name: str, fact: dict) -> str:
+    """A run printing ``fact`` as the packaged configuration's YAML result format
+    does: the ``var:`` fact as YAML, then its ``msg: |-`` JSON copy. Kept here,
+    apart from the adapter's own mock renderer, so a mistake in that renderer
+    cannot hide one in the codec. Fixture values only."""
+    var = yaml.safe_dump({fact_name: fact}, default_flow_style=False).splitlines()
+    msg = json.dumps(fact, indent=4).splitlines()
+    return "\n".join(
+        ["ok: [kvm1] => "]
+        + [f"    {line}" for line in var]
+        + ["ok: [kvm1] => ", "    msg: |-"]
+        + [f"        {line}" for line in msg]
+        + [""]
+    )
 
 
 def _params(**overrides) -> VmJobParams:
@@ -299,15 +314,47 @@ class TestGoldenImageCredentials:
 
 class TestPrepare:
     def test_a_referenced_relay_is_resolved_at_preparation(self):
-        class Resolver:
-            def resolve_into(self, params):
-                return replace(params, relay_addr="203.0.113.4", relay_token="fresh")
+        asked: list[tuple] = []
 
-        stored = {"host_id": "kvm1", "vm_action": "create", "offering_mode": "vm", "relay_id": "r"}
+        class Resolver:
+            def resolve_into(self, params, *, remote_port=None, owner_id=None):
+                asked.append((remote_port, owner_id))
+                grant = "signed-grant" if remote_port is not None else None
+                return replace(
+                    params, relay_addr="203.0.113.4", relay_token="fresh", relay_grant=grant
+                )
+
+        stored = {
+            "host_id": "kvm1", "vm_action": "create", "offering_mode": "vm",
+            "relay_id": "r", "vm_remote_port": 6101, "escrow_uid": "cr-1",
+        }
         plan = VmAnsibleCodec(relay_resolver=Resolver()).prepare(_run(stored))
 
+        assert asked == [(6101, "cr-1")]
         assert plan.variables["frp_auth_token"] == "fresh"
+        assert plan.variables["relay_grant"] == "signed-grant"
         assert plan.limit == "kvm1"
+
+    def test_a_removal_asks_for_no_grant(self):
+        asked: list[int | None] = []
+
+        class Resolver:
+            def resolve_into(self, params, *, remote_port=None, owner_id=None):
+                asked.append(remote_port)
+                return replace(params, relay_addr="203.0.113.4", relay_token="fresh")
+
+        stored = {
+            "host_id": "kvm1", "vm_action": "vm_remove", "offering_mode": "vm", "relay_id": "r",
+        }
+        plan = VmAnsibleCodec(relay_resolver=Resolver()).prepare(_run(stored))
+
+        assert asked == [None]
+        assert "relay_grant" not in plan.variables
+
+    def test_the_relay_familys_secret_variables_are_redacted(self):
+        assert {"frp_auth_token", "relay_grant", "relay_admin_password"} <= (
+            VmAnsibleCodec.secret_fields
+        )
 
     def test_pool_variables_and_playbook_come_from_the_stored_parameters(self):
         stored = {
@@ -326,7 +373,7 @@ class TestPrepare:
     def test_reserved_keys_are_the_jobs_own_variables(self):
         codec = VmAnsibleCodec()
         params = _params(provider_extra_vars={"region": "eu"})
-        assert codec.reserved_var_keys(params) == frozenset(codec.variables(params))
+        assert frozenset(codec.variables(params)) <= codec.reserved_var_keys(params)
         assert "region" not in codec.reserved_var_keys(params)
 
 
@@ -404,46 +451,33 @@ class TestRedaction:
 # ---------------------------------------------------------------------------
 
 
-class TestExtractSshPort:
-    def test_extracts_from_json_field(self):
-        assert extract_ssh_port('text "external_ssh_port": "54321" more') == "54321"
-
-    def test_extracts_from_ssh_command_with_host(self):
-        assert extract_ssh_port("ssh -i key -p 2222 root@kvm1", "kvm1") == "2222"
-
-    def test_falls_back_to_a_generic_pattern(self):
-        assert extract_ssh_port("connect using: ssh -p 9000 user@some.host.com") == "9000"
-
-    def test_json_field_takes_precedence(self):
-        assert extract_ssh_port('"external_ssh_port": "1111" ssh -p 2222 root@kvm1', "kvm1") == "1111"
-
-    @pytest.mark.parametrize("output", ["no port info here", ""])
-    def test_none_when_no_port_found(self, output):
-        assert extract_ssh_port(output) is None
-
-
-class TestExtractTenantUser:
-    def test_extracts_from_json_field(self):
-        assert extract_tenant_user('"tenant_user": "agentuser" and more') == "agentuser"
-
-    def test_extracts_from_ssh_command_with_host(self):
-        assert extract_tenant_user("ssh -p 2222 myuser@kvm1", "kvm1") == "myuser"
-
-    def test_json_field_takes_precedence(self):
-        assert extract_tenant_user('"tenant_user": "fromjson" ssh -p 22 fromcmd@kvm1', "kvm1") == "fromjson"
-
-    def test_none_when_no_user_found(self):
-        assert extract_tenant_user("nothing useful") is None
-
-
 class TestExtractVmFact:
     def test_extracts_the_named_fact(self):
         output = 'ok: [kvm1] => {\n    "vm_list_data": {"action": "list", "vm_count": 2}\n}\n'
         assert extract_vm_fact(output, "list") == {"action": "list", "vm_count": 2}
 
-    def test_falls_back_to_the_last_json_output_block(self):
-        output = 'msg: |\n  {"action": "create", "vm_name": "a"}\nmsg: |\n  {"action": "create", "vm_name": "b"}\n'
+    def test_the_shipped_form_is_read_from_its_msg_block(self):
+        fact = {"action": "create", "vm_name": "guest-a", "status": "success"}
+        assert extract_vm_fact(_shipped("vm_creation_data", fact), "create") == fact
+
+    def test_the_last_document_for_the_expected_action_is_taken(self):
+        output = _shipped("vm_creation_data", {"action": "create", "vm_name": "a"}) + _shipped(
+            "vm_creation_data", {"action": "create", "vm_name": "b"}
+        )
         assert extract_vm_fact(output, "create")["vm_name"] == "b"
+
+    def test_a_remove_run_never_adopts_a_create_document(self):
+        output = _shipped("vm_remove_data", {"action": "vm_remove", "vm_name": "a"}) + _shipped(
+            "vm_creation_data", {"action": "create", "vm_name": "a"}
+        )
+        assert extract_vm_fact(output, "vm_remove")["action"] == "vm_remove"
+        assert extract_vm_fact(_shipped("vm_creation_data", {"action": "create"}), "vm_remove") is None
+
+    def test_a_summary_block_followed_by_a_later_document_adopts_nothing(self):
+        output = "ok: [kvm1] => \n    msg: |-\n        VM created\n" + (
+            'ok: [kvm1] => {\n    "other": {"action": "create", "vm_name": "x"}\n}\n'
+        )
+        assert extract_vm_fact(output, "create") is None
 
     @pytest.mark.parametrize("action,output", [("unknown", "anything"), ("create", "no json")])
     def test_none_without_a_fact(self, action, output):
@@ -473,10 +507,35 @@ class TestExtractVmFact:
         assert extract_vm_fact(raw, "create")["authentication"]["root"]["password"] == "pw"
 
 
+_FACT_9000 = {"action": "create", "external_ssh_port": "9000", "tenant_user": "tenantx"}
+
+
+class TestFactFieldsOnly:
+    """The tenant account and port are the selected fact's, not anything else
+    the output prints."""
+
+    def test_a_port_and_account_printed_outside_the_fact_are_not_read(self):
+        stdout = "ssh -p 4444 intruder@kvm1\n" + _shipped(
+            "vm_creation_data", {"action": "create", "vm_name": "a"}
+        )
+        parsed = parse_vm_output(
+            AnsibleResult(stdout=stdout, stderr="", process_id=1), _params(), tenant_address="h"
+        )
+        assert (parsed.ssh_port, parsed.tenant_user) == (None, None)
+
+    def test_a_relayed_create_prints_no_forwarded_port(self):
+        fact = {"action": "create", "external_ssh_port": "N/A - Using FRP", "tenant_user": "t"}
+        parsed = parse_vm_output(
+            AnsibleResult(stdout=_shipped("vm_creation_data", fact), stderr="", process_id=1),
+            _params(), tenant_address="h",
+        )
+        assert (parsed.ssh_port, parsed.tenant_user) == (None, "t")
+
+
 class TestTenantAddress:
     def test_host_ip_and_ssh_command_use_the_supplied_tenant_address(self):
         output = AnsibleResult(
-            stdout='"external_ssh_port": "9000"\n"tenant_user": "tenantx"', stderr="", process_id=1
+            stdout=_shipped("vm_creation_data", _FACT_9000), stderr="", process_id=1
         )
         parsed = parse_vm_output(output, _params(), tenant_address="203.0.113.9")
         assert parsed.host_ip == "203.0.113.9"
@@ -484,7 +543,7 @@ class TestTenantAddress:
 
     def test_without_an_address_no_command_is_built(self):
         output = AnsibleResult(
-            stdout='"external_ssh_port": "9000"\n"tenant_user": "tenantx"', stderr="", process_id=1
+            stdout=_shipped("vm_creation_data", _FACT_9000), stderr="", process_id=1
         )
         parsed = parse_vm_output(output, _params(), tenant_address=None)
         assert parsed.host_ip is None
@@ -525,11 +584,12 @@ class TestBuildResultPayload:
         assert payload["authentication"]["root"]["ssh_key_path_host"] == "/root/key"
         assert payload["ssh_command"] == "ssh -p 2222 u@h"
 
-    def test_relay_remote_port_overrides_ssh_port(self):
-        frp = {"enabled": True, "relay_addr": "198.51.100.7", "remote_port": "54321"}
-        payload = build_result_payload(_output(ssh_port="2222", ansible_result={"action": "create", "frp": frp}))
+    @pytest.mark.parametrize("enabled", [True, "True"])
+    def test_an_enabled_relays_remote_port_overrides_ssh_port(self, enabled):
+        frp = {"enabled": enabled, "relay_addr": "198.51.100.7", "remote_port": "54321", "subdomain": "vm-abc"}
+        payload = build_result_payload(_output(ssh_port="2222", ansible_result={"action": "create", "relay": frp}))
         assert payload["ssh_port"] == "54321"
-        assert payload["frp"] == frp
+        assert payload["relay"] == frp
 
     @pytest.mark.parametrize("enabled", [False, "False"])
     @pytest.mark.parametrize("remote_port", ["N/A", "54321"])
@@ -537,14 +597,21 @@ class TestBuildResultPayload:
         """The playbook reports the relay block on every create; without a relay
         it is disabled and its fields are ``N/A``."""
         frp = {"enabled": enabled, "relay_addr": "N/A", "remote_port": remote_port, "ssh_access": "N/A"}
-        payload = build_result_payload(_output(ssh_port="2222", ansible_result={"action": "create", "frp": frp}))
+        payload = build_result_payload(_output(ssh_port="2222", ansible_result={"action": "create", "relay": frp}))
         assert payload["ssh_port"] == "2222"
-        assert payload["frp"] == frp
+        assert payload["relay"] == frp
 
     @pytest.mark.parametrize("remote_port", ["N/A", "", "0", "65536", "40001x", "²", True, 4.5, None])
     def test_an_enabled_relay_without_a_port_keeps_the_forwarded_port(self, remote_port):
         frp = {"enabled": True, "relay_addr": "198.51.100.7", "remote_port": remote_port}
-        payload = build_result_payload(_output(ssh_port="2222", ansible_result={"action": "create", "frp": frp}))
+        payload = build_result_payload(_output(ssh_port="2222", ansible_result={"action": "create", "relay": frp}))
+        assert payload["ssh_port"] == "2222"
+
+    def test_a_disabled_relay_block_keeps_the_forwarded_port(self):
+        """The buyer-key fact prints its relay block on the direct path too,
+        disabled, with ``N/A`` for its port."""
+        fact = {"action": "create", "relay": {"enabled": False, "remote_port": "N/A"}}
+        payload = build_result_payload(_output(ssh_port="2222", ansible_result=fact))
         assert payload["ssh_port"] == "2222"
 
     def test_vm_list_with_count(self):
@@ -622,7 +689,8 @@ def test_a_run_reports_the_vm_result_and_credentials() -> None:
 
     assert outcome.result.result_kind == CREATE_JOB_RESULT_KIND
     created = CreateJobResult.model_validate(outcome.result.value)
-    assert created.evidence is None  # the fact reported no time it became ready
+    assert created.evidence is None  # the fact names no guest
+    assert "vm_name" in created.detail["mismatch"]
     assert created.detail["host_ip"] == "203.0.113.1"
     assert created.detail["ssh_port"] == "2222"
     assert [c.credential_kind for c in outcome.credentials] == ["root", "tenant"]
@@ -693,7 +761,7 @@ def _create_fact_output(*, relay: dict | None) -> str:
             },
         },
         "network": network,
-        "frp": frp,
+        "relay": frp,
         "gpu": {
             "provisioned": False,
             "pci_address": "N/A",
@@ -720,7 +788,7 @@ def test_a_direct_create_reports_the_port_it_forwarded() -> None:
     # The fact is read from the printed JSON string, as a real run's is.
     assert '"vm_creation_data":' not in output
 
-    outcome, _ = _executed(output, _CREATE_PARAMETERS)
+    outcome, _ = _executed(output, {**_CREATE_PARAMETERS, "vm_target": "tenant-1"})
 
     created = CreateJobResult.model_validate(outcome.result.value)
     (endpoint,) = created.evidence.endpoints
@@ -731,7 +799,7 @@ def test_a_direct_create_reports_the_port_it_forwarded() -> None:
 def test_a_relayed_create_reports_the_relay_and_its_leased_port() -> None:
     outcome, _ = _executed(
         _create_fact_output(relay={"address": "198.51.100.7", "port": 40001}),
-        {**_CREATE_PARAMETERS, "relay_id": "r1", "vm_remote_port": 40001},
+        {**_CREATE_PARAMETERS, "vm_target": "tenant-1", "relay_id": "r1", "vm_remote_port": 40001},
     )
 
     created = CreateJobResult.model_validate(outcome.result.value)
@@ -741,7 +809,7 @@ def test_a_relayed_create_reports_the_relay_and_its_leased_port() -> None:
 
 
 _DIRECT = {
-    "action": "create", "status": "running", "vm_name": "tenant-1", "host": "kvm1",
+    "action": "create", "status": "success", "vm_name": "tenant-1", "host": "kvm1",
     "timestamp": "2030-01-01T00:00:01Z", "tenant_user": "tenant1",
     "host_ip": "203.0.113.1", "ssh_port": "2222", "vm_ip_internal": "192.168.122.9",
     "ansible_result": {"raw": "fact"},
@@ -749,12 +817,14 @@ _DIRECT = {
 _RELAY = {
     **_DIRECT,
     "ssh_port": "40001",
-    "frp": {"enabled": "True", "relay_addr": "relay.example", "remote_port": "40001"},
+    "relay": {"enabled": "True", "relay_addr": "relay.example", "remote_port": "40001"},
 }
 
 
 def _create_params(**fields) -> VmJobParams:
-    return VmJobParams(host_id="kvm1", vm_action="create", offering_mode="vm", **fields)
+    return VmJobParams(
+        host_id="kvm1", vm_action="create", vm_target="tenant-1", offering_mode="vm", **fields
+    )
 
 
 class TestCreateResult:
@@ -777,7 +847,7 @@ class TestCreateResult:
         created = create_result(_RELAY, _create_params(relay_id="r1", vm_remote_port=40002))
 
         assert created.evidence is None
-        assert created.detail["frp"]["remote_port"] == "40001"
+        assert created.detail["relay"]["remote_port"] == "40001"
 
     def test_a_relayed_guest_with_no_relay_reported_yields_no_evidence(self):
         assert create_result(_DIRECT, _create_params(relay_id="r1", vm_remote_port=40001)).evidence is None
@@ -785,6 +855,34 @@ class TestCreateResult:
     @pytest.mark.parametrize("user", [None, "", "  "])
     def test_an_endpoint_naming_no_tenant_account_is_no_evidence(self, user):
         assert create_result({**_DIRECT, "tenant_user": user}, _create_params()).evidence is None
+
+    @pytest.mark.parametrize(
+        "field,value,named",
+        [
+            ("vm_name", "tenant-2", "vm_name"),
+            ("status", "running", "status"),
+            ("action", "vm_remove", "action"),
+        ],
+        ids=["another guest", "another status", "another action"],
+    )
+    def test_a_fact_not_naming_its_job_yields_no_evidence(self, field, value, named):
+        created = create_result({**_DIRECT, field: value}, _create_params())
+
+        assert created.evidence is None
+        assert created.detail["mismatch"].startswith(f"{named}:")
+
+    def test_a_result_with_no_fact_yields_no_evidence(self):
+        created = create_result({**_DIRECT, "ansible_result": None}, _create_params())
+
+        assert created.evidence is None
+        assert created.detail["mismatch"] == "no create fact was printed"
+
+    def test_the_facts_host_is_not_compared_and_the_registry_address_is_used(self):
+        created = create_result({**_DIRECT, "host": "198.51.100.99"}, _create_params())
+
+        (endpoint,) = created.evidence.endpoints
+        assert endpoint.host == "203.0.113.1"
+        assert create_fact_mismatch({**_DIRECT, "host": "198.51.100.99"}, _create_params()) is None
 
     def test_the_detail_is_the_named_operator_fields_and_never_the_raw_fact(self):
         created = create_result(_DIRECT, _create_params())
@@ -834,3 +932,29 @@ class TestPlaybookContract:
     def test_the_inventory_target_carries_the_tenant_address(self):
         target = inventory_target(_HOST)
         assert (target.public_host, target.ssh_host) == ("203.0.113.1", "10.0.0.1")
+
+
+@pytest.mark.parametrize("relay_id,port,required", [(None, None, False), ("fixture-relay", None, True), (None, 6100, True)])
+def test_cleanup_mode_is_accepted_job_state_and_cannot_be_overridden(relay_id, port, required):
+    codec = VmAnsibleCodec()
+    params = _params(relay_id=relay_id, vm_remote_port=port)
+    variables = codec.variables(params)
+    assert variables["vm_relay_required"] is required
+    assert "vm_relay_required" in codec.reserved_var_keys(params)
+    with pytest.raises(ValueError, match="vm_relay_required"):
+        render_extra_vars(variables, {"vm_relay_required": not required})
+
+
+@pytest.mark.parametrize("action", ["create", "vm_remove", "undefine"])
+@pytest.mark.parametrize("key", [
+    "relay_proxy_action", "relay_proxy_name", "relay_proxy_local_ip",
+    "relay_proxy_local_port", "relay_proxy_remote_port", "relay_client_config",
+    "relay_proxy_teardown_library", "relay_admin_credentials", "frp_binary_path",
+    "frp_server_addr", "vm_remote_port", "vm_name", "vm_ip", "target_host",
+])
+def test_stored_provider_options_cannot_redirect_proxy_execution(action, key):
+    with pytest.raises(ValueError, match=key):
+        VmAnsibleCodec().prepare(_run({
+            "host_id": "kvm1", "vm_action": action, "offering_mode": "vm",
+            "vm_target": "guest-example", "provider_extra_vars": {key: "synthetic-other"},
+        }))

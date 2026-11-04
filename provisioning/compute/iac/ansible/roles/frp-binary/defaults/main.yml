@@ -1,0 +1,11 @@
+---
+frp_version: "0.61.1"
+frp_platform: linux_amd64
+# Verified against the official v0.61.1 frp_sha256_checksums.txt;
+# checksum-file SHA-256: a5ed0a9d32e8936e644e7822ebe1d33d37cd027795a46dbc9a842f0fcbbbc419.
+# Runtime installation uses only the pinned archive digest below.
+frp_archives:
+  linux_amd64:
+    url: https://github.com/fatedier/frp/releases/download/v0.61.1/frp_0.61.1_linux_amd64.tar.gz
+    sha256: bff260b68ca7b1461182a46c4f34e9709ba32764eed30a15dd94ac97f50a2c40
+frp_install_root: /usr/local/lib/frp

@@ -7,19 +7,21 @@ For the seller side see [`seller-quickstart.md`](./seller-quickstart.md).
 
 ## Supported settlement methods
 
-The buyer supports Alkahest escrow settlement.
+The buyer supports Alkahest escrow and Arkhai payments when the listing advertises
+a compatible option. The purchase example below uses Alkahest.
 
 | Mechanism | Buyer payment choices | Buyer requirements |
 |---|---|---|
 | Alkahest (`alkahest.v1`) | The exact chain/asset/escrow option advertised by the listing | An EVM wallet, RPC-backed chain configuration, gas, and the advertised asset. |
+| Arkhai payments (`arkhai.payments.v1`) | The configured service and asset advertised by the listing | A payer account, its API credential, and matching public service configuration. |
 
 
 ## Prerequisites
 
 - Linux or macOS (Windows: WSL).
 - Python 3.12+.
-- A public marketplace identity plus matching signing material injected through
-  `ARKHAI_IDENTITY_CREDENTIAL`.
+- A buyer profile containing a public marketplace identity and a reference to
+  its matching signing material, created or selected below.
 - An SSH keypair for leased VMs:
 
   ```bash
@@ -78,14 +80,17 @@ profile metadata under `$XDG_DATA_HOME/arkhai/buyer/profiles.json` (normally
 create or import one profile:
 
 ```bash
+umask 077
 market config init-user
 # Desktop: generate Ed25519 material into the OS keyring.
-market profile create --name personal --provider os-keyring \
-  --reference arkhai/buyer/personal --scheme ed25519 --generate
+market profile create personal --provider keyring.v1 \
+  --reference arkhai/buyer/personal --scheme ed25519 --generate --select
 
-# Headless: first create an owner-only regular secret file, then:
-market profile create --name automation --provider secret-file \
-  --reference /run/secrets/arkhai/buyer-credential --scheme ed25519
+# Headless alternative: generate into a new owner-only file.
+buyer_secret_dir="${XDG_DATA_HOME:-$HOME/.local/share}/arkhai/buyer/credentials"
+install -d -m 0700 "$buyer_secret_dir"
+market profile create automation --provider secret_file.v1 \
+  --reference "$buyer_secret_dir/automation.key" --scheme ed25519 --generate --select
 
 # Alkahest users additionally render independent wallet/chain inputs:
 market config init-user --include-evm-resources
@@ -96,9 +101,16 @@ metadata and redacted references. There is no provider fallback: keyring,
 strict file, and an explicitly named environment variable are distinct choices.
 Set `[provisioning].ssh_public_key`, `[registry].urls`, and each signed registry
 authority pin in public config. Never put a seed or marketplace private key in
-TOML.
+TOML. The secret-file provider requires a current-user-owned regular file and
+refuses to overwrite an existing file during generation.
 
 Settlement mechanisms are explicit and disabled by default.
+
+For Arkhai payments, configure `[Settlement.arkhai_payments]` and the separate
+`[vms].payer_account` as described in [settlement consumer configuration](development/DEPLOYMENT_AND_CONFIG.md#settlement-consumer-configuration-and-cutover).
+The API key belongs in the environment variable named by `api_key_env`, not in
+TOML. Use `livemode = false` for TEST receipts. This mechanism needs no EVM wallet
+or RPC configuration.
 
 An Alkahest buyer enables and prioritizes `alkahest.v1`, fills the generated
 `[Wallet]` and `[Chains.<name>]` tables, and names an address book in
@@ -115,9 +127,9 @@ writing, and an exact rerun converges:
 
 ```bash
 market profile import ~/.config/arkhai/legacy-buyer.toml --name personal \
-  --provider secret-file --reference /run/secrets/arkhai/buyer-credential --check
+  --provider secret_file.v1 --reference /path/to/current-user-owned-credential --check
 market profile import ~/.config/arkhai/legacy-buyer.toml --name personal \
-  --provider secret-file --reference /run/secrets/arkhai/buyer-credential
+  --provider secret_file.v1 --reference /path/to/current-user-owned-credential
 market config migrate --scope settlement --check
 market config migrate --scope settlement --write --backup
 ```

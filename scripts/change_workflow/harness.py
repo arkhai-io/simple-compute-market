@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import posixpath
 import re
 import subprocess
 import sys
@@ -49,11 +50,16 @@ UNATTENDED = (
     "complete without that call, end with a `stopped` outcome whose `reason` names that exact "
     "call, and otherwise go on and end as the step ends, since the denial is recorded on the "
     "outcome whatever it is. One denied call is not a denied tool. A call a deny rule refused "
-    "is forbidden: no other tool does it. A call denied because no rule allows it, which the "
+    "is forbidden: no other tool does it, except where the rule exists only to keep file "
+    "writes on the Edit and Write tools (the step table's comments name those rules: sed's "
+    "in-place forms, find's deleting, running, and writing actions, and the diff family's "
+    "output-to-file forms), whose refused shell write may be made with the Edit or Write tool "
+    "your step's rules allow. A call denied because no rule allows it, which the "
     "harness reports as don't ask mode, may be done instead by a tool your step's rules allow "
     "for the same work, such as the Edit tool for a shell write or Read or Grep for a shell "
-    "read; name the substitute in your message. Never ask about a denial as a question. Never "
-    "end your turn, schedule a wake-up, or start a monitor to wait for a background command or "
+    "read. Either way, name the substitute in your message. Never ask about a denial as a "
+    "question. Never end your turn, schedule a wake-up, or start a monitor to wait for a "
+    "background command or "
     "subagent: run a subagent in the foreground, and wait for a command as your skill says. A turn that starts after you have reported ends the run in your report's place.")
 
 # Set in the environment of every run the wrapper starts on Claude, so a command
@@ -74,15 +80,45 @@ _NETWORK = re.compile(r"can't reach the api server|connection error|econnrefused
                       r"network error", re.I)
 
 
+# A file-tool rule: the tool and the path pattern inside its parentheses.
+_PATH_RULE = re.compile(r"^(Read|Edit|Write|NotebookEdit)\((.*)\)$", re.S)
+
+
+def anchored(rule: str, root: Path) -> str:
+    """`rule` with a relative path pattern anchored at `root`, any other rule as it is.
+
+    Claude Code resolves a file-tool rule's bare or `./` pattern against the
+    session's working directory at the moment of each call, not where the session
+    started. A step that changes directory partway through, such as `cd` into an
+    archive directory to list its reviews, would then lose every relative rule its
+    table grants for the rest of the session. Written as `//<root>/<pattern>`, the
+    pattern names the checkout's own files wherever the session stands. Patterns
+    already absolute (`//`), home-relative (`~/`), or settings-relative (`/`) are
+    left alone. A pattern reaching above the checkout, such as a sibling worktree's
+    `../*-proposal/**`, has its `..` resolved here: Claude Code never matches a
+    pattern holding a `..` segment.
+    """
+    match = _PATH_RULE.match(rule)
+    if not match:
+        return rule
+    tool, pattern = match.groups()
+    if pattern.startswith(("/", "~/")) or pattern == "~":
+        return rule
+    relative = pattern[2:] if pattern.startswith("./") else pattern
+    return f"{tool}(/{posixpath.normpath(f'{root.resolve().as_posix()}/{relative}')})"
+
+
 def claude_command(prompt: str, rules: StepRules, schema: dict[str, Any] | None, model: Model,
-                   *, session: str | None = None, granted: Sequence[str] = (),
+                   *, root: Path, session: str | None = None, granted: Sequence[str] = (),
                    system: str = UNATTENDED) -> list[str]:
     """The headless Claude Code command for one turn of a step, on `model`.
 
     The prompt comes straight after `-p`: the rule lists are variadic, and would
     take a prompt placed after them as one more rule. Only the project's settings
     are loaded, not the owner's user or local settings with their allow rules. A
-    review is given no schema: its final message is the review.
+    review is given no schema: its final message is the review. Every file-tool
+    rule, granted ones too, is anchored at `root`, the checkout the run starts in
+    (`anchored`).
 
     A fresh run names its own session id. Without one, a headless child started
     from inside another Claude Code session inherits that session's id from its
@@ -102,11 +138,11 @@ def claude_command(prompt: str, rules: StepRules, schema: dict[str, Any] | None,
     command += ["--append-system-prompt", system]
     if session:
         command += ["--resume", session]
-    allow = [*rules.allow, *granted]
+    allow = [anchored(rule, root) for rule in (*rules.allow, *granted)]
     if allow:
         command += ["--allowedTools", *allow]
     if rules.deny:
-        command += ["--disallowedTools", *rules.deny]
+        command += ["--disallowedTools", *(anchored(rule, root) for rule in rules.deny)]
     return command
 
 

@@ -168,15 +168,10 @@
     - security_hardening
     - host_setup
 
-- name: Install the VM tunnel client when this host's pool uses a relay
-  # Conditional, not defaulted. A host with a public address and no relay
-  # serves VMs by direct NAT, which is a supported deployment — and the role
-  # now asserts an address and a token rather than falling back to a published
-  # literal, so including it unconditionally would fail initialization of every
-  # host that does not use a relay. The correct behaviour for an absent relay
-  # is that no VM tunnel client is installed at all.
-  include_tasks:
-    file: frp-client.yml
+# Direct-access hosts need no buyer tunnel client.
+- name: Install the buyer tunnel client when this host uses a relay
+  include_role:
+    name: relay-client
     apply:
       tags:
         - frp_client
@@ -253,10 +248,10 @@
       - "  - All jails use iptables-allports (complete IP blocking)"
       - ""
       - "VM TUNNEL CLIENT:"
-      - "  - Config: /etc/frp/frpc-vms.toml"
-      - "  - Logs: /var/log/frp/frpc-vms.log"
-      - "  - Status: sudo systemctl status frpc-vms"
-      - "  - View logs: sudo tail -f /var/log/frp/frpc-vms.log"
+      - "  - Config: /etc/frp/frpc-buyers.toml"
+      - "  - Logs: /var/log/frp/frpc-buyers.log"
+      - "  - Status: sudo systemctl status frpc-buyers"
+      - "  - View logs: sudo tail -f /var/log/frp/frpc-buyers.log"
       - "  - The host management tunnel is a separate unit, written when this"
       - "    host was prepared. No VM operation touches it."
       - ""

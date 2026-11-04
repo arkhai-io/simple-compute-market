@@ -12,7 +12,7 @@ from market_deal_lifecycle.terms import LifecycleTerms, partial_period
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from market_arkhai_payments.canonical import agreement_hash
+from market_arkhai_payments.canonical import agreement_hash, wire_json
 from market_arkhai_payments.errors import MandatePolicyError
 from market_arkhai_payments.models import Mandate
 
@@ -20,6 +20,9 @@ from market_arkhai_payments.models import Mandate
 MAX_SAFE_INTEGER = 9_007_199_254_740_991
 DEFAULT_WINDOW = "P7D"
 PAYMENTS_NONCE = "arkhai.payments.v1"
+# A stop takes effect with no notice, and a hold is never extended.
+IMMEDIATE = "P0D"
+STOP_CHARGES_PARTIAL_PERIOD = "charged"
 _ACCOUNT_ID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 _ASSET = r"^[A-Z][A-Z0-9]{0,16}(\/\d{1,6})?$"
 _FIXED_DURATION = re.compile(
@@ -226,8 +229,8 @@ def check(
         if isinstance(exc, MandatePolicyError):
             raise
         raise MandatePolicyError("mandate is invalid under the published wire schema") from exc
-    actual_values = actual.model_dump(mode="json", by_alias=True, exclude_none=True)
-    expected_values = expected.model_dump(mode="json", by_alias=True, exclude_none=True)
+    actual_values = wire_json(actual)
+    expected_values = wire_json(expected)
     mismatched = sorted(
         key for key in actual_values.keys() | expected_values.keys()
         if actual_values.get(key) != expected_values.get(key)

@@ -130,7 +130,10 @@
             "relay_token": false,
             "ssh_decryption_key": false,
             "inventory_ini": false,
-            "storefront_admin_key": false
+            "inventory_path": false,
+            "storefront_admin_key": false,
+            "relay_definitions_path": false,
+            "host_definitions_path": false
           }
         },
         "storefront": {

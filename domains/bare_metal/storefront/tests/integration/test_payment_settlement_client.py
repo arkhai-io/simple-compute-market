@@ -417,22 +417,32 @@ async def test_an_accepted_deal_settles_and_refunds_after_payments_is_disabled(h
 async def test_a_refund_recorded_before_delivery_start_stops_delivery(harness):
     db = harness.runtime.db
     gate = asyncio.Event()
+    entered = asyncio.Event()
     start = db.ensure_bare_metal_fulfillment_lifecycle
 
     async def gated_start(**kwargs):
+        entered.set()
         await gate.wait()
         return await start(**kwargs)
 
     db.ensure_bare_metal_fulfillment_lifecycle = gated_start
     harness.serve()
     settling = asyncio.create_task(harness.settle())
-    await asyncio.sleep(0.05)
-    assert (await harness.refund()).status == "refunded"
-    gate.set()
-    with pytest.raises(StorefrontClientError):
-        await settling
-    assert harness.provisioning.begin_calls == []
-    assert await db.load_bare_metal_fulfillment_lifecycle(negotiation_id=harness.negotiation_id) is None
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=10)
+        assert (await harness.refund()).status == "refunded"
+        gate.set()
+        with pytest.raises(StorefrontClientError):
+            await settling
+        assert harness.provisioning.begin_calls == []
+        assert await db.load_bare_metal_fulfillment_lifecycle(
+            negotiation_id=harness.negotiation_id
+        ) is None
+    finally:
+        gate.set()
+        if not settling.done():
+            settling.cancel()
+        await asyncio.gather(settling, return_exceptions=True)
 
 
 @pytest.mark.asyncio

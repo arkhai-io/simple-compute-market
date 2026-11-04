@@ -52,6 +52,7 @@ def parse_inventory_ini(
             ssh_user=entry["ssh_user"],
             ssh_port=entry["ssh_port"],
             public_host=entry["public_host"],
+            public_port=entry["public_port"],
             key_path=key_file if key_material == "path" else None,
             private_key=read_key(key_file) if key_material == "embedded" else None,
         )
@@ -73,12 +74,14 @@ def _parse_entries(ini_text: str) -> list[dict]:
     section names groups; neither lists hosts, and both are skipped.
 
     Returns a list of ``{"host_id", "ssh_host", "public_host", "ssh_user",
-    "ssh_port", "pool_id", "ansible_ssh_private_key_file"}`` dicts. Entries
-    missing ``ansible_host`` or ``ansible_user`` are skipped with a warning.
+    "ssh_port", "public_port", "pool_id", "ansible_ssh_private_key_file"}``
+    dicts. Entries missing ``ansible_host`` or ``ansible_user`` are skipped
+    with a warning.
 
     Variable mapping:
         ``ansible_port=``                 → ``ssh_port`` (int, default 22)
         ``public_host=``                  → ``public_host`` (tenant-facing addr)
+        ``public_port=``                  → ``public_port`` (tenant-facing port, int)
         ``ansible_ssh_private_key_file=`` → preserved verbatim
         ``pool_id=<id>``                  → the Resource Pool to place the host in
         ``pool_id=`` (empty)              → ``None``: unplace the host
@@ -119,24 +122,29 @@ def _parse_entries(ini_text: str) -> list[dict]:
             )
             continue
 
-        # A malformed ansible_port= skips the entry, because substituting 22
-        # would turn an operator's typo into a host that cannot be reached at
-        # all — a failure that looks like a network problem rather than a bad
-        # inventory line.
-        ssh_port = 22
-        if "ansible_port" in host_vars:
-            try:
-                ssh_port = int(host_vars["ansible_port"])
-            except ValueError:
-                ssh_port = -1
-            if not 1 <= ssh_port <= 65535:
-                logger.warning(
-                    "parse_inventory_ini: skipping '%s' — ansible_port '%s' is not a "
-                    "port number between 1 and 65535",
-                    name,
-                    host_vars["ansible_port"],
-                )
-                continue
+        # A malformed ansible_port= or public_port= skips the entry, because
+        # substituting a fallback would turn an operator's typo into a host
+        # that cannot be reached at all — a failure that looks like a network
+        # problem rather than a bad inventory line.
+        malformed = next(
+            (
+                key
+                for key in ("ansible_port", "public_port")
+                if key in host_vars and _port(host_vars[key]) is None
+            ),
+            None,
+        )
+        if malformed is not None:
+            logger.warning(
+                "parse_inventory_ini: skipping '%s' — %s '%s' is not a port number "
+                "between 1 and 65535",
+                name,
+                malformed,
+                host_vars[malformed],
+            )
+            continue
+        ssh_port = _port(host_vars["ansible_port"]) if "ansible_port" in host_vars else 22
+        public_port = _port(host_vars["public_port"]) if "public_port" in host_vars else None
 
         results.append({
             "host_id": name,
@@ -144,6 +152,7 @@ def _parse_entries(ini_text: str) -> list[dict]:
             "public_host": host_vars.get("public_host"),
             "ssh_user": ssh_user,
             "ssh_port": ssh_port,
+            "public_port": public_port,
             # A non-empty pool_id= names a pool, an empty one unplaces the
             # host, and no pool_id says nothing: an existing host stays where
             # it is, so an older inventory never unplaces it.
@@ -158,6 +167,15 @@ def _parse_entries(ini_text: str) -> list[dict]:
         })
 
     return results
+
+
+def _port(value: str) -> int | None:
+    """``value`` as a port number, or ``None`` when it is not one."""
+    try:
+        port = int(value)
+    except ValueError:
+        return None
+    return port if 1 <= port <= 65535 else None
 
 
 __all__ = ["DEFAULT_KEY_PATH", "parse_inventory_ini"]

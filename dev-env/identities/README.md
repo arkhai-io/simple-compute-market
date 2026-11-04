@@ -176,7 +176,7 @@ the same identifiers:
 
 The names are the VM stack's; the roles are the same kind in both stacks, which
 is what makes the reuse safe. `dev-env/bare-metal/` holds the lane's other
-development files — an empty host inventory, a pool document containing only the
+development files — an empty host definitions document, a pool document containing only the
 required `default` pool with no deliverable or advertisable modes (scenarios
 declare their own pools against the provisioning mock profile), and placeholders
 for files the stack requires but the lane never uses — each explaining itself

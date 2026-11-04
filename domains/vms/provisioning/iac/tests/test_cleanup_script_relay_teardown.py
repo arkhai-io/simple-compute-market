@@ -4,7 +4,9 @@
 YAML. It cannot prove the embedded shell behaves, and this is shell that runs
 unattended on a rented host: `vm-create.yml` writes
 `/usr/local/bin/cleanup_vm_<name>.sh` onto the host, and that script removes
-the VM's proxy stanza with `sed` and reloads the tunnel client with `curl`.
+the VM's proxy stanza through the shared family helper and reloads the tunnel
+client with `curl`. Addresses and admin passwords here are deterministic
+development fixtures and must never be used on a public network.
 
 Two properties matter enough to run the real shell for.
 
@@ -24,8 +26,10 @@ script runs, and the correctness bug this harness exists for — a corrupted
 kind a substring assertion reports as present and working.
 """
 
-from pathlib import Path
+import os
+import tempfile
 import unittest
+from pathlib import Path
 
 from shell_harness import (
     assert_bash_syntax_valid,
@@ -37,6 +41,11 @@ from shell_harness import (
 
 ROOT = Path(__file__).resolve().parents[1]
 VM_CREATE = ROOT / "ansible/roles/vm-management/tasks/vm-create.yml"
+# The functions the script includes ahead of this block, as the role includes
+# them into it.
+LIBRARY = (ROOT / "ansible/roles/vm-management/files/guest_teardown.sh").read_text(
+    encoding="utf-8"
+)
 
 # The relay-teardown block inside the generated cleanup script. Anchored on
 # the log line that opens it and the one that opens the next section, so a
@@ -48,7 +57,9 @@ _BLOCK_END = '      log "=== Cleaning up port forwarding rules ==="\n'
 # Ansible templating the extracted shell still carries. Substituted with the
 # values a real run would render, since bash has no opinion about Jinja.
 _SUBSTITUTIONS = {
-    "{{ frp_admin_port | default(7400) }}": "7400",
+    "{{ relay_proxy_teardown_library | quote }}": "/usr/local/lib/arkhai-relay/remove_proxy.sh",
+    "{{ relay_client_config | quote }}": "/etc/frp/frpc-buyers.toml",
+    "{{ vm_relay_required | default(true) | bool | ternary('true', 'false') }}": "true",
 }
 
 
@@ -65,7 +76,7 @@ def _teardown_block() -> str:
 
 
 _PRELUDE = """
-set -u
+set -eu
 VM_NAME="agent-vm-01"
 log() { echo "LOG: $1"; }
 log_error() { echo "ERR: $1" >&2; }
@@ -80,9 +91,9 @@ class CleanupScriptRelayTeardownTests(unittest.TestCase):
     def test_the_block_parses(self) -> None:
         """A cheap first pass. The behavioural checks below are the real ones:
         a command that does not exist parses fine."""
-        assert_bash_syntax_valid(_PRELUDE + self.block)
+        assert_bash_syntax_valid(_PRELUDE + LIBRARY + self.block)
 
-    def _run(self, *, config_exists: bool, reload_ok: bool = True):
+    def _run(self, *, config_exists: bool, reload_ok: bool = True, neighbour: bool = False, relay_required: bool = True):
         curl = (
             "#!/bin/bash\necho \"CURL $@\" >> \"$RECORD\"\nexit 0\n"
             if reload_ok
@@ -95,22 +106,30 @@ class CleanupScriptRelayTeardownTests(unittest.TestCase):
             "systemctl": "#!/bin/bash\necho \"SYSTEMCTL $@\" >> \"$RECORD\"\nexit 0\n",
         }
         with fake_binaries(fakes) as fake_bin:
-            import tempfile
-            import os
-
             workdir = tempfile.mkdtemp()
             record = os.path.join(workdir, "record")
             open(record, "w").close()
             etc = os.path.join(workdir, "etc", "frp")
             os.makedirs(etc)
-            vms_conf = os.path.join(etc, "frpc-vms.toml")
+            vms_conf = os.path.join(etc, "frpc-buyers.toml")
             mgmt_conf = os.path.join(etc, "frpc.toml")
             stanza = (
                 "serverAddr = \"203.0.113.9\"\n"
-                "# BEGIN ANSIBLE MANAGED BLOCK FOR VM agent-vm-01\n"
+                "# BEGIN ANSIBLE MANAGED RELAY PROXY vm-agent-vm-01\n"
                 "[[proxies]]\nname = \"vm-agent-vm-01\"\nremotePort = 6142\n"
-                "# END ANSIBLE MANAGED BLOCK FOR VM agent-vm-01\n"
+                "# END ANSIBLE MANAGED RELAY PROXY vm-agent-vm-01\n"
             )
+            stanza = 'webServer.port = 740\nwebServer.password = "' + 'a' * 64 + '"\n' + stanza
+            library = Path(workdir) / "remove_proxy.sh"
+            family = ROOT.parents[3] / "provisioning/compute/iac/ansible/roles/relay-proxy/files/remove_proxy.sh"
+            library.write_text(family.read_text(encoding="utf-8"), encoding="utf-8")
+            if neighbour:
+                # Another guest, whose name begins with this guest's.
+                stanza += (
+                    "# BEGIN ANSIBLE MANAGED RELAY PROXY vm-agent-vm-012\n"
+                    "[[proxies]]\nname = \"vm-agent-vm-012\"\nremotePort = 6143\n"
+                    "# END ANSIBLE MANAGED RELAY PROXY vm-agent-vm-012\n"
+                )
             if config_exists:
                 Path(vms_conf).write_text(stanza, encoding="utf-8")
             # The management tunnel's file always exists, and must be untouched.
@@ -118,8 +137,9 @@ class CleanupScriptRelayTeardownTests(unittest.TestCase):
 
             script = (
                 _PRELUDE
+                + LIBRARY
                 + f'RECORD="{record}"\nexport RECORD\n'
-                + self.block.replace("/etc/frp/", f"{etc}/")
+                + self.block.replace("if true; then", "if true; then" if relay_required else "if false; then").replace("/etc/frp/", f"{etc}/").replace("/usr/local/lib/arkhai-relay/remove_proxy.sh", str(library))
             )
             result = run_bash(script, fake_bin_dir=fake_bin)
             calls = Path(record).read_text(encoding="utf-8")
@@ -136,6 +156,18 @@ class CleanupScriptRelayTeardownTests(unittest.TestCase):
         # managed block is this script's business.
         self.assertIn('serverAddr = "203.0.113.9"', remaining)
 
+    def test_a_guest_whose_name_begins_with_this_ones_keeps_its_block(self) -> None:
+        """Each block is matched by its exact BEGIN and END lines. A pattern
+        this guest's name satisfies also matches every name it begins."""
+        result, _, vms_conf, _ = self._run(config_exists=True, neighbour=True)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        remaining = Path(vms_conf).read_text(encoding="utf-8")
+        self.assertNotIn('name = "vm-agent-vm-01"\n', remaining)
+        self.assertIn('name = "vm-agent-vm-012"', remaining)
+        self.assertIn("# BEGIN ANSIBLE MANAGED RELAY PROXY vm-agent-vm-012\n", remaining)
+        self.assertIn("# END ANSIBLE MANAGED RELAY PROXY vm-agent-vm-012\n", remaining)
+
     def test_the_management_tunnel_configuration_is_untouched(self) -> None:
         """The property that matters most, and the one YAML cannot show."""
         _, calls, _, mgmt_conf = self._run(config_exists=True)
@@ -149,16 +181,22 @@ class CleanupScriptRelayTeardownTests(unittest.TestCase):
         self.assertIn("/api/reload", calls)
         self.assertNotIn("SYSTEMCTL", calls)
 
-    def test_a_failed_reload_is_reported_rather_than_ignored(self) -> None:
+    def test_a_failed_reload_fails_the_cleanup(self) -> None:
+        """The running client may still hold the proxy and its relay port, so
+        the teardown fails and its capacity stays held for a retry."""
         result, _, _, _ = self._run(config_exists=True, reload_ok=False)
 
-        self.assertIn("STEP|remove_relay_proxy|partial", result.stdout)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("STEP|remove_relay_proxy|failed", result.stdout)
+        self.assertNotIn("STEP|remove_relay_proxy|success", result.stdout)
 
-    def test_an_absent_configuration_is_skipped_not_failed(self) -> None:
-        """A direct-NAT host has no VM tunnel client. Cleanup must not fail
-        there — the VM still needs undefining."""
+    def test_an_absent_configuration_fails_a_required_relay_cleanup(self) -> None:
         result, calls, _, _ = self._run(config_exists=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("/api/reload", calls)
 
+    def test_an_explicit_direct_job_skips_relay_cleanup(self) -> None:
+        result, calls, _, _ = self._run(config_exists=False, relay_required=False)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("STEP|remove_relay_proxy|skipped", result.stdout)
         self.assertNotIn("/api/reload", calls)

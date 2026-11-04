@@ -30,8 +30,13 @@ PHYSICAL_HOST_ID = "host-physical-1"
 POOL_ID = "bare-metal-pool"
 
 
-async def bare_metal_capacity(clients) -> None:
-    """The pool, host, and declaration one bare-metal machine is sold from."""
+async def bare_metal_capacity(
+    clients, *, public_host: str | None = None, public_port: int | None = None
+) -> None:
+    """The pool, host, and declaration one bare-metal machine is sold from.
+
+    ``public_host`` and ``public_port`` give the host a tenant-facing route.
+    """
     await clients.pools.create_pool(
         PoolCreate(
             id=POOL_ID,
@@ -48,7 +53,12 @@ async def bare_metal_capacity(clients) -> None:
         HostCreate(
             host_id=HOST_ID,
             connection=ssh_connection(
-                ssh_host=SSH_HOST, ssh_user="root", ssh_port=2201, key_path="/fake/id_ed25519"
+                ssh_host=SSH_HOST,
+                ssh_user="root",
+                ssh_port=2201,
+                public_host=public_host,
+                public_port=public_port,
+                key_path="/fake/id_ed25519",
             ),
         )
     )
@@ -97,27 +107,32 @@ async def schedule(clients, capacity_reservation_id: str) -> None:
     )
 
 
+def fulfillment_body(capacity_reservation_id: str, escrow_uid: str) -> FulfillmentRequestBody:
+    """The typed bare-metal request used by validation and acceptance."""
+    return FulfillmentRequestBody(
+        capacity_reservation_id=capacity_reservation_id,
+        market="bare_metal",
+        fulfillment_request=VersionedEnvelope(
+            kind="bare_metal.v2",
+            schema_version=1,
+            payload={
+                "kind": "bare_metal.v2",
+                "escrow_uid": escrow_uid,
+                "host_id": HOST_ID,
+                "physical_host_id": PHYSICAL_HOST_ID,
+                "lease_start_utc": "2030-01-01T00:00:00Z",
+                "lease_end_utc": "2030-01-02T00:00:00Z",
+                "access_method": "ssh",
+                "ssh_public_key": "ssh-ed25519 AAAA tenant-a",
+            },
+        ),
+    )
+
+
 async def begin(clients, capacity_reservation_id: str, escrow_uid: str) -> str:
     """Begin the deal's fulfillment, which dispatches the grant; its id."""
     accepted = await clients.family.begin_fulfillment(
-        FulfillmentRequestBody(
-            capacity_reservation_id=capacity_reservation_id,
-            market="bare_metal",
-            fulfillment_request=VersionedEnvelope(
-                kind="bare_metal.v2",
-                schema_version=1,
-                payload={
-                    "kind": "bare_metal.v2",
-                    "escrow_uid": escrow_uid,
-                    "host_id": HOST_ID,
-                    "physical_host_id": PHYSICAL_HOST_ID,
-                    "lease_start_utc": "2030-01-01T00:00:00Z",
-                    "lease_end_utc": "2030-01-02T00:00:00Z",
-                    "access_method": "ssh",
-                    "ssh_public_key": "ssh-ed25519 AAAA tenant-a",
-                },
-            ),
-        )
+        fulfillment_body(capacity_reservation_id, escrow_uid)
     )
     return accepted.fulfillment_id
 

@@ -95,6 +95,13 @@ class ConnectionCodec(Protocol):
     def validate(self, envelope: ConnectionEnvelope) -> ConnectionEnvelope:
         """Return the canonical form of a stored envelope, or raise ``ValueError``."""
 
+    def address(self, envelope: ConnectionEnvelope) -> str | None:
+        """The network address the service reaches the host at, if the kind has one.
+
+        Lets a rule that compares addresses read one without learning the
+        kind's fields.
+        """
+
 
 class ConnectionCodecs:
     """The connection codecs a deployment supports, by kind."""
@@ -106,6 +113,23 @@ class ConnectionCodecs:
                 raise ValueError(f"duplicate connection codec for kind {codec.kind!r}")
             by_kind[codec.kind] = codec
         self._codecs = by_kind
+
+    def canonical(self, envelope: ConnectionEnvelope) -> ConnectionEnvelope | None:
+        """A stored envelope in its codec's canonical form.
+
+        ``None`` when no composed codec serves the envelope's kind at its
+        version: such a connection cannot be stated at a version this
+        deployment accepts. An envelope its codec refuses has no canonical
+        form, so it is returned as stored, and a caller comparing or stating it
+        meets the refusal when it next builds through the codec.
+        """
+        codec = self._codecs.get(envelope.kind)
+        if codec is None or codec.version != envelope.version:
+            return None
+        try:
+            return codec.validate(envelope)
+        except ValueError:
+            return envelope
 
     def codec(self, kind: str) -> ConnectionCodec:
         try:
@@ -133,6 +157,10 @@ class ConnectionCodecs:
         if previous is not None and previous.kind != kind:
             previous = None
         return codec.build(public, secrets, previous=previous)
+
+    def address(self, envelope: ConnectionEnvelope) -> str | None:
+        """The address a host's connection reaches it at, by its kind's codec."""
+        return self.codec(envelope.kind).address(envelope)
 
 
 __all__ = [

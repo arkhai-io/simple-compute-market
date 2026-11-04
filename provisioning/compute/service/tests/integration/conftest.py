@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import time
 import uuid
 from dataclasses import dataclass
@@ -56,10 +57,8 @@ from market_identity import (
 from compute_provisioning_service import container as _container_module
 from vm_provisioning_adapter.db import Base as VmBase
 from vm_provisioning_adapter.bundle import VM_JOB_ACTIONS, build_vm_adapter_bundle
-from vm_provisioning_adapter.services.relay_port_allocator import (
-    RelayPortAllocator,
-)
-from vm_provisioning_adapter.services.relay_service import RelayService
+from compute_provisioning.relays import RelayExecutionResolver, RelayService
+from compute_provisioning.relays.db import Base as RelaysBase
 from compute_provisioning import JobExecutorTable, compose_adapter_bundles
 from vm_provisioning_adapter.services.vm_fulfillment_plan import VmFulfillmentPlan
 from vm_provisioning_adapter.services.vm_operations_service import VmOperationsService
@@ -391,47 +390,77 @@ from compute_provisioning_service.services.job_retry import retry_policy_from
 from compute_provisioning_ansible import MockAnsibleRunner
 from vm_provisioning_adapter.services.mock_output import vm_mock_output
 from compute_provisioning_service.services.system_status import SystemStatusService
+from fastapi import APIRouter, FastAPI
+from starlette.routing import Match
+
+
+def mount_unless_served(app: FastAPI, router: APIRouter) -> None:
+    """Include ``router`` in ``app`` unless the app already serves every route it declares.
+
+    The suite's fixtures share one module-level app, and ``main.py`` mounts the
+    test routers itself when the mock profile is active at import. Whether a
+    route is served is asked of the app's own routing, by matching a request for
+    each path and method the router declares: an included router is not listed
+    by its routes' paths in ``app.routes``, and every inclusion wraps the app's
+    lifespan once more, so a check by path would include the router again for
+    every test until entering the lifespan exhausts the stack.
+    """
+    for route in router.routes:
+        path = re.sub(r"\{[^}]+\}", "x", route.path)
+        for method in sorted(route.methods):
+            scope = {"type": "http", "path": path, "method": method, "root_path": ""}
+            if not any(served.matches(scope)[0] is Match.FULL for served in app.routes):
+                app.include_router(router)
+                return
 
 
 # ---------------------------------------------------------------------------
-# Representative playbook stdout for a successful vm_create job.
-# Contains a vm_creation_data JSON block that the VM codec
+# Representative playbook stdout for a successful vm_create job, in the JSON
+# result format. Contains a vm_creation_data JSON block that the VM codec
 # will extract into the job result.  Credentials are embedded so the credential
-# storage path is exercised.
+# storage path is exercised. The codec takes evidence only from a fact naming
+# the job's own guest and reporting success, so a test whose job names another
+# guest renders the output for it.
 # ---------------------------------------------------------------------------
 
-FAKE_CREATE_STDOUT = """\
+
+def fake_create_stdout(vm_name: str) -> str:
+    """The stdout of a successful create of ``vm_name``."""
+    return """\
 PLAY [Provision VM] ***********************************************************
 
 TASK [debug] ******************************************************************
-ok: [kvm1] => {
-    "vm_creation_data": {
+ok: [kvm1] => {{
+    "vm_creation_data": {{
         "action": "create",
-        "vm_name": "agent-vm-01",
-        "status": "running",
+        "vm_name": "{vm_name}",
+        "status": "success",
         "host": "kvm1",
         "timestamp": "2025-01-01T00:00:00Z",
         "tenant_user": "agentvm01",
         "external_ssh_port": "54321",
         "vm_ip_internal": "192.168.122.50",
-        "authentication": {
-            "tenant": {
+        "authentication": {{
+            "tenant": {{
                 "password": "tenantpw",
                 "key_type": "generated",
-                "ssh_commands": {
+                "ssh_commands": {{
                     "internal": "ssh -i key agentvm01@192.168.122.50",
                     "external": "ssh -i key -p 54321 agentvm01@10.0.0.1"
-                }
-            },
-            "root": {
+                }}
+            }},
+            "root": {{
                 "password": "rootpw",
-                "ssh_commands": {"internal": "ssh root@192.168.122.50"},
+                "ssh_commands": {{"internal": "ssh root@192.168.122.50"}},
                 "ssh_key_path_host": "/root/.ssh/agent-vm-01_root_ed25519"
-            }
-        }
-    }
-}
-"""
+            }}
+        }}
+    }}
+}}
+""".format(vm_name=vm_name)
+
+
+FAKE_CREATE_STDOUT = fake_create_stdout("agent-vm-01")
 
 
 # ---------------------------------------------------------------------------
@@ -440,9 +469,12 @@ ok: [kvm1] => {
 
 
 def _initialize_test_database(engine, *, default_pool: bool = True):
-    # resource_pools must exist before VM's ansible_pool_configs FK resolves.
+    # resource_pools and relays must exist before VM's ansible_pool_configs
+    # foreign keys resolve.
     PoolsBase.metadata.create_all(bind=engine)
-    # VM's relay and pool-configuration tables ride VM's own metadata.
+    # The relay tables ride the family's relay metadata.
+    RelaysBase.metadata.create_all(bind=engine)
+    # VM's pool-configuration table rides VM's own metadata.
     VmBase.metadata.create_all(bind=engine)
     # The host registry rides the host authority's own metadata.
     HostsBase.metadata.create_all(bind=engine)
@@ -514,20 +546,22 @@ def job_executor_table_for():
     return _job_executor_table
 
 
-def _ansible_executors(runner, settings, bare_metal_runner=None):
+def _ansible_executors(runner, settings, bare_metal_runner=None, relay_resolver=None):
     """VM's and bare metal's Ansible executors, each with its mode's playbook,
     as their runtimes build them: VM's over ``runner``, bare metal's over
-    ``bare_metal_runner`` (``runner`` when absent)."""
+    ``bare_metal_runner`` (``runner`` when absent). ``relay_resolver`` fills a
+    relayed job's token and signed grant as it runs, as the service's
+    composition gives each codec one."""
     vm = AnsibleJobExecutor(
         runner,
-        VmAnsibleCodec(),
+        VmAnsibleCodec(relay_resolver=relay_resolver),
         settings.resolved_vm_playbook_path,
         timeout_seconds=settings.ansible_timeout_seconds,
         additional_non_retryable_errors=settings.additional_non_retryable_errors,
     )
     bare_metal = AnsibleJobExecutor(
         bare_metal_runner if bare_metal_runner is not None else runner,
-        BareMetalAnsibleCodec(),
+        BareMetalAnsibleCodec(relay_resolver=relay_resolver),
         settings.resolved_bare_metal_playbook_path,
         timeout_seconds=settings.ansible_timeout_seconds,
         additional_non_retryable_errors=settings.additional_non_retryable_errors,
@@ -586,28 +620,37 @@ def fake_ansible() -> MagicMock:
 # ---------------------------------------------------------------------------
 # App fixture — wires all overrides and starts the job processing loop
 # ---------------------------------------------------------------------------
+@pytest.fixture
+def job_retry_options():
+    return {"default_max_retries": 3, "retry_backoff_initial_seconds": 60,
+            "retry_backoff_multiplier": 2.0, "retry_backoff_max_seconds": 3600}
+
+
+@pytest.fixture
+def bare_metal_plan_options():
+    return {"reclaim_policy": "remove_lease_key", "working_data_policy_id": None}
+
+
 @pytest_asyncio.fixture
 async def client_and_queue(
     session_factory,
     fake_ansible,
     bare_metal_runner,
+    bare_metal_plan_options,
+    job_retry_options,
     monkeypatch,
 ) -> AsyncIterator[tuple[ProvisioningClients, AsyncJobQueue]]:
     """Yield an authenticated provisioning client and fresh async job queue."""
 
     _install_signed_asgi_transport(monkeypatch)
     mock_settings = MagicMock(
-        default_max_retries=3,
-        retry_backoff_initial_seconds=60,
-        retry_backoff_multiplier=2.0,
-        retry_backoff_max_seconds=3600,
+        **job_retry_options,
         ansible_timeout_seconds=30,
         additional_non_retryable_errors=["UNREACHABLE", "Domain not found"],
         frp_server_addr="",
         frp_domain="",
         frp_dashboard_password="",
         resolved_vm_playbook_path=Path("/fake/playbook.yml"),
-        resolved_inventory_path=Path("/fake/hosts"),
         # A real Fernet key, not an empty string: the at-rest encryption used
         # by embedded host keys and relay tokens fails closed without one, and
         # a harness that supplies nothing can only exercise the unencrypted
@@ -616,6 +659,8 @@ async def client_and_queue(
         database_url=str(session_factory.kw["bind"].url),
         lease_watchdog_grace_period_seconds=300,
         lease_watchdog_enabled=False,
+        relay_grant_expiry_grace_seconds=3600,
+        relay_port_reuse_margin_seconds=300,
         # A closed loopback port keeps this refusal boundary off ambient proxies.
         storefront_url="http://127.0.0.1:0",
         storefront_site_id="default",
@@ -659,19 +704,28 @@ async def client_and_queue(
         release_effect=release_effects,
     )
 
+    connection_codecs = ConnectionCodecs([SshConnectionCodec(TEST_CONNECTION_KEY)])
     host_authority = HostAuthority(
         session_factory,
-        codecs=ConnectionCodecs([SshConnectionCodec(TEST_CONNECTION_KEY)]),
-        # The pool-change hooks exactly as the production container merges them,
-        # so a move refused there is refused here, by every host route.
-        pool_change_hooks=_container_module.Container.host_pool_change_hooks(),
+        codecs=connection_codecs,
+        # The pool- and connection-change hooks exactly as the production
+        # container composes them, so a write refused there is refused here,
+        # by every host route.
+        pool_change_hooks=_container_module.host_pool_change_hooks(connection_codecs),
+        connection_change_hooks=_container_module.host_connection_change_hooks(
+            connection_codecs
+        ),
     )
 
     from market_resource_pools import ResourcePoolService
     from vm_provisioning_adapter.services.ansible_pool_config_handler import AnsiblePoolConfigHandler
     resource_pool_service_handlers = {
-        "vm.ansible": AnsiblePoolConfigHandler(settings=mock_settings),
-        "bare_metal.ansible": BareMetalPoolConfigHandler(),
+        "vm.ansible": AnsiblePoolConfigHandler(
+            settings=mock_settings, connection_codecs=connection_codecs
+        ),
+        "bare_metal.ansible": BareMetalPoolConfigHandler(
+            settings=mock_settings, connection_codecs=connection_codecs
+        ),
     }
     resource_pool_service = ResourcePoolService(
         session_factory=session_factory,
@@ -724,12 +778,18 @@ async def client_and_queue(
     # Fresh queue per test — caller can inject on_job_started via fixture params
     job_queue = AsyncJobQueue(max_concurrent=2)
 
-    # VM's relay administration and its one port allocator, as VM's runtime
-    # builds them: the relay table is the thing under test in the relay suite,
-    # and the allocator is what fulfillment leases through and the terminal
-    # effect releases through.
-    relay_port_allocator = RelayPortAllocator(session_factory)
-    relay_service = RelayService(session_factory=session_factory, settings=mock_settings)
+    # The family's relay administration and its one port allocator, as the
+    # container builds them: the relay table is the thing under test in the
+    # relay suite, and the allocator is what fulfillment leases through and the
+    # release effect releases through.
+    relay_port_allocator = _container_module._make_relay_port_allocator(
+        session_factory, mock_settings
+    )
+    relay_service = RelayService(
+        session_factory=session_factory,
+        settings=mock_settings,
+        connection_codecs=connection_codecs,
+    )
 
     ansible_fulfillment_provider = JobFulfillmentProvider(
         plan=VmFulfillmentPlan(
@@ -755,11 +815,20 @@ async def client_and_queue(
     # Both adapter bundles composed as the container composes them: their
     # executors fill the job table, and their providers, pool handlers, and
     # inventory views are what the routes and the status read.
+    relay_resolver = RelayExecutionResolver(
+        session_factory=session_factory, settings=mock_settings
+    )
     vm_executor, bare_metal_executor = _ansible_executors(
-        fake_ansible, mock_settings, bare_metal_runner=bare_metal_runner
+        fake_ansible,
+        mock_settings,
+        bare_metal_runner=bare_metal_runner,
+        relay_resolver=relay_resolver,
     )
     composed_adapters = compose_adapter_bundles(
         [
+            _container_module._relay_bundle(
+                session_factory, mock_settings, relay_service, relay_port_allocator
+            ),
             build_vm_adapter_bundle(
                 fulfillment_provider=ansible_fulfillment_provider,
                 pool_config_handler=resource_pool_service_handlers["vm.ansible"],
@@ -769,7 +838,8 @@ async def client_and_queue(
                 fulfillment_provider=JobFulfillmentProvider(
                     plan=BareMetalFulfillmentPlan(
                         playbook_path=mock_settings.resolved_bare_metal_playbook_path,
-                        reclaim_policy=mock_settings.bare_metal_reclaim_policy,
+                        **bare_metal_plan_options,
+                        port_allocator=relay_port_allocator,
                     ),
                     submission=job_submission,
                     jobs=job_engine,
@@ -800,7 +870,10 @@ async def client_and_queue(
             session_factory=session_factory,
             teardown_port=teardown_port,
         ),
-        release_status=FulfillmentReleaseStatusPort(teardown_port),
+        release_status=FulfillmentReleaseStatusPort(
+            settlement_repository=SettlementRepository(),
+            session_factory=session_factory,
+        ),
         capacity_released_notifier=AsyncMock(return_value=True),
         capacity_release_outbox=capacity_release_outbox,
     )
@@ -813,15 +886,16 @@ async def client_and_queue(
         session_factory=session_factory,
         job_queue_provider=lambda: job_queue,
         ansible_service=fake_ansible,
-        codec=VmAnsibleCodec(),
+        # The relay resolver as production composes it, so a relayed job's
+        # token and grant are filled in, and its grant signed, as it runs.
+        codec=VmAnsibleCodec(relay_resolver=relay_resolver),
         host_authority=host_authority,
-        pool_config_handler=AnsiblePoolConfigHandler(settings=mock_settings),
+        pool_config_handler=resource_pool_service_handlers["vm.ansible"],
         job_engine=job_engine,
         job_submission=job_submission,
         vm_operations_service=VmOperationsService(submission=job_submission),
         host_operations_service=HostOperationsService(submission=job_submission),
         relay_port_allocator=relay_port_allocator,
-        relay_service=relay_service,
     )
 
     fulfillment_convergence_watchdog = FulfillmentConvergenceWatchdog(
@@ -915,14 +989,8 @@ async def client_and_queue(
     # Mount each adapter's test routes unless ``main.py`` already did: it
     # mounts them only when the mock profile is active at import, and the suite
     # must behave the same however pytest is invoked.
-    # Included routers may be lazy rather than flattened in app.routes. The
-    # public schema resolves their paths, so repeated fixtures do not stack
-    # duplicate routes and lifespan wrappers until startup exhausts recursion.
-    _mounted_paths = set(app.openapi()["paths"])
     for _test_router in (_vm_mock_router(), _bare_metal_mock_router()):
-        if not {route.path for route in _test_router.routes} <= _mounted_paths:
-            app.include_router(_test_router)
-            app.openapi_schema = None
+        mount_unless_served(app, _test_router)
 
     clients = provisioning_clients(transport)
     try:

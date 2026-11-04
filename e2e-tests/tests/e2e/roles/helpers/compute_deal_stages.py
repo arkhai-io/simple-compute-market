@@ -285,6 +285,11 @@ class ComputeDealDriver(Protocol):
     #: The resource the deal holds, as the storefront's capacity reads name it.
     reserved_resource_id: str
 
+    @property
+    def listing_status_after_first_fulfillment(self) -> str:
+        """Listing status implied by this lane's remaining sellable capacity."""
+        ...
+
     def seed_supply(self) -> None:
         """Declare the deal's supply at the site and load the storefront's projection."""
 
@@ -1249,18 +1254,18 @@ class Stage09b_SettlementReadyAndCredentials:
         self, storefront_admin_client, deal_driver: ComputeDealDriver,
         deal_state: ComputeDealState,
     ):
-        """Settlement ready, the domain's delivery present, listing closed.
+        """Settlement ready, delivery present, listing reflects remaining capacity.
 
-        The listing closes because its capacity is held by this deal; the
-        domain's own reconciliation stage before this one is what asked for
-        the close.
+        A whole-capacity deal closes its listing; a smaller deal leaves it
+        open for another guest. The lane states the expected result, and its
+        preceding reconciliation stage applies the current capacity view.
 
         Combined observation of all post-provisioning state:
           1. wait_for_settlement — server-side long-poll until the settlement is
              ready (no client polling)
           2. the domain's delivery, read where the domain delivers it, through
              its driver
-          3. GET /api/v1/listings/{id} → status=closed
+          3. GET /api/v1/listings/{id} → the lane's expected status
         """
         require_state(deal_state, "real_escrow_uid", "provisioning_result_injected",
                       "seller_listing_id", "negotiation_id",
@@ -1281,8 +1286,9 @@ class Stage09b_SettlementReadyAndCredentials:
         deal_driver.assert_delivery(deal_state)
 
         listing = storefront_admin_client.get_listing(deal_state.seller_listing_id)
-        assert listing.status == "closed", (
-            f"Expected listing status=closed while capacity is held, got {listing.status!r}"
+        expected = deal_driver.listing_status_after_first_fulfillment
+        assert listing.status == expected, (
+            f"Expected listing status={expected!r} after the first fulfillment, got {listing.status!r}"
         )
 
         deal_state.settlement_status = wait_result.status

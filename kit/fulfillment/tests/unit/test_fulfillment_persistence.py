@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from market_fulfillment import (
+    CREATE_COMPENSATION,
     FulfillmentConflictError,
     SettlementRecordState,
 )
@@ -165,6 +166,46 @@ def test_begin_teardown_unknown_fulfillment_id_raises_lookup_error():
             "no-such-fulfillment",
             VersionedEnvelope(kind="teardown-test", schema_version=1, payload={}),
         )
+
+
+def test_begin_compensating_teardown_marks_the_reason_and_keeps_the_message():
+    prepared = VersionedEnvelope(kind="teardown-test", schema_version=1, payload={"x": 1})
+    record = _record(state=SettlementRecordState.failed.value)
+    repository = MagicMock()
+    repository.get_by_fulfillment_id.return_value = record
+    db = MagicMock()
+    tx = SqlAlchemyFulfillmentTransaction(db, MagicMock(), repository)
+
+    tx.begin_compensating_teardown("fulfillment-1", prepared)
+
+    repository.transition.assert_called_once_with(
+        db,
+        "reservation-1",
+        SettlementRecordState.teardown_dispatch_pending.value,
+        prepared_teardown_operation=prepared.model_dump(mode="json"),
+        failure_reason=CREATE_COMPENSATION,
+    )
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        SettlementRecordState.active.value,
+        SettlementRecordState.teardown_failed.value,
+        SettlementRecordState.dispatching.value,
+    ],
+)
+def test_begin_compensating_teardown_refuses_a_record_that_is_not_failed(state):
+    repository = MagicMock()
+    repository.get_by_fulfillment_id.return_value = _record(state=state)
+    tx = SqlAlchemyFulfillmentTransaction(MagicMock(), MagicMock(), repository)
+
+    with pytest.raises(FulfillmentConflictError):
+        tx.begin_compensating_teardown(
+            "fulfillment-1",
+            VersionedEnvelope(kind="teardown-test", schema_version=1, payload={}),
+        )
+    repository.transition.assert_not_called()
 
 
 def test_attach_executor_job_is_a_no_op_without_a_ledger():

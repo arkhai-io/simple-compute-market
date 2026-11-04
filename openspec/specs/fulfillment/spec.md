@@ -180,13 +180,13 @@ Scheduling errors distinguish a missing or expired reservation, a request that c
 
 <a id="fulfillment-convergence-worker"></a>
 
-**Fulfillment convergence worker.** The compute provisioning composition runs a periodic fulfillment convergence worker alongside its other lifecycle workers. Each pass claims a bounded batch in a short SQLite write transaction, closes that transaction before provider I/O, and applies the provider outcome in a second transaction only while the same worker still owns the claim and the aggregate remains in the expected source state. Create dispatch, create-status convergence, teardown dispatch, and teardown-status convergence are independently callable passes so recovery behavior can be tested and operated without coupling all work to one monolithic cycle. There is no attempt-count ceiling: a row that keeps failing keeps retrying with backoff rather than being abandoned to a terminal state on its own, and durable claim state (not worker-local memory) is what a fresh worker instance resumes from after a restart. The one exception is unresolvable persisted resource identity on a provider-reported create success: since the metadata that failed to resolve is already durable and will not change on a later retry, that specific condition transitions directly to `failed` rather than retrying indefinitely behind diagnostics indistinguishable from a healthy in-progress row. The worker emits exactly one structured recovery-diagnostics event after each completed cycle rather than logging diagnostics per row. The snapshot contains a stable entry for every recovery lifecycle state, including states with zero rows. Each state reports total rows, actively claimed rows, expired claims eligible for reclamation, oldest-row age, and maximum attempt count. Provider-reported `failed` and `teardown_failed` rows are reported as separate counts. Age and attempt metrics are calculated per lifecycle state; the contract does not expose global oldest-age or maximum-attempt fields.
+**Fulfillment convergence worker.** The compute provisioning composition runs a periodic fulfillment convergence worker alongside its other lifecycle workers. Each pass claims a bounded batch in a short SQLite write transaction, closes that transaction before provider I/O, and applies the provider outcome in a second transaction only while the same worker still owns the claim and the aggregate remains in the expected source state. Create dispatch, create-status convergence, teardown dispatch, and teardown-status convergence are independently callable passes so recovery behavior can be tested and operated without coupling all work to one monolithic cycle. There is no attempt-count ceiling: a row that keeps failing keeps retrying with backoff rather than being abandoned to a terminal state on its own, and durable claim state (not worker-local memory) is what a fresh worker instance resumes from after a restart. The attempt count counts consecutive claims that produced only a failure: an applied outcome, or a provider answering that its operation is still pending, starts it again, so a phase never inherits the backoff of an earlier one. A pending answer keeps the claim for the initial poll interval, so a healthy operation is polled again after that interval whatever the row's earlier claims cost, and only consecutive failures grow the lease. The one exception is unresolvable persisted resource identity on a provider-reported create success: since the metadata that failed to resolve is already durable and will not change on a later retry, that specific condition transitions directly to `failed` rather than retrying indefinitely behind diagnostics indistinguishable from a healthy in-progress row. The worker emits exactly one structured recovery-diagnostics event after each completed cycle rather than logging diagnostics per row. The snapshot contains a stable entry for every recovery lifecycle state, including states with zero rows. Each state reports total rows, actively claimed rows, expired claims eligible for reclamation, oldest-row age, and maximum attempt count, the longest current run of consecutive unproductive claims among its rows. Provider-reported `failed` and `teardown_failed` rows are reported as separate counts. Counts follow the row's current state: a row whose compensating teardown has begun leaves the `failed` count, is counted in its teardown state and in `teardown_failed` while that teardown has failed, and once it reaches `torn_down` leaves every recovery-state and failure count, never counted as failed. Age and attempt metrics are calculated per lifecycle state; the contract does not expose global oldest-age or maximum-attempt fields.
 
 <a id="durable-settlement-persistence"></a>
 
 **Durable settlement persistence.** One durable `SettlementRecord` aggregate exists per `capacity_reservation_id`, which is its primary key. There is no separate scheduler-owned assignment table and no separate fulfillment record: scheduling creates the row, `begin_fulfillment` accepts it in place, and provider dispatch/teardown converge the same row. `fulfillment_id` is a distinct, nullable-until-accepted, unique column on that row — not a second primary key or a second row — generated the first time the aggregate is accepted past `assigned`. Whole-fulfillment status and teardown are addressed by `fulfillment_id`; scheduling and acceptance idempotency are addressed by `capacity_reservation_id`.
 
-The aggregate's lifecycle states are `assigned`, `dispatch_pending`, `dispatching`, `active`, `failed`, `teardown_dispatch_pending`, `tearing_down`, `torn_down`, `teardown_failed`, and `abandoned`. `failed`, `torn_down`, and `abandoned` are terminal; `teardown_failed` is not, since recovery may retry teardown. Transitions are checked against one compact table-driven validator shared by every caller (scheduler, fulfillment acceptance, provider recovery, teardown, and abandonment) rather than a bespoke check per edge. A retry that finds the row already at its target state is a no-op return, not a transition-table lookup — self-transitions are intentionally absent from the table so it describes only real state changes.
+The aggregate's lifecycle states are `assigned`, `dispatch_pending`, `dispatching`, `active`, `failed`, `teardown_dispatch_pending`, `tearing_down`, `torn_down`, `teardown_failed`, and `abandoned`. `torn_down` and `abandoned` are terminal; `teardown_failed` is not, since recovery may retry teardown. `failed` is terminal except for one edge, `failed` → `teardown_dispatch_pending`, taken only by a compensating teardown (below). Transitions are checked against one compact table-driven validator shared by every caller (scheduler, fulfillment acceptance, provider recovery, teardown, and abandonment) rather than a bespoke check per edge. A retry that finds the row already at its target state is a no-op return, not a transition-table lookup — self-transitions are intentionally absent from the table so it describes only real state changes.
 
 #### Scenario: Illegal state skip
 
@@ -229,6 +229,51 @@ Provider submission acknowledgement is a second short transaction. Identical met
 - **WHEN** `begin_fulfillment_teardown` is called for a fulfillment in any state other than `active` or one of the already-tearing-down states above
 - **THEN** it reports a conflict rather than beginning teardown
 
+A failed create may have left effects the provider can undo. `begin_compensating_teardown`, addressed by `fulfillment_id`, begins a **compensating teardown** for a `failed` fulfillment. Its caller passes an `authorize` predicate, which the operation evaluates inside its write transaction over the record's state, failure reason, and provider metadata. The kit treats that metadata as opaque and never judges eligibility itself; the caller's predicate does. The operation answers by the aggregate's state in that transaction:
+
+- an unknown `fulfillment_id` is not found;
+- a fulfillment at or past `teardown_dispatch_pending` returns its current view, writing nothing, as `begin_fulfillment_teardown` does;
+- a `failed` fulfillment the predicate refuses, or whose provider raises a configuration error preparing its teardown, is refused with a compensation-refused conflict, writing nothing, and stays `failed`;
+- a `failed` fulfillment the predicate authorizes and whose provider prepares its teardown has that teardown recorded, and moves to `teardown_dispatch_pending` with the failure reason `create_compensation`, keeping its failure message; convergence then dispatches and observes it as any teardown;
+- any other state is a conflict, writing nothing.
+
+`create_compensation` is the kit's reason for a compensating teardown, and no other path writes it. A fulfillment carrying it was compensated, and it ended compensated when it is `torn_down`; a `torn_down` fulfillment carrying any other reason, or none, was delivered. A non-null reason alone marks nothing, because a delivered fulfillment's failed teardown records a reason that its later success does not clear. When a compensating teardown fails, convergence keeps the reason `create_compensation` and replaces only the failure message with the teardown's diagnostic, so the message holds the latest diagnostic. The kit does not keep the earlier message elsewhere; what the provider recorded of the create, such as its job, is the provider's to keep.
+
+#### Scenario: A failed create is compensated
+
+- **WHEN** a compensating teardown is begun for a `failed` fulfillment the caller authorizes and whose provider prepares its teardown
+- **THEN** the aggregate moves to `teardown_dispatch_pending` with the reason `create_compensation` and its message kept, and convergence dispatches the provider's teardown
+
+#### Scenario: A failed create's teardown cannot be prepared
+
+- **WHEN** a compensating teardown is begun for a `failed` fulfillment whose provider cannot prepare a teardown from its metadata
+- **THEN** the operation refuses with a compensation-refused conflict and the aggregate stays `failed` with nothing prepared
+
+#### Scenario: The caller does not authorize compensation
+
+- **WHEN** a compensating teardown is begun for a `failed` fulfillment its caller's predicate refuses
+- **THEN** the operation refuses with a compensation-refused conflict, writing nothing
+
+#### Scenario: A compensating teardown is requested twice
+
+- **WHEN** a compensating teardown is begun for a fulfillment whose compensating teardown has already begun
+- **THEN** it returns the current view without preparing or transitioning again
+
+#### Scenario: A compensating teardown fails and is retried
+
+- **WHEN** a compensating teardown reaches `teardown_failed` and convergence's later attempt reaches `torn_down`
+- **THEN** the aggregate carries `create_compensation` throughout, its message holding the last teardown diagnostic recorded
+
+#### Scenario: A delivered fulfillment's teardown fails once
+
+- **WHEN** an `active` fulfillment's teardown reaches `teardown_failed` and later `torn_down`
+- **THEN** it does not carry `create_compensation`, and is not read as compensated
+
+#### Scenario: Ordinary teardown of a failed fulfillment
+
+- **WHEN** `begin_fulfillment_teardown` is called for a `failed` fulfillment
+- **THEN** it reports a conflict, as before; only the compensating operation begins a failed fulfillment's teardown
+
 `begin_fulfillment_teardown` is exposed over HTTP as `POST /fulfillment/{fulfillment_id}/begin-teardown`, returning the same fulfillment-acceptance view shape `/fulfillment/begin` returns, with the same `fulfillment_not_found`/`fulfillment_conflict` error-mapping convention.
 
 A fulfillment produces zero or more `ProvisionedResource` rows, each with a globally unique `provisioned_resource_id` and a denormalized `fulfillment_id`. Resource identities are resolved from validated provider metadata only after the provider reports create success; replay is idempotent for the same fulfillment-owned output identity, backed by the globally unique `provisioned_resource_id` primary key, not just an application-level existence check — a genuine concurrent insert race is resolved by re-reading and returning the winning row rather than raising. Confirmed teardown updates those existing rows rather than resolving or creating resource identities again. Per-resource teardown is not exposed unless a caller requires it; teardown addresses the whole fulfillment.
@@ -243,12 +288,24 @@ The generic lifecycle transition operation may update only prepared create/teard
 
 The compute provisioning service uses SQLite. Fulfillment acceptance reserves SQLite's single writer slot with an immediate write transaction before reading and updating the aggregate, so concurrent acceptance attempts serialize and observe one durable `fulfillment_id`. This is a database-wide SQLite writer guarantee, not PostgreSQL-style row locking. Aggregate creation remains protected by the `capacity_reservation_id` primary key; an observed uniqueness race is resolved by re-reading the winning row and applying the ordinary equivalence rule.
 
-Recovery-lease fields (a claim owner, a claim expiry, and an attempt count) live directly on the aggregate row rather than in a separate claims table: one aggregate has at most one pending provider operation at a time, so a separate table would only add a join with no independent-claiming benefit. Recovery acquisition uses a short `BEGIN IMMEDIATE` transaction that selects eligible unclaimed or expired rows, assigns the worker and expiry, increments the attempt count, and commits before provider I/O. SQLite's single-writer reservation serializes concurrent claim attempts; this is not represented as portable row locking or a distributed multi-replica protocol. Provider calls run without an open database transaction. A second short transaction applies an outcome only when the expected lifecycle state and current claim owner still match, preventing a worker whose lease was reclaimed from writing a stale result or clearing another worker's claim.
+Recovery-lease fields (a claim owner, a claim expiry, and an attempt count) live directly on the aggregate row rather than in a separate claims table: one aggregate has at most one pending provider operation at a time, so a separate table would only add a join with no independent-claiming benefit. Recovery acquisition uses a short `BEGIN IMMEDIATE` transaction that selects eligible unclaimed or expired rows, assigns the worker and expiry, increments the attempt count, and commits before provider I/O; the owning worker's healthy progress starts the count again. SQLite's single-writer reservation serializes concurrent claim attempts; this is not represented as portable row locking or a distributed multi-replica protocol. Provider calls run without an open database transaction. A second short transaction applies an outcome only when the expected lifecycle state and current claim owner still match, preventing a worker whose lease was reclaimed from writing a stale result or changing another worker's claim, its expiry, or its attempt count.
 
 #### Scenario: Expired claim is reclaimed
 
 - **WHEN** a claimed row's claim has expired and no other claim has replaced it
 - **THEN** a subsequent claim attempt may claim it again
+
+#### Scenario: A healthy pending teardown after a long create
+
+- **WHEN** a teardown's status reads pending on a row whose create took nine claims
+- **THEN** the claim is kept only for the initial poll interval and its attempt count starts
+  again, so the next cycle observes the finished teardown and the lease is released within the
+  lease watchdog's grace period
+
+#### Scenario: Status reads keep failing
+
+- **WHEN** consecutive status reads of a row fail
+- **THEN** each claim's lease grows with the attempt count until a read succeeds
 
 ### Requirement: Scheduling applies the pool provider's host requirement
 

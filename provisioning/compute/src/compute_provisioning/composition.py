@@ -42,7 +42,9 @@ class ExecutorAdapterContribution:
 class ExecutorAdapterBundle:
     """Everything one compute domain contributes to service composition.
 
-    A domain's routes are not part of it: the service mounts them when it
+    The family's relays contribute one too, with no executor or provider: the
+    release effect, definitions document, and worker every domain a relay
+    carries shares, registered once. A domain's routes are not part of it: the service mounts them when it
     builds the app, before any bundle exists, through the router factories the
     adapter exports. Execution readiness is not either: the composition root
     reports it from the executors it composed.

@@ -668,6 +668,79 @@ def test_clear_claim_is_a_noop_when_the_claim_was_reclaimed_by_another_worker(
         assert record.claim_expires_at is not None
 
 
+def _claimed_after(session_factory, repo, claims: int, *, worker_id="worker-1"):
+    """A row claimed ``claims`` times, the last by ``worker_id``, still held."""
+    with session_factory() as db:
+        repo.schedule(
+            db, capacity_reservation_id="cr-1", market="vms",
+            scheduling_requirements=_requirement(), resource=_resource(),
+        )
+        repo.accept_fulfillment(
+            db, capacity_reservation_id="cr-1", market="vms",
+            fulfillment_request=envelope("vm.fulfillment_request", 1, {}),
+        )
+        db.commit()
+    long_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+    for claim in range(claims):
+        with session_factory() as db:
+            repo.claim_pending(
+                db, states=[SettlementRecordState.dispatch_pending.value], limit=10,
+                lease_seconds=3600 if claim == claims - 1 else 1,
+                worker_id=worker_id,
+                now=None if claim == claims - 1 else long_ago + timedelta(seconds=10 * claim),
+            )
+
+
+def test_progress_releases_the_claim_and_starts_the_attempt_count_again(
+    session_factory, repo
+):
+    _claimed_after(session_factory, repo, 3)
+
+    with session_factory() as db:
+        assert repo.record_progress(db, "cr-1", worker_id="worker-1") is True
+        db.commit()
+
+    with session_factory() as db:
+        record = repo.get(db, "cr-1")
+        assert (record.claimed_by, record.claim_expires_at, record.attempt_count) == (
+            None, None, 0
+        )
+
+
+def test_progress_with_a_lease_keeps_the_claim_for_that_long(session_factory, repo):
+    _claimed_after(session_factory, repo, 3)
+    now = datetime.now(timezone.utc)
+
+    with session_factory() as db:
+        assert repo.record_progress(
+            db, "cr-1", worker_id="worker-1", lease_seconds=5, now=now
+        ) is True
+        db.commit()
+
+    with session_factory() as db:
+        record = repo.get(db, "cr-1")
+        assert (record.claimed_by, record.attempt_count) == ("worker-1", 0)
+        assert record.claim_expires_at == (now + timedelta(seconds=5)).replace(tzinfo=None)
+
+
+def test_progress_from_a_worker_whose_claim_was_taken_changes_nothing(
+    session_factory, repo
+):
+    _claimed_after(session_factory, repo, 3, worker_id="worker-2")
+    with session_factory() as db:
+        before = repo.get(db, "cr-1")
+        held = (before.claimed_by, before.claim_expires_at, before.attempt_count)
+
+    with session_factory() as db:
+        assert repo.record_progress(db, "cr-1", worker_id="worker-1", lease_seconds=5) is False
+        db.commit()
+
+    with session_factory() as db:
+        record = repo.get(db, "cr-1")
+        assert (record.claimed_by, record.claim_expires_at, record.attempt_count) == held
+        assert held[2] == 3
+
+
 def test_mark_provisioned_resources_torn_down_updates_status(session_factory, repo):
     with session_factory() as db:
         repo.schedule(

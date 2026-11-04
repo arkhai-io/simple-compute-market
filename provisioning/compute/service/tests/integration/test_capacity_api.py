@@ -44,7 +44,7 @@ def _host_row(**fields) -> Host:
     host = Host(**fields)
     host.set_connection(ConnectionEnvelope(
         kind="ssh",
-        version=1,
+        version=2,
         public={"ssh_host": "10.0.0.1", "ssh_user": "root", "key_path": "/dev/null"},
     ))
     return host

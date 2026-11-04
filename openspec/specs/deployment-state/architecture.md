@@ -62,6 +62,8 @@ VM-only, bare-metal-only, and combined deployments select storefront processes i
 
 Schema evolution is additive by default. A non-additive change needs an explicit expand/contract plan that identifies the period in which old and new readers or writers coexist. Public package and wire compatibility similarly belong to the owning capability rather than being inferred from a shared repository version.
 
+Persisted accepted evidence can outlive the writer that produced it. Preserve its protocol-owned representation while records remain retained, and make any incompatible reader or writer transition explicit across the supported lifetime. A typed application view is derived from the verified representation; it does not replace the retained bytes or relax digest/signature checks. Deletion, tombstoning, and reader support floors remain owned by the relevant capability. Zero nonterminal contracts does not establish that a reader is unused: retained terminal evidence and supported buyer recovery may still require it. This bounded rule does not establish cross-domain artifact discovery or automatic retirement tooling.
+
 ## Identity credential delivery
 
 Public identity and secret credentials have different deployment carriers because they have different disclosure and authority properties. Supported public principals and trust pins are safe to render in ordinary profiles and ConfigMaps and must be inspectable so operators can audit the trust target. Possession of a private signing credential grants the ability to impersonate that principal, so it is mounted from an approved Secret boundary and exposed only to the role's composition root when it constructs the signer.

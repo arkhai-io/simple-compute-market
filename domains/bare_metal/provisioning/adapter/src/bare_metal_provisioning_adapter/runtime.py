@@ -34,12 +34,13 @@ class BareMetalProvisioningRuntime:
     ansible_service: Any
     playbook_path: Any
     settings: Any
+    relay_resolver: Any = None
 
     def job_executor(self) -> AnsibleJobExecutor:
         """What runs both bare-metal access actions."""
         return AnsibleJobExecutor(
             self.ansible_service,
-            BareMetalAnsibleCodec(),
+            BareMetalAnsibleCodec(relay_resolver=self.relay_resolver),
             self.playbook_path,
             timeout_seconds=self.settings.ansible_timeout_seconds,
             additional_non_retryable_errors=self.settings.additional_non_retryable_errors,
@@ -65,6 +66,9 @@ def build_bare_metal_runtime(
     job_engine,
     job_submission: JobSubmissionService,
     config,
+    relay_port_allocator=None,
+    relay_resolver=None,
+    connection_codecs=None,
 ) -> BareMetalProvisioningRuntime:
     active = [
         profile.strip()
@@ -80,12 +84,17 @@ def build_bare_metal_runtime(
             plan=BareMetalFulfillmentPlan(
                 playbook_path=config.resolved_bare_metal_playbook_path,
                 reclaim_policy=getattr(config, "bare_metal_reclaim_policy", None),
+                working_data_policy_id=getattr(config, "bare_metal_working_data_policy_id", None),
+                port_allocator=relay_port_allocator,
             ),
             submission=job_submission,
             jobs=job_engine,
         ),
-        pool_config_handler=BareMetalPoolConfigHandler(),
+        pool_config_handler=BareMetalPoolConfigHandler(
+            settings=config, connection_codecs=connection_codecs
+        ),
         ansible_service=ansible_service,
         playbook_path=config.resolved_bare_metal_playbook_path,
         settings=config,
+        relay_resolver=relay_resolver,
     )

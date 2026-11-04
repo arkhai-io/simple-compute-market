@@ -1,0 +1,25 @@
+name: Public content
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  public-content:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check every new commit for recognizable private content
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BASE: ${{ github.event.before }}
+          INTEGRATION_BRANCH: dev
+        run: |
+          base="$PR_BASE"
+          if [ -z "$base" ]; then base="$PUSH_BASE"; fi
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+            base="origin/$INTEGRATION_BRANCH"
+          fi
+          python3 scripts/check_public_content.py --base "$base"

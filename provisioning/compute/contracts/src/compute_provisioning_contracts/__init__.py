@@ -1,6 +1,6 @@
 """The compute provisioning family's wire contract.
 
-Versioned contract models, the host, job, system, and mock-rule models, and the
+Versioned contract models, the host, job, relay, system, and mock-rule models, and the
 route contracts the provisioning service authenticates and every typed client
 signs from, the mock mechanism's as a template each compute domain mounts. A
 thin distribution: it carries no service code, so the family kit, the service,
@@ -48,6 +48,13 @@ from .hosts import (
     ConnectionView,
     ConnectivityResult,
     HostCreate,
+    HostDefinition,
+    HostDefinitionConnection,
+    HostDefinitionProblem,
+    HostDefinitionProblemCode,
+    HostDefinitionsDiff,
+    HostDefinitionsImportRequest,
+    HostDefinitionsImportResponse,
     HostListResponse,
     HostResponse,
     HostUpdate,
@@ -68,6 +75,20 @@ from .mock_rules import (
     MockRuleDeleted,
     MockRuleResumed,
     MockRuleView,
+)
+from .relays import (
+    RelayActiveGrantKey,
+    RelayCreate,
+    RelayGrantKeyStage,
+    RelayGrantKeys,
+    RelayLeaseListResponse,
+    RelayLeaseView,
+    RelayListResponse,
+    RelayResponse,
+    RelayRetiredGrantKey,
+    RelayStagedGrantKey,
+    RelayTokenRotate,
+    RelayUpdate,
 )
 from .system import (
     ConvergenceCycleResponse,
@@ -143,6 +164,13 @@ __all__ = [
     "ConnectionView",
     "ConnectivityResult",
     "HostCreate",
+    "HostDefinition",
+    "HostDefinitionConnection",
+    "HostDefinitionProblem",
+    "HostDefinitionProblemCode",
+    "HostDefinitionsDiff",
+    "HostDefinitionsImportRequest",
+    "HostDefinitionsImportResponse",
     "HostListResponse",
     "HostResponse",
     "HostUpdate",
@@ -159,6 +187,18 @@ __all__ = [
     "MockRuleDeleted",
     "MockRuleResumed",
     "MockRuleView",
+    "RelayActiveGrantKey",
+    "RelayCreate",
+    "RelayGrantKeyStage",
+    "RelayGrantKeys",
+    "RelayLeaseListResponse",
+    "RelayLeaseView",
+    "RelayListResponse",
+    "RelayResponse",
+    "RelayRetiredGrantKey",
+    "RelayStagedGrantKey",
+    "RelayTokenRotate",
+    "RelayUpdate",
     "ExecutionStatus",
     "ExecutorStatus",
     "HealthResponse",

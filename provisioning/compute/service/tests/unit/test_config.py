@@ -258,9 +258,15 @@ def _layered_settings(
     """The service's own settings file under one profile, loaded as the service
     loads it, with no dotenv file in reach and no playbook setting in the
     process environment beyond ``environment``, and no pool seed path there."""
-    monkeypatch.delenv("PROVISIONING_VM_PLAYBOOK_PATH", raising=False)
-    monkeypatch.delenv("PROVISIONING_PLAYBOOK_PATH", raising=False)
-    monkeypatch.delenv("PROVISIONING_POOL_SEED_PATH", raising=False)
+    for name in (
+        "PROVISIONING_VM_PLAYBOOK_PATH",
+        "PROVISIONING_PLAYBOOK_PATH",
+        "PROVISIONING_POOL_SEED_PATH",
+        "PROVISIONING_INVENTORY_INI",
+        "PROVISIONING_INVENTORY_PATH",
+        "PROVISIONING_HOST_DEFINITIONS_PATH",
+    ):
+        monkeypatch.delenv(name, raising=False)
     for name, value in (environment or {}).items():
         monkeypatch.setenv(name, value)
     (tmp_path / "config-first.yml").write_text(profile)
@@ -377,3 +383,116 @@ def test_the_retired_playbook_setting_in_the_environment_is_refused(
 
     with pytest.raises(RetiredSettingsError, match="vm_playbook_path"):
         settings.refuse_retired_settings()
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        'inventory_ini: "[kvm_hosts]\\nkvm1 ansible_host=192.0.2.1\\n"\n',
+        'inventory_ini: ""\n',
+        'inventory_path: "/opt/inventory/provisioning-hosts.ini"\n',
+        'inventory_path: ""\n',
+    ],
+    ids=["inventory_ini", "empty inventory_ini", "inventory_path", "empty inventory_path"],
+)
+def test_a_retired_inventory_setting_in_a_profile_is_refused_naming_host_definitions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    statement: str,
+) -> None:
+    """Whatever value it states, an empty one included: the refusal is the
+    one existence test every retired setting shares."""
+    name = statement.split(":", 1)[0]
+    settings = _layered_settings(tmp_path, monkeypatch, profile=statement)
+
+    assert settings.stated_retired_settings() == (name,)
+    with pytest.raises(
+        RetiredSettingsError,
+        match=rf"{name} \(state host_definitions_path instead\)",
+    ):
+        settings.refuse_retired_settings()
+
+
+@pytest.mark.parametrize(
+    ("variable", "value"),
+    [
+        ("PROVISIONING_INVENTORY_INI", "[kvm_hosts]"),
+        ("PROVISIONING_INVENTORY_INI", ""),
+        ("PROVISIONING_INVENTORY_PATH", "/opt/inventory/provisioning-hosts.ini"),
+    ],
+    ids=["inventory_ini", "empty inventory_ini", "inventory_path"],
+)
+def test_a_retired_inventory_setting_in_the_environment_is_refused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    variable: str,
+    value: str,
+) -> None:
+    settings = _layered_settings(tmp_path, monkeypatch, environment={variable: value})
+
+    with pytest.raises(RetiredSettingsError, match="host_definitions_path"):
+        settings.refuse_retired_settings()
+
+
+def test_every_stated_retired_setting_is_named_at_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _layered_settings(
+        tmp_path,
+        monkeypatch,
+        profile='inventory_ini: ""\ninventory_path: "/opt/hosts.ini"\nplaybook_path: "/opt/vm.yaml"\n',
+    )
+
+    assert sorted(settings.stated_retired_settings()) == [
+        "inventory_ini",
+        "inventory_path",
+        "playbook_path",
+    ]
+
+
+_PACKAGED_CONFIG = _SETTINGS_DIR / "config"
+_PACKAGED_PROFILES = sorted(
+    path.name.removeprefix("config-").removesuffix(".yml")
+    for path in _PACKAGED_CONFIG.glob("config-*.yml")
+)
+
+
+def test_the_service_is_packaged_with_profiles() -> None:
+    assert {"docker", "mock", "seller"} <= set(_PACKAGED_PROFILES)
+
+
+@pytest.mark.parametrize("profiles", ["", *_PACKAGED_PROFILES])
+def test_the_packaged_configuration_states_no_retired_setting(
+    monkeypatch: pytest.MonkeyPatch, profiles: str
+) -> None:
+    """The packaged ``settings.toml``, the base ``config.yml``, and each
+    packaged profile, loaded by the service's own loader from the packaged
+    directory with no dotenv file and no operator configuration, state nothing
+    the startup refusal refuses."""
+    for name in config_module.RETIRED_SETTINGS:
+        monkeypatch.delenv(f"PROVISIONING_{name.upper()}", raising=False)
+    options = replace(config_module._BOOTSTRAP_OPTIONS, load_dotenv=False)
+    monkeypatch.setattr(config_module, "_BOOTSTRAP_OPTIONS", options)
+    result = config_module._load_bootstrap(
+        {"CONFIG_DIRECTORY": str(_PACKAGED_CONFIG), "ACTIVE_PROFILES": profiles}
+    )
+    settings = Settings(result.settings)
+
+    assert settings.stated_retired_settings() == ()
+    settings.refuse_retired_settings()
+
+
+def test_the_host_definitions_path_resolves_when_stated_and_is_absent_by_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert _layered_settings(tmp_path, monkeypatch).resolved_host_definitions_path is None
+
+    settings = _layered_settings(
+        tmp_path,
+        monkeypatch,
+        profile=f'host_definitions_path: "{tmp_path / "hosts.yaml"}"\n',
+    )
+
+    assert settings.resolved_host_definitions_path == (tmp_path / "hosts.yaml").resolve()

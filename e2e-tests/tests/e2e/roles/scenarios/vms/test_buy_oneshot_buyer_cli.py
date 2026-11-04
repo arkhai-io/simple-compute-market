@@ -236,10 +236,9 @@ class TestStageB1a_ExecutorHostRegistry:
         `no_matching_inventory` even though discovery found the listing —
         the failure lands three stages from its cause.
 
-        Registered through the admin API rather than a mounted inventory file:
-        `inventory_path` is docker-compose-specific while the canonical Helm
-        deployment supplies inventory as an inline secret, and a mount is shared
-        state no scenario declares. The storefront is then told to pull
+        Registered through the admin API rather than a mounted host definitions
+        document, which is deployment configuration every scenario on the stack
+        would share and no scenario declares. The storefront is then told to pull
         projections immediately and the pull is asserted, rather than sleeping
         out the poller interval.
         """
@@ -340,18 +339,6 @@ class TestStageB3_ArmProvisioning:
                 rule_id=BUY_RULE_ID,
                 match={"vm_action": "create"},
                 pause_before_result=False,
-                # The create fact the VM playbook prints, with the forwarded port
-                # and the time access became ready: a create reporting neither
-                # says nothing a buyer can use, and fails.
-                result_stdout=(
-                    'ok: [kvm1] => {\n    "vm_creation_data": '
-                    '{"action": "create", "vm_name": "e2e-buy-vm", "tenant_user": "vmuser", '
-                    '"external_ssh_port": "2222", "timestamp": "2030-01-01T00:00:01Z", '
-                    '"tenant_ssh_key_path": "/tmp/e2e.key", "frp": {"enabled": false}, '
-                    '"authentication": {"tenant": {"ssh_commands": '
-                    '{"external": "ssh vmuser@localhost", '
-                    '"internal": "ssh vmuser@10.0.0.1"}}}}\n}\n'
-                ),
             )
         )
         deal_state.provisioning_gate_armed = True

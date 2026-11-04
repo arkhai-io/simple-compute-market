@@ -37,6 +37,7 @@ from .readiness import (
     SshKeyInfo,
     ansible_readiness_component,
 )
+from .runner import read_fact
 
 #: The Ansible configuration every playbook the service runs is run under,
 #: exported as ``ANSIBLE_CONFIG`` unless a deployment names its own.
@@ -67,6 +68,7 @@ __all__ = [
     "TRANSPORT_FAILURES",
     "matches_any",
     "parse_inventory_ini",
+    "read_fact",
     "render_extra_vars",
     "ssh_connection",
     "write_extra_vars",

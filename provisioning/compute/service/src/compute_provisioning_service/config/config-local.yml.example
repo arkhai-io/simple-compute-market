@@ -9,8 +9,10 @@
 
 # Override Ansible paths to your local checkout of domains/vms/provisioning/iac:
 # vm_playbook_path: "/home/you/code/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml"
-# inventory_path: "/home/you/code/domains/vms/provisioning/iac/ansible/inventory/provisioning-hosts.ini"
 # management_vars_path: "/home/you/code/domains/vms/provisioning/iac/ansible/inventory/management-vars.yaml"
+
+# Uncomment to register hosts from a host definitions document at startup:
+# host_definitions_path: "/home/you/provisioning/host-definitions.yaml"
 
 # Public marketplace identity and exact storefront trust pin. Supply the
 # matching service signer only through ARKHAI_IDENTITY_CREDENTIAL.

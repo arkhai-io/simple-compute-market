@@ -1,7 +1,11 @@
 # Repository Tools
 
 This directory contains repo-owned developer and validation tools that are
-larger than a shell wrapper but are not part of the market runtime services.
+larger than a shell wrapper but are not part of the market runtime services,
+and standalone infrastructure components: software the market's deployments
+run beside them, which is not itself a market service, depends on no internal
+package, and is meant to move to a repository of its own (see
+[Standalone infrastructure components](#standalone-infrastructure-components)).
 
 The main purpose of this namespace is to keep operational tooling versioned
 with the code it validates. These tools encode repeatable workflows such as
@@ -17,16 +21,16 @@ validate, diagnose, and file issues for the whole repo workflow? They orchestrat
 the existing tests, preserve environment and command evidence, make workarounds
 explicit, and turn failures into reviewable issue packets.
 
-At a high level, tools in this directory are invoked through thin wrappers in
-`scripts/`. The wrapper establishes the repository root and runtime environment,
+At a high level, the developer and validation tools are invoked through thin
+wrappers in `scripts/`. The wrapper establishes the repository root and runtime environment,
 then hands off to the implementation package under `tools/`. Tool packages own
 their configs, schemas, tests, and internal modules. User-facing workflow docs
 live in `docs/`, while generated outputs stay under ignored `.scm-local/`
 directories.
 
-Use the stable entrypoints in `scripts/` from the repository root. Files under
-`tools/` are implementation packages, configs, schemas, and tests for those
-entrypoints.
+Use the stable entrypoints in `scripts/` from the repository root. A developer or
+validation tool's files under `tools/` are implementation packages, configs,
+schemas, and tests for those entrypoints.
 
 ## Current Tools
 
@@ -121,6 +125,43 @@ Run the CLI from the repo root through the wrapper:
 
 When changing tool behavior, update tests first or alongside the change. Keep
 tool commits separate from generated artifacts and unrelated service lockfiles.
+
+## Standalone infrastructure components
+
+A standalone component is generic infrastructure that is not specific to this
+marketplace: it names no host, lease, site, or other market concept, depends on
+no internal package — only on third-party distributions and the standard
+library — and can be lifted into its own repository as it stands. It owns its
+interface, such as a specification, a test vector, or a pins file, and the
+market's code conforms to that interface, never the reverse. It carries its own
+`LICENSE` and semantic version, and is not invoked through `scripts/`.
+
+`make check-architecture` does not read `tools/`, so each component holds its own
+dependency boundary in a structure test, and its tests join `make test` through
+a root target.
+
+### `frp-grant-admission/`
+
+An frps server plugin admitting a relay proxy only for the remote port a signed
+grant names. Its [README](frp-grant-admission/README.md) is the grant's
+specification.
+
+- `make test` (in its directory) runs the unit and in-process integration tests
+  with no network; its real-frp tests skip.
+- `make test-frp` fetches the frp release `frp-pins.toml` pins, verifies each
+  archive against its SHA-256, and runs real `frps` and `frpc` against the
+  plugin, failing if any test skips or none runs.
+- `make test-floor` runs the unit tests, the test vector included, with each
+  runtime dependency at the lowest release the project declares, in an
+  environment of its own; it needs the network.
+- `make build` builds its wheel into its own `dist/`.
+- From the repository root, `make test-frp-grant-admission` runs its `make test`
+  and is part of `make test` and the Tests workflow's matrix;
+  `make test-frp-grant-admission-frp` and `make test-frp-grant-admission-floor`
+  run the other two, which the Tests workflow's `frp · real-frp gate` job runs.
+- `make build-frp-grant-admission`, part of `make build`, builds its image from
+  its own directory as `arkhai:frp-grant-admission`, which `make push-images`
+  pushes.
 
 ## Adding More Tools
 

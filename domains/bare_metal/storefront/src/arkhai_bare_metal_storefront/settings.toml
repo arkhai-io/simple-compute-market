@@ -82,6 +82,11 @@ urls = []
 # Public URL -> stable registry authority name plus canonical response-signing
 # principals. Keys must exactly match [registry].urls after URL normalization.
 
+[registry.auth]
+# Public URL -> bearer token, for a registry that requires one to write. Secret:
+# state it only in storefront.secrets.toml. Each key must be one of
+# [registry].urls after URL normalization.
+
 [capacity]
 # How reservations are placed among sites: "fill_first" (configuration
 # order) or "most_available".

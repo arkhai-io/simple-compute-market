@@ -8,9 +8,9 @@ One ``SshSession`` lives for one scenario run. Its owner-only directory holds
 the keys it generates and its own ``known_hosts``, and is removed when the run
 ends. A host's key is trusted on first use within the run and only for the run:
 every later connection checks it against that one file, so a host presenting
-another key mid-run fails rather than being trusted again. The delivered
-machine's host key is not delivered with its access, so nothing earlier could
-pin it.
+another key mid-run fails rather than being trusted again. Where the operator
+knows the host key, the session pins that key before first contact; an external
+known_hosts file is read strictly and is never rewritten or removed.
 
 Connections use the system ``ssh`` in batch mode, offering only the key they
 are given (``IdentitiesOnly``) and reading no user or system SSH configuration,
@@ -23,8 +23,10 @@ until its first boot and cloud-init's reboot are done.
 from __future__ import annotations
 
 import base64
+import enum
 import hashlib
 import logging
+import math
 import os
 import shutil
 import subprocess
@@ -34,6 +36,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Condition, Thread
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import (
@@ -42,6 +45,8 @@ from cryptography.hazmat.primitives.serialization import (
     PrivateFormat,
     PublicFormat,
 )
+
+from e2e_harness.ssh_host_key import canonical_host_public_key
 
 log = logging.getLogger(__name__)
 
@@ -86,13 +91,42 @@ class SshAccessError(AssertionError):
     """What a scenario expected of an SSH connection did not happen."""
 
 
+ACCESS_PROBE_OUTPUT = "arkhai-bare-metal-access-ok"
+
+
+class SshOutcome(enum.Enum):
+    """What one SSH attempt proved about the tenant's access."""
+
+    ACCEPTED = "accepted"
+    REFUSED = "refused"
+
+
+def classify_ssh(returncode: int, stdout: str, stderr: str) -> SshOutcome:
+    """Read one attempt as access accepted or refused by authentication.
+
+    SSH exits 255 for its own failures, a refused connection, a timeout, and a
+    host-key mismatch among them, so the exit status alone cannot tell a revoked
+    key from a host that could not be reached. Only the server's refusal of the
+    public key proves revocation; every other failure is raised, never counted
+    as revoked.
+    """
+    if returncode == 0 and stdout == ACCESS_PROBE_OUTPUT:
+        return SshOutcome.ACCEPTED
+    if returncode == 255 and "Permission denied" in stderr and "publickey" in stderr:
+        return SshOutcome.REFUSED
+    raise SshAccessError(
+        f"SSH attempt proved neither access nor revocation: exit {returncode}, "
+        f"stderr {stderr.strip()[-300:]!r}"
+    )
+
+
 class HostKeyChanged(SshAccessError):
     """A host presented another key than the one first seen in this run."""
 
 
 @dataclass(frozen=True)
 class SshKey:
-    """A key pair generated for this run."""
+    """A key offered during a run, generated there or supplied by its owner."""
 
     private_key: Path
     #: The OpenSSH public line, as a buyer negotiates it.
@@ -162,6 +196,102 @@ def _fingerprint(key_base64: str) -> str:
     return "SHA256:" + base64.b64encode(digest).decode().rstrip("=")
 
 
+class SshHeartbeat:
+    """One uninterrupted SSH process, drained while the scenario does other work.
+
+    Local arrival times catch a stalled connection; remote timestamps also catch
+    a remote pause hidden by buffered delivery. No reconnect can erase a gap.
+    """
+
+    def __init__(self, process: subprocess.Popen[str], *, clock: Callable[[], float]) -> None:
+        self.process = process
+        self._clock = clock
+        self._condition = Condition()
+        self._last_arrival: float | None = None
+        self._last_remote: float | None = None
+        self._longest_gap = 0.0
+        self.sample_count = 0
+        self._error: str | None = None
+        self._ended = False
+        self._reader = Thread(target=self._read, daemon=True)
+        self._reader.start()
+
+    def _read(self) -> None:
+        try:
+            assert self.process.stdout is not None
+            for line in self.process.stdout:
+                with self._condition:
+                    try:
+                        remote = float(line.strip())
+                        if not math.isfinite(remote):
+                            raise ValueError("nonfinite timestamp")
+                        now = self._clock()
+                        if self._last_remote is not None:
+                            assert self._last_arrival is not None
+                            if remote < self._last_remote:
+                                raise ValueError("remote time moved backwards")
+                            self._longest_gap = max(
+                                self._longest_gap, remote - self._last_remote,
+                                now - self._last_arrival,
+                            )
+                        self._last_arrival, self._last_remote = now, remote
+                        self.sample_count += 1
+                    except ValueError as error:
+                        self._error = f"invalid heartbeat timestamp: {error}"
+                    self._condition.notify_all()
+        finally:
+            with self._condition:
+                self._ended = True
+                self._condition.notify_all()
+
+    def wait_ready(self, *, min_samples: int = 1, timeout: float = CONNECT_TIMEOUT_SECONDS + COMMAND_SECONDS) -> None:
+        """Require a first observation from this exact process within a bound."""
+        with self._condition:
+            ready = self._condition.wait_for(
+                lambda: self.sample_count >= min_samples or self._ended or self._error,
+                timeout=timeout,
+            )
+            if not ready or self.sample_count < min_samples or self._error:
+                raise SshAccessError(self._error or "heartbeat produced no timestamp before ending or timing out")
+        self.assert_alive()
+
+    @property
+    def running(self) -> bool:
+        return self.process.poll() is None and not self._ended
+
+    @property
+    def longest_gap(self) -> float:
+        with self._condition:
+            if self._last_arrival is None:
+                return float("inf")
+            return max(self._longest_gap, self._clock() - self._last_arrival)
+
+    def assert_alive(self, *, max_gap: float = 5.0) -> None:
+        """Require the original process still alive and no excessive heartbeat gap."""
+        if self._error:
+            raise SshAccessError(self._error)
+        if not self.running:
+            raise SshAccessError(f"heartbeat SSH process ended (exit={self.process.poll()})")
+        gap = self.longest_gap
+        if gap > max_gap:
+            raise SshAccessError(f"heartbeat longest gap {gap:.3f}s exceeds {max_gap:.3f}s")
+
+    def close(self) -> None:
+        """End only this monitor's process and reap it before removing run keys."""
+        if self.process.poll() is None:
+            self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait(timeout=5)
+        self._reader.join(timeout=5)
+        if self._reader.is_alive():
+            raise SshAccessError("heartbeat reader did not stop after its process exited")
+        if self.process.stdout is not None:
+            self.process.stdout.close()
+
+
 class SshSession:
     """One run's keys, known hosts, and connections."""
 
@@ -170,18 +300,27 @@ class SshSession:
         directory: Path,
         *,
         ssh: str = "ssh",
+        host_key: str | None = None,
+        known_hosts_file: Path | None = None,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
         connect_retry_seconds: float = CONNECT_RETRY_SECONDS,
         attempt_seconds: float = CONNECT_TIMEOUT_SECONDS + COMMAND_SECONDS,
     ) -> None:
         self.directory = directory
-        self.known_hosts = directory / "known_hosts"
+        if host_key is not None and known_hosts_file is not None:
+            raise ValueError("select a pinned host key or known_hosts file, not both")
+        self._pinned_host_key = canonical_host_public_key(host_key) if host_key is not None else None
+        self._pinned = host_key is not None or known_hosts_file is not None
+        self.known_hosts = known_hosts_file if known_hosts_file is not None else directory / "known_hosts"
+        if known_hosts_file is not None and not known_hosts_file.is_file():
+            raise ValueError("pinned known_hosts file does not exist")
         self._ssh = ssh
         self._clock = clock
         self._sleep = sleep
         self._connect_retry_seconds = connect_retry_seconds
         self._attempt_seconds = attempt_seconds
+        self._heartbeats: list[SshHeartbeat] = []
 
     # -- keys ---------------------------------------------------------------
 
@@ -201,6 +340,7 @@ class SshSession:
 
     def argv(self, endpoint: SshEndpoint, key: SshKey, command: str) -> list[str]:
         """The ``ssh`` invocation for one attempt."""
+        self._pin(endpoint)
         return [
             self._ssh,
             "-F", "/dev/null",
@@ -210,13 +350,66 @@ class SshSession:
             "-o", f"ConnectTimeout={CONNECT_TIMEOUT_SECONDS}",
             "-o", "IdentitiesOnly=yes",
             "-o", "IdentityAgent=none",
-            "-o", "StrictHostKeyChecking=accept-new",
+            "-o", "StrictHostKeyChecking=yes" if self._pinned else "StrictHostKeyChecking=accept-new",
+            "-o", "ControlMaster=no",
+            "-o", "ControlPath=none",
+            "-o", "PreferredAuthentications=publickey",
+            "-o", "PasswordAuthentication=no",
+            "-o", "KbdInteractiveAuthentication=no",
+            "-o", "UpdateHostKeys=no",
             "-o", f"UserKnownHostsFile={self.known_hosts}",
             "-o", "GlobalKnownHostsFile=/dev/null",
             "-o", "HashKnownHosts=no",
             f"{endpoint.user}@{endpoint.host}",
             command,
         ]
+
+    def _pin(self, endpoint: SshEndpoint) -> None:
+        """Bind the operator's key to each delivered port before its first attempt."""
+        if self._pinned_host_key is None:
+            return
+        name = endpoint.host if endpoint.port == 22 else f"[{endpoint.host}]:{endpoint.port}"
+        lines = self.known_hosts.read_text().splitlines() if self.known_hosts.exists() else []
+        matching = [line.split() for line in lines if line.split() and name in line.split()[0].split(",")]
+        wanted = self._pinned_host_key.split()
+        if matching:
+            if any(fields[1:3] != wanted for fields in matching):
+                raise HostKeyChanged(f"{name} already has another key pinned in this run")
+            return
+        with self.known_hosts.open("a") as stream:
+            stream.write(f"{name} {self._pinned_host_key}\n")
+        self.known_hosts.chmod(0o600)
+
+    def heartbeat(self, endpoint: SshEndpoint, key: SshKey) -> SshHeartbeat:
+        """Start one established session that stays open across other proxy changes."""
+        command = "while :; do date +%s; sleep 1; done"
+        argv = self.argv(endpoint, key, command)
+        argv[-2:-2] = ["-o", "ServerAliveInterval=2", "-o", "ServerAliveCountMax=3"]
+        error_path = self.directory / f"heartbeat-{len(self._heartbeats)}.stderr"
+        with error_path.open("w") as errors:
+            process = subprocess.Popen(
+                argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                stderr=errors, text=True, bufsize=1,
+            )
+        monitor = SshHeartbeat(process, clock=self._clock)
+        self._heartbeats.append(monitor)
+        try:
+            monitor.wait_ready()
+        except BaseException:
+            monitor.close()
+            raise
+        return monitor
+
+    def close(self) -> None:
+        """Close every owned heartbeat, including one a failed stage left open."""
+        failures = []
+        for heartbeat in self._heartbeats:
+            try:
+                heartbeat.close()
+            except Exception as error:
+                failures.append(str(error))
+        if failures:
+            raise SshAccessError("; ".join(failures))
 
     def _attempt(
         self,
@@ -368,7 +561,7 @@ class SshSession:
                     f"{endpoint.user}@{endpoint.host}:{endpoint.port} accepted "
                     f"{key.private_key.name}, which it should refuse"
                 )
-            if result is not None and "Permission denied" in result.stderr:
+            if result is not None and "Permission denied" in result.stderr and "publickey" in result.stderr:
                 reason = result.stderr.strip()
                 log.info(
                     "%s@%s:%s refused %s: %s",
@@ -384,6 +577,17 @@ class SshSession:
                 )
             self._pause(deadline)
 
+    def access_outcome(self, endpoint: SshEndpoint, key: SshKey) -> SshOutcome:
+        """One pinned-key access probe; only authenticated key refusal is revocation.
+
+        This performs no reconnect or retry: a transport failure remains a failed
+        observation, preserving an installed buyer scenario's strict judgment.
+        """
+        result = self._attempt(endpoint, key, f"printf {ACCESS_PROBE_OUTPUT}", timeout=30)
+        if result is None:
+            raise SshAccessError("SSH attempt proved neither access nor revocation: timed out")
+        return classify_ssh(result.returncode, result.stdout, result.stderr)
+
     def probe(self, endpoint: SshEndpoint, key: SshKey) -> GuestShape:
         """The user, vCPU count, memory, and root disk a connection shows."""
         return parse_probe(self.run(endpoint, key, _PROBE))
@@ -395,7 +599,17 @@ def ssh_session(**options) -> Iterator[SshSession]:
     directory = Path(tempfile.mkdtemp(prefix="e2e-ssh-"))
     try:
         directory.chmod(0o700)
-        yield SshSession(directory, **options)
+        session = SshSession(directory, **options)
+        try:
+            yield session
+        except BaseException:
+            try:
+                session.close()
+            except Exception as error:
+                log.warning("Could not close the run's heartbeat sessions: %s", error)
+            raise
+        else:
+            session.close()
     finally:
         # Reported rather than raised, so a failure here cannot hide the run's
         # own outcome; the directory holds private keys, so it is never silent.

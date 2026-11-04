@@ -108,6 +108,8 @@ from tests.e2e.roles.helpers.compute_deal_stages import alkahest_opening
 from tests.e2e.roles.scenarios.vms.conftest import (
     _alice_publisher_trust,
     _alice_url,
+    _buyer_signer,
+    _publisher_trust,
     _require_setting,
     _signer,
     _trust,
@@ -306,18 +308,11 @@ def alice_agent_id(alice_admin_client) -> str:
 # Registry trust configuration and typed client composition.
 # ---------------------------------------------------------------------------
 
-def _buyer_signer():
-    return _signer(
-        "eip191", settings.BUYER.MARKETPLACE_CREDENTIAL,
-        "BUYER.MARKETPLACE_CREDENTIAL",
-    )
-
-
 def _registry_client(url: str) -> SyncRegistryClient:
     pins = _registry_pins(url)
     return SyncRegistryClient(
         url, signer=_buyer_signer(), caller_role="buyer",
-        expected_registries=_trust(pins["identifier"]),
+        expected_registries=_trust(pins["identifier"], scheme=pins["scheme"]),
         registry_authority=pins["authority_id"],
         api_key=_REGISTRY_B_TOKEN if url == _REGISTRY_B else None,
         timeout=5.0,
@@ -341,7 +336,7 @@ def _escrow_named_by(listing_id: str) -> dict:
 def _registry_authority(url: str) -> RegistryAuthority:
     pins = _registry_pins(url)
     return RegistryAuthority(
-        authority=pins["authority_id"], principals=_trust(pins["identifier"]),
+        authority=pins["authority_id"], principals=_trust(pins["identifier"], scheme=pins["scheme"]),
     )
 
 
@@ -360,6 +355,7 @@ def _registry_pins(url: str) -> dict[str, str]:
                 "identifier": _require_setting(
                     block.get("identifier", ""), f"{section}.IDENTIFIER"
                 ),
+                "scheme": str(block.get("authority_scheme", "eip191") or "eip191"),
             }
     raise AssertionError(
         f"no configured registry pins for {url!r}; add them rather than "
@@ -700,13 +696,9 @@ class TestStage06a_NegotiateWithBob:
         # thread against whichever principal opened it.
         buyer_to_bob = SyncStorefrontClient(
             str(settings.SELLER.API_URL),
-            _signer("eip191", settings.BUYER.MARKETPLACE_CREDENTIAL,
-                    "BUYER.MARKETPLACE_CREDENTIAL"),
+            _buyer_signer(),
             caller_role="buyer",
-            expected_publishers=_trust(
-                _signer("eip191", settings.SELLER.PRIVATE_KEY,
-                        "SELLER.PRIVATE_KEY").identity.identifier
-            ),
+            expected_publishers=_publisher_trust(),
         )
         try:
             resp = buyer_to_bob.negotiate_new(
@@ -759,8 +751,7 @@ class TestStage06b_NegotiateWithAlice:
         # This client signs as the buyer.
         buyer_to_alice = SyncStorefrontClient(
             str(settings.ALICE.API_URL),
-            _signer("eip191", settings.BUYER.MARKETPLACE_CREDENTIAL,
-                    "BUYER.MARKETPLACE_CREDENTIAL"),
+            _buyer_signer(),
             caller_role="buyer",
             expected_publishers=_alice_publisher_trust(),
         )

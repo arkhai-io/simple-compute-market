@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+import json
 from pathlib import Path
 
 from arkhai_bare_metal import BARE_METAL_OFFERING_MODE
@@ -17,7 +19,7 @@ HOST = ExecutionHost(
     pool_id="default",
     connection=ConnectionEnvelope(
         kind="ssh",
-        version=1,
+        version=2,
         public={
             "ssh_host": "10.0.0.5",
             "public_host": "203.0.113.5",
@@ -27,6 +29,54 @@ HOST = ExecutionHost(
         },
     ),
 )
+
+
+def host_with(**public) -> ExecutionHost:
+    """``HOST`` with its connection's public fields changed."""
+    return dataclasses.replace(
+        HOST,
+        connection=dataclasses.replace(
+            HOST.connection, public={**HOST.connection.public, **public}
+        ),
+    )
+
+
+def shipped_output(fact_name: str, fact: dict) -> str:
+    """A run's output as the packaged configuration's YAML result format prints
+    it: the ``debug: var:`` fact as YAML, then its ``debug: msg:`` JSON copy as a
+    literal block. Fixture values only.
+
+    The codec tests read output rendered here, written from the callback's form,
+    rather than by the adapter's own mock renderer, so a mistake in that
+    renderer cannot hide one in the codec. The mock renderer is covered on its
+    own, read back by the codec and through the service's typed clients.
+    """
+    yaml_lines = [f"        {key}: '{value}'" for key, value in sorted(fact.items())]
+    msg_lines = [f"        {line}" for line in json.dumps(fact, indent=4).splitlines()]
+    return "\n".join(
+        [
+            "PLAY [Bare-metal Node Access Operations] *****",
+            "",
+            "TASK [Output data as parsable JSON] *****",
+            "ok: [bm-node-1] => ",
+            f"    {fact_name}:",
+            *yaml_lines,
+            "",
+            "TASK [Output JSON string for external parsing] *****",
+            "ok: [bm-node-1] => ",
+            "    msg: |-",
+            *msg_lines,
+            "",
+            "PLAY RECAP *****",
+            "bm-node-1 : ok=9 changed=2 unreachable=0 failed=0",
+            "",
+        ]
+    )
+
+
+def json_output(fact_name: str, fact: dict) -> str:
+    """A run's output under the JSON result format: the quoted ``var:`` fact."""
+    return "ok: [bm-node-1] => " + json.dumps({fact_name: fact}, indent=4) + "\n"
 
 
 def job_run(params: BareMetalJobParams, host: ExecutionHost = HOST) -> JobRun:

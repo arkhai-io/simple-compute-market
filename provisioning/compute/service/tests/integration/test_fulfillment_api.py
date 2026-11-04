@@ -34,8 +34,10 @@ calls into.
 
 from __future__ import annotations
 from compute_provisioning_ansible import ssh_connection
+from compute_provisioning_ansible.runner import AnsibleResult
 
 import uuid
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -54,11 +56,14 @@ from compute_provisioning_contracts import (
     FulfillmentScheduleRequest,
     FulfillmentScheduleResponse,
     FulfillmentStatusResponse,
+    LeaseState,
+    LeaseTermination,
 )
 from compute_provisioning_service.main import app
 from . import bare_metal_deal
-from .conftest import SERVICE_AUTHORITIES, STOREFRONT_SIGNER
+from .conftest import SERVICE_AUTHORITIES, STOREFRONT_SIGNER, fake_create_stdout
 from market_fulfillment import (
+    CREATE_COMPENSATION,
     FulfillmentOrchestrator,
     PhysicalSettlementRequest,
     ProviderRegistry,
@@ -73,10 +78,15 @@ from market_fulfillment.fulfillment_persistence import (
     SqlAlchemyFulfillmentUnitOfWork,
 )
 from market_core import VersionedEnvelope
-from vm_provisioning_adapter.db import RelayPortLease
+from compute_provisioning.relays import (
+    Relay,
+    RelayPortAllocator,
+    RelayPortLease,
+    RelayService,
+)
 from vm_provisioning_adapter.guest_names import fulfillment_guest_name
-from vm_provisioning_adapter.services.relay_service import RelayService
-from vm_provisioning_adapter.services.relay_port_allocator import RelayPortAllocator
+from vm_provisioning_adapter.codec import VM_RESULT_FACTS
+from vm_provisioning_adapter.services.mock_output import shipped_output
 from market_resource_pools_contracts import PoolCreate, PoolUpdate
 from market_site.router import make_capacity_router
 from compute_provisioning_contracts import HostCreate
@@ -194,6 +204,7 @@ async def _reserved_capacity(
     *,
     claim: dict[str, Any] | None = None,
     provider_config: dict[str, Any] = _PROVIDER_CONFIG,
+    lease_duration_seconds: int | None = None,
 ) -> str:
     """Register a pool + VM resource and reserve capacity against it.
 
@@ -234,6 +245,7 @@ async def _reserved_capacity(
     reserved = capacity_ledger_service.reserve(
         claim=reservation_claim,
         deal_ref={"agreement_id": f"agreement-{pool_id}", "market": "vms"},
+        lease_duration_seconds=lease_duration_seconds,
     )
     assert reserved is not None
     return reserved["capacity_reservation_id"]
@@ -244,6 +256,7 @@ async def _scheduled_reservation(
     *,
     claim: dict[str, Any] | None = None,
     provider_config: dict[str, Any] = _PROVIDER_CONFIG,
+    lease_duration_seconds: int | None = None,
 ) -> str:
     """Register a pool + VM resource, reserve capacity, and schedule it.
 
@@ -259,7 +272,10 @@ async def _scheduled_reservation(
         _container_module.resolved_physical_settlement_scheduler
     )
     capacity_reservation_id = await _reserved_capacity(
-        pool_id, claim=claim, provider_config=provider_config
+        pool_id,
+        claim=claim,
+        provider_config=provider_config,
+        lease_duration_seconds=lease_duration_seconds,
     )
 
     physical_settlement_scheduler.schedule_resource(
@@ -772,7 +788,7 @@ class TestStatusAndResultQueries:
         assert "fulfillment_not_found" in str(refused.value)
 
     async def test_result_on_an_active_fulfillment_includes_live_credentials(
-        self, fulfillment: FulfillmentApi, client_and_queue
+        self, fulfillment: FulfillmentApi, client_and_queue, fake_ansible
     ):
         # The create job runs to completion here, and it runs only against a
         # registered host record.
@@ -782,6 +798,13 @@ class TestStatusAndResultQueries:
         ))
         capacity_reservation_id = await _scheduled_reservation(
             pool_id="pool-fulfillment-result-active"
+        )
+        # The run reports the guest provisioning names for this reservation, as
+        # the role does, so its result carries delivery evidence.
+        fake_ansible.wait_for_playbook.return_value = AnsibleResult(
+            stdout=fake_create_stdout(fulfillment_guest_name(capacity_reservation_id)),
+            stderr="",
+            process_id=99999,
         )
         begun = await fulfillment.begin(
             capacity_reservation_id, "vms", _fulfillment_request()
@@ -928,6 +951,12 @@ class TestScheduleEndpoint:
 
 
 
+#: How every grant begins: the base64url of its canonical header's first
+#: bytes, ``{"alg":"EdDSA","kid":"``, up to the last character those bytes
+#: alone decide.
+_GRANT_PREFIX = "eyJhbGciOiJFZERTQSIsImtpZCI6I"
+
+
 class TestRelayPortLifecycleOverTheApi:
     """Allocation and release across the real fulfillment API.
 
@@ -949,8 +978,6 @@ class TestRelayPortLifecycleOverTheApi:
         the relay afterwards rather than creating it first — two creations of
         one pool is a conflict, not a race.
         """
-        from compute_provisioning_service import container as _container_module
-
         relays: RelayService = _container_module.resolved_relay_service
         # The container outlives a single test in this module, and relays live
         # in a table the pool fixture does not reset.
@@ -964,7 +991,10 @@ class TestRelayPortLifecycleOverTheApi:
                 token="admission-token",
             )
 
-        capacity_reservation_id = await _scheduled_reservation(pool_id=pool_id)
+        # A lease end, from which the port's lease fixes its grants' expiry.
+        capacity_reservation_id = await _scheduled_reservation(
+            pool_id=pool_id, lease_duration_seconds=3600
+        )
 
         pools = _container_module.resolved_resource_pool_service
         pools.update_pool(
@@ -1000,6 +1030,48 @@ class TestRelayPortLifecycleOverTheApi:
 
         assert self._held_ports() == []
 
+    async def test_a_relay_with_no_active_grant_key_is_refused_before_dispatch(
+        self, fulfillment: FulfillmentApi
+    ):
+        """A proxy without a grant would be refused by a relay enforcing
+        admission, so preparation refuses the relay, naming it and the key."""
+        relays: RelayService = _container_module.resolved_relay_service
+        if not any(r.id == "site-keyless" for r in relays.list_relays()):
+            relays.create_relay(
+                relay_id="site-keyless",
+                relay_addr="203.0.113.77",
+                relay_port=7000,
+                vm_port_range_start=6300,
+                vm_port_range_count=10,
+                token="admission-token",
+            )
+        # Service-internal state setup: no route removes a relay's active key,
+        # and a relay stored before relays held keys has none.
+        with _container_module.resolved_session_factory() as db, db.begin():
+            row = db.get(Relay, "site-keyless")
+            row.grant_key_encrypted = row.grant_key_id = row.grant_key_public = None
+        pool_id = f"relay-pool-{uuid.uuid4().hex[:8]}"
+        capacity_reservation_id = await _scheduled_reservation(
+            pool_id=pool_id, lease_duration_seconds=3600
+        )
+        _container_module.resolved_resource_pool_service.update_pool(
+            pool_id,
+            PoolUpdate(provider_config={**_PROVIDER_CONFIG, "relay_id": "site-keyless"}),
+        )
+
+        result = await fulfillment.validate(
+            capacity_reservation_id, "vms", _fulfillment_request()
+        )
+        assert result["valid"] is False
+        (issue,) = result["issues"]
+        assert "'site-keyless'" in issue["message"]
+        assert "no active grant key" in issue["message"]
+        with pytest.raises(ComputeProvisioningError):
+            await fulfillment.begin(capacity_reservation_id, "vms", _fulfillment_request())
+        assert RelayPortAllocator(
+            _container_module.resolved_session_factory
+        ).held_ports("site-keyless") == []
+
     async def test_acceptance_takes_exactly_one_port(
         self, fulfillment: FulfillmentApi
     ):
@@ -1032,8 +1104,9 @@ class TestRelayPortLifecycleOverTheApi:
         assert first["fulfillment_id"] == second["fulfillment_id"]
         assert len(self._held_ports()) == 1
 
+    @pytest.mark.parametrize("key", ["vm_target", "relay_proxy_action", "relay_proxy_name", "relay_client_config", "relay_proxy_remote_port"])
     async def test_rejected_preparation_rolls_back_its_port_and_acceptance(
-        self, fulfillment: FulfillmentApi
+        self, fulfillment: FulfillmentApi, key
     ):
         pool_id = f"relay-pool-{uuid.uuid4().hex[:8]}"
         capacity_reservation_id = await self._relay_backed_reservation(pool_id)
@@ -1043,7 +1116,7 @@ class TestRelayPortLifecycleOverTheApi:
             PoolUpdate(provider_config={
                 **_PROVIDER_CONFIG,
                 "relay_id": "site-a",
-                "extra_vars": {"vm_target": "override"},
+                "extra_vars": {key: "override"},
             }),
         )
 
@@ -1069,6 +1142,151 @@ class TestRelayPortLifecycleOverTheApi:
         )
         await fulfillment.begin(capacity_reservation_id, "vms", _fulfillment_request())
         assert len(self._held_ports()) == 1
+
+    async def test_a_failed_create_is_compensated_and_its_port_returns_with_the_capacity(
+        self, fulfillment: FulfillmentApi, client_and_queue, fake_ansible
+    ):
+        """A create on a relay-backed pool fails after dispatch: its run, stated
+        here, prints a guest other than this reservation's, so it carries no
+        delivery evidence. Terminating the lease begins the VM's removal as a
+        compensating teardown; the relay port stays leased through it and
+        returns with the capacity, once the aggregate is ``torn_down``."""
+        clients, job_queue = client_and_queue
+        capacity_reservation_id = await self._relay_backed_reservation(
+            f"relay-pool-{uuid.uuid4().hex[:8]}"
+        )
+        guest = fulfillment_guest_name(capacity_reservation_id)
+        removed_stdout = shipped_output(
+            "kvm-fulfillment-1",
+            VM_RESULT_FACTS["vm_remove"],
+            {
+                "action": "vm_remove",
+                "vm_name": guest,
+                "timestamp": "2030-01-01T00:00:00Z",
+                "host": "kvm-fulfillment-1",
+                "status": "success",
+                "destroy_output": "",
+                "cleanup_output": [],
+                "error": "",
+            },
+        )
+        fake_ansible.wait_for_playbook.side_effect = [
+            AnsibleResult(stdout=fake_create_stdout("another-guest"), stderr="", process_id=1),
+            AnsibleResult(stdout=removed_stdout, stderr="", process_id=2),
+        ]
+        ledger = _container_module.resolved_capacity_ledger_service
+        ledger.commit(
+            capacity_reservation_id=capacity_reservation_id,
+            lease_end_utc="2099-01-01T00:00:00Z",
+        )
+
+        async def converge() -> None:
+            await clients.family.pause_fulfillment_convergence()
+            try:
+                await clients.family.advance_fulfillment_convergence_cycle()
+            finally:
+                await clients.family.resume_fulfillment_convergence()
+
+        def aggregate() -> SettlementRecord:
+            with _container_module.resolved_session_factory() as db:
+                record = db.get(SettlementRecord, capacity_reservation_id)
+                db.expunge(record)
+                return record
+
+        await fulfillment.begin(capacity_reservation_id, "vms", _fulfillment_request())
+        await job_queue.wait_until_idle()
+        await converge()
+        record = aggregate()
+        assert (record.state, record.failure_reason) == (
+            SettlementRecordState.failed.value,
+            "provider_reported_failure",
+        )
+        assert len(self._held_ports()) == 1
+        # The create ran past writing its variables, so its grant was signed:
+        # the lease records the grant's expiry, fixed from the lease end when
+        # the port was leased, and the key that signed it.
+        relay = await clients.family.get_relay("site-a")
+        (signed,) = [
+            lease
+            for lease in (await clients.family.list_relay_leases("site-a")).leases
+            if lease.owner_id == capacity_reservation_id
+        ]
+        assert signed.grant_expires_at == datetime(2099, 1, 1, 1, 0)
+        assert signed.grant_key_id == relay.grant_keys.active.kid
+        # No read of the failed job carries the grant or the relay token.
+        for job in (await clients.family.list_jobs()).jobs:
+            read = (await clients.family.get_job(job.job_id)).model_dump_json()
+            read += (await clients.family.get_job_logs(job.job_id)).model_dump_json()
+            assert _GRANT_PREFIX not in read
+            assert "admission-token" not in read
+
+        lease = await clients.family.terminate_lease(capacity_reservation_id, LeaseTermination())
+        assert lease.status == LeaseState.RELEASING
+        assert aggregate().failure_reason == CREATE_COMPENSATION
+
+        await converge()
+        await job_queue.wait_until_idle()
+        await converge()
+        record = aggregate()
+        assert (record.state, record.failure_reason) == (
+            SettlementRecordState.torn_down.value,
+            CREATE_COMPENSATION,
+        )
+        # Torn down, but the lease has not yet returned its capacity.
+        assert len(self._held_ports()) == 1
+
+        await clients.family.check_leases()
+
+        assert (await clients.family.get_lease(capacity_reservation_id)).status == (
+            LeaseState.RELEASED
+        )
+        assert self._held_ports() == []
+        # The holdings read shows the torn-down delivery's lease released, and
+        # no other lease on its port.
+        holdings = (await clients.family.list_relay_leases("site-a")).leases
+        (ours,) = [lease for lease in holdings if lease.owner_id == capacity_reservation_id]
+        assert ours.released_at is not None
+        assert [lease for lease in holdings if lease.remote_port == ours.remote_port] == [ours]
+
+    async def test_a_relayed_create_signs_its_grant_and_no_read_carries_it(
+        self, fulfillment: FulfillmentApi, client_and_queue, fake_ansible
+    ):
+        """A relayed create that succeeds had its grant signed, for its own
+        reservation's lease, as it ran; its job read and logs carry neither
+        the grant nor the relay token."""
+        clients, job_queue = client_and_queue
+        capacity_reservation_id = await self._relay_backed_reservation(
+            f"relay-pool-{uuid.uuid4().hex[:8]}"
+        )
+        fake_ansible.wait_for_playbook.side_effect = [
+            AnsibleResult(
+                stdout=fake_create_stdout(fulfillment_guest_name(capacity_reservation_id)),
+                stderr="",
+                process_id=1,
+            ),
+        ]
+
+        await fulfillment.begin(capacity_reservation_id, "vms", _fulfillment_request())
+        await job_queue.wait_until_idle()
+
+        relay = await clients.family.get_relay("site-a")
+        (lease,) = [
+            lease
+            for lease in (await clients.family.list_relay_leases("site-a")).leases
+            if lease.owner_id == capacity_reservation_id and lease.released_at is None
+        ]
+        assert lease.grant_key_id == relay.grant_keys.active.kid
+        jobs = [
+            job
+            for job in (await clients.family.list_jobs()).jobs
+            if capacity_reservation_id in job.model_dump_json()
+        ]
+        assert jobs and all(job.status == "succeeded" for job in jobs)
+        for job in jobs:
+            read = (await clients.family.get_job(job.job_id)).model_dump_json()
+            read += (await clients.family.get_job_logs(job.job_id)).model_dump_json()
+            assert _GRANT_PREFIX not in read
+            assert "admission-token" not in read
 
     async def test_a_direct_nat_pool_takes_no_port(self, fulfillment: FulfillmentApi):
         """A deployment with no relay is a supported state, not a degraded one."""

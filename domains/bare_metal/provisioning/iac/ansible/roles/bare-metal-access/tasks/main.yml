@@ -22,29 +22,130 @@
 
 - name: Validate bare-metal reclaim policy
   fail:
-    msg: "bare_metal_reclaim_policy must be one of: remove_lease_key, lock_user, delete_user"
+    msg: "bare_metal_reclaim_policy must be one of: remove_lease_key, lock_user, delete_user, bounded_working_data"
   when:
     - node_action == "node_reclaim_access"
-    - (bare_metal_reclaim_policy | default('remove_lease_key')) not in ["remove_lease_key", "lock_user", "delete_user"]
+    - (bare_metal_reclaim_policy | default('remove_lease_key')) not in ["remove_lease_key", "lock_user", "delete_user", "bounded_working_data"]
+
+- name: Record the selected bounded policy
+  set_fact:
+    bare_metal_bounded: "{{ (bare_metal_reclaim_policy | default('remove_lease_key')) == 'bounded_working_data' }}"
+
+# Proxy removal runs even when a partially failed grant created no account.
+- name: Remove the leased bare-metal buyer proxy
+  ansible.builtin.include_role:
+    name: relay-proxy
+    apply:
+      become: true
+      delegate_to: "{{ target_host }}"
+  vars:
+    relay_proxy_action: remove
+    relay_proxy_name: "bm-{{ bare_metal_ssh_user }}"
+  no_log: true
+  when:
+    - node_action == "node_reclaim_access"
+    - relay_id | default('') | length > 0
+
+- name: Read or reserve the protected bounded identity
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - /usr/local/lib/arkhai-tenant-working-data.py
+      - --policy
+      - /etc/arkhai-working-data/policy.json
+    stdin: "{{ {'version': 1, 'operation': ('reserve' if node_action == 'node_grant_access' else 'inspect'), 'reservation_id': bare_metal_capacity_reservation_id, 'account': bare_metal_ssh_user, 'policy_id': bare_metal_working_data_policy_id} | to_json }}"
+  register: bare_metal_identity_result
+  become: true
+  delegate_to: "{{ target_host }}"
+  when: bare_metal_bounded | bool
+
+- name: Record the protected bounded identity
+  set_fact:
+    bare_metal_identity: "{{ bare_metal_identity_result.stdout | from_json }}"
+  when: bare_metal_bounded | bool
+
+- name: Record the tenant home
+  set_fact:
+    bare_metal_tenant_home: "{{ bare_metal_identity.home if bare_metal_bounded | bool else '/home/' + bare_metal_ssh_user }}"
+
+- name: Look up the bounded account without modifying an existing identity
+  ansible.builtin.command:
+    argv: [getent, passwd, "{{ bare_metal_ssh_user }}"]
+  register: bare_metal_grant_account
+  changed_when: false
+  failed_when: bare_metal_grant_account.rc not in [0, 2]
+  delegate_to: "{{ target_host }}"
+  when:
+    - node_action == "node_grant_access"
+    - bare_metal_bounded | bool
+
+- name: Look up the bounded private group without modifying an existing identity
+  ansible.builtin.command:
+    argv: [getent, group, "{{ bare_metal_ssh_user }}"]
+  register: bare_metal_grant_group
+  changed_when: false
+  failed_when: bare_metal_grant_group.rc not in [0, 2]
+  delegate_to: "{{ target_host }}"
+  when:
+    - node_action == "node_grant_access"
+    - bare_metal_bounded | bool
 
 - name: Ensure bare-metal tenant group exists
   group:
     name: "{{ bare_metal_ssh_user }}"
+    gid: "{{ bare_metal_identity.gid if bare_metal_bounded | bool else omit }}"
     state: present
   become: yes
   delegate_to: "{{ target_host }}"
-  when: node_action == "node_grant_access"
+  when:
+    - node_action == "node_grant_access"
+    - not (bare_metal_bounded | bool) or bare_metal_grant_group.rc == 2
 
 - name: Ensure bare-metal tenant user exists
   user:
     name: "{{ bare_metal_ssh_user }}"
     group: "{{ bare_metal_ssh_user }}"
     shell: /bin/bash
+    uid: "{{ bare_metal_identity.uid if bare_metal_bounded | bool else omit }}"
+    home: "{{ bare_metal_tenant_home }}"
+    groups: "{{ [] if bare_metal_bounded | bool else omit }}"
+    append: false
     create_home: yes
     state: present
   become: yes
   delegate_to: "{{ target_host }}"
-  when: node_action == "node_grant_access"
+  when:
+    - node_action == "node_grant_access"
+    - not (bare_metal_bounded | bool) or bare_metal_grant_account.rc == 2
+
+- name: Verify the created bounded account identity
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - /usr/local/lib/arkhai-tenant-working-data.py
+      - --policy
+      - /etc/arkhai-working-data/policy.json
+    stdin: "{{ {'version': 1, 'operation': 'verify-identity', 'reservation_id': bare_metal_capacity_reservation_id, 'account': bare_metal_ssh_user, 'policy_id': bare_metal_working_data_policy_id} | to_json }}"
+  changed_when: false
+  become: true
+  delegate_to: "{{ target_host }}"
+  when:
+    - node_action == "node_grant_access"
+    - bare_metal_bounded | bool
+
+- name: Install the bounded tenant key without following tenant paths
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - /usr/local/lib/arkhai-tenant-working-data.py
+      - --policy
+      - /etc/arkhai-working-data/policy.json
+    stdin: "{{ {'version': 1, 'operation': 'install-key', 'reservation_id': bare_metal_capacity_reservation_id, 'account': bare_metal_ssh_user, 'policy_id': bare_metal_working_data_policy_id, 'ssh_public_key': bare_metal_ssh_public_key} | to_json }}"
+  become: true
+  delegate_to: "{{ target_host }}"
+  when:
+    - node_action == "node_grant_access"
+    - bare_metal_bounded | bool
 
 - name: Install bare-metal tenant SSH public key
   ansible.posix.authorized_key:
@@ -55,29 +156,73 @@
     comment: "arkhai bare-metal lease {{ escrow_uid | default('unknown') }}"
   become: yes
   delegate_to: "{{ target_host }}"
-  when: node_action == "node_grant_access"
+  when:
+    - node_action == "node_grant_access"
+    - not (bare_metal_bounded | bool)
 
 - name: Ensure bare-metal tenant SSH directory permissions
   file:
-    path: "/home/{{ bare_metal_ssh_user }}/.ssh"
+    path: "{{ bare_metal_tenant_home }}/.ssh"
     owner: "{{ bare_metal_ssh_user }}"
     group: "{{ bare_metal_ssh_user }}"
     mode: "0700"
     state: directory
   become: yes
   delegate_to: "{{ target_host }}"
-  when: node_action == "node_grant_access"
+  when:
+    - node_action == "node_grant_access"
+    - not (bare_metal_bounded | bool)
 
 - name: Ensure bare-metal tenant authorized_keys permissions
   file:
-    path: "/home/{{ bare_metal_ssh_user }}/.ssh/authorized_keys"
+    path: "{{ bare_metal_tenant_home }}/.ssh/authorized_keys"
     owner: "{{ bare_metal_ssh_user }}"
     group: "{{ bare_metal_ssh_user }}"
     mode: "0600"
     state: file
   become: yes
   delegate_to: "{{ target_host }}"
-  when: node_action == "node_grant_access"
+  when:
+    - node_action == "node_grant_access"
+    - not (bare_metal_bounded | bool)
+
+- name: Add the leased bare-metal buyer proxy
+  ansible.builtin.include_role:
+    name: relay-proxy
+    apply:
+      become: true
+      delegate_to: "{{ target_host }}"
+  vars:
+    relay_proxy_action: add
+    relay_proxy_name: "bm-{{ bare_metal_ssh_user }}"
+    relay_proxy_local_ip: "127.0.0.1"
+    relay_proxy_local_port: 22
+    relay_proxy_remote_port: "{{ bare_metal_remote_port }}"
+  no_log: true
+  when:
+    - node_action == "node_grant_access"
+    - relay_id | default('') | length > 0
+
+# Compensation can find an account that its grant never created. The targeted
+# lookup never creates it: getent exits 2 for absence; other errors fail reclaim.
+# Legacy policies then skip account mutation. Bounded reclaim still uses its
+# protected numeric receipt for activity and working-data verification.
+- name: Look up the bare-metal tenant account before reclaim
+  ansible.builtin.command:
+    argv:
+      - getent
+      - passwd
+      - "{{ bare_metal_ssh_user }}"
+  register: bare_metal_account_lookup
+  changed_when: false
+  failed_when: bare_metal_account_lookup.rc not in [0, 2]
+  delegate_to: "{{ target_host }}"
+  when: node_action == "node_reclaim_access"
+
+- name: Record whether the bare-metal tenant account exists
+  set_fact:
+    bare_metal_account_present: "{{ bare_metal_account_lookup.rc == 0 }}"
+  when: node_action == "node_reclaim_access"
 
 - name: Revoke bare-metal tenant SSH public key when provided
   ansible.posix.authorized_key:
@@ -89,19 +234,93 @@
   delegate_to: "{{ target_host }}"
   when:
     - node_action == "node_reclaim_access"
-    - (bare_metal_reclaim_policy | default('remove_lease_key')) in ["remove_lease_key", "lock_user"]
+    - bare_metal_account_present | bool
     - bare_metal_ssh_public_key | default('') | trim != ''
+    - not (bare_metal_bounded | bool)
 
-- name: Remove bare-metal tenant authorized_keys when key-only reclaim has no key
+- name: Remove bare-metal tenant authorized_keys when reclaim has no key
   file:
-    path: "/home/{{ bare_metal_ssh_user }}/.ssh/authorized_keys"
+    path: "{{ bare_metal_tenant_home }}/.ssh/authorized_keys"
     state: absent
   become: yes
   delegate_to: "{{ target_host }}"
   when:
     - node_action == "node_reclaim_access"
-    - (bare_metal_reclaim_policy | default('remove_lease_key')) == "remove_lease_key"
+    - bare_metal_account_present | bool
     - bare_metal_ssh_public_key | default('') | trim == ''
+    - not (bare_metal_bounded | bool)
+
+- name: Revoke the bounded tenant key without following tenant paths
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - /usr/local/lib/arkhai-tenant-working-data.py
+      - --policy
+      - /etc/arkhai-working-data/policy.json
+    stdin: "{{ {'version': 1, 'operation': 'revoke-key', 'reservation_id': bare_metal_capacity_reservation_id, 'account': bare_metal_ssh_user, 'policy_id': bare_metal_working_data_policy_id} | to_json }}"
+  become: true
+  delegate_to: "{{ target_host }}"
+  when:
+    - node_action == "node_reclaim_access"
+    - bare_metal_bounded | bool
+
+- name: Install the tenant activity termination helper
+  ansible.builtin.copy:
+    src: tenant_activity.py
+    dest: /usr/local/lib/arkhai-tenant-activity.py
+    owner: root
+    group: root
+    mode: "0700"
+  become: true
+  delegate_to: "{{ target_host }}"
+  when:
+    - node_action == "node_reclaim_access"
+    - (bare_metal_account_present | bool) or (bare_metal_bounded | bool)
+
+- name: End and verify bare-metal tenant activity before account policy
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - /usr/local/lib/arkhai-tenant-activity.py
+      - "{{ bare_metal_ssh_user }}"
+      - "{{ bare_metal_account_lookup.stdout.split(':')[2] }}"
+  register: bare_metal_activity_result
+  become: true
+  delegate_to: "{{ target_host }}"
+  when:
+    - node_action == "node_reclaim_access"
+    - bare_metal_account_present | bool
+    - not (bare_metal_bounded | bool)
+
+- name: End and verify the protected bounded tenant activity
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - /usr/local/lib/arkhai-tenant-activity.py
+      - --trusted-uid
+      - "{{ bare_metal_ssh_user }}"
+      - "{{ bare_metal_identity.uid | string }}"
+  register: bare_metal_bounded_activity_result
+  become: true
+  delegate_to: "{{ target_host }}"
+  when:
+    - node_action == "node_reclaim_access"
+    - bare_metal_bounded | bool
+
+- name: Record verified bounded activity termination
+  set_fact:
+    bare_metal_activity_detail: "{{ bare_metal_bounded_activity_result.stdout | from_json }}"
+  when:
+    - node_action == "node_reclaim_access"
+    - bare_metal_bounded | bool
+
+- name: Record verified bare-metal activity termination
+  set_fact:
+    bare_metal_activity_detail: "{{ bare_metal_activity_result.stdout | from_json }}"
+  when:
+    - node_action == "node_reclaim_access"
+    - bare_metal_account_present | bool
+    - not (bare_metal_bounded | bool)
 
 - name: Lock bare-metal tenant account after reclaim
   user:
@@ -112,9 +331,9 @@
   become: yes
   delegate_to: "{{ target_host }}"
   register: bare_metal_lock_result
-  failed_when: false
   when:
     - node_action == "node_reclaim_access"
+    - bare_metal_account_present | bool
     - (bare_metal_reclaim_policy | default('remove_lease_key')) == "lock_user"
 
 - name: Delete bare-metal tenant account after reclaim
@@ -125,10 +344,16 @@
   become: yes
   delegate_to: "{{ target_host }}"
   register: bare_metal_delete_result
-  failed_when: false
   when:
     - node_action == "node_reclaim_access"
+    - bare_metal_account_present | bool
     - (bare_metal_reclaim_policy | default('remove_lease_key')) == "delete_user"
+
+- name: Complete bounded working-data reclaim
+  ansible.builtin.include_tasks: bounded-reclaim.yml
+  when:
+    - node_action == "node_reclaim_access"
+    - bare_metal_bounded | bool
 
 - name: Get current timestamp for bare-metal node access action
   shell: date -u +"%Y-%m-%dT%H:%M:%SZ"
@@ -151,6 +376,13 @@
   when:
     - node_action == "node_grant_access"
     - node_access_timestamp is defined
+
+- name: Record the granted relay endpoint
+  set_fact:
+    node_grant_access_data: "{{ node_grant_access_data | combine({'relay': {'enabled': true, 'relay_addr': frp_server_addr, 'remote_port': bare_metal_remote_port | int}}) }}"
+  when:
+    - node_action == "node_grant_access"
+    - relay_id | default('') | length > 0
 
 - name: Create JSON formatted output for node_grant_access
   set_fact:
@@ -179,6 +411,9 @@
       timestamp: "{{ node_access_timestamp.stdout }}"
       host: "{{ target_host }}"
       status: "success"
+      account_present: "{{ bare_metal_account_present | bool }}"
+      activity: "{{ bare_metal_activity_detail | default({}) }}"
+      working_data: "{{ bare_metal_cleanup_detail | default({}) }}"
       account_locked: "{{ bare_metal_lock_result.changed | default(false) }}"
       account_deleted: "{{ bare_metal_delete_result.changed | default(false) }}"
   when:

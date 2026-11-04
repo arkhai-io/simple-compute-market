@@ -1,0 +1,74 @@
+---
+- name: Require the allocated proxy endpoint and signed grant
+  ansible.builtin.assert:
+    that:
+      - relay_proxy_local_ip is defined and relay_proxy_local_ip | length > 0
+      - relay_proxy_remote_port | int > 0 and relay_proxy_remote_port | int <= 65535
+      - relay_grant is defined and relay_grant | length > 0
+  no_log: true
+
+- name: Check the buyer client baseline
+  ansible.builtin.include_role:
+    name: relay-client
+
+- name: Read the root-only admin credentials
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_python_interpreter | default('/usr/bin/python3') }}"
+      - "{{ frp_binary_path | dirname | dirname }}/client_config.py"
+      - credentials
+      - "{{ relay_client_config }}"
+  register: relay_admin_credentials
+  changed_when: false
+  no_log: true
+
+- name: Add the allocated TCP proxy and its grant
+  ansible.builtin.blockinfile:
+    path: "{{ relay_client_config }}"
+    marker: "# {mark} ANSIBLE MANAGED RELAY PROXY {{ relay_proxy_name }}"
+    block: |
+      [[proxies]]
+      name = {{ relay_proxy_name | to_json }}
+      type = "tcp"
+      localIP = {{ relay_proxy_local_ip | to_json }}
+      localPort = {{ relay_proxy_local_port | int }}
+      remotePort = {{ relay_proxy_remote_port | int }}
+      transport.useEncryption = true
+      metadatas.grant = {{ relay_grant | to_json }}
+    create: false
+    mode: '0600'
+  no_log: true
+
+# Reload applies a proxy diff without closing other buyers' established sessions.
+- name: Reload the buyer client with authentication
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ (relay_admin_credentials.stdout | from_json)['webServer.port'] }}/api/reload"
+    url_username: admin
+    url_password: "{{ (relay_admin_credentials.stdout | from_json)['webServer.password'] }}"
+    force_basic_auth: true
+    use_proxy: false
+    status_code: 200
+  no_log: true
+
+- name: Wait for the buyer proxy to come up
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ (relay_admin_credentials.stdout | from_json)['webServer.port'] }}/api/status"
+    url_username: admin
+    url_password: "{{ (relay_admin_credentials.stdout | from_json)['webServer.password'] }}"
+    force_basic_auth: true
+    use_proxy: false
+    return_content: true
+    status_code: 200
+  register: relay_proxy_status
+  retries: 12
+  delay: 5
+  until: >-
+    relay_proxy_status.status | default(-1) == 200
+    and (relay_proxy_status.content | default('') | trim) != ''
+    and (
+      (relay_proxy_status.content | from_json).tcp | default([], true)
+      | selectattr('name', 'equalto', relay_proxy_name)
+      | selectattr('status', 'equalto', 'running')
+      | list | length
+    ) > 0
+  no_log: true

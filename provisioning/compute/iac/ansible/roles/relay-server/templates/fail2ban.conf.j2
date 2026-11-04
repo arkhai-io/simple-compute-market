@@ -1,0 +1,9 @@
+[sshd]
+enabled = true
+port = 22{% for ports in frp_proxy_ports %},{{ ports.start }}:{{ ports.end }}{% endfor %}
+
+filter = sshd
+logpath = /var/log/auth.log
+maxretry = 5
+findtime = 10m
+bantime = 1h

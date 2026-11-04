@@ -43,6 +43,7 @@ from compute_provisioning_service.controllers import (
     hosts_controller,
     jobs_controller,
     leases_controller,
+    relays_controller,
     test_jobs_controller,
 )
 from market_site.router import make_capacity_router
@@ -279,11 +280,11 @@ app = build_compute_provisioning_app(
         *vm_router_mounts(
             vm_operations=lambda: _container_module.resolved_vm_operations_service,
             host_operations=lambda: _container_module.resolved_host_operations_service,
-            relay_service=lambda: _container_module.resolved_relay_service,
         ),
         ComputeProvisioningRouterMount(jobs_controller.router, "/api/v1"),
         ComputeProvisioningRouterMount(host_import_controller.router, "/api/v1"),
         ComputeProvisioningRouterMount(hosts_controller.router, "/api/v1"),
+        ComputeProvisioningRouterMount(relays_controller.router, "/api/v1"),
         ComputeProvisioningRouterMount(leases_controller.router, "/api/v1"),
         ComputeProvisioningRouterMount(PoolController.make_router(), "/api/v1"),
         ComputeProvisioningRouterMount(CapacityDefinitionsController.make_router(), "/api/v1"),

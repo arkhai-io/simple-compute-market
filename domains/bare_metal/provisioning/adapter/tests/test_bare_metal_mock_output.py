@@ -8,7 +8,8 @@ import pytest
 from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTION
 from compute_provisioning.jobs import JobFailure, JobSuccess
 from compute_provisioning.jobs.executor_mock import MockRule
-from compute_provisioning_ansible import MockAnsibleRunner
+from compute_provisioning_ansible import MockAnsibleRunner, MockPlaybook, read_fact
+from compute_provisioning_ansible.runner import extract_fact, inventory_target
 from compute_provisioning_contracts import (
     CREATE_JOB_RESULT_KIND,
     AccessEndpoint,
@@ -21,7 +22,7 @@ from bare_metal_provisioning_adapter.services.mock_output import (
     bare_metal_mock_output,
 )
 
-from execution import HOST, executor, job_run
+from execution import HOST, executor, host_with, job_run
 
 
 def _mock() -> MockAnsibleRunner:
@@ -56,19 +57,59 @@ async def test_default_grant_reports_the_access_fact_for_the_registered_host() -
     assert outcome.result.result_kind == CREATE_JOB_RESULT_KIND
     created = CreateJobResult.model_validate(outcome.result.value)
     assert created.detail["physical_host_id"] == "physical-1"
+    # The buyer's endpoint is the host's tenant-facing address with its
+    # connection port; the fact's own host and port, the provisioner's route,
+    # stay detail.
     assert created.evidence.endpoints == (
-        AccessEndpoint(protocol="ssh", host="10.0.0.5", port=2201, user="tenant-a"),
+        AccessEndpoint(protocol="ssh", host="203.0.113.5", port=2201, user="tenant-a"),
+    )
+    assert (created.detail["host"], created.detail["port"]) == ("10.0.0.5", "2201")
+
+
+@pytest.mark.asyncio
+async def test_default_grant_reaches_a_host_on_its_tenant_route() -> None:
+    host = host_with(public_host="192.0.2.10", public_port=22)
+
+    outcome = await executor(_mock()).execute(job_run(_params(NODE_GRANT_ACCESS_ACTION), host))
+
+    (endpoint,) = CreateJobResult.model_validate(outcome.result.value).evidence.endpoints
+    assert (endpoint.host, endpoint.port, endpoint.user) == ("192.0.2.10", 22, "tenant-a")
+
+
+@pytest.mark.parametrize("action", [NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTION])
+def test_the_default_output_is_the_shipped_yaml_form(action) -> None:
+    """A ``var:`` fact in the YAML format, which only the ``msg:`` JSON block
+    beside it carries as JSON, as the packaged configuration prints them."""
+    params = _params(action)
+    stdout = bare_metal_mock_output(
+        MockPlaybook(
+            parameters=params.model_dump(mode="json"),
+            limit=HOST.host_id,
+            hosts={HOST.host_id: inventory_target(HOST)},
+        )
+    )
+    fact_name = f"{action}_data"
+
+    assert f"    {fact_name}:\n" in stdout and f'"{fact_name}":' not in stdout
+    assert "    msg: |-\n" in stdout
+    assert extract_fact(stdout, fact_name) is None
+    fact = read_fact(stdout, fact_name, action=action)
+    assert (fact["action"], fact["host_id"], fact["ssh_user"], fact["status"]) == (
+        action, HOST.host_id, "tenant-a", "success",
     )
 
 
 @pytest.mark.asyncio
-async def test_default_grant_without_a_tenant_names_the_mock_user() -> None:
+async def test_default_grant_for_a_job_naming_no_tenant_reports_no_evidence() -> None:
+    """The role refuses such a grant; a default output naming the mock account
+    for it matches no account the job names, so it yields no evidence."""
     outcome = await _execute(
         _mock(),
         _params(NODE_GRANT_ACCESS_ACTION, ssh_user=None),
     )
 
-    assert outcome.result.value["evidence"]["endpoints"][0]["user"] == DEFAULT_MOCK_SSH_USER
+    assert outcome.result.value["evidence"] is None
+    assert outcome.result.value["detail"]["ssh_user"] == DEFAULT_MOCK_SSH_USER
 
 
 @pytest.mark.asyncio
@@ -81,6 +122,41 @@ async def test_default_reclaim_reports_the_reclaim_and_its_policy() -> None:
     assert outcome.result.value["action"] == NODE_RECLAIM_ACCESS_ACTION
     assert outcome.result.value["status"] == "success"
     assert outcome.result.value["reclaim_policy"] == "lock_user"
+    assert outcome.result.value["account_present"] is True
+
+
+#: The reclaim role sets each from one boolean expression, so its fact prints them
+#: as JSON booleans.
+RECLAIM_ACCOUNT_FIELDS = {"account_present": True, "account_locked": False,
+                          "account_deleted": False}
+
+
+def test_the_default_reclaim_prints_its_account_fields_as_booleans() -> None:
+    """As the reclaim role prints them: bare in the ``var:`` display, and JSON
+    booleans in the ``msg:`` block the fact reader returns."""
+    stdout = bare_metal_mock_output(
+        MockPlaybook(
+            parameters=_params(NODE_RECLAIM_ACCESS_ACTION).model_dump(mode="json"),
+            limit=HOST.host_id,
+            hosts={HOST.host_id: inventory_target(HOST)},
+        )
+    )
+
+    fact = read_fact(stdout, f"{NODE_RECLAIM_ACCESS_ACTION}_data",
+                     action=NODE_RECLAIM_ACCESS_ACTION)
+    for name, value in RECLAIM_ACCOUNT_FIELDS.items():
+        assert type(fact[name]) is bool and fact[name] is value, (name, fact[name])
+        assert f"        {name}: {str(value).lower()}\n" in stdout
+
+
+@pytest.mark.asyncio
+async def test_the_default_reclaim_result_carries_its_account_fields_as_booleans() -> None:
+    """Through the real executor and codec, the reclaim's result keeps them."""
+    outcome = await _execute(_mock(), _params(NODE_RECLAIM_ACCESS_ACTION))
+
+    assert isinstance(outcome, JobSuccess)
+    for name, value in RECLAIM_ACCOUNT_FIELDS.items():
+        assert outcome.result.value[name] is value, (name, outcome.result.value[name])
 
 
 @pytest.mark.asyncio

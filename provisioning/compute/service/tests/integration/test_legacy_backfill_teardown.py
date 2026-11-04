@@ -187,7 +187,10 @@ def test_pre_cutover_vm_lease_backfills_and_tears_down_to_release():
             session_factory=session_factory,
             teardown_port=teardown_port,
         ),
-        release_status=FulfillmentReleaseStatusPort(teardown_port),
+        release_status=FulfillmentReleaseStatusPort(
+            settlement_repository=settlement_repository,
+            session_factory=session_factory,
+        ),
         capacity_released_notifier=_successful_notification,
     )
 

@@ -153,7 +153,7 @@ test-storefront: ## Full storefront reinit + test
 # Each subproject resolves the wheel directory from its own relative default:
 # `uv sync` records the path it is given in the lockfile, so an absolute one
 # would rewrite committed locks with the caller's filesystem layout.
-test-bare-metal: ## Bare-metal domain, storefront, buyer, and provisioning adapter tests
+test-bare-metal: test-bare-metal-iac ## Bare-metal domain, storefront, buyer, and provisioning adapter tests
 	cd bare_metal && $(MAKE) test
 	cd bare_metal/storefront && $(MAKE) test
 	cd bare_metal/buyer && $(MAKE) test
@@ -178,3 +178,7 @@ test-apicredits-middleware:
 
 test-provisioning-adapter: ## VM provisioning adapter tests against built wheels
 	cd vms/provisioning/adapter && $(MAKE) test
+
+.PHONY: test-bare-metal-iac
+test-bare-metal-iac:
+	cd bare_metal/provisioning/iac && $(MAKE) test

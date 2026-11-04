@@ -15,8 +15,9 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: helm-values-schema e2e-dev-identities e2e-dev-identities-env e2e-vms-dev-env e2e-apicredits-dev-env e2e-apicredits-stack-env e2e-bare-metal-dev-env review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-bare-metal-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-uv-version check-python-version check-project-layout lock
 .PHONY: check-architecture check-architecture-layers check-architecture-scope check-architecture-dependencies check-architecture-kinds check-architecture-change architecture-report
 .PHONY: test-release-tooling test-deployment-packaging test-registry-client test-provisioning-adapter test-e2e-unit
+.PHONY: test-frp-grant-admission test-frp-grant-admission-frp test-frp-grant-admission-floor build-frp-grant-admission
 .PHONY: dist-arkhai-core-registry
-.PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits
+.PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits test-provisioning-iac-native
 .PHONY: dist-bare-metal-buyer
 .PHONY: run-e2e run-ci fetch-e2e-logs
 .PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
@@ -195,7 +196,7 @@ test-deployment-packaging: test-release-tooling ## Run release tooling plus Helm
 dist-clean: ## Remove .dist/ directory
 	rm -rf $(DIST_DIR)
 
-test: test-core test-kits test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-registry-client test-storefront test-provisioning-adapter test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-e2e-unit test-deployment-packaging ## Run every unit and integration suite; the docker-compose e2e scenarios and cluster `helm test` are separate
+test: test-core test-kits test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-registry-client test-storefront test-provisioning-adapter test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-e2e-unit test-deployment-packaging test-frp-grant-admission ## Run every unit and integration suite; the docker-compose e2e scenarios and cluster `helm test` are separate
 
 test-core:
 	cd core && make test
@@ -216,6 +217,7 @@ test-provisioning:
 	cd provisioning/compute/service && make test
 
 test-provisioning-iac:
+	$(MAKE) -C provisioning/compute/iac test
 	$(MAKE) -C domains test-provisioning-iac
 
 test-registry:
@@ -226,6 +228,17 @@ test-registry-client:
 
 test-provisioning-adapter:
 	$(MAKE) -C domains test-provisioning-adapter
+
+# The standalone frps admission plugin under tools/: its default suite needs no
+# network and skips the real-frp tests, which its gate runs with the floor run.
+test-frp-grant-admission:
+	$(MAKE) -C tools/frp-grant-admission test
+
+test-frp-grant-admission-frp: ## Run the frps admission plugin against the real frp its pins file names; fetches frp
+	$(MAKE) -C tools/frp-grant-admission test-frp
+
+test-frp-grant-admission-floor: ## Run the frps admission plugin's unit tests with its runtime dependencies at their declared floors
+	$(MAKE) -C tools/frp-grant-admission test-floor
 
 # The e2e project's unit tests; its scenarios need the docker-compose stack.
 test-e2e-unit:
@@ -281,7 +294,7 @@ build: ## Build the wheels, the buyer CLI binary, and every runtime image
 	$(MAKE) dist
 	$(MAKE) build-buyer
 	$(MAKE) -j4 build-registry build-storefront build-bare-metal-storefront build-provisioning
-	$(MAKE) -j3 build-apicredits-service build-apicredits-storefront build-apicredits-sample-app
+	$(MAKE) -j4 build-apicredits-service build-apicredits-storefront build-apicredits-sample-app build-frp-grant-admission
 
 # ---------------------------------------------------------------------------
 # e2e-*-dev-env — each stack's signer, wallet, and buyer paths from the
@@ -423,7 +436,7 @@ e2e-bare-metal-dev-env: ## Print VAR=value lines for the bare-metal lane's `dock
 	@echo 'BARE_METAL_PROVISIONING_IDENTITY_IDENTIFIER=$(E2E_BARE_METAL_SITE_AUTHORITY_ID)'
 	@echo 'BARE_METAL_PROVISIONING_ADMIN_IDENTITY_SCHEME=eip191'
 	@echo 'BARE_METAL_PROVISIONING_ADMIN_IDENTITY_IDENTIFIER=$(E2E_BARE_METAL_SITE_ADMIN_ID)'
-	@echo 'BARE_METAL_PROVISIONING_INVENTORY_FILE=$(E2E_BARE_METAL_DIR)/hosts.ini'
+	@echo 'BARE_METAL_PROVISIONING_HOST_DEFINITIONS_FILE=$(E2E_BARE_METAL_DIR)/hosts.yaml'
 	@echo 'BARE_METAL_POOL_DEFINITIONS_FILE=$(E2E_BARE_METAL_DIR)/resource-pools.yaml'
 	@echo 'BARE_METAL_PROVISIONING_SSH_PRIVATE_KEY_FILE=$(E2E_BARE_METAL_DIR)/ssh-key-placeholder'
 	@echo 'BARE_METAL_SITE_ID=$(E2E_BARE_METAL_SITE_ID)'
@@ -508,6 +521,24 @@ build-bare-metal-storefront:
 build-provisioning:
 	cd provisioning/compute/service && make build IMAGE_SUFFIX=$(IMAGE_SUFFIX)
 
+# Native gates run the Ansible, collections, playbooks and tests packaged in the
+# candidate image, with loopback networking only. A separate parse pass uses the
+# shared service configuration and image role path, as service jobs do.
+PROVISIONING_IMAGE ?= arkhai:compute-provisioning$(IMAGE_SUFFIX)
+test-provisioning-iac-native: ## Run family and VM IaC native Ansible tests in the built provisioning image
+	@docker image inspect $(PROVISIONING_IMAGE) >/dev/null 2>&1 || { \
+		echo "no $(PROVISIONING_IMAGE) image: build it first, with make build-provisioning" >&2; exit 1; }
+	docker run --rm --network none \
+		-w /opt/domains/vms/provisioning/iac \
+		-e PYTHON=/home/appuser/ansible-venv/bin/python \
+		$(PROVISIONING_IMAGE) bash scripts/native_ansible_gate.sh
+	docker run --rm --network none \
+		-w /opt/provisioning/compute/iac \
+		-e PYTHON=/home/appuser/ansible-venv/bin/python \
+		$(PROVISIONING_IMAGE) bash scripts/native_ansible_gate.sh
+	docker run --rm --network none -e ANSIBLE_LOG_PATH=/dev/null \
+		$(PROVISIONING_IMAGE) bash /opt/provisioning/compute/iac/scripts/image_syntax_gate.sh
+
 # API-credits domain images (item 6). Built from the repo root so each
 # Dockerfile's `COPY .dist/` + `COPY domains/` resolve. The api-credits
 # registry reuses arkhai:registry (built by build-registry) with a
@@ -520,6 +551,19 @@ build-apicredits-storefront:
 
 build-apicredits-sample-app:
 	docker build --ulimit nofile=65536:65536 -f domains/apicredits/sample-app/Dockerfile -t arkhai:apicredits-sample-app$(IMAGE_SUFFIX) .
+
+# The frps admission plugin builds from its own directory, which is the whole of its
+# build context; the image carries the plugin's own version, read from its project.
+FRP_GRANT_ADMISSION_DIR := tools/frp-grant-admission
+# Hoisted into a variable: macOS-shipped GNU Make 3.81 refuses `$$` inside single
+# quotes inside `$(shell ...)`.
+FRP_GRANT_ADMISSION_VERSION_SED := s/^version = "\(.*\)"$$/\1/p
+build-frp-grant-admission: ## Build the frps admission plugin's image
+	docker build --ulimit nofile=65536:65536 \
+		--build-arg VERSION=$(shell sed -n '$(FRP_GRANT_ADMISSION_VERSION_SED)' $(FRP_GRANT_ADMISSION_DIR)/pyproject.toml) \
+		-f $(FRP_GRANT_ADMISSION_DIR)/Dockerfile \
+		-t arkhai:frp-grant-admission$(IMAGE_SUFFIX) $(FRP_GRANT_ADMISSION_DIR)
+	$(if $(IMAGE_SUFFIX),,docker tag arkhai:frp-grant-admission arkhai:frp-grant-admission-$(GIT_SUFFIX))
 
 build-test-image:
 	cd e2e-tests && make build IMAGE_SUFFIX=$(IMAGE_SUFFIX)
@@ -567,8 +611,10 @@ deploy-compose:
 	docker compose ps
 
 # Top-level Helm deploy consumes pre-existing Secret names from helm/values.yaml;
-# credential files and inventory content never pass through Helm values. It keeps
-# the release's volumes on uninstall; a local development cluster is deployed with
+# credential files never pass through Helm values, while a host definitions
+# document, which names keys by path and carries none, is the provisioning
+# chart's `definitions.hosts` value. It keeps the release's volumes on
+# uninstall; a local development cluster is deployed with
 # `make -C helm deploy-local` instead (docs/development/DEPLOYMENT_AND_CONFIG.md).
 deploy: deploy-helm
 
@@ -716,6 +762,7 @@ push-images: _require-ar-project
 	$(call push_image,registry,registry)
 	$(call push_image,storefront,storefront)
 	$(call push_image,provisioning,compute-provisioning)
+	$(call push_image,frp-grant-admission,frp-grant-admission)
 
 push-dev-images: _require-ar-project
 	$(call push_image,dev-env,dev-env)
@@ -945,9 +992,9 @@ ALLOW ?=
 STEP_RUN = python3 scripts/run_change_step.py run
 STEP_GRANTS = $(if $(strip $(ALLOW)), --allow '$(subst ;,' --allow ',$(subst ','\'',$(ALLOW)))')
 
-design: ## Open a Claude Code design session for an OpenSpec change (CHANGE=<change> [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
+design: ## Open a Claude Code design session for an OpenSpec change; unattended, ARGUMENTS follows the change in the skill's invocation, as the owner's direction to the design (CHANGE=<change> [UNATTENDED=1 [ARGUMENTS=<text>] [ALLOW='<rule>;<rule>']])
 	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
-	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) design "$(CHANGE)"$(STEP_GRANTS),claude "/change-design $(CHANGE)")
+	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) design "$(CHANGE)"$(if $(strip $(ARGUMENTS)), --arguments '$(subst ','\'',$(ARGUMENTS))')$(STEP_GRANTS),claude "/change-design $(CHANGE)")
 
 # The orchestrating session relays and routes rather than judging, so it needs a
 # large context for a change's relayed turns, not a high effort.
@@ -955,9 +1002,9 @@ orchestrate: ## Open the orchestrating Claude Code session for one OpenSpec chan
 	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
 	@claude --model claude-opus-5-5 --effort medium "/change-orchestrate $(CHANGE)"
 
-plan: ## Open a Claude Code planning session for an OpenSpec change; unattended, it resumes the design session (CHANGE=<change> [UNATTENDED=1 [FRESH=1] [ALLOW='<rule>;<rule>']])
+plan: ## Open a Claude Code planning session for an OpenSpec change; unattended, it resumes the design session, and ARGUMENTS follows the change in the skill's invocation, as the owner's direction to the plan (CHANGE=<change> [UNATTENDED=1 [FRESH=1] [ARGUMENTS=<text>] [ALLOW='<rule>;<rule>']])
 	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
-	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) plan "$(CHANGE)"$(if $(filter 1,$(FRESH)), --fresh)$(STEP_GRANTS),claude "/change-plan $(CHANGE)")
+	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) plan "$(CHANGE)"$(if $(filter 1,$(FRESH)), --fresh)$(if $(strip $(ARGUMENTS)), --arguments '$(subst ','\'',$(ARGUMENTS))')$(STEP_GRANTS),claude "/change-plan $(CHANGE)")
 
 implement: round-view-closed ## Open a fresh Claude Code session implementing an OpenSpec change; unattended, ARGUMENTS follows the change in the skill's invocation, as a merge's conflicts to resolve, and SESSION_ID continues that implementation session instead (CHANGE=<change> [SECTION=<n>] [SECTIONS=<n-m>] [UNATTENDED=1 [ARGUMENTS=<text>] [SESSION_ID=<id>] [ALLOW='<rule>;<rule>']])
 	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
@@ -1085,3 +1132,23 @@ fetch-e2e-logs: ## Wait for an E2E run, fetch its logs, and zip the resulting di
 
 prune-tombstones: ## Delete every file whose contents are a tombstone comment
 	@python3 scripts/prune_tombstones.py
+
+.PHONY: test-bare-metal-iac
+test-bare-metal-iac:
+	$(MAKE) -C domains test-bare-metal-iac
+
+.PHONY: test-bare-metal-iac-native
+test-bare-metal-iac-native: ## Native helper account/IPC/mount checks in a disposable private container
+	@docker image inspect $(PROVISIONING_IMAGE) >/dev/null 2>&1 || { \
+		echo "no $(PROVISIONING_IMAGE) image: build it first, with make build-provisioning" >&2; exit 1; }
+	docker run --rm --user 0 --network none --pid="" --ipc private \
+		--cap-add SYS_ADMIN --security-opt apparmor=unconfined \
+		--tmpfs /work:rw,nosuid,nodev,mode=0755 \
+		-v "$(CURDIR)/domains/bare_metal/provisioning/iac:/iac:ro" -w /iac \
+		-e BARE_METAL_DISPOSABLE_NATIVE=private-container-v1 \
+		-e PYTHON=/home/appuser/ansible-venv/bin/python \
+		$(PROVISIONING_IMAGE) bash scripts/native_cleanup_gate.sh
+
+.PHONY: check-public-content
+check-public-content: ## Scan staged changes for recognizable private content
+	@python3 scripts/check_public_content.py --staged

@@ -21,7 +21,7 @@ from market_core.schemas import (
 )
 
 from market_deal_lifecycle.terms import LifecycleTerms
-
+from market_arkhai_payments.canonical import wire_json
 from market_arkhai_payments.errors import MandatePolicyError
 from market_arkhai_payments.mandates import MandatePolicy, PaymentsOptionParams, derive_mandate
 from market_arkhai_payments.models import AccountId, Mandate
@@ -153,7 +153,7 @@ class PaymentSettlementData(BaseModel):
 
     def to_wire(self) -> dict[str, Any]:
         return {
-            "mandate": self.mandate.model_dump(mode="json", by_alias=True, exclude_none=True),
+            "mandate": wire_json(self.mandate),
             "transaction_id": self.transaction_id,
         }
 
@@ -177,7 +177,7 @@ class PaymentSettlementData(BaseModel):
         except (KeyError, TypeError, ValueError) as exc:
             raise MandatePolicyError("stored payment mandate is malformed") from exc
         derived = derive_mandate(dict(agreement), policy)
-        if derived.model_dump(mode="json", by_alias=True, exclude_none=True) != wire:
+        if wire_json(derived) != wire:
             raise MandatePolicyError("stored payment mandate differs from the accepted Agreement")
 
 

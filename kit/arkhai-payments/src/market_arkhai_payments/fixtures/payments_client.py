@@ -14,7 +14,7 @@ from typing import Any
 
 from market_identity import Ed25519Signer, Signer
 
-from market_arkhai_payments.canonical import jcs_bytes
+from market_arkhai_payments.canonical import jcs_bytes, wire_json
 from market_arkhai_payments.errors import (
     PaymentsAPIError,
     PaymentsProtocolError,

@@ -96,6 +96,21 @@ library, which remain the tests of that service's wire contract. A library
 test that exercises a real database but still sits in `unit/` moves to
 `integration/` when it is next touched.
 
+**Registration and traffic are different proofs:** a test that a
+connection, proxy, or route was admitted also carries traffic through
+it. A peer can report a registration it cannot serve — a tunnel listed
+as running whose remote port reaches nothing, an address delivered that
+routes elsewhere — and only bytes sent end to end show the admission
+did what it claims. The frps admission plugin's real-frp tests
+(`tools/frp-grant-admission/tests/frp/`) hold to this: an admitted proxy
+carries bytes from frps's remote port to a listener behind frpc, and a
+proxy that outlives a reload carries traffic on a held connection and a
+new one. Those tests are a third flavour of integration test, beside the
+in-process and library ones: real external processes started by the
+test, skipped in the default suite without their binaries and run in a
+gate that fails on a skip, as the native Ansible checks are
+([Ansible Syntax and Native Checks](#ansible-syntax-and-native-checks)).
+
 **Test setup pattern:** Use `httpx.AsyncClient` with `ASGITransport`
 against the real application instance, injected via the service's
 canonical typed-client constructor (`FooClient(transport=...)`).
@@ -498,6 +513,17 @@ adapter mounts its rules and job dry run under its own prefix, VM's at
 `/test/bare-metal/mock-rules` and `/test/bare-metal/evaluate-job`, beside the
 shared `/test/jobs/*` routes. None of them is mounted outside the mock profile.
 
+A mock's default output is what the shipped configuration prints for the job:
+the role's `debug: var:` fact in the YAML result format, then the `debug: msg:`
+JSON copy the shared fact reader reads, rendered from the job's own parameters
+— its guest or host, its tenant account, its action, and booleans where the
+role prints booleans. So a mock lane exercises the same reader and the same
+linkage between a fact and its job as a real run, and a fact naming another
+guest or tenant yields no delivery evidence there too. The VM scenarios arm no
+create output of their own; every create reads that default. A test that needs
+an output the role would not print for its job states it in a rule and keeps
+to the codec's or provider's level.
+
 `make -C e2e-tests test-e2e` runs the three in turn, taking each stack down
 before the next, because every stack names its chain container `anvil` and
 publishes fixed host ports. A lane provides its own configuration, so a
@@ -523,7 +549,10 @@ A mock-provisioned deal proves the services compose into a working deal, not
 that a real resource was delivered. Bare metal's release-qualified deal
 (`e2e_bare_metal_deal`) needs a real whole host to grant and revoke access on,
 which the pipeline never has, so no lane selects it: real access and its
-revocation remain a separate protected lane's evidence. VM's real delivery is
+revocation remain a separate protected lane's evidence. It uses the shared
+SSH helper with the operator's read-only known-hosts file; each access probe is
+one fresh process, and only public-key authentication refusal proves revocation.
+Transport failure is an unsuccessful observation. VM's real delivery is
 proven the same way, outside every lane, by
 [the real-provisioning lane](#the-real-provisioning-lane).
 
@@ -572,30 +601,36 @@ once the lease expires and its capacity is released, a VM list job on the host
 no longer names the guest and the delivered access no longer connects. It claims
 nothing about the guest's other credentials, which a batch-mode SSH client never
 tries. The guest's host key is trusted on first use for the run only, and a
-later connection presenting another fails the run. The lane proves direct access
-through the host's forwarded port; no lane runs a relay-backed pool.
+later connection presenting another fails the run. Direct access uses forwarded
+guest ports; relay access checks the relay address and the reservation's leased
+port against the delivered endpoint. Released holdings retain their grant expiry;
+the scenario does not require immediate port reuse during quarantine.
 
 It is in no lane, because the pipeline has no host to provision on. It runs from
 an operator's machine against a deployed stack's forwarded services, signing as
-the `local` profile's principals, with `ACTIVE_PROFILES=local,real-vm-target`:
+the `local` profile's principals, with `ACTIVE_PROFILES=local,real-provisioning-target`:
 [`e2e-tests/README.md`](../../e2e-tests/README.md#real-vm-provisioning) gives the
 steps, and [`VALIDATION_RUNBOOK.md`](VALIDATION_RUNBOOK.md#21-provide-a-kvm-host)
-the operator procedure around them. Its target is the `REAL_VM_TARGET` section
-of `config-real-vm-target.yml`, which an environment owner renders into
-`e2e-tests/config/` beside the committed example, `config-real-vm-target.yml.example`,
+the operator procedure around them. Its target is the `REAL_PROVISIONING_TARGET` section
+of `config-real-provisioning-target.yml`, which an environment owner renders into
+`e2e-tests/config/` beside the committed example, `config-real-provisioning-target.yml.example`,
 and which Git ignores.
-`e2e-tests/src/e2e_harness/real_vm_target.py` validates it before anything else.
-Version 1 describes one host — its identity, the address, user, and port the
-provisioning service connects to, where the service reads its key, the address
-buyers reach, and the capacity it sells — and admits only direct access; a
-missing or misspelled field fails naming it, and an unknown version is refused.
+`e2e-tests/src/e2e_harness/real_provisioning_target.py` validates it before anything else.
+Version 2 describes at most one host per domain, each with a connection,
+access and sellable capacity. A VM host adds a listing shape fitting twice within
+capacity; a bare-metal host adds its physical identity and verified SSH public
+host key. Direct access names a public host, while relay access names only its
+relay identifier. Unknown or foreign fields fail by name; version 1 is refused
+with conversion instructions. A relayed run requires an enabled relay with a
+configured token and active grant key before taking holds or registering supply.
+The target contains no private key or relay secret.
 Without the profile every stage skips naming it, and nothing is written to the
 stack.
 
 The lane registers its own supply from the target — a pool stating a GPU-less
 shape, the host with its connection, and one declaration selling the whole
-capacity — after checking, before its holds are taken, that the service reports
-its VM executor real. It runs every shared stage and no mock-lane stage, and
+capacity — and publishes the target's smaller listing shape. It checks before
+its holds are taken that the service reports its VM executor real. It runs every shared stage and no mock-lane stage, and
 inserts its own: a check that the settlement preview chose the target host,
 before settlement; a create-job poll after it; SSH access stages once the lease
 is recorded; a teardown-job poll; and the VM-list and access-ended checks after
@@ -615,9 +650,17 @@ the deal's own `job_submitted` event, filtered by its negotiation and counted
 from a mark taken before settling, because an adopted listing's event log holds
 earlier deals' events.
 
-A run that fails after the storefront accepted its settlement, and before the
-guest is confirmed gone, is recovered by a module finaliser. It expires only its
-own deal's lease, through the site, and advances the held workers, so the
+The lane keeps one SSH process printing a timestamp each second, with a five-second
+maximum observed gap, while a second deal creates a guest and then expires it.
+It requires the original session alive across both operations and checks management
+connectivity before and after each create and teardown. Each guest uses its own
+delivered port. A temporary reservation proves the second guest's shape is available
+again while the first guest remains active. The first deal then follows ordinary
+lease expiry and proves the whole host capacity is available again.
+
+A run that fails after an accepted settlement is recovered by a module finaliser.
+It tries both deals even if one recovery fails, expiring only their own leases
+through the site, and advances the held workers, so the
 provisioning service tears the guest down through its own lease lifecycle; it
 then confirms the teardown job and the guest's absence. It takes any settlement
 the storefront records, or whose dispatch it logs within a bound, as having
@@ -626,6 +669,19 @@ before delivery. Where it cannot find the fulfillment or confirm the removal, it
 fails naming the escrow, negotiation, fulfillment, reservation, jobs, guest, and
 host. It never releases reservations fleet-wide, which would return the host's
 capacity to the market while its guest may still run.
+
+The opt-in `e2e_bare_metal_real_provisioning` scenario
+(`e2e-tests/tests/e2e/roles/scenarios/bare_metal/test_real_provisioning_deal.py`)
+uses the same canonical shared stages with a gate-free bare-metal driver. It
+registers a backed relay-bound pool, the target's management connection and one
+whole-machine declaration. Publication creates or reuses the open listing for
+that machine and declared shape; the scenario never creates a listing directly.
+The target's host key is validated and pinned before first SSH contact. Actual
+grant/reclaim jobs, management continuity, negotiated-key access, unrelated-key
+refusal, ordinary expiry/release, closed access and released/quarantined relay
+holdings require a configured real host. The module belongs to no pipeline lane;
+without its target it skips before any holds or supply writes. Unit and mock
+pipeline results do not substitute for this physical qualification.
 
 ## Coverage Contract Between Levels
 
@@ -791,8 +847,8 @@ proves its own check:
   clients:
   - admission and scheduling refusals with the executor boundary asserted
     never reached;
-  - dispatch to an unregistered host failing before any playbook, even with a
-    configured inventory file naming the host.
+  - dispatch to an unregistered host failing before any playbook, even after a
+    host definitions document naming the host was submitted and refused.
 
 ## Multi-Domain Storefront Composition
 
@@ -886,6 +942,12 @@ manifest must fail startup rather than admit mixed identity precedence.
   physical access. Check readiness before a live run and report unavailable
   service or credential prerequisites rather than run against a down target.
 
+## Accepted Arkhai purchase qualification
+
+For external physical qualification, use the shipped ordinary buyer CLI to exercise discovery, negotiation, signed TEST payment, delivery, and ordinary teardown. Collect independent lifecycle observations through the supported typed operator clients; do not import a payment-specific full-deal driver merely to obtain operator visibility. Keep buyer credentials separate from operator credentials. Bind source and selected artifacts/configuration to the run and correlate the accepted Agreement, funding evidence, receipt, rental debit, reservation, fulfillment, jobs, delivered access, and teardown observations in restricted evidence. Public summaries omit credentials, private service records, and raw deployment data.
+
+Require actual paid-buyer journeys for claims about tenant identity, negotiated privilege, grant admission, GPU work, delivery, ordinary teardown, fresh access denial, and capacity restoration. A supplemental network-policy probe is admissible only from an actual operator-only CPU guest on the same paid deployment, using the pinned guest base, its actual default bridge and virtio NIC, and the loaded policy structure. It may establish only the finite selectors observed on that path; it establishes none of the paid tenant identity, credential, privilege, grant, GPU, payment, delivery, or lifecycle facts and does not prove universal isolation. A namespace-only probe is not a substitute for this guest-path evidence. Published vectors, local component tests, and controlled smokes are narrower evidence. Record unrun markers as unrun: an equivalent ordinary-buyer method does not mean an older named test marker executed.
+
 ## Payment Receipts in Tests
 
 A seller delivers only after verifying a receipt that the payments service
@@ -908,13 +970,24 @@ signature = service.sign(_frame(("arkhai.payments.receipt.v1", jcs_sha256(receip
 ```
 
 The fixture is trustworthy because it uses the same framing function as the
-kit's verifier, and the kit's unit suite proves it reproduces the published
-vector exactly:
+kit's verifier, and that framing is pinned by the producer's own vectors. The
+kit vendors two vector publications. The current producer vectors' receipt passes the
+strict models and verifies. The historical vectors are a separate raw-framing
+regression whose receipt the current models refuse. The framing and the
+signature cover a receipt's JSON whatever its parts say, so the kit's unit
+suite reproduces each publication's message and signature from its raw
+published body, byte for byte, and then signs and verifies a receipt for a
+mandate the marketplace derives through the same framing:
 
 ```python
 assert receipt_message(vector_body).hex() == vectors["receipt"]["message"]
-assert sign_receipt(Ed25519Signer(vector_seed), vector_body) == vector_receipt
+assert signer.sign(receipt_message(vector_body)) == vector_signature
+assert sign_receipt(SERVICE, derived_body) == build_signed_receipt(signer=SERVICE, mandate=mandate)
 ```
+
+The fixture exists to supply receipts for mandates the marketplace derives.
+`kit/arkhai-payments/schema/SOURCE.md` records the schema's and both vector
+publications' content hashes and how to select newer ones.
 
 The fixture takes its signer as an argument and ships no key material.
 Integration tests replace `PaymentsClient`, the code that wraps the payments
@@ -974,6 +1047,56 @@ exactly when it passes under `make test`; `scripts/tests/test_tests_workflow.py`
 holds the matrix to `make test`'s targets. The jobs set
 `_TYPER_FORCE_DISABLE_TERMINAL`, because Typer forces Rich's terminal styling
 whenever `GITHUB_ACTIONS` is set, which a local run never sees.
+
+## Ansible Syntax and Native Checks
+
+The roles reach most of their task files through `include_tasks`, which
+`ansible-playbook --syntax-check` does not follow, so checking a role's own
+playbook leaves those files unparsed. Each such role has a parse-only playbook
+that imports its task files through `import_role` instead, in the role's
+context: `vm-management-task-files.yaml` and `vm-setup-task-files.yaml` in the
+VM IaC tree. Parsing is where some errors only show: Ansible splits a free-form
+`shell: |` string as module arguments, so an unbalanced quote, an apostrophe in a
+bash comment included, fails the whole task file as it loads, though bash would
+run the script. A syntax check templates nothing and executes nothing.
+
+A parse-only playbook's first task refuses to run and is tagged `always`, since
+the tasks it imports keep their own tags and some carry `always`: under any
+`--tags` selection the refusal still runs first. An operator's explicit
+`--skip-tags always` or `--start-at-task` passes over it, which nothing in a play
+can refuse.
+
+`domains/vms/provisioning/iac/scripts/validate_playbooks.sh` syntax-checks every playbook the VM IaC tree
+ships from one list, which a structure test holds equal to the playbooks
+present; `make validate-playbooks` runs it. Tests that run shipped tasks through
+real `ansible-playbook` are library integration: the VM suite renders both create
+facts and exercises its family-role call boundary, and the family suite runs its
+installer and authenticated status wait against controlled local file and HTTP
+boundaries. Native tests skip in the default suite without supported Ansible;
+the family HTTP tests also require the `ansible.posix.json` callback.
+
+`make test-provisioning-iac-native` runs the native suites and syntax checks from
+the built provisioning image's packaged IaC trees, with no network but loopback.
+A missing image, supported Ansible or required callback, no native test, or a
+skipped native test fails the gate. Both domains' playbooks are parsed with their
+own configuration and with the shared service configuration and image role path.
+The shared configuration contains no domain path. A structure test holds the VM
+gate's list of native modules to every module defining its skip guard. The VM
+end-to-end lane runs this gate once it has built the image.
+
+The bounded bare-metal working-data helper has its own evidence boundaries.
+`make test-bare-metal-iac` exercises its unit and library-integration behavior;
+`make build-provisioning` followed by `make test-bare-metal-iac-native`
+executes native account, filesystem and IPC behavior in a disposable isolated
+environment and fails on missing prerequisites or skips. Neither gate proves
+that an image contains the intended assets, that the role is active in a
+deployment, or that a real lease is reclaimed. A deployed qualification must additionally observe an actual lease through
+cleanup and successor access; the real-provisioning marker by itself does not
+qualify bounded cleanup. A valid older copy of the host ledger is
+not locally distinguishable from current state; operational rollback response
+is quarantine pending history verification or host decommission, not a passing
+rollback test. A rejected cleanup retains capacity; normal same-job retry is
+distinct from terminal failed-job recovery or force-release.
 
 ## Chart Render Tests
 
@@ -1132,7 +1255,7 @@ only the named payments table, not domain configuration or payer selection.
 See [shared payment-scenario configuration](../../e2e-tests/README.md#shared-payment-scenario-configuration)
 for environment and runner setup.
 
-**Current example:** complete deals settled through the Arkhai payments service are qualified by that service's own suite. Here, `kit/arkhai-payments` checks conformance against the service's published vectors, vendored and identified by content hash in `kit/arkhai-payments/schema/SOURCE.md`.
+**Current example:** complete deals settled through the Arkhai payments service are qualified by that service's own suite. Here, `kit/arkhai-payments` generates its models from the service's published schema and checks the published vectors, all vendored and identified by content hash in `kit/arkhai-payments/schema/SOURCE.md`: the current producer vectors through the strict models, signatures and transaction identities, and the historical vectors as raw transaction identities, receipt framing, signatures and attachment hashes only, which the current models refuse, as "Payment Receipts in Tests" describes. Neither proves live service responses, provider funding or physical delivery.
 
 ## Offline Review Validation
 

@@ -106,6 +106,27 @@ def test_a_runs_line_carries_the_denials_of_the_subagents_it_started(tmp_path: P
         "reason": "mode", "subagent": {"id": AGENT, "description": "Verify F3"}}]
 
 
+def test_a_subagent_denial_the_stream_also_reports_keeps_its_subagent(tmp_path: Path) -> None:
+    """The harness may list a subagent's denial on the parent's result too,
+    unmarked: the line carries it once, naming the subagent it ran in, with the
+    reason its transcript gives."""
+    parent = {"tool_name": "Bash", "tool_use_id": "p-1", "tool_input": {"command": "make lock"}}
+    streamed = {"tool_name": "Bash", "tool_use_id": "s-1", "tool_input": {"command": "sleep 5"}}
+    claude = FakeClaude(([_spawn("spawn-1") + "\n"]
+                         + event_lines(VALID["finished"], denials=[parent, streamed]), 0))
+    conversation = conversations(tmp_path) / f"{SESSION}.jsonl"
+    write_subagent(conversation, [
+        _use("s-1", "sleep 5"),
+        _result("s-1", {"decision": "reject", "source": "config", "reasonType": "mode"}),
+    ], description="Verify F3", started_by="spawn-1")
+
+    line = make_wrapper(tmp_path, claude).run("triage", CHANGE)
+
+    assert line["denials"] == [
+        parent,
+        {**streamed, "reason": "mode", "subagent": {"id": AGENT, "description": "Verify F3"}}]
+
+
 def test_without_a_spawned_set_every_subagent_is_read(tmp_path: Path) -> None:
     conversation = tmp_path / f"{SESSION}.jsonl"
     write_subagent(conversation, [

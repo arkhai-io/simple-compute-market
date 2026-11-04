@@ -34,6 +34,7 @@ from .conftest import (
     STOREFRONT_SIGNER,
     _initialize_test_database,
     _install_signed_asgi_transport,
+    mount_unless_served,
 )
 from compute_provisioning_service.identity import ProvisioningIdentityContext
 from compute_provisioning_service.middleware.auth import (
@@ -68,8 +69,7 @@ from compute_provisioning_contracts import (
     MockRuleView,
 )
 from vm_provisioning_adapter.services.mock_output import vm_mock_output
-from vm_provisioning_adapter.services.relay_port_allocator import RelayPortAllocator
-from vm_provisioning_adapter.services.relay_service import RelayService
+from compute_provisioning.relays import RelayPortAllocator
 
 HOST = "kvm1"
 
@@ -129,7 +129,6 @@ async def client_and_queue(
         frp_domain="",
         frp_dashboard_password="",
         resolved_vm_playbook_path=Path("/fake/playbook.yml"),
-        resolved_inventory_path=Path("/fake/hosts"),
         ssh_decryption_key="",
         database_url="sqlite:///:memory:",
     )
@@ -198,7 +197,6 @@ async def client_and_queue(
         vm_operations_service=VmOperationsService(submission=job_submission),
         host_operations_service=HostOperationsService(submission=job_submission),
         relay_port_allocator=RelayPortAllocator(session_factory),
-        relay_service=RelayService(session_factory=session_factory, settings=mock_settings),
     )
 
     app.container.vm_runtime.override(vm_runtime)
@@ -212,13 +210,8 @@ async def client_and_queue(
     _container_module.resolved_ansible_service = programmable_mock
     _container_module.resolved_host_authority = host_authority
 
-    _test_prefix = "/test"
-    _already_mounted = any(
-        getattr(r, "path", "").startswith(_test_prefix) for r in app.routes
-    )
-    if not _already_mounted:
-        app.include_router(test_jobs_controller.router)
-        app.include_router(_vm_mock_router())
+    mount_unless_served(app, test_jobs_controller.router)
+    mount_unless_served(app, _vm_mock_router())
 
     _container_module.resolved_job_queue = job_queue
     _container_module.resolved_vm_operations_service = app.container.vm_operations_service()

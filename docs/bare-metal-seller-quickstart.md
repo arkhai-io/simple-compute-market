@@ -22,8 +22,8 @@ buyer-side escrow requirements.
 - The staged internal wheels and the images built from this checkout.
 - Canonical marketplace principals and matching role-scoped signer files for
   the registry, storefront, and selected-site provisioning authority.
-- An Ansible inventory containing a real whole-host SSH target and a dedicated
-  provisioning SSH private-key file.
+- A host definitions document declaring a real whole-host SSH target, and a
+  dedicated provisioning SSH private-key file.
 - A Resource Pool document that explicitly declares `bare_metal`; absence is
   not a permissive default.
 - One strict shared settlement configuration, the `[Settlement]` section of the storefront's configuration. Alkahest roles require chain configuration and the wallet key in the storefront's Secret overlay, whose account, funded, is the public seller address. Payments-only roles use public service, account, and receipt-trust settings without wallet or RPC inputs. Never put a wallet private key, payment credential, or provider object in Compose, the public configuration file, or this document.
@@ -44,22 +44,42 @@ configuration files.
 
 ## Define the selected site
 
-Create an operator-owned inventory file outside the repository:
+Create an operator-owned host definitions document outside the repository:
 
-```ini
-[bare_metal_nodes]
-host-ca-h200-01 ansible_host=10.0.0.25 public_host=203.0.113.25 ansible_user=ubuntu pool_id=whole-host-california
+```yaml
+hosts:
+  - host_id: host-ca-h200-01
+    pool_id: whole-host-california
+    connection:
+      kind: ssh
+      version: 2
+      public:
+        ssh_host: 10.0.0.25
+        ssh_user: ubuntu
+        public_host: 203.0.113.25
+        public_port: 22
+        key_path: /home/appuser/.ssh/id_ed25519
 ```
 
-The provisioning service registers every host entry in this file as a host; the
-section name is yours to choose and means nothing to it. List only execution
-hosts. A host's `pool_id` places it in that pool, which must exist; an empty
-`pool_id=` unplaces it, and a host with none is registered unplaced. Registering
-a host declares none of its capacity: a machine is sold only once you register it
-as a Physical Resource, as "Start and inspect" below describes.
+The addresses are documentation values; use your own. `key_path` is the
+provisioning SSH key's path inside the container, where the stack mounts
+`BARE_METAL_PROVISIONING_SSH_PRIVATE_KEY_FILE`; the document never carries a
+key.
+
+The provisioning service reconciles the document at startup whenever it
+changes, after the pool document. List only execution hosts. Each entry declares
+its whole host: its `pool_id` places it in that pool, which must exist, and an
+entry with none unplaces it; an omitted `enabled` enables it. A host the
+document does not name is left as it is and logged as not named. A document the
+service cannot apply — one naming a pool that does not exist, say — stops it
+from starting, naming the problem. Registering a host declares none of its
+capacity: a machine is sold only once you register it as a Physical Resource,
+as "Start and inspect" below describes. The operator handbook's
+["Host definitions"](operator-handbook.md#host-definitions) describes the
+document's rules in full.
 
 Create a Resource Pool document outside the repository. The pool id must match
-the inventory host's `pool_id`; executor connectivity remains service-owned:
+the host entry's `pool_id`; executor connectivity remains service-owned:
 
 ```yaml
 pools:
@@ -81,9 +101,9 @@ replaces the provisioning service's seed. Without one, a fresh site storing no
 pool is seeded at startup with `vm-default` and `bare-metal-default`, which sell
 nothing until capacity is declared into them; set `pool_seed_path` to another
 pool document to seed different pools while administering them through the API,
-or to an empty value to start with none. Under Helm, supply that document through
-the provisioning chart's `configFiles` and name its path,
-`/app/config/<name>`, in `config.pool_seed_path`.
+or to an empty value to start with none. The operator handbook's
+["Pool definitions"](operator-handbook.md#pool-definitions) covers the pool
+document and the seed, under Helm too.
 
 Every pool must declare `advertisable_modes` — the offering modes its listings
 may name — and `capacity_backing`. A `backed` pool may advertise only modes it
@@ -97,11 +117,72 @@ host record it names determine execution. The playbook is fixed into each grant
 and reclaim when it is prepared, so changing the setting affects only jobs
 prepared afterwards.
 
-The mounted inventory seeds the host registry when the provisioning service
-starts with no hosts registered; it is not read at execution. A host added to it
-later must be imported (`POST /api/v1/hosts/import`) before work can be
-dispatched to it. A host's `public_host` is passed to the access playbook as a
-host variable.
+Edit the document and restart the provisioning service to add or change a host;
+a restart with the document unchanged applies nothing, so changes made through
+the API survive it. Check a changed document first with `POST
+/api/v1/hosts/definitions/import` and `"validate_only": true`. Work runs only
+against registered hosts, never against the file. A host's `public_host` and
+`public_port` are the endpoint a buyer is given: the route a tenant takes to the
+machine, each falling back to the connection's own address and port when the
+entry states none. For a relay-backed pool, the buyer receives the leased relay
+endpoint instead. The provisioning service's own route stays `ssh_host` and
+`ssh_port`. Every host is stored as an `ssh` connection at version 2; a host
+stored at version 1 runs nothing until it is submitted again at version 2.
+
+The Ansible INI inventory remains Ansible's own host list for preparing hosts,
+and the input of `POST /api/v1/hosts/import`, which registers hosts from it on a
+running service; the service does not read it at startup. A site that stated
+`inventory_path` or `inventory_ini` must remove it before upgrading, since the
+service refuses to start while either is stated; the upgraded service keeps
+every registered host. The operator handbook's
+["Upgrading from an INI inventory"](operator-handbook.md#upgrading-from-an-ini-inventory)
+gives the steps, from a first start with `hosts: []` to a document made from
+the registry's export.
+
+For a relay-backed pool, set `provider_config.relay_id` to the registered
+buyer relay id. Keep the host's management connection independent of its
+buyer route. The relay must already have its token, active grant key and checked
+admission plugin; follow [seller relay setup](seller-frp-setup.md). Grant creates
+a per-lease proxy through `frpc-buyers`, carrying the signed port grant; the
+result names the relay endpoint rather than the management SSH address.
+
+Prepare a relay-backed host with
+`domains/bare_metal/provisioning/iac/ansible/playbooks/host-kit/host-setup.yaml`
+from `domains/bare_metal/provisioning/iac` with
+`ANSIBLE_CONFIG=ansible/ansible.cfg`, the operator-owned inventory and relay
+connection variables `frp_server_addr`, `frp_server_port` and `frp_auth_token`.
+This prepares `frpc-buyers`; granting a relayed lease also ensures that client
+is prepared. If a bounded working-data policy is selected, supply its separate
+`bare_metal_working_data_policy` during host preparation. Do not put relay
+tokens or grant keys in pool provider extras. A host reached through a management tunnel in a pool without a
+buyer relay must explicitly set a tenant-reachable `public_host` and `public_port`;
+the management tunnel's endpoint is not an implicit buyer route.
+
+Reclaim removes the lease's proxy, terminates tenant processes and sessions,
+checks activity has ended, and applies the configured key/account policy. It does
+not merely remove an SSH key while leaving an established tenant session alive.
+A relay port remains quarantined until its grant expiry plus the reuse margin;
+released capacity does not imply immediate port reuse. Working-data deletion is
+an additional configured policy, not a promise implied by key revocation.
+
+### Bounded working-data policy
+
+Use the operator-only `bare-metal-working-data` host-preparation role to
+install the protected helper and policy. Create the required protected state
+and cleanup roots in the host's actual mount namespace before initialization.
+Initialize only through the explicit host-preparation option; normal grant and
+reclaim never initialize, reset, adopt or rebuild the UID/GID ledger. Select the
+bounded policy and its policy ID in provisioning configuration before new
+grants. Existing grants retain their selected policy through reclaim, and
+existing grants cannot be adopted into bounded cleanup.
+
+The helper removes only attributable data under its configured roots and
+refuses unknown activity or ownership rather than widening its scope. A refusal
+keeps the teardown failed and capacity held for recovery. On rollback, disable
+new bounded grants and preserve the host ledger; a structurally valid older
+ledger cannot identify itself as rolled back. Quarantine a host after known or
+suspected ledger rollback until its history is verified or the host is
+decommissioned. Do not restore the host ledger from a service database backup.
 
 The pool declaration is authoritative. Do not add `vm` merely to make a
 request pass; add it only if the same pool and executor can actually deliver
@@ -140,7 +221,7 @@ export BARE_METAL_STOREFRONT_CONFIG_FILE=/run/operator/storefront.toml
 export BARE_METAL_STOREFRONT_SECRETS_FILE=/run/operator/storefront.secrets.toml
 export BARE_METAL_PROVISIONING_IDENTITY_ENV_FILE=/run/operator/provisioning-identity.env
 export BARE_METAL_PROVISIONING_SSH_PRIVATE_KEY_FILE=/run/operator/site-ssh-key
-export BARE_METAL_PROVISIONING_INVENTORY_FILE=/run/operator/bare-metal-hosts.ini
+export BARE_METAL_PROVISIONING_HOST_DEFINITIONS_FILE=/run/operator/host-definitions.yaml
 export BARE_METAL_POOL_DEFINITIONS_FILE=/run/operator/resource-pools.yaml
 
 export BARE_METAL_REGISTRY_AUTHORITY_ID=bare-metal-registry
@@ -289,9 +370,9 @@ listing and is reported by name.
 
 The URL path's Physical Resource id, the `host_id`, and `physical_host_id` are
 separate fields with the exact values shown by their roles. `host_id` is the
-host's inventory alias, the first token of its line in the Ansible inventory;
+host's registered id, its entry's `host_id` in the host definitions document;
 `physical_host_id` identifies the physical machine for cross-mode accounting.
-Do not substitute the provider id or public IP for the inventory alias.
+Do not substitute the provider id or public IP for the host id.
 `physical_host_id` and `allocation_mode` belong at the top level of
 `attributes`, where the site authority's exclusive/shareable accounting reads
 them; `bare_metal_publication` carries only whether the machine is offered and
@@ -512,12 +593,22 @@ role inputs and run:
 uv run pytest -m e2e_bare_metal_deal -v
 ```
 
-The scenario drives the installed `market bare-metal` command. It checks the
-public lifecycle in order, performs real SSH with the returned access
-descriptor, requests teardown through the buyer command, waits for the
-accepted terminal teardown status, and proves that the same SSH access is
-revoked. A mock job, unit result, Compose render, health response, or
-provisioning database row is not substitute evidence.
+The scenario drives the installed `market bare-metal` command as it ships. Its
+role inputs are the buyer's marketplace credential
+(`ARKHAI_E2E_BARE_METAL_MARKETPLACE_CREDENTIAL`), the tenant's SSH private key
+(`ARKHAI_E2E_BARE_METAL_SSH_PRIVATE_KEY_FILE`), a known-hosts file pinning the
+delivered host's key (`ARKHAI_E2E_BARE_METAL_KNOWN_HOSTS_FILE`), and the registry and
+purchase settings under `BARE_METAL`; without any of them it skips, naming it.
+
+It buys through `buy`, then reads the run back with `result`, `access`, and
+`teardown`, each given `--run-id` and the id `buy` printed. Every access attempt is
+a fresh SSH process that reads no configuration and checks the host's key strictly
+against the pinned file. Teardown repeats `teardown --run-id` until the lease is
+`released`, failing at once on `teardown_failed` and at its bound with the last
+state. Revocation is proven only by that pinned host refusing the same key for its
+public key afterwards; a refused or timed-out connection, an unreachable host, or a
+host-key mismatch fails the scenario instead. A mock job, unit result, Compose
+render, health response, or provisioning database row is not substitute evidence.
 
 ## Operational rules
 

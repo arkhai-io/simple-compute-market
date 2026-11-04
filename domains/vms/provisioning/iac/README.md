@@ -33,6 +33,22 @@ A comprehensive Terraform and Ansible-based Infrastructure as Code solution for 
 - **FRP server** (optional, for remote SSH access)
 - **Terraform 1.14+** with updated GCP Provider version
 
+A host that creates scratch VMs must be **x86-64**: a scratch create reads the
+target's machine architecture before any host effect and refuses any other. It
+creates every guest from one pinned, dated release of the Ubuntu Noble x86-64 cloud
+image, named in the `vm-management` role's `vars/main.yml` with its SHA-256 and
+stored under a name carrying the release. The image is downloaded only when absent,
+and its SHA-256 is checked before it backs any disk, whether it was just downloaded
+or already on the host; a file at the pinned path with another digest fails every
+scratch create until it is removed. To move the pin, verify the new release's
+`SHA256SUMS` against its `SHA256SUMS.gpg` with the Ubuntu cloud image keyring, then
+change the release and its digest in `vars/main.yml` together. Golden images are not
+pinned.
+
+`playbooks/host-kit/vm-setup.yaml` is never run on a host whose management access
+must be preserved: it enables a default-deny firewall, adds bans, edits SSH
+configuration and the boot loader, and reboots unconditionally.
+
 ## Installation
 
 ### 1. Clone the Repository
@@ -57,8 +73,12 @@ against the whole directory (`-i inventory/`):
 - `inventory/hosts` (from `hosts.example`): infrastructure you manage with
   these playbooks.
 - `inventory/provisioning-hosts.ini` (from `provisioning-hosts.example`): the
-  hosts you sell. The provisioning service is given this file alone and
-  registers every host entry in it, whatever its section.
+  hosts you sell, as Ansible's own host list, which the host-setup and
+  VM-operations playbooks run against. The provisioning service does not read
+  it at startup: it registers the hosts its host definitions document declares
+  (`docs/operator-handbook.md`, "Host definitions"), and
+  registers this file's entries only when it is submitted to
+  `POST /api/v1/hosts/import`. Keep the two lists of sold hosts in step.
 
 ```ini
 # inventory/hosts
@@ -77,7 +97,7 @@ kvm1 ansible_host=<kvm-host-ip> ansible_user=<user> ansible_ssh_private_key_file
 ```
 
 **Inventory Group Descriptions**:
-- `[frp_servers]`: Public-facing VPS/servers running the FRP server daemon. Acts as the secure tunnel entry point for VM SSH access and hosts the FRP admin dashboard. Targeted by `frp-server-setup.yaml` and `docker-app-setup.yaml` playbooks.
+- `[frp_servers]`: Public-facing servers used by `docker-app-setup.yaml`. Buyer relay preparation uses the compute family playbook and its `[relay_servers]` group; see the relay setup section below.
 - `[provisioning_servers]`: Servers running the Async Provisioning Service. These handle inbound VM provisioning API requests, manage the job queue, and execute Ansible playbooks against KVM hosts. Targeted by `docker-app-setup.yaml`.
 - `[kvm_hosts]`: Bare-metal or dedicated servers running KVM/QEMU hypervisors where guest VMs are created and managed. These are the actual compute nodes, and the hosts the provisioning service sells. Targeted by `vm-setup.yaml` and `vm-operations.yaml` playbooks.
 - `[kvms]`: The VMs the VM-operations playbook has created, recorded in `inventory/hosts` when each is created and removed when it is undefined. Not edited by hand.
@@ -164,7 +184,7 @@ ansible-playbook -i inventory/ playbooks/frp/docker-app-setup.yaml \
 - `MANAGEMENT_VARS_YAML`: base64-encoded `management-vars.yaml` (no newlines). The container decodes it to `/opt/domains/vms/provisioning/iac/ansible/inventory/management-vars.yaml` on startup. Required when using Golden Images (`vm_action=create` or `vm_action=undefine`).
 - `DEFAULT_VM_HOST`: alias of the KVM host from the Ansible inventory (e.g. `kvm1`) that the service will SSH into for provisioning operations.
 - `ANSIBLE_BECOME_PASS`: sudo password on the target KVM host.
-- Store the generated FRP credentials JSON outside version control. The FRP setup role writes it to `credentials/frp-server-credentials-<host>-<timestamp>.json` at the repo root on the Ansible control machine.
+- Keep the operator-supplied relay token in a private vars file outside version control. Relay preparation does not generate or export credentials.
 
 ### 5. Configure Build Variables (Optional)
 Create `build-vars.yaml` for Golden Image builds:
@@ -224,14 +244,42 @@ make validate-tests
 These targets currently cover:
 
 - inventory parsing via `ansible-inventory -i ansible/inventory/ --list`
-- syntax checks for:
-  - `playbooks/frp/frp-server-setup.yaml`
+- syntax checks of every playbook in `ansible/playbooks/`, from the one list in
+  `scripts/validate_playbooks.sh`, which a structure test holds equal to the
+  playbooks present:
   - `playbooks/frp/docker-app-setup.yaml`
   - `playbooks/host-kit/vm-setup.yaml`
+  - `playbooks/host-kit/vm-setup-task-files.yaml`
+  - `playbooks/host-kit/passthrough-audit.yaml`
   - `playbooks/single-tenant/vm-operations.yaml`
+  - `playbooks/single-tenant/vm-management-task-files.yaml`
 - VM lifecycle contract tests in `tests/test_vm_management_contracts.py`, which
   verify the checked-in task contracts for `vm-create`, `vm-destroy`,
   `vm-undefine`, prerequisite fail-fast behavior, and JSON output formatting
+
+A syntax check parses a playbook and what it imports statically; it does not follow
+`include_tasks`, through which both roles reach their task files. The two parse-only
+playbooks, `vm-setup-task-files.yaml` and `vm-management-task-files.yaml`, import
+those files through `import_role` so the check parses them in their role's context.
+Each refuses to run with a first task tagged `always`, so a `--tags` selection still
+stops there; an explicit `--skip-tags always` or `--start-at-task` passes over it.
+Parsing catches what bash would not: Ansible splits a free-form `shell: |` string as
+module arguments, so an unbalanced quote, an apostrophe in a bash comment included,
+fails the whole task file as it loads. A syntax check templates nothing and runs
+nothing.
+
+`tests/test_vm_relay_roles.py` renders both create-fact variants and exercises the
+VM-to-family proxy call through real `ansible-playbook`, with a controlled family
+role at that boundary. The shared family's IaC suite tests its authenticated proxy
+wait against a loopback HTTP peer. These are library integration tests; the default
+`make test` skips native cases without supported Ansible (and the family's HTTP
+cases need the `ansible.posix.json` callback).
+
+`make native-ansible-gate` here runs VM syntax and native tests, failing on a skip.
+`make test-provisioning-iac-native` from the repository root runs the packaged VM
+and family suites in a built provisioning image, with external networking disabled.
+It also parses both domains with their own configuration and the image's shared
+service configuration. The VM end-to-end lane runs the root target.
 
 `ansible-lint` is not part of the default validation path in this repo yet.
 
@@ -267,71 +315,29 @@ Useful flags:
 
 ### Deployment Sequence Overview
 
-Follow this sequence in order. Each phase produces outputs (credentials, IPs, tokens) that are required as inputs for the next phase — particularly for generating the Async Provisioning Service variables.
+Prepare the relay infrastructure and its admission configuration, then the KVM
+host, then deploy the provisioning service. Register the relay and bind its
+resource pool before provisioning guests. Direct access does not require a relay.
 
-```
-Phase 1: Terraform (GCP Resources)
-  Provisions: GCS bucket, Artifact Registry repos, service accounts
-  Outputs → build-vars.yaml, docker-vars.yaml
-         │
-         ▼
-Phase 2: FRP Server Setup  (playbooks/frp/frp-server-setup.yaml → [frp_servers])
-  Provisions: FRP daemon, Nginx, SSL, credentials file
-  Outputs → frp_server_addr, frp_auth_token, frp_dashboard_password
-         │                                               │
-         ▼                                               │
-Phase 3: KVM Host Setup    (playbooks/host-kit/vm-setup.yaml → [kvm_hosts])   │
-  Provisions: KVM/QEMU, GPU drivers, FRP client, golden image (optional)      │
-  Outputs → DEFAULT_VM_HOST (inventory alias), ANSIBLE_BECOME_PASS            │
-         │                                               │
-         ▼                                               ▼
-Phase 4a: ERC Registry     (playbooks/frp/docker-app-setup.yaml → [frp_servers / provisioning_servers])
-  Provisions: Blockchain identity/reputation registry container
-  Outputs → REGISTRY_URL (e.g. http://localhost:8080)
-         │
-         ▼
-Phase 4b: Async Provisioning Service  (playbooks/frp/docker-app-setup.yaml → [provisioning_servers])
-  Requires ALL prior outputs:
-    FRP_SERVER_ADDR        ← Phase 2: frp_server_addr
-    FRP_DOMAIN             ← Phase 2: frp_domain
-    FRP_DASHBOARD_PASSWORD ← Phase 2: frp_dashboard_password (credentials file)
-    DEFAULT_VM_HOST        ← Phase 3: KVM host inventory alias
-    ANSIBLE_BECOME_PASS    ← Phase 3: KVM host sudo password
-    REGISTRY_URL           ← Phase 4a: ERC Registry endpoint
-         │
-         ▼
-Phase 5: VM Create / Lifecycle  (playbooks/single-tenant/vm-operations.yaml → [kvm_hosts])
-  create → start → monitor → shutdown/reboot → lease_end → undefine
-```
+### 1. Setup a Buyer Relay
 
-| Phase | Playbook | Target Group | Key Outputs Needed by Provisioning Service |
-|---|---|---|---|
-| 1 | `terraform apply` | GCP | `gcp_project_id`, registry/bucket details |
-| 2 | `frp/frp-server-setup.yaml` | `[frp_servers]` | `FRP_SERVER_ADDR`, `FRP_DOMAIN`, `FRP_DASHBOARD_PASSWORD` |
-| 3 | `host-kit/vm-setup.yaml` | `[kvm_hosts]` | `DEFAULT_VM_HOST`, `ANSIBLE_BECOME_PASS` |
-| 4a | `frp/docker-app-setup.yaml` | `[frp_servers]` | `REGISTRY_URL` |
-| 4b | `frp/docker-app-setup.yaml` | `[provisioning_servers]` | *(this is the service being configured)* |
-| 5 | `single-tenant/vm-operations.yaml` | `[kvm_hosts]` | — |
-
-> **Note**: The generated FRP credentials file is saved to `credentials/frp-server-credentials-<host>-<timestamp>.json` after Phase 2. Keep this file — it contains the `frp_auth_token` and `frp_dashboard_password` needed for Phases 3 and 4b.
-
----
-
-### 1. Setup FRP Server (Optional, for secure remote access to leased VMs)
-The FRP server acts as a secure bridge for buyers to access their leased VM resources without exposing additional ports on the Host Kit. You'll need a dedicated VM with at least 2 vCPUs and 4GB RAM that has network access to the Host Kit guest VMs.
-
-**Note**: This is optional as direct port SSH access is still supported, but FRP is highly recommended for enhanced security as it eliminates the need to expose multiple ports on your infrastructure.
+The compute family's [relay-server playbook](../../../../provisioning/compute/iac/ansible/playbooks/relay-server.yaml)
+prepares native frps under systemd. Run from the repository root with an
+operator-owned inventory containing a `relay_servers` group and a private vars
+file containing `frp_auth_token` and `frp_proxy_ports`:
 
 ```bash
-ansible-playbook -i inventory/ playbooks/frp/frp-server-setup.yaml \
-  -e "frp_domain=vm.arkhai.io" \
-  -e "certbot_email=admin@vm.arkhai.io" \
-  --limit proxy-dev
+ANSIBLE_ROLES_PATH=provisioning/compute/iac/ansible/roles \
+  ansible-playbook -i <operator-inventory> \
+  provisioning/compute/iac/ansible/playbooks/relay-server.yaml \
+  -e @<private-relay-vars>
 ```
 
-**Parameter Explanations**:
-- `frp_domain`: The domain or subdomain for FRP server access and SSL certificates
-- `certbot_email`: Email address for Let's Encrypt SSL certificate registration
+The role requires a supplied admission token and does not return credentials.
+`frp_proxy_ports` is a list of `{start: <port>, end: <port>}` ranges shared by
+frps, ufw, and fail2ban. Each issuer's allowed range must fit within that window.
+The control port defaults to 7000. Buyer-serving relays additionally require
+signed-grant admission to be installed and verified before a pool serves buyers.
 
 ### 2. Setup KVM Host Infrastructure
 This step configures the required drivers, BIOS setup adjustments on the kernel, installs necessary packages, and prepares the host for VM management, especially when using FRP for remote access.
@@ -377,7 +383,6 @@ vm_gpu_count: 2
 image_setup_type: scratch
 frp_domain: "vm.arkhai.io"
 frp_server_addr: "<frp-server-vm-ip-address>"
-frp_dashboard_password: "<some-random-dashboard-api-password>"                        
 EOF                                 
     
 ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
@@ -400,7 +405,6 @@ ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
 - `image_setup_type`: Image type to use (scratch = base Ubuntu image, golden = custom image)
 - `frp_domain`: Domain/subdomain for FRP remote access
 - `frp_server_addr`: IP address of your FRP server
-- `frp_dashboard_password`: Password for FRP dashboard access
 
 **`inventory/management-vars.yaml` Usage**
 - `--extra-vars @inventory/management-vars.yaml` usage is only required when utilizing Packer-generated Golden Images for the VMs
@@ -493,12 +497,10 @@ image-and-ssh-provisioning-iac/
 │   ├── inventory/
 │   │   ├── hosts                      # Main inventory file
 │   │   └── management-vars.yaml       # Auto-generated management variables
-│   ├── credentials/                   # FRP server credentials storage
 │   ├── keys/                          # SSH keys storage when no customer public key provided
 │   ├── playbooks/
 │   │   ├── vm-setup.yaml              # KVM host infrastructure setup
 │   │   ├── frp/
-│   │   │   ├── frp-server-setup.yaml  # FRP server deployment
 │   │   │   └── docker-app-setup.yaml  # Docker app deployment with FRP
 │   │   ├── host-kit/
 │   │   │   └── vm-setup.yaml          # Host-specific VM setup
@@ -506,10 +508,6 @@ image-and-ssh-provisioning-iac/
 │   │       └── vm-operations.yaml     # VM lifecycle management
 │   ├── roles/
 │   │   ├── docker-app/                # Docker application deployment
-│   │   │   ├── handlers/
-│   │   │   ├── tasks/
-│   │   │   └── templates/
-│   │   ├── frp-setup/                 # FRP server configuration
 │   │   │   ├── handlers/
 │   │   │   ├── tasks/
 │   │   │   └── templates/
@@ -763,212 +761,28 @@ ansible-playbook -i inventory/ playbooks/host-kit/vm-setup.yaml \
 - `build`: Build-related tasks
 - `build_completion`: Post-build completion tasks
 
-### FRP Server Setup (frp-setup role)
-- **FRP Server Installation**: Automated download and installation of FRP server binary from GitHub releases
-- **Authentication System**: Random 64-character authentication tokens and 32-character dashboard passwords generation
-- **Configuration Management**: FRP server configuration templates with TLS encryption, dashboard access, and subdomain routing
-- **Systemd Service**: FRP server systemd service creation, daemon management, and automatic startup configuration
-- **Directory Structure**: Dedicated configuration directories (/etc/frp), log directories (/var/log/frp), and proper permissions
-- **Nginx Integration**: Reverse proxy configuration for FRP admin dashboard with SSL termination
-- **SSL Certificate Management**: Let's Encrypt integration for HTTPS access to FRP services
-- **Security Configuration**: Token-based authentication, encrypted communications, and access control
+### Buyer Relay Infrastructure
 
-#### FRP Server Setup Command Examples
+[Shared compute IaC](../../../../provisioning/compute/iac/) owns `frp-binary`,
+`relay-client`, `relay-proxy`, and `relay-server`. The pinned frp archive is
+verified before extraction, and the native service unit runs the versioned binary.
+The relay-server configuration contains the operator-supplied token and is
+root-only. Changing the server configuration or binary version restarts frps;
+perform those changes with the relay drained.
 
-**Standard FRP Server Setup with SSL**:
-```bash
-ansible-playbook -i inventory/ playbooks/frp/frp-server-setup.yaml \
-  -e "frp_domain=vm.arkhai.io" \
-  -e "certbot_email=admin@vm.arkhai.io" \
-  --limit proxy-dev
-```
+The family client uses `/etc/frp/frpc-buyers.toml` and `frpc-buyers.service`.
+Its per-host admin password is kept in the root-only configuration, and the
+loopback admin port defaults to 740. Preparation refuses a host whose effective
+unprivileged-port boundary would let another account bind that port. Proxy
+operations authenticate every reload and status request. Removal applies a
+proxy diff by reload and retains pending state across a failed reload.
+The host's management client and binary remain operator-owned.
 
-**FRP Server Setup with Custom Credentials**:
-```bash
-ansible-playbook -i inventory/ playbooks/frp/frp-server-setup.yaml \
-  -e "frp_domain=vm.arkhai.io" \
-  -e "certbot_email=admin@vm.arkhai.io" \
-  -e "frp_auth_token=your-custom-64-char-token-here-make-it-secure-and-random" \
-  -e "frp_dashboard_password=your-custom-32-char-password" \
-  --limit proxy-dev
-```
-
-**FRP Server Setup with Subdomain Host** (alternative parameter):
-```bash
-ansible-playbook -i inventory/ playbooks/frp/frp-server-setup.yaml \
-  -e "frp_subdomain_host=vm.arkhai.io" \
-  -e "certbot_email=admin@vm.arkhai.io" \
-  --limit proxy-dev
-```
-
-**Parameter Reference**:
-- `frp_domain`: Primary domain/subdomain for FRP services (e.g., `vm.arkhai.io`)
-- `frp_subdomain_host`: Alternative parameter for domain (same as `frp_domain`, used internally)
-- `certbot_email`: Email for Let's Encrypt SSL certificate notifications (e.g., `admin@vm.arkhai.io`)
-- `frp_auth_token`: Custom 64-character authentication token (auto-generated if not provided)
-- `frp_dashboard_password`: Custom 32-character dashboard password (auto-generated if not provided)
-
-**Important Notes**:
-- Auto-generated credentials are saved to `credentials/frp-server-credentials-<host>-<timestamp>.json`
-- DNS must be configured before SSL: Create A record `frp-admin.<domain>` pointing to server IP
-- FRP dashboard URL: `https://frp-admin.<domain>` (with SSL) or `http://localhost:7001` (SSH tunnel)
-- Control port: `7000` (FRP client connections)
-- Proxy port range: `7002-8000` (SSH tunnels for VMs)
-- Default dashboard user: `admin`
-
-**Firewall Ports Opened**:
-- Port `22`: SSH access
-- Port `80`: HTTP (for Let's Encrypt verification)
-- Port `443`: HTTPS (for FRP admin dashboard)
-- Port `7000`: FRP control port
-- Ports `7002-8000`: FRP proxy port range
-
-**Post-Installation Access**:
-```bash
-# SSH tunnel access (works without SSL)
-ssh -L 7001:localhost:7001 user@<frp-server-ip>
-# Then visit: http://localhost:7001
-
-# Direct HTTPS access (after SSL setup)
-# Visit: https://frp-admin.vm.arkhai.io
-```
-
-#### FRP Dashboard API Examples
-
-The FRP server provides a REST API for monitoring and managing proxy connections. All API requests require Basic Authentication using the dashboard credentials.
-
-**Authentication Setup**:
-```bash
-# Set credentials from your saved credentials file
-FRP_USER="admin"
-FRP_PASSWORD="<dashboard-password-from-credentials-file>"
-FRP_API_URL="http://localhost:7001/api"  # Via SSH tunnel
-# OR
-FRP_API_URL="https://frp-admin.vm.arkhai.io/api"  # Direct HTTPS
-```
-
-**Get Server Information**:
-```bash
-curl -u "${FRP_USER}:${FRP_PASSWORD}" \
-  "${FRP_API_URL}/serverinfo"
-```
-
-**Response Example**:
-```json
-{
-    "version": "0.54.0",
-    "bindPort": 7000,
-    "vhostHTTPPort": 8080,
-    "vhostHTTPSPort": 8443,
-    "tcpmuxHTTPConnectPort": 0,
-    "kcpBindPort": 0,
-    "quicBindPort": 0,
-    "subdomainHost": "vm.arkhai.io",
-    "maxPoolCount": 50,
-    "maxPortsPerClient": 0,
-    "heartbeatTimeout": 90,
-    "allowPortsStr": "7002-8000",
-    "tlsForce": true,
-    "totalTrafficIn": 55145,
-    "totalTrafficOut": 56310,
-    "curConns": 0,
-    "clientCounts": 1,
-    "proxyTypeCount": {
-        "tcp": 1
-    }
-}
-```
-
-**List All Active Proxies (Fetch Ports)**:
-```bash
-curl -u "${FRP_USER}:${FRP_PASSWORD}" \
-  "${FRP_API_URL}/proxy/tcp"
-```
-
-**Response Example**:
-```json
-{
-    "proxies": [
-        {
-            "name": "vm-cyifje",
-            "conf": null,
-            "todayTrafficIn": 21678,
-            "todayTrafficOut": 26851,
-            "curConns": 0,
-            "lastStartTime": "02-12 11:46:02",
-            "lastCloseTime": "02-12 11:46:11",
-            "status": "offline"
-        },
-        {
-            "name": "vm-o0bw3z",
-            "conf": null,
-            "todayTrafficIn": 0,
-            "todayTrafficOut": 0,
-            "curConns": 0,
-            "lastStartTime": "02-12 01:54:13",
-            "lastCloseTime": "02-12 01:57:23",
-            "status": "offline"
-        },
-        {
-            "name": "vm-t6q98d",
-            "conf": null,
-            "todayTrafficIn": 33467,
-            "todayTrafficOut": 29459,
-            "curConns": 0,
-            "lastStartTime": "02-12 02:18:50",
-            "lastCloseTime": "02-12 04:47:57",
-            "status": "offline"
-        },
-        {
-            "name": "vm-uo0nwf",
-            "conf": {
-                "name": "vm-uo0nwf",
-                "type": "tcp",
-                "transport": {
-                    "useEncryption": true,
-                    "bandwidthLimit": "",
-                    "bandwidthLimitMode": "client"
-                },
-                "loadBalancer": {
-                    "group": ""
-                },
-                "healthCheck": {
-                    "type": "",
-                    "intervalSeconds": 0
-                },
-                "localIP": "127.0.0.1",
-                "plugin": {
-                    "type": "",
-                    "ClientPluginOptions": null
-                },
-                "remotePort": 7002
-            },
-            "clientVersion": "0.54.0",
-            "todayTrafficIn": 0,
-            "todayTrafficOut": 0,
-            "curConns": 0,
-            "lastStartTime": "02-12 11:46:11",
-            "lastCloseTime": "",
-            "status": "online"
-        }
-    ]
-}
-```
-
-**Get Specific Proxy Details**:
-```bash
-# Replace 'vm-base-gpu-ssh' with your proxy name
-curl -u "${FRP_USER}:${FRP_PASSWORD}" \
-  "${FRP_API_URL}/proxy/tcp/vm-uo0nwf"
-```
-
-**API Response Status Codes**:
-- `200`: Success
-- `401`: Authentication failed (invalid credentials)
-- `404`: Resource not found (proxy/client doesn't exist)
-- `500`: Server error
-
-**Note**: The FRP Dashboard API runs on port 7001 (localhost only by default). For remote access, either use an SSH tunnel or access via the Nginx reverse proxy at `https://frp-admin.<domain>/api`.
+Service jobs always supply `vm_relay_required` from accepted relay ownership;
+provider extra variables cannot override it. Manual create/cleanup/undefine calls
+default to requiring relay cleanup. Set `vm_relay_required=false` explicitly only
+for a guest known to use direct access. A missing client configuration fails a
+required cleanup, since its running client may still forward traffic.
 
 ### VM Management Operations (vm-management role)
 - **VM Lifecycle Management**: Complete VM operations including create, start, stop, shutdown, reboot, destroy, undefine, and reset-password
@@ -1073,7 +887,6 @@ vm_gpu_count: 2
 image_setup_type: scratch
 frp_domain: vm.arkhai.io
 frp_server_addr: 192.168.100.61
-frp_dashboard_password: "prFHMe8bsiOgTOM8I39udN0lD9h4Nt2W"
 EOF
 
 ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
@@ -1096,7 +909,6 @@ vm_gpu_provisioned: false
 image_setup_type: scratch
 frp_domain: vm.arkhai.io
 frp_server_addr: 192.168.100.61
-frp_dashboard_password: "prFHMe8bsiOgTOM8I39udN0lD9h4Nt2W"
 EOF
 
 ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
@@ -1239,8 +1051,52 @@ ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
 - `image_setup_type`: Base image type (`scratch` for Ubuntu cloud image, `golden` for custom image)
 - `frp_domain`: FRP domain for remote access (e.g., `vm.arkhai.io`)
 - `frp_server_addr`: IP address of FRP server (e.g., `192.168.100.61`)
-- `frp_dashboard_password`: FRP dashboard API password for proxy registration
 - `vm_lease_end`: Lease expiration datetime in UTC format `YYYY-MM-DD HH:MM` (e.g., `2026-02-23 10:45`) - use JSON format in command: `-e '{"vm_lease_end":"2026-02-23 10:45"}'`
+
+#### GPU guests, readiness, and autostart
+
+Four settings come only from a pool's operator-owned provider configuration, its
+`extra_vars`, which reach the playbook as extra variables. No job parameter or
+fulfillment requirement carries them, and a request naming one is refused.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `vm_passthrough_boot_gpu` | `false` | Whether the host's boot GPU may be passed through |
+| `vm_setup_wait_attempts` | `10` | How many times a create checks that the guest finished setting up |
+| `vm_setup_wait_interval_seconds` | `30` | How long it waits between those checks |
+| `vm_autostart` | `true` | Whether the created guest starts on host boot |
+
+Each is checked on the controller before any host effect: the two wait settings must
+be positive integers, and the other two booleans, so a quoted `"40"` fails, naming the
+setting.
+
+- **The boot GPU.** It is the GPU whose sysfs `boot_vga` flag is set, read per device.
+  Without the opt-in it is never selected, whatever the GPU inventory lists. With the
+  opt-in it is eligible only when the inventory lists it available, its sysfs driver
+  link names `vfio-pci` now, and no defined guest has it attached; another driver, or
+  none, makes it ineligible.
+- **Every way a create chooses a GPU** applies the same eligibility: the first choice,
+  each retry's alternative, and the multi-GPU selection. Attachment is read from defined
+  guests' hostdev source addresses, and guests that cannot be read fail the selection.
+- **No eligible GPU** fails the create before any domain is defined. The role never
+  binds or unbinds a device: preparing a GPU for passthrough, and returning it to its
+  host driver afterwards, is the operator's procedure.
+- **Readiness.** A create that runs out of attempts fails, naming the bound and both
+  settings.
+- **Autostart.** A host passing through its only GPU sets `vm_autostart: false`, so a
+  guest a teardown has not yet removed cannot reclaim the GPU when the host reboots.
+
+On the relay path, a create waits for the host's tunnel client to report the guest's
+proxy. Its status API answers JSON labelled `text/plain`, so the wait parses the body
+itself, whatever its label. Only a `tcp` proxy named exactly `vm-<guest>` with status
+exactly `running` is ready. A failed request, another status, or an empty body is
+retried within the wait's bound, and a body that is not the client's status document
+ends the create as an error at once.
+
+A teardown removes the guest's proxy block and then reloads the client. A
+`frpc-buyers.toml.reload-pending.vm-<guest>` record beside the configuration stays until a
+reload succeeds. While it remains, the teardown fails and capacity stays held, and a
+retry reloads before it reports the proxy gone, so retrying is safe.
 
 #### Guest names
 
@@ -1517,7 +1373,7 @@ app_nginx_path: "/"                  # Default, or "/api" for subpath
 # Network Mode
 docker_network_mode: "bridge"        # Default: bridge (port-mapped). Set to "host" to use host networking (e.g. for ZeroTier access)
 
-# FRP Subdomain Support (if frp-setup role configured)
+# FRP Subdomain Support (requires separately configured vhost routing)
 frp_subdomain_host: "example.com"    # Wildcard DNS domain (e.g., vm.arkhai.io)
 # Results in: app_nginx_site_name.frp_subdomain_host
 # Example: my-app.example.com

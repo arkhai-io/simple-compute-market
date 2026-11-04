@@ -21,8 +21,10 @@ from compute_provisioning_ansible import ssh_connection
 from .conftest import ProvisioningClients
 from compute_provisioning_client import ComputeProvisioningError, ComputeProvisioningJobError
 import asyncio
+from datetime import datetime
 
 import pytest
+from compute_provisioning.relays import RelayPortLease
 
 from vm_provisioning_operator.models import CreateVmRequest
 from compute_provisioning_contracts import HostCreate
@@ -33,6 +35,37 @@ from compute_provisioning.jobs.queue import AsyncJobQueue
 
 HOST = "kvm1"
 VM_NAME = "agent-vm-01"
+
+
+def _relay_holding(port: int) -> None:
+    """Relay ``site-a``, with a token and a grant key, its ``port`` held by a
+    reservation other than any operator create's.
+
+    The lease is seeded as service-internal state: fulfillment is the only
+    route that takes one.
+    """
+    relays = _container_module.resolved_relay_service
+    if not any(relay.id == "site-a" for relay in relays.list_relays()):
+        relays.create_relay(
+            relay_id="site-a",
+            relay_addr="203.0.113.9",
+            relay_port=7000,
+            vm_port_range_start=6100,
+            vm_port_range_count=100,
+            token="admission-token",
+        )
+    with _container_module.resolved_session_factory() as db, db.begin():
+        db.add(
+            RelayPortLease(
+                id=f"lease-{port}",
+                relay_id="site-a",
+                remote_port=port,
+                host_id=HOST,
+                owner_kind="fulfillment",
+                owner_id=f"cr-{port}",
+                grant_expires_at=datetime(2031, 1, 1),
+            )
+        )
 
 
 def _make_event_seam(job_queue: AsyncJobQueue) -> asyncio.Event:
@@ -165,17 +198,19 @@ class TestCreateVmViaClient:
         call_kwargs = fake_ansible.start_playbook.call_args
         assert call_kwargs.kwargs.get("limit") == HOST or HOST in str(call_kwargs)
 
-    async def test_a_relay_bearing_request_reaches_the_service_intact(
+    async def test_an_operators_relayed_create_gets_no_grant_for_another_lease(
         self, client_and_queue, fake_ansible
     ):
-        """What the client emits is what the service receives.
+        """What the client emits is what the service receives, and a grant is
+        signed only for the job's own reservation's lease.
 
-        The only other relay request test is the deliberate raw-HTTP
-        malformed-body case, which proves rejection. This is the happy path:
-        the canonical client serializes the relay fields, and the extra-vars
-        the job is built from carry exactly them.
+        The canonical client serializes the relay fields, and the job refuses
+        them by name: an operator's create carries no reservation, and the
+        port it names is held by another, so no grant can be signed for its
+        proxy, which a relay enforcing admission would refuse.
         """
         client, job_queue = client_and_queue
+        _relay_holding(6142)
         dispatched = _make_event_seam(job_queue)
 
         submit = await client.vm.create_vm(
@@ -187,11 +222,15 @@ class TestCreateVmViaClient:
             ),
         )
         await asyncio.wait_for(dispatched.wait(), timeout=5.0)
-        final = await client.family.poll_until_complete(
-            submit.job_id, timeout=5.0, poll_interval=0.05
-        )
+        with pytest.raises(ComputeProvisioningJobError) as failed:
+            await client.family.poll_until_complete(
+                submit.job_id, timeout=5.0, poll_interval=0.05
+            )
 
-        assert final.status == "succeeded"
+        assert "relay 'site-a' holds no lease on port 6142" in str(failed.value)
+        holdings = await client.family.list_relay_leases("site-a")
+        (lease,) = [lease for lease in holdings.leases if lease.remote_port == 6142]
+        assert lease.grant_key_id is None
 
     async def test_a_relay_bearing_job_does_not_publish_its_token(
         self, client_and_queue
@@ -203,6 +242,7 @@ class TestCreateVmViaClient:
         field check would have walked straight past.
         """
         client, job_queue = client_and_queue
+        _relay_holding(6142)
         dispatched = _make_event_seam(job_queue)
 
         submit = await client.vm.create_vm(
@@ -214,11 +254,14 @@ class TestCreateVmViaClient:
             ),
         )
         await asyncio.wait_for(dispatched.wait(), timeout=5.0)
-        final = await client.family.poll_until_complete(
-            submit.job_id, timeout=5.0, poll_interval=0.05
-        )
+        with pytest.raises(ComputeProvisioningJobError):
+            await client.family.poll_until_complete(
+                submit.job_id, timeout=5.0, poll_interval=0.05
+            )
 
-        assert "admission-token" not in final.model_dump_json()
+        read = (await client.family.get_job(submit.job_id)).model_dump_json()
+        read += (await client.family.get_job_logs(submit.job_id)).model_dump_json()
+        assert "admission-token" not in read
 
     async def test_credentials_stored_and_returned_after_success(self, client_and_queue):
         """A successful create stores every role's credentials, retrievable by job_id.
@@ -272,24 +315,23 @@ class TestCreateVmViaClient:
 
 class TestDispatchRequiresARegisteredHost:
     async def test_a_job_for_an_unregistered_host_is_refused_before_it_is_recorded(
-        self, client_and_queue, fake_ansible, tmp_path, monkeypatch
+        self, client_and_queue, fake_ansible
     ):
-        """Dispatch renders only from the host registry. A configured inventory
-        file naming the host changes nothing: it is a seed input, not an
-        execution source."""
-        inventory = tmp_path / "hosts"
-        inventory.write_text(
-            "[kvm_hosts]\n"
-            "unregistered-kvm  ansible_host=198.51.100.7  ansible_user=root\n"
-        )
-
-        # Service-internal state setup: no API configures the inventory path.
-        monkeypatch.setattr(
-            app.container.vm_runtime().config,
-            "resolved_inventory_path",
-            inventory,
-        )
+        """Dispatch renders only from the host registry. A host definitions
+        document naming the host that was refused changes nothing: a document
+        only populates host records, and is never an execution source."""
         client, _ = client_and_queue
+        refused_document = await client.family.import_host_definitions(
+            "hosts:\n"
+            "  - host_id: unregistered-kvm\n"
+            "    pool_id: no-such-pool\n"
+            "    connection:\n"
+            "      kind: ssh\n"
+            "      version: 2\n"
+            "      public: {ssh_host: 198.51.100.7, ssh_user: root, key_path: /keys/id}\n"
+        )
+        assert refused_document.applied is False
+        assert [problem.code for problem in refused_document.problems] == ["unknown_pool"]
 
         # Refused at submission: every job needs a registered host, so none is
         # recorded or run for this one.

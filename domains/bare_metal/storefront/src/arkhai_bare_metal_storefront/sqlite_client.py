@@ -11,7 +11,7 @@ from typing import Any, TypeVar
 
 from arkhai_bare_metal import (
     BARE_METAL_OFFERING_MODE,
-    BareMetalLeaseReadyEvidence,
+    BareMetalLeaseReadyEvidenceDocument,
     BareMetalListing,
     BareMetalMaterialization,
     BareMetalMessage,
@@ -1019,10 +1019,10 @@ class SQLiteClient(CoreSQLiteClient):
         self,
         *,
         evidence_digest: str,
-    ) -> BareMetalLeaseReadyEvidence | None:
+    ) -> BareMetalLeaseReadyEvidenceDocument | None:
         """Resolve one content-addressed lease-ready document, for an Alkahest deal."""
 
-        def _load() -> BareMetalLeaseReadyEvidence | None:
+        def _load() -> BareMetalLeaseReadyEvidenceDocument | None:
             conn = sqlite3.connect(self.db_path)
             try:
                 row = conn.execute(
@@ -1030,9 +1030,13 @@ class SQLiteClient(CoreSQLiteClient):
                     "WHERE lease_ready_evidence_digest = ?",
                     (evidence_digest,),
                 ).fetchone()
-                if row is None or row[0] is None:
+                if row is None:
                     return None
-                return BareMetalLeaseReadyEvidence.model_validate_json(str(row[0]))
+                if not isinstance(row[0], str):
+                    raise ValueError("stored lease-ready evidence is not canonical TEXT")
+                return BareMetalLeaseReadyEvidenceDocument(
+                    row[0].encode("utf-8"), evidence_digest
+                )
             finally:
                 conn.close()
 
@@ -1069,15 +1073,15 @@ class SQLiteClient(CoreSQLiteClient):
         self,
         *,
         negotiation_id: str,
-        evidence: BareMetalLeaseReadyEvidence,
-    ) -> BareMetalLeaseReadyEvidence:
+        evidence: BareMetalLeaseReadyEvidenceDocument,
+    ) -> BareMetalLeaseReadyEvidenceDocument:
         """Record an Alkahest fulfillment's evidence once; a retry finds it.
 
         The first evidence recorded is the one whose digest may already be on
         chain, so a later attempt reuses it rather than writing a different one.
         """
 
-        def _save() -> BareMetalLeaseReadyEvidence:
+        def _save() -> BareMetalLeaseReadyEvidenceDocument:
             conn = sqlite3.connect(self.db_path)
             try:
                 with conn:
@@ -1086,17 +1090,23 @@ class SQLiteClient(CoreSQLiteClient):
                         "lease_ready_evidence_json = ?, "
                         "lease_ready_evidence_digest = ?, "
                         "updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') "
-                        "WHERE negotiation_id = ? AND lease_ready_evidence_json IS NULL",
+                        "WHERE negotiation_id = ? AND lease_ready_evidence_json IS NULL "
+                        "AND lease_ready_evidence_digest IS NULL",
                         (evidence.canonical_json(), evidence.evidence_digest, negotiation_id),
                     )
-                row = conn.execute(
-                    "SELECT lease_ready_evidence_json FROM bare_metal_fulfillment_lifecycle "
-                    "WHERE negotiation_id = ?",
-                    (negotiation_id,),
-                ).fetchone()
-                if row is None:
-                    raise RuntimeError("bare-metal fulfillment lifecycle is missing")
-                return BareMetalLeaseReadyEvidence.model_validate_json(str(row[0]))
+                    row = conn.execute(
+                        "SELECT lease_ready_evidence_json, lease_ready_evidence_digest "
+                        "FROM bare_metal_fulfillment_lifecycle WHERE negotiation_id = ?",
+                        (negotiation_id,),
+                    ).fetchone()
+                    if row is None:
+                        raise RuntimeError("bare-metal fulfillment lifecycle is missing")
+                    if not isinstance(row[0], str):
+                        raise ValueError("stored lease-ready evidence is not canonical TEXT")
+                    stored = BareMetalLeaseReadyEvidenceDocument(
+                        row[0].encode("utf-8"), row[1]
+                    )
+                return stored
             finally:
                 conn.close()
 

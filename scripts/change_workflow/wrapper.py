@@ -162,6 +162,15 @@ def earlier_outcomes(results: Sequence[dict[str, Any]], last: dict[str, Any] | N
     return earlier
 
 
+def _with_subagent(streamed: dict[str, Any], found: dict[str, Any]) -> dict[str, Any]:
+    """A denial the parent's stream reported, marked with the subagent whose
+    transcript also records it, and given that transcript's reason when the
+    stream gave none."""
+    reason = {"reason": found["reason"]} if "reason" in found and "reason" not in streamed else {}
+    marked = {"subagent": found["subagent"]} if "subagent" in found else {}
+    return {**streamed, **reason, **marked}
+
+
 @dataclass
 class Wrapper:
     """Runs steps of changes under one repository root, through injected seams."""
@@ -359,8 +368,8 @@ class Wrapper:
                 # Each attempt is read alone; the transcript keeps them all.
                 stream = Stream(transcript, progress, self.clock, self.echo)
                 attempts.append(stream)
-                command = claude_command(prompt, rules, schema, model, session=session,
-                                         granted=granted)
+                command = claude_command(prompt, rules, schema, model, root=self.root,
+                                         session=session, granted=granted)
                 failure, status, reached = None, None, None
                 try:
                     status = self.runner(command, self.root, stream.feed)
@@ -407,12 +416,20 @@ class Wrapper:
 
     def _denials(self, stream: Stream, session: str | None) -> list[dict[str, Any]]:
         """The run's denials: the parent's own, from its stream, then those its
-        subagents met, read from their transcripts beside the conversation file."""
+        subagents met, read from their transcripts beside the conversation file.
+
+        The harness may also report a subagent's denial on the parent's stream,
+        unmarked; that entry is kept once and given the subagent its transcript
+        names, and the transcript's reason when the stream gave none, so the
+        denial is never read as the parent's own call."""
         ran = stream.session or session
         extra = (subagent_denials(self.conversation(self.root, ran), stream.tool_use_ids)
                  if ran else [])
+        found = {d["tool_use_id"]: d for d in extra if d.get("tool_use_id")}
+        streamed = [_with_subagent(d, found[d["tool_use_id"]])
+                    if d.get("tool_use_id") in found else d for d in stream.denials]
         seen = {d.get("tool_use_id") for d in stream.denials if d.get("tool_use_id")}
-        return stream.denials + [d for d in extra if d.get("tool_use_id") not in seen]
+        return streamed + [d for d in extra if d.get("tool_use_id") not in seen]
 
     def _before(self, log: Path, session: str | None) -> Entry:
         if session is None:

@@ -70,7 +70,7 @@ def test_only_scheduler_and_ids_modules_import_the_two_allowed_kit_dependencies(
             top_level = module_name.split(".")[0]
             is_local = module_name.startswith(".") or top_level == "market_fulfillment"
             is_stdlib_or_typing = top_level in {
-                "__future__", "abc", "contextlib", "dataclasses", "datetime", "decimal", "enum", "logging", "random", "threading", "typing", "uuid",
+                "__future__", "abc", "contextlib", "copy", "dataclasses", "datetime", "decimal", "enum", "logging", "random", "threading", "types", "typing", "uuid",
             }
             if is_local or is_stdlib_or_typing:
                 continue

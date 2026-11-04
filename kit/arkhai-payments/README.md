@@ -5,10 +5,19 @@
 credential validation, fee policy, hold release and cash operations;
 this kit persists no settlement state and runs no background worker.
 
-The JSON Schema and test vectors are the payments service's published wire
-contract, vendored and identified by the content hashes recorded in
-[`schema/SOURCE.md`](schema/SOURCE.md). `src/market_arkhai_payments/models.py`
-is generated from that schema with `python scripts/generate_models.py`.
+The standalone JSON Schema and current producer conformance vectors are vendored
+by content hash. Historical vectors remain separate raw signing and hashing
+regressions. [`schema/SOURCE.md`](schema/SOURCE.md) records publication hashes,
+the neutral schema identifier, generation checks and evidence limits.
+`src/market_arkhai_payments/models.py` is generated with the pinned generator using
+`python scripts/generate_models.py`.
+
+Models accept effective part ends and zero gross snapshots and receipts while
+retaining unknown-field refusal and numeric/string bounds. Required nullable
+maximum hold extensions remain present as null; absent optional ends stay omitted
+through approval serialization, canonical identities and signature verification.
+Exact service compatibility is checked before consumer deployment; local producer
+vectors do not prove provider funding or physical delivery.
 
 ## Seller option and mandate
 
@@ -52,7 +61,9 @@ permission, and preserves the seller and accepted option's dispute authority as 
 authorities. Only the dispute authority can extend or lift a hold. Each once
 part encodes the absolute Agreement term end and holds until that end plus
 `lifecycle.adjudication.dispute_window_seconds`, with the agreed nullable
-`case_hold_max_seconds` cap. Fractional ends round up to the wire's whole second;
+`case_hold_max_seconds` cap. Either part's `maxHoldExtension` is required and may be
+null; the models are generated so, and every wire form the kit produces keeps the
+null (see [`schema/SOURCE.md`](schema/SOURCE.md#required-nullable-durations-and-optional-values)). Fractional ends round up to the wire's whole second;
 late approval clamps the effective end at the authority without changing the
 mandate. `derive_part_terms` also supplies setup ends and rate permissions: only
 entitlements grant party stops, preserving notice and treatment, while the
@@ -210,8 +221,8 @@ that tests inject through a stage's or approval's `client_for_owner`.
 the fake's own `livemode` applies only to the receipts it signs on approval,
 and a receipt handed to `serve()` keeps the mode it was signed with. So a test
 can play a live service against a stage configured for either mode. The
-kit's unit suite proves the receipt fixture reproduces the published vector
-byte for byte, which is why tests never sign receipts any other way.
+kit's unit suite proves the receipt fixture's framing reproduces the published
+vector's message and signature byte for byte, which is why tests never sign receipts any other way.
 
 ## Checks
 
@@ -224,10 +235,13 @@ make build
 
 `make test` checks static typing; unit tests for mandate derivation, receipt
 verification, client response handling, the seller stage, buyer approval,
-settlement configuration, and the receipt fixture; and the upstream mandate,
-receipt, attachment, and approval vectors.
-The vector runner is also available as `uv run python scripts/check_vectors.py`
-or `uv run python -m market_arkhai_payments.fixtures.conformance`.
+settlement configuration, the receipt fixture, and the mandate against a literal
+request in the current wire; current producer mandate, receipt, snapshot, event
+and attachment conformance; and the historical publication's raw signing and hash
+framing, whose obsolete mandates and receipt the current models must refuse.
+The vector runner is also available as `uv run python scripts/check_vectors.py`,
+which replays the current publication and then checks the historical one, or as
+`uv run python -m market_arkhai_payments.fixtures.conformance` for the replay alone.
 From the repository root, this builds and drives the installed wheel rather than
 an editable/source import (no services, seed files or credentials required):
 

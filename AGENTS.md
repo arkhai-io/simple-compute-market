@@ -48,6 +48,7 @@ problem through and writing the answer that fits it.
 - `openspec/specs/<subsystem>/spec.md` contains authoritative current subsystem behavior, invariants, ownership, and lifecycle semantics.
 - `openspec/specs/<subsystem>/architecture.md` may contain durable current-state conceptual models, design motivation, trade-offs, relationships, and limitations. It does not replace normative requirements.
 - `openspec/specs/README.md` is the canonical capability documentation index.
+- `docs/development/DEPLOYMENT_AND_CONFIG.md` holds configuration resolution and deployment conventions; `docs/operator-handbook.md` holds what an operator needs to run a deployment: document formats, procedures, and upgrade and recovery steps. Neither replaces a specification's normative requirements.
 - `openspec/changes/` contains proposed deltas, design exploration, migration notes, implementation tasks, and temporary compatibility concerns.
 - Git history and pull requests contain provenance and change history.
 

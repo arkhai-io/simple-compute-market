@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 from arkhai_bare_metal import (
     BareMetalAcceptedAlkahestBinding,
+    BareMetalLeaseReadyEvidenceDocument,
     BareMetalLeaseReadyResult,
     CanonicalPrincipal,
     bare_metal_digest,
@@ -216,7 +217,9 @@ class BareMetalAlkahestLifecycle:
             reason=f"settlement_{state}" + (f": {reason}" if reason else ""),
         )
 
-    async def _lease_ready_evidence(self, record: SettlementObligationRecord):
+    async def _lease_ready_evidence(
+        self, record: SettlementObligationRecord
+    ) -> BareMetalLeaseReadyEvidenceDocument | None:
         """Start or resume delivery; return the evidence once the lease is active."""
 
         negotiation_id = record.agreement_ref
@@ -243,8 +246,12 @@ class BareMetalAlkahestLifecycle:
             )
         if state != "active":
             return None
-        if lifecycle.get("lease_ready_evidence_json"):
-            # Recorded on an earlier attempt, whose digest may be on chain.
+        if (
+            lifecycle.get("lease_ready_evidence_json") is not None
+            or lifecycle.get("lease_ready_evidence_digest") is not None
+        ):
+            # Either stored field means a proof may already exist. Partial or
+            # corrupt state must fail rather than construct replacement content.
             stored = await self.db.load_bare_metal_lease_ready_evidence(
                 evidence_digest=str(lifecycle["lease_ready_evidence_digest"])
             )
@@ -263,7 +270,7 @@ class BareMetalAlkahestLifecycle:
         record: SettlementObligationRecord,
         lifecycle: Mapping[str, Any],
         escrow_uid: str,
-    ):
+    ) -> BareMetalLeaseReadyEvidenceDocument:
         negotiation_id = record.agreement_ref
         context = await self.db.load_bare_metal_fulfillment_context(
             negotiation_id=negotiation_id

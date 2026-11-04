@@ -1,0 +1,18 @@
+bindPort = {{ frp_server_port | int }}
+auth.method = "token"
+auth.token = {{ frp_auth_token | to_json }}
+transport.tls.force = true
+allowPorts = [
+{% for ports in frp_proxy_ports %}
+  { start = {{ ports.start | int }}, end = {{ ports.end | int }} },
+{% endfor %}
+]
+log.to = "/var/log/frp/frps.log"
+log.level = "info"
+log.maxDays = 30
+
+[[httpPlugins]]
+name = "grant-admission"
+addr = {{ frp_grant_admission_address | to_json }}
+path = "/"
+ops = ["NewProxy"]

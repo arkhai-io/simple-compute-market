@@ -671,6 +671,26 @@ The payments service MUST remain the authority for its ledger, account credentia
 - **WHEN** a buyer files a case on an `arkhai.payments.v1` deal
 - **THEN** it files with the agreement's dispute authority and sends the payments service no case or effect of its own
 
+#### Scenario: Published payment snapshots contain an effective end or zero gross
+
+- **WHEN** the selected published contract permits an effective part end or a zero gross amount in a payment snapshot or receipt
+- **THEN** the generated consumer accepts those fields and values without accepting unknown fields or weakening unrelated constraints
+
+#### Scenario: A contract publication is refreshed
+
+- **WHEN** the payment consumer selects a newer standalone JSON Schema and producer conformance vectors
+- **THEN** it records their content hashes, regenerates reproducible strict models, verifies current producer signatures and transaction identities, and preserves historical raw signed-byte verification separately
+
+#### Scenario: Nullable required values remain distinct from optional omissions
+
+- **WHEN** a published mandate includes a required nullable duration or an omitted optional end
+- **THEN** serialization retains the required null and omits an unset optional end consistently for the approval body, canonical transaction identity and receipt verification
+
+#### Scenario: An explicit null for an optional property is normalized away
+
+- **WHEN** a mandate, receipt or snapshot states `null` for an optional property whose schema does not allow null, such as a part's `end` or a receipt part's `rate`
+- **THEN** the generated consumer accepts it and treats it as omitted, so the transaction identity and receipt signature verification use the normalized body, and settlement data pairing such a mandate with the hash of its raw JSON is refused
+
 ### Requirement: Marketplace roles hold no payment ledger
 
 Marketplace roles MUST NOT own ledger state or implement cash movement, Stripe top-ups, payouts, or provider recovery. Mechanism kits MUST keep no settlement servicing state or daemon; headless callers supply owner-scoped credentials per request and verify service-signed receipts through the identity kit. A storefront MAY keep lifecycle observation state (watch cursors, funding timers, the end-service journal, and evidence records), which records what an authority reported and never a balance.

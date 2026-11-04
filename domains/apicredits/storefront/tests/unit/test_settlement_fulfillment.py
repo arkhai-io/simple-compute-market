@@ -616,7 +616,16 @@ async def settled_db(tmp_path, monkeypatch, request):
     return client, response["negotiation_id"]
 
 
-def _build_settlement_composition(db, *, on_outcome=None):
+def _build_settlement_composition(db, *, on_completion=None):
+    """The settlement composition the coordinator tests drive.
+
+    ``on_completion`` is called with the coordinator's own task once that task
+    finishes. The task persists its outcome and then wakes servicing, so its
+    outcome being stored does not mean it is done: a test that waits for the
+    task itself, through ``_fulfilled``, neither ends while the task still runs
+    on the test's event loop, which closes without cancelling it, nor misses an
+    error the task raised.
+    """
     from apicredits_storefront.domain_runtime import (
         fulfill_api_credit_settlement,
         persist_api_credit_settlement_outcome,
@@ -671,9 +680,12 @@ def _build_settlement_composition(db, *, on_outcome=None):
         ),
     )
     async def persist(prepared, outcome):
+        # The coordinator awaits this hook from its own task, so the current
+        # task is the one the test waits for; its done callback is registered
+        # before persisting, so a failure here reaches the test too.
+        if on_completion is not None:
+            asyncio.current_task().add_done_callback(on_completion)
         await persist_api_credit_settlement_outcome(db, prepared, outcome)
-        if on_outcome is not None:
-            on_outcome()
     coordinator = SettlementJobCoordinator(
         runtime,
         prepare=partial(
@@ -693,6 +705,15 @@ def _build_settlement_composition(db, *, on_outcome=None):
         wake_servicing=worker.wake,
     )
     return runtime, worker, coordinator
+
+
+async def _fulfilled(finished: asyncio.Future):
+    """The coordinator task's outcome, once the task has finished, failing the
+    test if it raised, was cancelled, or did not fulfil."""
+    task = await asyncio.wait_for(finished, timeout=5)
+    outcome = task.result()
+    assert outcome.status == "fulfilled", outcome
+    return outcome
 
 
 async def test_settlement_coordinator_verifies_issues_and_stores_credentials(settled_db, monkeypatch):
@@ -716,14 +737,16 @@ async def test_settlement_coordinator_verifies_issues_and_stores_credentials(set
     monkeypatch.setattr(settlement_stages, "verify_escrow_against_plan", verify)
     monkeypatch.setattr(CreditsServiceClient, "submit_credit_issuance", issue)
     client = SimpleNamespace(string_obligation=SimpleNamespace(do_obligation=attest))
-    completed = asyncio.Event()
-    runtime, worker, coordinator = _build_settlement_composition(db, on_outcome=completed.set)
+    finished = asyncio.get_running_loop().create_future()
+    runtime, worker, coordinator = _build_settlement_composition(
+        db, on_completion=finished.set_result
+    )
     result = await coordinator.start(
         escrow_uid="0xdeal", negotiation_id=neg_id, mechanism_client=client, chain_name="anvil",
         request=_settlement_request(neg_id),
     )
     assert result["status"] == "provisioning"
-    await asyncio.wait_for(completed.wait(), timeout=5)
+    await _fulfilled(finished)
     progress = await db.load_issuance_progress(reference="0xdeal")
     assert progress["status"] == "ready"
     from apicredits_storefront.settlement_stages import project_progress
@@ -803,14 +826,14 @@ async def test_a_listing_changed_since_acceptance_settles_against_the_committed_
 
     monkeypatch.setattr(settlement_stages, "verify_escrow_against_plan", verify)
     monkeypatch.setattr(CreditsServiceClient, "submit_credit_issuance", issue)
-    completed = asyncio.Event()
-    runtime, _, coordinator = _build_settlement_composition(db, on_outcome=completed.set)
+    finished = asyncio.get_running_loop().create_future()
+    runtime, _, coordinator = _build_settlement_composition(db, on_completion=finished.set_result)
     await coordinator.start(
         escrow_uid="0xchanged", negotiation_id=neg_id,
         mechanism_client=SimpleNamespace(string_obligation=SimpleNamespace(do_obligation=attest)),
         chain_name="anvil", request=_settlement_request(neg_id),
     )
-    await asyncio.wait_for(completed.wait(), timeout=5)
+    await _fulfilled(finished)
 
     assert [call["settlement_plan"] for call in verified] == [committed]
     registered = await runtime.get_status(neg_id)
@@ -843,14 +866,14 @@ async def test_verified_prepare_delivers_when_further_chain_reads_are_unavailabl
 
     monkeypatch.setattr(settlement_stages, "verify_escrow_against_plan", verify)
     monkeypatch.setattr(CreditsServiceClient, "submit_credit_issuance", issue)
-    completed = asyncio.Event()
-    _, _, coordinator = _build_settlement_composition(db, on_outcome=completed.set)
+    finished = asyncio.get_running_loop().create_future()
+    _, _, coordinator = _build_settlement_composition(db, on_completion=finished.set_result)
     await coordinator.start(
         escrow_uid="0xverified", negotiation_id=neg_id,
         mechanism_client=SimpleNamespace(string_obligation=SimpleNamespace(do_obligation=attest)),
         chain_name="anvil", request=_settlement_request(neg_id),
     )
-    await asyncio.wait_for(completed.wait(), timeout=5)
+    await _fulfilled(finished)
 
     assert (await db.load_issuance_progress(reference="0xverified"))["status"] == "ready"
     assert (await db.load_escrow(escrow_uid="0xverified"))["status"] == "ready"

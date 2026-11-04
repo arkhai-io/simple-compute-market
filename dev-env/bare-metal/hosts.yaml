@@ -1,0 +1,6 @@
+# Development host definitions document for the bare-metal end-to-end lane:
+# deliberately empty. Under the lane's default mock provisioning nothing ever
+# connects to a host, and publication dispatches no job; its scenarios register
+# the hosts they need through the API, which this document leaves as they are.
+# Not for any real site.
+hosts: []

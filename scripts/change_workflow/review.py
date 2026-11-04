@@ -3,8 +3,10 @@ the change's next numbered record.
 
 A review runs the `change-review` skill in Codex's read-only sandbox first, and
 when Codex is unavailable, on Claude with no rule that edits; either way the
-reviewer cannot change what it reviews. Its final message is the review. It is
-checked for the review format before it is published as the change's next numbered
+reviewer cannot change what it reviews. Its final message is the review, from its
+first line that is the review's title: any narration before that line is dropped,
+and the transcript keeps it. The rest is checked for the review format before it
+is published as the change's next numbered
 `reviews/NN-<kind>.md`, the only authoritative record of its findings; the session
 goes to `reviews/transcripts/NN-<kind>.log`, a transcript no review or triage step
 reads. A run whose output is not a review publishes nothing, and its output is kept
@@ -123,13 +125,31 @@ def _reviewed_head(root: Path) -> str:
         raise ReviewError(f"could not read HEAD, the commit under review: {exc}") from exc
 
 
+def _is_title(line: str, kind: str, change: str) -> bool:
+    title = line.lower()
+    return title.startswith("# ") and f"{kind} review" in title and change.lower() in title
+
+
+def from_title(text: str, kind: str, change: str) -> str:
+    """`text` from its first line that is the title of a `kind` review of `change`.
+
+    A reviewer may narrate before its review; that preamble is dropped here and
+    kept in the transcript. Output with no such line is returned as it is, for
+    `review_problems` to refuse.
+    """
+    lines = text.splitlines(keepends=True)
+    for index, line in enumerate(lines):
+        if _is_title(line.strip(), kind, change):
+            return "".join(lines[index:])
+    return text
+
+
 def review_problems(text: str, kind: str, change: str) -> list[str]:
     """Why `text` is not a review in the `change-review` format; empty when it is."""
     lines = [line for line in text.splitlines() if line.strip()]
     if not lines:
         return ["the output is empty"]
-    title = lines[0].lower()
-    if not (title.startswith("# ") and f"{kind} review" in title and change.lower() in title):
+    if not _is_title(lines[0].strip(), kind, change):
         return [f"the first line is not the title of a {kind} review of {change}: {lines[0][:80]!r}"]
     problems = []
     positions = [text.find(f"\n## {section}\n") for section in SECTIONS]
@@ -254,7 +274,7 @@ def _claude_attempt(model: Model, prompt: str, continuing: str | None, draft: Pa
     """One run of the review on Claude, its final message written to `draft`, as
     Codex writes its own."""
     stream = Stream(log, log.with_suffix(".progress"), clock, echo)
-    command = claude_command(prompt, rules, None, model, session=continuing,
+    command = claude_command(prompt, rules, None, model, root=root, session=continuing,
                              system=REVIEW_UNATTENDED)
     try:
         status = runner(command, root, stream.feed)
@@ -379,6 +399,8 @@ def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str |
     elif status != 0:
         problems = [f"the reviewer exited {status}"]
     else:
+        # The review starts at its title; a rejected run's draft keeps everything.
+        text = from_title(text, kind, change)
         problems = review_problems(text, kind, change)
     if problems or ran is None:
         output.unlink()

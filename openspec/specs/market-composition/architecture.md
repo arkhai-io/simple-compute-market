@@ -326,6 +326,10 @@ Core defines shared-reader carriers: public settlement options, accepted Agreeme
 
 Acceptance fixes exact Agreement bytes and puts the seller-derived mandate in opaque `settlement_data`; both are committed together in `negotiation_threads` and carried in responses and outcomes. VM, bare-metal, and API-credit sellers load the mandate by negotiation ID, poll its deterministic transaction ID, verify the signed receipt, and only then provision or issue. Pending evidence is retryable, completed calls are idempotent, and nonterminal domain work is re-driven. Receipt evidence and physical/grant progress remain domain-owned.
 
+## Current and historical payment wire compatibility
+
+Before a consumer, endpoint, or server change, verify rebuilt consumer responses against both the currently deployed authority contract and the selected publication. Bind each check to the contract it observed. One check may cover both only when their identity is established; if they differ, establish a compatible rollout order before mutation. Historical signed-byte verification is additional evidence, not a substitute for current response parsing. Do not change or downgrade the external authority to match the consumer. The vendored payment kit records source and transformation provenance, current and historical vectors, and generation rules in its README and schema source notes. Local vector conformance does not establish live funding, deployed service compatibility, or physical delivery.
+
 ## Identity composition
 
 Marketplace identity is a foundation kit alongside the generic settlement lifecycle. It owns canonical principals, signer/verifier dispatch, authenticated request and response envelopes, replay handling, and rotation primitives. The dependency is deliberately one way: roles, domains, settlement adapters, and their composition roots may depend downward on these interfaces, while the identity kit imports no role, domain, settlement mechanism, hosted provider, or chain runtime.

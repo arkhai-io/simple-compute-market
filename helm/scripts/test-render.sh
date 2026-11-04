@@ -289,6 +289,23 @@ expect_override_failure \
     "$CHART_DIR/fixtures/payments-ed25519-values.yaml" \
     "public registry with an acquisition pointer fails render" \
     --set-string 'registry.descriptor.accessAcquisitionPointer=https://registry.example/access'
+# The provisioning chart derives every definition document's path from its
+# `definitions` value, and the service refuses the retired inventory settings,
+# so a release stating any of them under provisioning `config` fails to render,
+# naming the key; a render failing for another reason does not count.
+for refused in host_definitions_path relay_definitions_path inventory_path inventory_ini; do
+    label="provisioning.config.$refused fails render naming the key"
+    if refusal="$(helm template "$RELEASE-invalid" "$CHART_DIR" \
+        --values "$CHART_DIR/values.yaml" \
+        --values "$CHART_DIR/fixtures/payments-ed25519-values.yaml" \
+        --set-string "provisioning.config.$refused=/app/config/elsewhere.yaml" 2>&1 >/dev/null)"; then
+        fail "$label"
+    elif grep -q "$refused" <<<"$refusal"; then
+        pass "$label"
+    else
+        fail "$label"
+    fi
+done
 # Each chart's own render tests (docs/development/TESTING.md, "Chart Render
 # Tests"), so this one target runs every render check. The storefront and
 # bare-metal storefront charts' tests also load a rendered document with that

@@ -158,3 +158,15 @@ def test_make_targets_delegate_to_the_script() -> None:
 
     assert "scripts/check_push_ready.py check" in makefile
     assert "scripts/check_push_ready.py push" in makefile
+
+
+def test_private_content_refuses_publication(repo: Path, capsys) -> None:
+    # Synthetic prohibited account assembled so this test remains publishable.
+    private = "/home/" + "fixture-person" + "/work"
+    (repo / "notes.md").write_text(private)
+    _git(repo, "add", "notes.md")
+    _git(repo, "commit", "-qm", "notes")
+
+    assert guard.main(["push"], root=repo) == 1
+    assert _git(repo, "ls-remote", "origin", "refs/heads/feat/change") == ""
+    assert private not in capsys.readouterr().err

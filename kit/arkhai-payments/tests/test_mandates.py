@@ -53,6 +53,7 @@ def test_authorities_nonce_and_fee_follow_policy():
         "stop": [], "reverse": [PAYEE, DISPUTE], "extend": [DISPUTE],
     }
     assert BUYER not in wire["parts"][0]["authorities"]["reverse"]
+    assert "authorities" not in wire
     assert wire["nonce"] == "arkhai.payments.v1"
     assert wire["fee"] == {"bps": 250}
 

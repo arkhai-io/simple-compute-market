@@ -497,7 +497,17 @@ check confirms that `HEAD` is attached, the worktree is clean, the branch is nei
 `main` nor `dev`, and the branch's upstream has the same name. The push MUST send
 exactly `HEAD` and MUST NOT be forced. A branch with no upstream MAY be pushed to
 the same name, setting that upstream. The check MUST report a refused state and
-MUST NOT repair it.
+MUST NOT repair it. Before sending commits, the check MUST reject recognizable
+personal home paths, private assistant planning/session paths and identifiers in
+a configured local denylist from added content, filenames and commit messages.
+It MUST inspect intermediate commits, not only the final tree, and MUST omit
+matched values from diagnostics. An unreadable configured denylist or unavailable
+comparison refs MUST fail closed. This mechanical check does not replace review.
+
+#### Scenario: Private content is removed in a later commit
+
+- **WHEN** an outgoing commit adds recognizable private content and a later commit removes it
+- **THEN** the guarded push refuses the history without printing the matched value
 
 #### Scenario: The worktree is dirty
 
@@ -1300,14 +1310,20 @@ run records MUST be recorded on the run's outcome, from the run's own record and
 with the harness's reason when it gives one. A run that cannot go on without a denied tool MUST end
 with a stopped outcome naming the denial, rather than asking a question or working
 around it; a run that goes on MUST do so only by calls its step's rules allow. A
-call a deny rule refused MUST NOT be done by another tool; a call denied for want
-of an allow rule MAY be done by a tool the step's rules allow for the same work,
-and the run MUST name that substitute in its message. The orchestrating session
+call a deny rule refused MUST NOT be done by another tool, except where the rule
+exists only to keep file writes on the Edit and Write tools — the step table marks
+such rules, as sed's in-place forms, find's deleting, running, and writing
+actions, and the diff family's output-to-file forms — whose refused shell write
+MAY be made with the Edit or Write tool the step's rules allow. A call denied for
+want of an allow rule MAY be done by a tool the step's rules allow for the same
+work. Either way the run MUST name that substitute in its message. The orchestrating session
 MUST read each recorded denial from the run's record, never from the step's
 message; classify it by the harness's reason as a gap in the table or a
 forbidden action, matching a command refused by its parts, or one with no
 reason, against the step's deny rules; check the run's later calls, after a deny-rule
-denial, for a workaround; propose, for a gap, the narrowest rule that matches the
+denial, for a workaround; read a write-steering rule's denial whose write was made
+with the Edit or Write tool as a gap, which needs no ruling from the owner; propose,
+for a gap, the narrowest rule that matches the
 call and say whether it is a one-run grant or a tracked change; and record its
 reading in the workflow log as a
 decision reading that run, before the next step runs. A run whose outcome still
@@ -1319,7 +1335,16 @@ the orchestrating session, as a tracked change, or granted by the owner for one
 run, fresh or resumed. A grant MUST be passed on that run's command line — for a
 fresh run through its step's make target — recorded as `granted` on the run's log
 line, and never added to the table, so the step's next run is held to its table
-again. Interactive runs MUST NOT be restricted by the table.
+again. A file-tool rule's relative path, in the table or in a grant, MUST name a
+path from the root of the checkout the run starts in, whatever directory the run
+has since moved to. Interactive runs MUST NOT be restricted by the table.
+
+#### Scenario: A step changes directory before writing a file its table allows
+
+- **WHEN** an unattended run changes its working directory into a subdirectory
+  and then writes a file its step's relative file rule names from the checkout's
+  root
+- **THEN** the write is allowed, as it would be from the checkout's root
 
 #### Scenario: Validation attempts to relock
 
@@ -1347,6 +1372,15 @@ again. Interactive runs MUST NOT be restricted by the table.
 - **THEN** the run names the substitute in its message, and the orchestrating
   session reads the denial as a gap, not a workaround
 
+#### Scenario: A step's in-place sed is refused and the step uses the Edit tool
+
+- **WHEN** an unattended run's `sed -i` is refused by the deny rule that keeps file
+  writes on the Edit tool, and the run makes the same edit with the Edit tool its
+  step's rules allow
+- **THEN** the run names the substitute in its message, and the orchestrating
+  session reads the denial as a gap, not a workaround, with no ruling asked of the
+  owner
+
 #### Scenario: A question carries denials
 
 - **WHEN** an unattended validation was denied a command it could do without, went
@@ -1357,9 +1391,10 @@ again. Interactive runs MUST NOT be restricted by the table.
 
 #### Scenario: A step is denied by a deny rule
 
-- **WHEN** an unattended run is denied a call that a deny rule names
-- **THEN** the denial stands, and the run's attempt is reported to the owner as a
-  finding
+- **WHEN** an unattended run is denied a call that a deny rule forbidding the work
+  itself names, such as `git stash`
+- **THEN** the denial stands, no other tool does the work, and the run's attempt
+  is reported to the owner as a finding
 
 #### Scenario: A step commits its work
 

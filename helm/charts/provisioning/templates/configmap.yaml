@@ -24,6 +24,9 @@ data:
     {{- if .Values.definitions.pools -}}
       {{- $_ := set $config "pool_definitions_path" "/app/config/pool-definitions.yaml" -}}
     {{- end -}}
+    {{- if .Values.definitions.hosts -}}
+      {{- $_ := set $config "host_definitions_path" "/app/config/host-definitions.yaml" -}}
+    {{- end -}}
     {{- if .Values.definitions.capacity -}}
       {{- $_ := set $config "capacity_definitions_path" "/app/config/capacity-definitions.yaml" -}}
     {{- end -}}
@@ -37,8 +40,9 @@ data:
   {{- with .Values.definitions.relays }}
   {{- /*
     Relay inventory. An entry may name which key of the provisioning-secrets
-    profile holds its admission token; the key is named here, the value never
-    is. That key is read once, when the relay is created — a token rotated
+    profile holds its admission token, and must name the key holding its
+    grant-signing key; the keys are named here, the values never are. Each is
+    read once, when the relay is created — a token or a grant key rotated
     through the relay API is authoritative from then on.
   */}}
   relay-definitions.yaml: |
@@ -50,6 +54,15 @@ data:
     is disabled. Imported before capacity, whose declarations name pools.
   */}}
   pool-definitions.yaml: |
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.definitions.hosts }}
+  {{- /*
+    Hosts. Each entry declares its whole host and names its key by file path,
+    never carrying one; a host this document stops naming is retained.
+    Imported after pools, which an entry names, and before capacity.
+  */}}
+  host-definitions.yaml: |
     {{- toYaml . | nindent 4 }}
   {{- end }}
   {{- with .Values.definitions.capacity }}

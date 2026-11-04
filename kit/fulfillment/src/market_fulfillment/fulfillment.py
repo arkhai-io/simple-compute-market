@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import copy
 import logging
 from dataclasses import dataclass
-from typing import Any
+from types import MappingProxyType
+from typing import Any, Callable, Mapping
 
 from market_resource_pools_contracts import pool_delivers_offering_mode
 
@@ -12,11 +14,13 @@ from .db import SettlementRecord, SettlementRecordState
 from market_core import VersionedEnvelope
 from .fulfillment_persistence import FulfillmentTransaction, FulfillmentUnitOfWork
 from .provider import (
+    CompensationRefusedError,
     CredentialFetchFailedError,
     FulfillmentConflictError,
     FulfillmentCreateFailedError,
     FulfillmentValidationIssue,
     FulfillmentValidationResult,
+    ProviderConfigInvalidError,
     ProviderRegistry,
     ProvisionedResourceDescriptor,
     SettlementResult,
@@ -30,11 +34,10 @@ from .settlement_types import SettlementEntityNotFoundError, SettlementResource
 
 logger = logging.getLogger(__name__)
 
-# States a fulfillment reaches only after begin_fulfillment_teardown has
-# already run once. A repeat call in any of these states is an idempotent
-# no-op return, not a re-preparation or a conflict -- including terminal
-# torn_down and the retryable teardown_failed, which recovery may still
-# resolve by calling this same entrypoint again.
+# States a fulfillment reaches only after a teardown has begun, ordinary or
+# compensating. A repeat call of either entrypoint in any of these states
+# adopts that teardown: it returns the current view, re-preparing and writing
+# nothing, so a caller need not track whether it already asked.
 _TEARDOWN_INITIATED_STATES = frozenset(
     {
         SettlementRecordState.teardown_dispatch_pending.value,
@@ -66,6 +69,22 @@ class FulfillmentStatus:
     state: str
     failure_reason: str | None
     failure_message: str | None
+
+
+@dataclass(frozen=True)
+class CompensationCandidate:
+    """What a compensating teardown's caller judges a failed fulfillment by.
+
+    The kit passes the record's fields without interpreting them: which
+    failures are worth compensating, and what the provider metadata says, are
+    the caller's to decide. ``provider_metadata`` is a deep copy, so nothing
+    the caller does to it while judging reaches the record, which the
+    transaction may still write; its top level is also read-only.
+    """
+
+    state: str
+    failure_reason: str | None
+    provider_metadata: Mapping[str, Any]
 
 
 @dataclass(frozen=True)
@@ -295,22 +314,97 @@ class FulfillmentOrchestrator:
                     "only an active fulfillment can begin teardown"
                 )
 
-            if record.prepared_teardown_operation:
-                prepared = VersionedEnvelope.model_validate(
-                    record.prepared_teardown_operation
-                )
-            else:
-                pool = tx.get_pool(record.pool_id)
-                if pool is None:
-                    raise LookupError(f"pool {record.pool_id!r} not found")
-                provider = self._providers.require(record.provider)
-                prepared = provider.prepare_teardown(
-                    self._settlement_result(tx, record),
-                    dict(pool.provider_config or {}),
-                )
-
+            prepared = self._prepared_teardown(tx, record)
             updated = tx.begin_teardown(fulfillment_id, prepared)
             return self._view(updated)
+
+    async def begin_compensating_teardown(
+        self,
+        fulfillment_id: str,
+        *,
+        authorize: Callable[[CompensationCandidate], bool],
+    ) -> FulfillmentAcceptance:
+        """Durably begin the teardown of a failed fulfillment's create.
+
+        A create that failed after dispatch may have left effects its
+        provider's teardown can undo. ``authorize`` decides whether this
+        failure is one to compensate; it is judged inside the write
+        transaction, on the record as that transaction reads it, so a record
+        that changed since the caller last looked is judged as it now is.
+
+        Answers by the aggregate's state:
+
+        - a teardown already begun or finished returns its current view,
+          writing nothing, so a repeated call adopts the first;
+        - ``failed``, refused by ``authorize`` or by a provider that cannot
+          prepare its teardown (``ProviderConfigInvalidError``), raises
+          ``CompensationRefusedError``, writing nothing;
+        - ``failed``, with any other preparation error, raises that error,
+          writing nothing, since it may not hold on a later attempt;
+        - ``failed``, authorized and prepared, records the teardown and moves
+          to ``teardown_dispatch_pending`` with the failure reason
+          ``CREATE_COMPENSATION``, keeping the failure message;
+        - any other state raises ``FulfillmentConflictError``.
+
+        Like ``begin_fulfillment_teardown`` it performs no provider I/O;
+        convergence dispatches and observes the teardown.
+        """
+
+        with self._uow.transaction() as tx:
+            record = tx.get_by_fulfillment_id_for_write(fulfillment_id)
+            if record is None:
+                raise SettlementEntityNotFoundError(
+                    f"no fulfillment {fulfillment_id!r}"
+                )
+            if record.state in _TEARDOWN_INITIATED_STATES:
+                return self._view(record)
+            if record.state != SettlementRecordState.failed.value:
+                raise FulfillmentConflictError(
+                    f"fulfillment {fulfillment_id!r} is {record.state!r}; "
+                    "only a failed fulfillment can begin a compensating teardown"
+                )
+
+            candidate = CompensationCandidate(
+                state=record.state,
+                failure_reason=record.failure_reason,
+                provider_metadata=MappingProxyType(
+                    copy.deepcopy(dict(record.provider_metadata or {}))
+                ),
+            )
+            if not authorize(candidate):
+                raise CompensationRefusedError(
+                    f"fulfillment {fulfillment_id!r} failed with "
+                    f"{record.failure_reason!r}, which its caller does not "
+                    "compensate"
+                )
+            try:
+                prepared = self._prepared_teardown(tx, record)
+            except ProviderConfigInvalidError as exc:
+                raise CompensationRefusedError(
+                    f"fulfillment {fulfillment_id!r} cannot be compensated: {exc}"
+                ) from exc
+
+            updated = tx.begin_compensating_teardown(fulfillment_id, prepared)
+            return self._view(updated)
+
+    def _prepared_teardown(
+        self, tx: FulfillmentTransaction, record: Any
+    ) -> VersionedEnvelope[Any]:
+        """The record's teardown operation, prepared once.
+
+        An operation already captured on the row, as a backfilled row carries,
+        is reused rather than re-prepared from live pool configuration.
+        """
+        if record.prepared_teardown_operation:
+            return VersionedEnvelope.model_validate(record.prepared_teardown_operation)
+        pool = tx.get_pool(record.pool_id)
+        if pool is None:
+            raise LookupError(f"pool {record.pool_id!r} not found")
+        provider = self._providers.require(record.provider)
+        return provider.prepare_teardown(
+            self._settlement_result(tx, record),
+            dict(pool.provider_config or {}),
+        )
 
     @staticmethod
     def _settlement_result(tx: FulfillmentTransaction, record: Any) -> SettlementResult:

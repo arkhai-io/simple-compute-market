@@ -37,9 +37,22 @@ _LOOP_START = 'if [ -n "$GPU_DEVICES" ]; then\n'
 _LOOP_END = "\n        fi\n"
 
 
+# The task includes the shared eligibility functions and reads the pool's
+# boot-GPU opt-in; both are rendered as Ansible would before bash sees them.
+_RENDERED = {
+    "{{ lookup('file', 'gpu_eligibility.sh') }}": (
+        ROOT / "ansible/roles/vm-management/files/gpu_eligibility.sh"
+    ).read_text(encoding="utf-8"),
+    "{{ vm_passthrough_boot_gpu | bool | lower }}": "false",
+}
+
+
 def _task_cmd_text() -> str:
     text = VM_CREATE.read_text(encoding="utf-8")
-    return extract_between(text, _TASK_CMD_START, _TASK_CMD_END)
+    command = extract_between(text, _TASK_CMD_START, _TASK_CMD_END)
+    for template, value in _RENDERED.items():
+        command = command.replace(template, value)
+    return command
 
 
 def _attachment_loop_fragment() -> str:

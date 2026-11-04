@@ -16,6 +16,12 @@ on the direct path is reached at its host's buyer-facing address and the
 external port the playbook forwarded. Its detail is VM's named operator facts,
 the guest's internal address among them; secrets are never among them, being
 reported as credentials.
+
+A result is read from the one fact its action's role printed, through the
+compute family's fact reader, never from a search of the whole output: the
+tenant account and the forwarded or relayed port are that fact's. A create
+yields evidence only from a fact that names the job's own guest and reports
+success; any other fact yields none, and the detail names what differed.
 """
 
 from __future__ import annotations
@@ -38,17 +44,19 @@ from compute_provisioning_contracts import (
 )
 from pydantic import ValidationError
 from compute_provisioning.jobs import JobRun
+from compute_provisioning.relays import (
+    RELAY_GRANT_VARIABLE,
+    RELAY_JOB_RESERVED_VARIABLES,
+    RELAY_SECRET_VARIABLES,
+    RELAY_TOKEN_VARIABLE,
+)
 from compute_provisioning_ansible import (
     AnsibleJobInterpretation,
     AnsibleJobPlan,
     matches_any,
+    read_fact,
 )
-from compute_provisioning_ansible.runner import (
-    AnsibleResult,
-    InventoryTarget,
-    extract_fact,
-    extract_json_block,
-)
+from compute_provisioning_ansible.runner import AnsibleResult, InventoryTarget
 
 from vm_provisioning_adapter.models.jobs_model import VmJobParams
 
@@ -57,9 +65,9 @@ logger = logging.getLogger(__name__)
 #: The inventory group the VM-operations playbook targets.
 VM_INVENTORY_GROUP = "kvm_hosts"
 
-#: Fields the VM playbooks print whose values are secret: the root key's path
-#: on the host and a relay's admission token.
-VM_SECRET_FIELDS = frozenset({"ssh_key_path_host", "frp_auth_token"})
+#: Fields whose values are secret wherever a VM playbook prints them: the root
+#: key's path on the host, and the relay family's secret variable names.
+VM_SECRET_FIELDS = frozenset({"ssh_key_path_host"}) | RELAY_SECRET_VARIABLES
 
 #: VM failures that running the same job again cannot fix.
 VM_NON_RETRYABLE_FAILURES: tuple[str, ...] = (
@@ -84,6 +92,25 @@ VM_RESULT_FACTS: Mapping[str, str] = {
     "reset_password": "vm_password_reset_data",
     "vm_remove": "vm_remove_data",
     "check": "check_data",
+}
+
+#: The ``action`` each VM action's fact names, as its role prints it. The shared
+#: fact reader takes a printed document as the job's fact only when it names
+#: this action, so one action's run never adopts another's document. The
+#: monitor and check roles print no ``action``, so only their fact's JSON
+#: ``var:`` form is read.
+VM_FACT_ACTIONS: Mapping[str, str] = {
+    "create": "create",
+    "list": "list",
+    "start": "start",
+    "shutdown": "shutdown",
+    "destroy": "destroy",
+    "reboot": "reboot",
+    "undefine": "undefine",
+    "monitor": "monitor",
+    "reset_password": "reset_password",
+    "vm_remove": "vm_remove",
+    "check": "check",
 }
 
 # The roles a playbook's ``authentication`` fact may carry, in the order their
@@ -111,8 +138,16 @@ class GoldenImageCredentials:
 
 
 class RelayResolver(Protocol):
-    def resolve_into(self, params: VmJobParams) -> VmJobParams:
-        """``params`` with the referenced relay's address and token filled in."""
+    def resolve_into(
+        self,
+        params: VmJobParams,
+        *,
+        remote_port: int | None = None,
+        owner_id: str | None = None,
+    ) -> VmJobParams:
+        """``params`` with the referenced relay's address and token filled in,
+        and the grant for ``remote_port``'s lease, held by ``owner_id``, when a
+        port is given."""
 
 
 @dataclass
@@ -176,9 +211,10 @@ class VmAnsibleCodec:
     """The VM domain's ``AnsibleJobCodec``; see the module docstring.
 
     ``relay_resolver``, when given, fills a referenced relay's address and
-    token into a job's parameters immediately before its variables are
-    written, so the token never enters the job's stored parameters and a
-    rotation takes effect on a retry.
+    token, and a create's signed grant, into a job's parameters immediately
+    before its variables are written, so the token and the grant never enter
+    the job's stored parameters, and a rotated token or key takes effect on a
+    retry.
     """
 
     inventory_group = VM_INVENTORY_GROUP
@@ -199,8 +235,20 @@ class VmAnsibleCodec:
 
     def prepare(self, run: JobRun) -> AnsibleJobPlan:
         params = vm_job_params(run.parameters, host_id=run.host.host_id)
+        collisions = sorted(
+            self.reserved_var_keys(params).intersection(params.provider_extra_vars)
+        )
+        if collisions:
+            raise ValueError(
+                "provider extra_vars override reserved job variables: " + ", ".join(collisions)
+            )
         if self._relay_resolver is not None:
-            params = self._relay_resolver.resolve_into(params)
+            # A create carries its leased port, and so adds a proxy, which
+            # carries a grant for the lease its reservation holds; a removal
+            # carries no port and needs no grant.
+            params = self._relay_resolver.resolve_into(
+                params, remote_port=params.vm_remote_port, owner_id=params.escrow_uid
+            )
         return AnsibleJobPlan(
             variables=self.variables(params),
             extra_variables=dict(params.provider_extra_vars),
@@ -254,13 +302,20 @@ class VmAnsibleCodec:
         refused when a fulfillment is prepared rather than only when the job
         runs.
         """
-        return frozenset(self.variables(params))
+        # These aliases and optional inputs control the domain role even when
+        # the codec emits no relay fields for a direct job.
+        return frozenset(self.variables(params)) | RELAY_JOB_RESERVED_VARIABLES | frozenset({
+            "target_host", "vm_name", "vm_ip", "vm_remote_port", "relay_id",
+        })
 
     def variables(self, params: VmJobParams) -> dict[str, Any]:
         """The VM-operations playbook's variables for a job, extra ones aside."""
         variables: dict[str, Any] = {
             "host_id": params.host_id,
             "vm_action": params.vm_action,
+            # Accepted relay ownership, also reserved for direct jobs: provider
+            # extras must never switch off a required teardown.
+            "vm_relay_required": bool(params.relay_id or params.vm_remote_port is not None),
             "offering_mode": params.offering_mode,
             "executor_action": params.executor_action,
             "executor_target": params.executor_target,
@@ -283,17 +338,19 @@ class VmAnsibleCodec:
         for name in ("vm_gpu_device", "vm_gpu_devices", "vm_gpu_partition_size"):
             if getattr(params, name):
                 variables[name] = getattr(params, name)
-        # Relay inputs. The token is a credential and reaches the playbook the
-        # way every other job variable does; the codec's secret fields keep it
-        # out of logged output. The remote port is supplied, never chosen:
-        # allocation belongs to the service, which is also what can reclaim it
-        # when the VM's life ends by any path.
+        # Relay inputs. The token and the grant are credentials and reach the
+        # playbook the way every other job variable does; the codec's secret
+        # fields keep them out of logged output. The remote port is supplied,
+        # never chosen: allocation belongs to the service, which is also what
+        # can reclaim it when the VM's life ends by any path.
         if params.relay_addr:
             variables["frp_server_addr"] = params.relay_addr
         if params.relay_port:
             variables["frp_server_port"] = params.relay_port
         if params.relay_token:
-            variables["frp_auth_token"] = params.relay_token
+            variables[RELAY_TOKEN_VARIABLE] = params.relay_token
+        if params.relay_grant:
+            variables[RELAY_GRANT_VARIABLE] = params.relay_grant
         if params.vm_remote_port:
             variables["vm_remote_port"] = params.vm_remote_port
         for name in ("golden_image_name", "gcs_bucket_url", "gcs_image_path", "escrow_uid"):
@@ -339,10 +396,13 @@ def parse_vm_output(
 
     ``tenant_address`` is the address buyers use to reach the host, resolved
     from the registered host record. It becomes ``host_ip``; nothing here
-    reads an inventory file for it.
+    reads an inventory file for it. The tenant account and forwarded port are
+    the selected fact's own; a relayed port replaces the forwarded one when
+    the payload is built.
     """
-    ssh_port = extract_ssh_port(output.stdout, params.host_id)
-    tenant_user = extract_tenant_user(output.stdout, params.host_id)
+    fact = extract_vm_fact(output.stdout, params.vm_action)
+    ssh_port = _forwarded_port(fact)
+    tenant_user = _text(fact, "tenant_user")
     ssh_command = None
     if ssh_port and tenant_user and tenant_address:
         ssh_command = (
@@ -355,57 +415,30 @@ def parse_vm_output(
         tenant_user=tenant_user,
         host_ip=tenant_address,
         ssh_command=ssh_command,
-        ansible_result=extract_vm_fact(output.stdout, params.vm_action),
+        ansible_result=fact,
     )
 
 
-def extract_ssh_port(playbook_output: str, host_id: str | None = None) -> Optional[str]:
-    patterns = [r'"external_ssh_port":\s*"(?P<port>\d+)"']
-    if host_id:
-        patterns.extend([
-            rf"-p\s*(?P<port>\d{{2,5}})\s+root@{re.escape(host_id)}",
-            rf"-p\s*(?P<port>\d{{2,5}})\s+\S+@{re.escape(host_id)}",
-        ])
-    patterns.append(r"-p\s*(?P<port>\d{2,5})\s+\S+@[\w\.-]+")
-    for pattern in patterns:
-        match = re.search(pattern, playbook_output)
-        if match:
-            return match.group("port")
-    return None
-
-
-def extract_tenant_user(playbook_output: str, host_id: str | None = None) -> Optional[str]:
-    patterns = [r'"tenant_user":\s*"(?P<user>[^"]+)"']
-    if host_id:
-        patterns.append(
-            rf"-p\s*\d{{2,5}}\s+(?P<user>[A-Za-z0-9._-]+)@{re.escape(host_id)}"
-        )
-    patterns.append(r"-p\s*\d{2,5}\s+(?P<user>[A-Za-z0-9._-]+)@\S+")
-    for pattern in patterns:
-        match = re.search(pattern, playbook_output)
-        if match:
-            return match.group("user")
-    return None
-
-
 def extract_vm_fact(stdout: str, action: str) -> Optional[dict]:
-    """The result fact a VM action's playbook printed.
-
-    The fact is printed by name; failing that, the last ``msg: |`` block
-    carrying an ``action`` is the one ``json-output.yml`` printed.
-    """
+    """The result fact a VM action's playbook printed, read through the compute
+    family's fact reader for the ``action`` that action's role prints."""
     fact_name = VM_RESULT_FACTS.get(action)
     if not fact_name:
         return None
-    result = extract_fact(stdout, fact_name)
-    if result is not None:
-        return result
-    last_result = None
-    for match in re.finditer(r"msg:\s*\|[-]?\s*\n", stdout):
-        candidate = extract_json_block(stdout, match.end())
-        if candidate is not None and "action" in candidate:
-            last_result = candidate
-    return last_result
+    return read_fact(stdout, fact_name, action=VM_FACT_ACTIONS[action])
+
+
+def _text(fact: Mapping[str, Any] | None, name: str) -> Optional[str]:
+    value = (fact or {}).get(name)
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _forwarded_port(fact: Mapping[str, Any] | None) -> Optional[str]:
+    """The forwarded port a fact reports, or ``None``. A relayed create prints
+    a sentence there rather than a port."""
+    value = (fact or {}).get("external_ssh_port")
+    text = str(value).strip() if value is not None else ""
+    return text if text.isdigit() else None
 
 
 def split_credentials(
@@ -480,15 +513,14 @@ def build_result_payload(result: VmPlaybookOutput) -> dict:
         if tenant_cmds.get("external"):
             payload["ssh_command"] = tenant_cmds["external"]
 
-    frp = ar.get("frp")
-    if frp:
-        payload["frp"] = frp
-        # The create playbook's fact for a buyer-provided key reports this block
-        # whether or not a relay was configured, and without one it reports the
-        # relay disabled with "N/A" placeholders. Only an enabled relay's port
-        # is where a buyer connects; otherwise the port the playbook forwarded
-        # on the host stands.
-        relay = _relay_reported(payload)
+    relay_block = ar.get("relay")
+    if relay_block:
+        payload["relay"] = relay_block
+        # The buyer-key fact prints its relay block on the direct path too,
+        # disabled and with "N/A" placeholders for its port. Only an enabled
+        # relay reporting a TCP port replaces the port the playbook forwarded
+        # on the host.
+        relay = _relay_reported(ar)
         if relay is not None and _is_port(relay.get("remote_port")):
             payload["ssh_port"] = relay["remote_port"]
 
@@ -532,20 +564,44 @@ def build_result_payload(result: VmPlaybookOutput) -> dict:
 
 #: A create result's fields kept as its operator detail. None is secret: the
 #: playbook's credentials have already been split out as credentials.
+#: ``mismatch`` names how a fact differs from its job, when it does.
 VM_CREATE_DETAIL = (
     "action", "status", "vm_name", "vm_state", "host", "timestamp", "tenant_user",
-    "host_ip", "ssh_port", "vm_ip_internal", "gpu", "network", "frp",
-    "result_message", "note", "operation_initiated",
+    "host_ip", "ssh_port", "vm_ip_internal", "gpu", "network", "relay",
+    "result_message", "note", "operation_initiated", "mismatch",
 )
 
 
+def create_fact_mismatch(payload: Mapping[str, Any], params: VmJobParams) -> str | None:
+    """How a create's selected fact differs from its job, or ``None``.
+
+    The role names the guest it created ``vm_name``, which the play sets from
+    the job's ``vm_target``, and reports ``success``. The fact's ``host`` is the
+    play's tenant address, not an identity, so it is not compared.
+    """
+    if payload.get("ansible_result") is None:
+        return "no create fact was printed"
+    found = []
+    if payload.get("action") != "create":
+        found.append(f"action: the fact names {payload.get('action')!r}, the job 'create'")
+    if not params.vm_target:
+        found.append("vm_name: the job names no guest")
+    elif payload.get("vm_name") != params.vm_target:
+        found.append(
+            f"vm_name: the fact names {payload.get('vm_name')!r}, the job {params.vm_target!r}"
+        )
+    if payload.get("status") != "success":
+        found.append(f"status: the fact reports {payload.get('status')!r}, not 'success'")
+    return "; ".join(found) or None
+
+
 def _relay_reported(payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
-    frp = payload.get("frp")
-    if not isinstance(frp, Mapping):
+    relay = payload.get("relay")
+    if not isinstance(relay, Mapping):
         return None
-    enabled = frp.get("enabled")
+    enabled = relay.get("enabled")
     if enabled is True or str(enabled).lower() == "true":
-        return frp
+        return relay
     return None
 
 
@@ -561,11 +617,15 @@ def _is_port(value: Any) -> bool:
 def create_evidence(payload: Mapping[str, Any], params: VmJobParams) -> DeliveryEvidence | None:
     """How a buyer reaches the guest a create reported, or ``None``.
 
-    A job that leased a relay port is reached through the relay, at exactly
-    that port; a run reporting none, or another, yields nothing. Otherwise the
-    guest is reached at its host's buyer-facing address and forwarded port.
-    Either way the endpoint names the tenant account, or there is no evidence.
+    A fact that does not name the job's guest and report success yields
+    nothing. A job that leased a relay port is reached through the relay, at
+    exactly that port; a run reporting none, or another, yields nothing.
+    Otherwise the guest is reached at its host's buyer-facing address and
+    forwarded port. Either way the endpoint names the tenant account, or there
+    is no evidence.
     """
+    if create_fact_mismatch(payload, params) is not None:
+        return None
     if params.relay_id or params.vm_remote_port is not None:
         relay = _relay_reported(payload)
         if relay is None or params.vm_remote_port is None:
@@ -600,14 +660,15 @@ def create_evidence(payload: Mapping[str, Any], params: VmJobParams) -> Delivery
 
 def create_result(payload: Mapping[str, Any], params: VmJobParams) -> CreateJobResult:
     """A create's result: its delivery evidence, and its named operator detail."""
-    return CreateJobResult(
-        evidence=create_evidence(payload, params),
-        detail={
-            name: payload[name]
-            for name in VM_CREATE_DETAIL
-            if payload.get(name) not in (None, "")
-        },
-    )
+    detail = {
+        name: payload[name]
+        for name in VM_CREATE_DETAIL
+        if payload.get(name) not in (None, "")
+    }
+    mismatch = create_fact_mismatch(payload, params)
+    if mismatch is not None:
+        detail["mismatch"] = mismatch
+    return CreateJobResult(evidence=create_evidence(payload, params), detail=detail)
 
 
 def _roles(auth: Mapping[str, Any]) -> Iterable[tuple[str, Mapping[str, Any]]]:
@@ -623,14 +684,14 @@ __all__ = [
     "VM_NON_RETRYABLE_FAILURES",
     "VM_RESULT_FACTS",
     "VM_CREATE_DETAIL",
+    "VM_FACT_ACTIONS",
     "VM_SECRET_FIELDS",
     "VmAnsibleCodec",
     "VmPlaybookOutput",
     "build_result_payload",
     "create_evidence",
+    "create_fact_mismatch",
     "create_result",
-    "extract_ssh_port",
-    "extract_tenant_user",
     "extract_vm_fact",
     "parse_vm_output",
     "split_credentials",

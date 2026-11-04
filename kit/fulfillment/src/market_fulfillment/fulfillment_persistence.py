@@ -15,6 +15,7 @@ from .db import SettlementRecordState
 from market_core import VersionedEnvelope
 from .provider import FulfillmentConflictError
 from .settlement_repository import SettlementRepository, begin_sqlite_write_transaction
+from .transitions import CREATE_COMPENSATION
 
 
 @dataclass(frozen=True)
@@ -64,7 +65,15 @@ class FulfillmentTransaction(Protocol):
         prepared: VersionedEnvelope[Any],
     ) -> Any: ...
 
+    def begin_compensating_teardown(
+        self,
+        fulfillment_id: str,
+        prepared: VersionedEnvelope[Any],
+    ) -> Any: ...
+
     def get_by_fulfillment_id(self, fulfillment_id: str) -> Any | None: ...
+
+    def get_by_fulfillment_id_for_write(self, fulfillment_id: str) -> Any | None: ...
 
     def list_provisioned_resources(self, capacity_reservation_id: str) -> list[Any]: ...
 
@@ -229,9 +238,41 @@ class SqlAlchemyFulfillmentTransaction:
         fulfillment_id: str,
         prepared: VersionedEnvelope[Any],
     ) -> Any:
+        return self._queue_teardown(fulfillment_id, prepared)
+
+    def begin_compensating_teardown(
+        self,
+        fulfillment_id: str,
+        prepared: VersionedEnvelope[Any],
+    ) -> Any:
+        """Queue a failed fulfillment's teardown, marked as a compensation.
+
+        Only ``failure_reason`` is written beside the teardown: the failure
+        message stays the create's diagnostic until a teardown records its own.
+        """
+        return self._queue_teardown(
+            fulfillment_id,
+            prepared,
+            expected_state=SettlementRecordState.failed.value,
+            failure_reason=CREATE_COMPENSATION,
+        )
+
+    def _queue_teardown(
+        self,
+        fulfillment_id: str,
+        prepared: VersionedEnvelope[Any],
+        *,
+        expected_state: str | None = None,
+        **lifecycle_updates: object,
+    ) -> Any:
         record = self._repository.get_by_fulfillment_id(self.db, fulfillment_id)
         if record is None:
             raise LookupError(fulfillment_id)
+        if expected_state is not None and record.state != expected_state:
+            raise FulfillmentConflictError(
+                f"fulfillment {fulfillment_id!r} is {record.state!r}, "
+                f"not {expected_state!r}"
+            )
 
         value = prepared.model_dump(mode="json")
         if (
@@ -247,9 +288,20 @@ class SqlAlchemyFulfillmentTransaction:
             record.capacity_reservation_id,
             SettlementRecordState.teardown_dispatch_pending.value,
             prepared_teardown_operation=value,
+            **lifecycle_updates,
         )
 
     def get_by_fulfillment_id(self, fulfillment_id: str) -> Any | None:
+        return self._repository.get_by_fulfillment_id(self.db, fulfillment_id)
+
+    def get_by_fulfillment_id_for_write(self, fulfillment_id: str) -> Any | None:
+        """Reserve SQLite's writer slot, then read the aggregate.
+
+        Must be this transaction's first statement. Holding the slot before
+        the read means no other writer can move the aggregate between the
+        state a caller judges and the write it makes from that judgement.
+        """
+        begin_sqlite_write_transaction(self.db)
         return self._repository.get_by_fulfillment_id(self.db, fulfillment_id)
 
     def list_provisioned_resources(self, capacity_reservation_id: str) -> list[Any]:

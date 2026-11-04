@@ -19,9 +19,10 @@ DOMAIN_MODULES = (
 )
 # Every place the generic service may name a domain, as (service file, module)
 # pairs. The composition root builds the adapters' runtimes and mounts their
-# routers. The service's database holds VM's tables, so schema creation creates
-# VM's metadata, and the migration history, which created and evolved those
-# tables, reads VM's models and its legacy lease conversion.
+# routers. The service's database holds VM's pool configuration table, so schema
+# creation creates VM's metadata, and the migration history, which created and
+# evolved that table, reads VM's model and its legacy lease conversion. The
+# relay tables are the compute family's, and nothing names a domain for them.
 ALLOWED_DOMAIN_IMPORTS = {
     ("container.py", "vm_provisioning_adapter.runtime"),
     ("container.py", "bare_metal_provisioning_adapter.runtime"),

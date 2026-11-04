@@ -1016,6 +1016,81 @@ carry `app.kubernetes.io/name`.
 - **THEN** no Pod annotated `helm.sh/hook: test` carries all of any rendered Deployment's
   `matchLabels` or any rendered Service's selector
 
+### Requirement: Evolution preserves retained accepted representations
+
+A change evolving retained signed or content-addressed state MUST preserve the
+original accepted representation and identity. Proof verification MUST use the
+owning protocol's canonicalization and framing over that representation before
+conversion to an application view. A migration MUST NOT replace accepted content
+with a current-model dump. Derived unsigned state MAY migrate separately.
+
+#### Scenario: A decoded view gains a defaulted field
+
+- **WHEN** an upgrade adds a defaulted field to the application view of retained
+  bare-metal lease-ready evidence
+- **THEN** original evidence bytes, digest, signature input, and supported v1
+  decoding remain unchanged
+
+#### Scenario: A derived field is renamed
+
+- **WHEN** a migration renames derived state beside retained accepted content
+- **THEN** the original accepted representation and identity are not rewritten
+
+### Requirement: Preservation respects explicit support and retention boundaries
+
+Representation preservation MUST NOT extend authorized retention, reverse deletion
+or tombstoning, or reenable explicitly unsupported wire versions. A reader-removal
+change MUST identify supported reference and read obligations and establish that
+none still needs the reader. Zero nonterminal records alone MUST NOT establish
+that retained terminal evidence or supported recovery is unused.
+
+#### Scenario: Contact retention deletes an accepted payload
+
+- **WHEN** the contact capability deletes payloads under its authorized policy
+- **THEN** existing tombstone and refusal behavior remain authoritative, and the
+  deleted payload is not presented as replacement content under its old proof
+
+#### Scenario: A previous-wire payment mandate is loaded
+
+- **WHEN** settlement data carries a mandate the settlement contract explicitly refuses
+- **THEN** it remains refused and unchanged rather than converted or reenabled
+
+#### Scenario: Terminal evidence still has supported readers
+
+- **WHEN** no nonterminal contract needs a decoder but retained terminal evidence
+  still has a supported read obligation
+- **THEN** a removal change cannot declare that decoder unused from the
+  nonterminal count alone
+
+### Requirement: The provisioning chart renders a host definitions document
+
+The provisioning chart MUST render a non-empty `definitions.hosts` value verbatim into its ConfigMap, mount it read-only at `/app/config/host-definitions.yaml`, and set `host_definitions_path` to that path in the rendered profile; an empty value MUST render no document, mount, or path. The values schema MUST refuse `host_definitions_path`, `inventory_path`, and `inventory_ini` under `config`, and `host-definitions.yaml` as a `configFiles` name. It MUST refuse `relay_definitions_path` under `config` as it refuses the pool and capacity paths, since the chart derives every definition document's path from its `definitions` value. The chart's values MUST NOT state `inventory_path`. A change to the document MUST change the ConfigMap checksum the deployment carries, so a release that edits it rolls the pod.
+
+#### Scenario: A release supplies host definitions
+
+- **WHEN** a release sets `definitions.hosts` to a host definitions document
+- **THEN** the document renders into the ConfigMap, mounts at `/app/config/host-definitions.yaml`, and the rendered profile sets `host_definitions_path` to that path
+
+#### Scenario: A release supplies no host definitions
+
+- **WHEN** `definitions.hosts` is empty
+- **THEN** no host document renders or mounts, and the rendered profile sets no `host_definitions_path`
+
+#### Scenario: A release states the path or a retired inventory setting
+
+- **WHEN** a release sets `config.host_definitions_path`, `config.inventory_path`, or `config.inventory_ini`
+- **THEN** rendering fails naming the refused key
+
+#### Scenario: A release states the relay definitions path
+
+- **WHEN** a release sets `config.relay_definitions_path`
+- **THEN** rendering fails naming the refused key
+
+#### Scenario: A release edits its host definitions
+
+- **WHEN** a release changes `definitions.hosts`
+- **THEN** the deployment's ConfigMap checksum changes, and the pod is replaced
+
 ## Evidence
 
 - Configurable registry endpoints and independently composed role stacks: core buyer registry configuration plus domain Compose and Helm manifests.

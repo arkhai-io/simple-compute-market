@@ -288,7 +288,7 @@ A `once`-only mandate MUST authorize no `start` and no `stop`. It MUST authorize
 
 ### Requirement: The payments mandate is derived exactly from the Agreement
 
-The mandate MUST be derived only from the exact accepted Agreement, binding its JCS hash, deterministic transaction ID, parties, asset, amounts, part shapes, authorities, holds, caps and approval window. Buyer and seller MUST derive the same mandate under the selected mechanism's vendored contract; unsupported bonds or terms MUST refuse.
+The mandate MUST be derived only from the exact accepted Agreement, binding its JCS hash, deterministic transaction ID, parties, asset, amounts, part shapes, authorities, holds, caps and approval window. Buyer and seller MUST derive the same mandate under the selected mechanism's vendored contract; unsupported bonds or terms MUST refuse. Every part MUST carry its own lifecycle authorities and its maximum hold extension, null where the accepted terms leave the case hold uncapped; the mandate MUST NOT carry mandate-level authorities, and a stored mandate that does is refused, never rewritten.
 
 #### Scenario: Hold and approval expiry follow the accepted timing
 
@@ -305,6 +305,16 @@ The mandate MUST be derived only from the exact accepted Agreement, binding its 
 
 - **WHEN** a seller configures a hosted option with `bond`
 - **THEN** the builder refuses to emit it, naming the unsupported term
+
+#### Scenario: The part's own authorities grant nothing beyond the accepted rights
+
+- **WHEN** a seller derives a mandate and the buyer checks it
+- **THEN** both derive the identical mandate, whose one `once` part lets nobody stop it, lets the seller and the dispute authority reverse it, lets only the dispute authority extend its hold, and states `maxHoldExtension` from the accepted case-hold cap, null when the terms set none, and the mandate has no mandate-level `authorities`
+
+#### Scenario: A mandate in the previous wire is refused
+
+- **WHEN** stored settlement data or a counterparty's mandate carries mandate-level `authorities`, or a part without its own authorities or maximum hold extension
+- **THEN** it is refused before any approval or verification, and the stored Agreement bytes and mandate are left as they are
 
 ### Requirement: The buyer approves only a mandate it has checked
 

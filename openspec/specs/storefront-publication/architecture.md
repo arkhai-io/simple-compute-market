@@ -285,6 +285,14 @@ Readiness recovery may add a deterministic option without changing listing ident
 
 
 
+## Retained bare-metal evidence
+
+Bare-metal evidence has a protocol representation and a convenient application view. The evidence owner retains the canonical UTF-8 body, checks the expected outer digest and nested result digest, and then exposes a separately validated, read-only view. Defaults or coercions in that view do not rewrite the original proof input.
+
+Persistence verifies the candidate before insertion and preserves the first accepted document for a fulfillment; a later candidate cannot replace it. Publication carries the retained digest, and authenticated resolution serializes the original body under the existing signed envelope. Typed clients verify the requested digest before returning a view, while preserving field-style access to evidence and result values. The public document API is versioned deliberately so consumers can depend on its nominal types without changing the signed wire contract.
+
+Compatibility is bounded by retention and the owning reader's explicit support floor. Preserve stored representations during that period; deletion or tombstoning follows the owning lifecycle. This does not add a generic artifact registry or claim support for mandate forms outside the documented contract.
+
 ## Related contracts
 
 - [Marketplace identity](../marketplace-identity/spec.md)

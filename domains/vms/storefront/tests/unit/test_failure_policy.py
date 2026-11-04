@@ -116,6 +116,72 @@ async def test_failure_policy_releases_capacity_and_runs_webhook(
     assert fake._available("gpu-host-1") == 2
 
 
+@pytest.mark.asyncio
+async def test_a_compensating_deals_release_is_refused_until_the_site_permits_it(
+    tmp_path, monkeypatch
+):
+    """The failure actions free nothing themselves. While the site's release
+    guard refuses -- as provisioning's does for a compensating aggregate until
+    it is ``torn_down`` -- the release reports nothing released, the capacity
+    stays held, and no listing reopens; once the guard permits, the same action
+    releases the reservation."""
+    from tests.fake_site import FakeSite, capacity_runtime_over
+
+    db = SQLiteClient(
+        db_path=str(tmp_path / "compensating.db"),
+        registry=build_vm_storefront_registry(build_vm_storefront_domain()),
+    )
+    fake = FakeSite(deliverable_modes={"vm"})
+    fake.add_resource("gpu-host-1", 2, attributes={"vm_host": "kvm1"})
+    binding = PublicationBinding("site-test", "vm", "pool-test", BACKED)
+    capacity = capacity_runtime_over(fake, site_name=binding.site_id)
+
+    async def resolve_capacity_binding(repository, listing_id):
+        return binding
+
+    monkeypatch.setattr(
+        "market_storefront.failure_actions.capacity_binding_for_listing",
+        resolve_capacity_binding,
+    )
+    monkeypatch.setattr(
+        "market_storefront.failure_actions._configured_failure_actions_source",
+        lambda: ["release_capacity"],
+    )
+    reserved = await capacity.reserve(
+        binding,
+        claim={"offering_mode": "vm", "resource_id": "gpu-host-1", "gpu_count": 1},
+        deal_ref={"listing_id": "listing-1", "negotiation_id": "neg-1"},
+    )
+    assert reserved is not None
+    reservation_id = reserved["capacity_reservation_id"]
+    failure = FulfillmentFailureContext(
+        listing_id="listing-1",
+        negotiation_id="neg-1",
+        capacity_reservation_id=reservation_id,
+        reason="provisioning_failed",
+        message="grant reported no delivery evidence",
+        source="fulfillment_resume",
+    )
+
+    # The guard refuses: the compensating teardown has not reached torn_down.
+    fake.delivered.add(reservation_id)
+    refused = await apply_fulfillment_failure_policy(db, failure, capacity=capacity)
+
+    assert refused.state is None
+    assert refused.reopened_listing_ids == []
+    assert refused.actions == [{"action": "release_capacity", "status": "ok"}]
+    assert fake.reservations[reservation_id]["state"] == "reserved"
+    assert fake._available("gpu-host-1") == 1
+
+    # torn_down: the guard permits, and the same action frees the capacity.
+    fake.delivered.discard(reservation_id)
+    released = await apply_fulfillment_failure_policy(db, failure, capacity=capacity)
+
+    assert released.state == "released"
+    assert fake.reservations[reservation_id]["state"] == "released"
+    assert fake._available("gpu-host-1") == 2
+
+
 _ACCEPTED_ESCROW_PROPOSAL = {
     "chain_name": "anvil",
     "escrow_address": "0x" + "aa" * 20,

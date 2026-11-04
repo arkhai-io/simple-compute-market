@@ -89,6 +89,14 @@ real host remain qualification prerequisites. Readiness failures and unrun lanes
 are named, not converted into fixture passes. See the
 [lifecycle limits](../deal-lifecycle/architecture.md#current-limits).
 
+## Ordinary Arkhai purchase evidence
+
+A physical qualification can drive the shipped ordinary buyer and collect independent observations through the supported typed operator clients. Keep buyer credentials separate from operator credentials and bind each run's source, selected artifacts, configuration, buyer result, Agreement/payment evidence, reservation, fulfillment, provisioning jobs, and access observations in restricted evidence. Public summaries should retain only sanitized outcomes and explicit limits.
+
+A completed payment proof correlates genuine TEST funding evidence with attributable rental charges and the accepted Agreement/receipt state; pre-existing unexplained credit is not funding proof. The receipt gate and seller/provider lifecycle observations establish distinct facts. Paid buyer journeys are required for claims about the actual tenant identity, negotiated privilege, valid grant, GPU work, delivery, ordinary teardown, fresh access denial, and restored capacity. A supplemental network-policy probe is admissible only from an actual operator-only CPU guest on the same paid deployment, using the pinned guest base, its actual default bridge and virtio NIC, and the loaded policy structure. It may establish only the finite selectors observed on that path; it establishes none of the paid tenant identity, credential, privilege, grant, GPU, payment, delivery, or lifecycle facts and does not prove universal isolation. A namespace-only probe is not a substitute for this guest-path evidence.
+
+The ordinary buyer method may replace a payment-specific scenario driver, but it does not make an old named test marker pass. Preserve unrun or unavailable observations explicitly, and do not equate a controlled local smoke, published vector, or component suite with external funding or physical access.
+
 ## Current limits
 
 The e2e harness predominantly uses HTTP clients and explicit test seams, but it is not yet completely external to service packages and a few scenarios retain timing or private-client dependencies. The architecture therefore states the desired boundary only where current tests establish it and treats full harness extraction as separate work.

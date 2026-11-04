@@ -5,20 +5,15 @@ from __future__ import annotations
 from types import MappingProxyType
 
 from compute_provisioning import (
-    ComputeProvisioningBackgroundTask,
-    DefinitionDocumentContribution,
     ExecutorAdapterBundle,
     ExecutorAdapterContribution,
     JobExecutor,
 )
+from compute_provisioning.job_fulfillment import JobFulfillmentProvider
 
 from vm_provisioning_adapter.inventory_views import AnsiblePoolDefaultsViews
-from compute_provisioning.job_fulfillment import JobFulfillmentProvider
 from vm_provisioning_adapter.services.ansible_pool_config_handler import (
     AnsiblePoolConfigHandler,
-)
-from vm_provisioning_adapter.services.relay_port_allocator import (
-    release_reservation_ports,
 )
 
 
@@ -57,12 +52,9 @@ def build_vm_adapter_bundle(
     fulfillment_provider: JobFulfillmentProvider,
     pool_config_handler: AnsiblePoolConfigHandler,
     job_executor: JobExecutor,
-    definition_documents: tuple[DefinitionDocumentContribution, ...] = (),
-    background_tasks: tuple[ComputeProvisioningBackgroundTask, ...] = (),
 ) -> ExecutorAdapterBundle:
-    """VM's contribution. Its relay ports are returned with a reservation's
-    capacity; the relay document and the port reconciliation are built by the
-    runtime from its configuration."""
+    """VM's contribution. Its relay ports are the family's: their release
+    effect, definitions document, and reconciliation compose beside it."""
     return ExecutorAdapterBundle(
         name="vm",
         executors=(
@@ -74,7 +66,4 @@ def build_vm_adapter_bundle(
         fulfillment_providers={ANSIBLE_PROVIDER: fulfillment_provider},
         pool_config_handlers={ANSIBLE_PROVIDER: pool_config_handler},
         inventory_views=(AnsiblePoolDefaultsViews(provider=ANSIBLE_PROVIDER),),
-        release_effects=(release_reservation_ports,),
-        definition_documents=definition_documents,
-        background_tasks=background_tasks,
     )
