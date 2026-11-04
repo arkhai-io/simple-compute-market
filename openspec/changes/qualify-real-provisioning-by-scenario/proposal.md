@@ -63,6 +63,14 @@ against mock or controlled delivery.
   the payments target and parties, and use only the payments interface this
   repository already imports. Like every real-provisioning module, they are in no
   default lane, and they report a blocked skip without a target.
+- **In-cluster payments over HTTPS.** The storefront charts gain an option to trust
+  a deployment-supplied CA bundle through `SSL_CERT_FILE`. A kit test pins that an
+  `https://<service>.<namespace>.svc.cluster.local` payments origin is accepted
+  and plain HTTP to it refused. The HTTPS requirement is unchanged.
+- **A programmable mock dispute authority** as a module of the chart. It is the
+  `arkhai.mediation.v1` double, run with a deployment-supplied identity and
+  programmed by the scenario before a run, so that payment listings publish and
+  any dispute-side call is deterministic.
 - **Method amendment.** The scenarios join the accepted operator-procedure
   method, which is retained, as the repeatable and deterministic way to make
   these observations. The runbook, testing guide and test-compatibility documents
@@ -96,6 +104,10 @@ None.
 - The owning services and their typed clients: signed admin reads for the missing
   observations, with tests at the levels that own them.
 - `e2e-tests/pyproject.toml`: markers for the new scenarios.
+- `helm/charts/storefront`, `helm/charts/bare-metal-storefront`: the trusted CA
+  bundle option. `helm/Chart.yaml` and a new subchart: the mock dispute authority
+  module.
+- `kit/arkhai-payments` tests: the cluster-service HTTPS origin.
 - Documentation: `docs/development/VALIDATION_RUNBOOK.md` §29,
   `docs/development/TESTING.md`, `openspec/specs/test-compatibility/`,
   `docs/development/ROADMAP.md` Goal 1, and `openspec/changes/README.md`.

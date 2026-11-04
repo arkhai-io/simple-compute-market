@@ -170,6 +170,49 @@ The scenario ends each bare-metal lease itself, through the buyer's ordinary
 back-dates the lease nor waits for natural expiry. §29 excludes only a forced
 release, a manual retry or a consumed-UID reset.
 
+### P9. In-cluster payments over HTTPS with a deployment's CA
+
+A deployment may run its payments service inside the cluster. Storefronts then
+reach it at a service DNS origin, `https://<service>.<namespace>.svc.cluster.local[:port]`.
+The kit already accepts that origin: `ArkhaiPaymentsConfig.service_url` and
+`PaymentsClient` require an HTTP(S) origin without a path, and HTTPS outside
+loopback. That rule stays, following `add-arkhai-payments-lane-double`'s accepted
+transport decision: HTTPS origins, a development CA trusted explicitly through
+`SSL_CERT_FILE`, and no verification bypass or origin relaxation. The client builds
+non-loopback connections with `trust_env`, so httpx 0.28 verifies against
+`SSL_CERT_FILE` when it is set.
+
+This change adds:
+
+- a kit test that pins this. A cluster-service HTTPS origin is accepted, and the
+  same origin over HTTP is refused.
+- a chart option on the storefront and bare-metal storefront charts that mounts a
+  deployment-supplied CA bundle (a Secret or ConfigMap key) into the storefront
+  container and sets `SSL_CERT_FILE` to it. The bundle holds the deployment's CA
+  plus the public roots; the option names no CA itself.
+
+### P10. A programmable mock dispute authority, as a module of the chart
+
+Every `arkhai.payments.v1` listing needs an accepted dispute authority, or it
+publishes no payment option. The production mediation authority is another
+service's. The scenarios need one whose responses they program in advance, in the
+style of provisioning's mock mode (owner direction).
+
+The mock is this repository's: the `arkhai.mediation.v1` HTTP double that
+`add-arkhai-payments-lane-double` plans. This change makes it deployable as another
+module of the umbrella chart, a subchart enabled by a condition like the others.
+That change refuses lane fixture identities in production configuration, so this
+module runs with a deployment-supplied identity, record key and origin, and with
+no fixture identity. A scenario programs its responses before a run through the
+double's typed control client. The storefronts accept it through `[[Dispute]]` /
+`[[DisputeCredential]]` entries, and the buyer through its own, both rendered by
+the deployment. It serves HTTPS with the same deployment CA as P9.
+
+The mock's behaviour and its control client come from `add-arkhai-payments-lane-double`.
+That change gates this part of the implementation (index Notes). If its double is
+not ready, the design phase decides whether this change builds the minimal subset
+of the double the purchases exercise.
+
 ## Open questions
 
 1. **Lease durations.** Observation 2 needs both leases to expire naturally, with the
@@ -192,3 +235,8 @@ release, a manual retry or a consumed-UID reset.
   scenario (P8).
 - The scenario ends the bare-metal lease itself (P8).
 - The operator-procedure method is retained beside the scenarios (P1).
+- The kit supports an in-cluster `https://<service>.<namespace>.svc.cluster.local`
+  payments origin and keeps requiring HTTPS. The deployment supplies a development
+  CA (P9).
+- The dispute authority is a programmable mock, deployed as another module of the
+  chart, since its definition is this repository's (P10).
