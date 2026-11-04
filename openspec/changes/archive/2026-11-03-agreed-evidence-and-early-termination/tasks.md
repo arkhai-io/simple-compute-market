@@ -1234,8 +1234,6 @@ Once-only qualification is not rate/ruling-execution or real-host qualification.
   tracker reader failed before GitHub backend selection; repository-native `gh`
   succeeds and unresolved tooling friction is filed as
   [#329](https://github.com/arkhai-io/simple-compute-market/issues/329).
-  16.11 remains unchecked and unperformed for owner review; no push, rebase,
-  merge or execution-ticket closure is performed.
 - 16.11 then ran in `87e978790`, after owner review: the change is archived with its
   deltas synchronized into `openspec/specs/`.
 
@@ -1364,7 +1362,7 @@ and is not recorded here.
 | 25 F2 — refund scenario contradicts the opt-in refund failure action | Fixed. The scenario permits `reverse` only for a seller-authenticated request or the enabled pre-delivery refund action, and again refuses a buyer-triggered reverse |
 | 25 F3 — scenarios prescribing external authorities' outcomes | Fixed. Lifecycle and servicing scenarios state what SCM files, preserves, sends or observes; the penalty-cap and never-delivered rate arithmetic is kept as context in `deal-lifecycle/architecture.md#external-authorities` |
 | 25 F4 — ROADMAP says not yet archived | Fixed in Goal 8's current state. The Goal 6 and Goal 8 "in closeout" gap rows stay accurate until triage; archive cleanup must mark them landed when the index row becomes `archived`, since the index procedure does not cover ROADMAP |
-| 25 F5 — deployed lanes predate the review 19–23 repairs | Deferred to the owner: rerun `e2e_deal`, `e2e_deal_buyer_cli`, `e2e_bare_metal_mock_deal` and `e2e_vm_payment_deal` on final HEAD, or accept the older-revision evidence explicitly in triage |
+| 25 F5 — deployed lanes predate the review 19–23 repairs | Rerun on fresh images built from `87e978790`, after the review 19–23 repairs, with no skips; recorded in `docs/attachments/aeet-final-qualification/index.md`; later commits are documentation-only |
 | 25 F6 — `converge-ongoing-compute-leases` would drop the rejected-filing rule | Recorded in that change's index row; its delta is not rewritten here. Its design reverification owes the clause and both omitted scenarios |
 | 25 F8 — records still say archival is withheld | Fixed by appended notes in 16.10, the closeout packet's scope section and the design Status |
 | 25 F9 — vacuous "The full policy is enforced" scenarios | Fixed rather than left for `shorten-long-requirements`: each restated-requirement scenario (nineteen, counting THENs that restate the requirement under another title) is replaced by a concrete case, overflow obligations move to separately named requirements under 500 characters, and original headings are kept. `spot-deals-through-arkhai-payments` and `unify-compute-delivery-path` MODIFY two of those requirements; their index rows note the split |

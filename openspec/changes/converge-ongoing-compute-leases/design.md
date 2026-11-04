@@ -186,7 +186,7 @@ intents together with mediation's request vocabulary and published mapping.
 
 Arkhai mediation's mechanical delivery-end rule is payee agreement under the foundation's guards; its cause=payee branch is the standard self-penalty
 (`openspec/changes/archive/2026-11-03-agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`); this change proves its financial consequences in both lanes (rows 5, 8 and
-10) and restates none of its steps. A buyer-filed cause=payee claim receives the same cap: automatically with payee agreement and the mapping/time/replay guards, otherwise through an operator. A matching receipt-backed cause=payer claim also rules automatically, preserving payer notice/treatment and paying no penalty. No response or invalid concurrence stays with triage; no silence default exists. SCM's respondent poll signs durable-record matches or contests them; final wire/vectors wait at foundation 12.1. The authority never reconciles direct seller restitution because there is none.
+10) and restates none of its steps. Which claims rule mechanically, under which guards, and what each cause's ruling does are the foundation's statements (its D10) and are not restated here; this change proves their consequences — a buyer-filed claim the payee signed, a receipt-backed payer claim, a contested one left to a person — in rows 1, 8, 10 and 12. The authority never reconciles direct seller restitution because there is none.
 
 A self-penalty is one package — stop, refunds and bond — and a partial direct path
 would still need a dispute. The authority records disputes so it can act on bad
