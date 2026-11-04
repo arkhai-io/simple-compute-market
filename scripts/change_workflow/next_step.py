@@ -1526,7 +1526,12 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None, **seams: A
         return 1
     result = compute(root, args[0], **seams)
     print(plain(result) if as_text else json.dumps(result, ensure_ascii=False, default=str))
-    return 1 if result["step"] == "unclassified" else 0
+    if result["step"] != "unclassified":
+        return 0
+    # Exit 1 promises its reason on standard error, as every subcommand's refusal
+    # gives it; the result on standard output is the structured form a program reads.
+    print(f"ERROR: {result['reason']}", file=sys.stderr)
+    return 1
 
 
 if __name__ == "__main__":

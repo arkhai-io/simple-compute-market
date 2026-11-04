@@ -9,6 +9,7 @@ proven is which repository it acts on; the import rule reads the scripts' source
 from __future__ import annotations
 
 import ast
+import json
 import os
 import subprocess
 import sys
@@ -53,6 +54,50 @@ def test_the_command_compares_this_checkouts_graph_diagram() -> None:
                          capture_output=True, text=True, check=False)
     assert (ran.returncode, ran.stderr) == (0, "")
     assert ran.stdout.endswith("draws the table.\n")
+
+
+def test_next_gives_an_unclassified_results_reason_on_standard_error() -> None:
+    # The result stays on standard output, where a program reads it; exit 1 gives
+    # its reason on standard error, as every subcommand's refusal does.
+    command = [str(COMMAND), "next", "no-such-change"]
+    ran = subprocess.run(command, cwd=SCRIPTS.parent, capture_output=True, text=True,
+                         check=False)
+    assert ran.returncode == 1
+    result = json.loads(ran.stdout)
+    assert result["step"] == "unclassified" and "no-such-change" in result["reason"]
+    assert ran.stderr == f"ERROR: {result['reason']}\n"
+    plain = subprocess.run([*command, "--plain"], cwd=SCRIPTS.parent, capture_output=True,
+                           text=True, check=False)
+    assert (plain.returncode, plain.stderr) == (1, ran.stderr)
+
+
+def _post_compaction_hook() -> str:
+    """The command the project's settings run for the post-compaction hook."""
+    settings = json.loads((SCRIPTS.parent / ".claude/settings.json").read_text("utf-8"))
+    [entry] = [entry for entry in settings["hooks"]["SessionStart"]
+               if entry.get("matcher") == "compact"]
+    [hook] = entry["hooks"]
+    return hook["command"]
+
+
+def test_the_post_compaction_hook_describes_the_project_from_any_directory(
+        tmp_path: Path) -> None:
+    # Claude Code runs the hook from the session's working directory, which may be
+    # outside any repository or in another checkout, such as a change's clone; the
+    # hook describes the project all the same.
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    other = tmp_path / "other"
+    subprocess.run(["git", "init", "-q", "-b", "elsewhere", str(other)], check=True)
+    branch = subprocess.run(["git", "branch", "--show-current"], cwd=SCRIPTS.parent,
+                            capture_output=True, text=True, check=True).stdout.strip()
+    environ = {**os.environ, "CLAUDE_PROJECT_DIR": str(SCRIPTS.parent),
+               "GIT_CEILING_DIRECTORIES": str(tmp_path)}
+    for where in (outside, other):
+        ran = subprocess.run(["sh", "-c", _post_compaction_hook()], cwd=where, env=environ,
+                             capture_output=True, text=True, check=False)
+        assert (ran.returncode, ran.stderr) == (0, "")
+        assert f"Checked-out branch: {branch or '(detached HEAD)'}\n" in ran.stdout
 
 
 def test_the_command_has_no_python_suffix_so_nothing_imports_it() -> None:

@@ -563,6 +563,33 @@ need it run through those tests. Five engine tests keep the old scripts' names
 `test_post_compaction_context.py`, `test_round_view.py`); renaming them was left,
 as they name what they test well enough and no rule asks it.
 
+Round 1's triage (review 38) fixed two of sections 1–3's defects. 38 F1: the
+post-compaction hook ran the command by `$CLAUDE_PROJECT_DIR`'s path but in the
+hook's working directory, so from outside a repository it printed nothing and from
+another checkout it described that checkout. `.claude/settings.json`'s hook now runs
+`cd "$CLAUDE_PROJECT_DIR" && scripts/change-workflow hook post-compaction`, an edit
+the orchestrating session made on the owner's word, so the command's
+working-directory rule (CW-r3ka) holds without an exception. 38 F2: `next` exited 1
+on an `unclassified` result with its reason only in the result on standard output;
+it now also writes `ERROR: <reason>` to standard error, as D6's exit 1 promises,
+with standard output unchanged. Tests, in `test_change_workflow_command.py`: the
+hook command read from the settings and run by `sh` from a directory outside any
+repository and from another repository, describing this checkout's branch; and
+`scripts/change-workflow next` on an unknown change, in its JSON and plain forms,
+exiting 1 with the reason on standard error and the JSON result on standard output.
+Evidence: the focused suites (`test_change_workflow_command.py`,
+`test_change_next_step.py`, `test_post_compaction_context.py`,
+`test_change_workflow_cli.py`; the two new tests library integration, the command
+run as a process), 367 passed; the scripts suite (`make test-release-tooling`),
+2001 passed; `make test` passed, on the fixed code before the fresh-context
+check's two test-only edits; `make check-packaging` passed; `make check-change`
+failed only on `check-doc-citations`, every miss a file a later section creates, as
+before. The fresh-context check found nothing blocking. Following its notes, the plain form's test no
+longer parses text outside the promise, and a redundant assertion went. Declined:
+moving the `next` test in-process, since the owner accepted a process test of the
+command's two streams, and the in-process equality of `cli.main` and
+`next_step.main` stays where it is.
+
 ## 4. The record set's format, read and marked
 
 Delivers one format version for a change's record set, carried on the outputs and
