@@ -184,11 +184,7 @@ def retired_pricing_configuration_keys() -> list[str]:
 
 def listing_resource_for_candidate(res: dict[str, Any]) -> dict[str, Any]:
 
-    alkahest = settlement_config_mapping().get("alkahest", {})
-    interruptible = isinstance(alkahest, dict) and bool(
-        alkahest.get("interruptible", False)
-    )
-    listing_resource = vm_listing_resource_for_listing(res, interruptible=interruptible)
+    listing_resource = vm_listing_resource_for_listing(res)
     listing_resource["offering_mode"] = "vm"
     return listing_resource
 

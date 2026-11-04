@@ -2,19 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import time
-from collections.abc import Callable
 from dataclasses import dataclass, replace
-from typing import Any
 
-from core_buyer import DEFAULT_HTTP_TIMEOUT, BuyResult, signed_storefront_json
+from core_buyer import BuyResult
 from core_buyer.orchestration import make_publisher_trust_resolver, wait_for_settlement
 from market_arkhai_payments import ArkhaiPaymentsConfig, PaymentApproval
 from market_arkhai_payments.models import AccountId
 from market_config.config_loader import load_user_config
 from market_core.schemas import Agreement
-from market_identity import Identity, Signer, TrustedIdentitySet
+from market_deal_lifecycle_contracts.models import Accepted, CommitMessage, Pending
+
+from .evidence import evidence_store
+from .lifecycle import buyer_lifecycle, run_sync
 
 
 @dataclass
@@ -29,34 +31,6 @@ class AgreedTerms:
     duration_seconds: int
 
 
-@dataclass(frozen=True, slots=True)
-class VmSettlementTransport:
-    """Submit a negotiation-scoped settlement request to its trusted storefront."""
-
-    seller_url: str
-    principal: Identity
-    signer: Signer
-    resolve_seller_principals: Callable[[], TrustedIdentitySet]
-    timeout: float = DEFAULT_HTTP_TIMEOUT
-
-    def settle(self, negotiation_id: str) -> dict[str, Any]:
-        body = {
-            "negotiation_id": negotiation_id,
-            "buyer_principal": self.principal.model_dump(mode="json"),
-        }
-        return signed_storefront_json(
-            self.seller_url.rstrip("/") + f"/api/v1/settle/{negotiation_id}",
-            body,
-            signer=self.signer,
-            principal=self.principal,
-            method="POST",
-            operation="settle_escrow",
-            resource=negotiation_id,
-            timeout=self.timeout,
-            resolve_response_principals=self.resolve_seller_principals,
-        )
-
-
 def payer_selection(selected):
     """Add the VM buyer's account to a selected payments option."""
     section = load_user_config().get("vms", {})
@@ -65,7 +39,7 @@ def payer_selection(selected):
         selected,
         selection=selected.selection.model_copy(
             update={
-                "params": {**(selected.selection.params or {}), "payer_account": payer},
+                "settlement": {**selected.selection.settlement, "payer_account": payer},
             }
         ),
     )
@@ -112,21 +86,36 @@ def settle_payment(
         timeout=timeout,
         interval=interval,
     )
+    evidence_store().remember_commitment(negotiation_id, transaction)
     on_event(
         "payment_approved",
         {"transaction_id": transaction, "negotiation_id": negotiation_id},
     )
-    transport = VmSettlementTransport(
-        seller_url, principal, signer, resolve_seller_principals
-    )
     deadline = time.monotonic() + timeout
-    while True:
-        submitted = transport.settle(negotiation_id)
-        if submitted.get("status") != "pending":
-            break
-        if time.monotonic() >= deadline:
-            raise TimeoutError("seller is still waiting for the payment receipt")
-        time.sleep(interval)
+
+    async def commit():
+        async with buyer_lifecycle(
+            agreement_bytes=raw, settlement_data=settlement_data, seller_url=seller_url,
+            signer=signer, publishers=resolve_seller_principals(), approval=buyer,
+            timeout=timeout,
+        ) as lifecycle:
+            message = CommitMessage(
+                negotiation_id=negotiation_id, commitment_ref=transaction,
+                operation_key="commit:" + transaction,
+            )
+            while True:
+                outcome = await lifecycle.commit(message)
+                if isinstance(outcome, Accepted):
+                    return
+                if not isinstance(outcome, Pending):
+                    raise RuntimeError("seller commit: " + outcome.model_dump_json())
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("seller is still waiting for the payment receipt")
+                await asyncio.sleep(min(interval, remaining))
+
+    run_sync(commit)
+    submitted = {"status": "committed", "negotiation_id": negotiation_id, "settlement_ref": transaction}
     on_event("settlement_submitted", {"escrow_uid": negotiation_id, "body": submitted})
     return wait_for_settlement(
         seller_url=seller_url,
@@ -195,4 +184,4 @@ def make_payment_settle_hook(
     return settle
 
 
-__all__ = ["VmSettlementTransport", "payment_buyer", "settle_payment"]
+__all__ = ["payment_buyer", "settle_payment"]

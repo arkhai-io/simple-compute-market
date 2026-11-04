@@ -217,7 +217,18 @@ Agreement/mandate/reference without replacing verified evidence with pending or
 requiring another payment poll. Authority lookup and immutable grant digests
 reconcile acknowledgement loss under one fulfillment identity. Buyer credentials
 remain in the private result channel, not public settlement evidence. Ledger,
-fees, hold release, disputes and `reverse` remain payments-service operations.
+fees, hold release/extensions and `reverse` remain payments-service operations;
+cases, rulings and their effects belong to the independent dispute authority.
+
+Hosted options carry lifecycle adjudication and derive per-part end/hold from the
+Agreement, separate from approval expiry. Publication and buyer selection/mandate
+checks validate the full accepted dispute identity and interface params against
+registry-specific preferences; matching account text alone is insufficient.
+Local preferences/vetoes precede opt-in registry recommendations and credentials
+bind separately by full identity. These checks do not introduce lifecycle
+servicing: API-credit roles compose no seller evidence/watch/respondent or buyer
+case-filing path. Consequences of reversing already-issued credits are unspecified.
+See [lifecycle limits](../deal-lifecycle/architecture.md#current-limits).
 
 ### Explicit database reset
 

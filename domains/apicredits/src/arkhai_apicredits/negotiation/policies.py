@@ -28,6 +28,7 @@ from __future__ import annotations
 import logging
 import re
 
+from market_core.schemas import settlement_option_schema
 from market_identity import Identity, IdentityScheme
 from market_alkahest.schemas import (
     EscrowProposal,
@@ -118,16 +119,14 @@ def api_credits_round_zero_guard(
     if isinstance(proposal, dict) and proposal.get("settlement_selection") is not None:
         try:
             selection = proposal["settlement_selection"]
-            # A selection names its option exactly; `params` carries the buyer's
-            # inputs to the mechanism (a payer account, say) and is optional.
             if (
                 not isinstance(selection, dict)
-                or not {"mechanism", "option_id", "expiration_unix"} <= set(selection)
-                or not set(selection) <= {"mechanism", "option_id", "expiration_unix", "params"}
-                or not isinstance(selection.get("params") or {}, dict)
+                or not {"settlement", "option_id", "expiration_unix"} <= set(selection)
+                or not set(selection) <= {"settlement", "option_id", "expiration_unix"}
+                or not isinstance(selection.get("settlement"), dict)
             ):
                 raise ValueError("selection has invalid fields")
-            mechanism = selection["mechanism"]
+            mechanism = selection["settlement"].get("schema")
             option_id = selection["option_id"]
             expiration_unix = selection["expiration_unix"]
             if not isinstance(mechanism, str) or not mechanism:
@@ -149,7 +148,7 @@ def api_credits_round_zero_guard(
                 for option in options
                 if isinstance(option, dict)
                 and option.get("option_id") == option_id
-                and option.get("mechanism") == mechanism
+                and settlement_option_schema(option) == mechanism
             ]
             if len(matches) != 1:
                 raise ValueError("selection does not exact-match one listing option")

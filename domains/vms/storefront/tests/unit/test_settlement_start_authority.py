@@ -40,7 +40,7 @@ def _thread() -> dict:
         "negotiation_id": "neg-1",
         "terminal_state": "success",
         "agreement_bytes": json.dumps(
-            {"settlement": {"mechanism": "alkahest.v1"}}
+            {"settlement": {"settlement": {"schema": "alkahest.v1"}}}
         ).encode(),
         "buyer_principal": _BUYER.model_dump(mode="json"),
         "settlement_data": {
@@ -204,7 +204,7 @@ async def test_a_deal_settled_by_introduction_is_refused_before_its_stage_starts
     thread = {
         **_thread(),
         "agreement_bytes": json.dumps(
-            {"settlement": {"mechanism": "contact-exchange.v1"}}
+            {"settlement": {"settlement": {"schema": "contact-exchange.v1"}}}
         ).encode(),
     }
     db = SimpleNamespace(

@@ -7,6 +7,9 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
+from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
+from market_core.schemas import settlement_option_schema
 from arkhai_apicredits.settlement import CreditsServiceClient
 from core_storefront.stage_log import stage_event
 from market_alkahest import (
@@ -14,7 +17,8 @@ from market_alkahest import (
     ALKAHEST_MECHANISM_ID,
     RECIPIENT_RELEASE,
     AlkahestChainProbe,
-    configured_release_model,
+    require_deliverable_release_models,
+    RECIPIENT_RELEASE,
     escrow_release_conditions,
 )
 from market_arkhai_payments import (
@@ -92,9 +96,10 @@ class ApiCreditsSettlementComposition:
     failure_policy: Any
     arkhai_payments_stage: PaymentSellerStage | None = None
     seller_wallet_address: str = ""
+    disputes: RegistryDisputePolicy = field(default_factory=lambda: RegistryDisputePolicy.from_document({}), repr=False)
 
     def accepted_settlement_artifacts(self, agreement: Mapping[str, Any]) -> dict[str, Any]:
-        mechanism = agreement["settlement"]["mechanism"]
+        mechanism = settlement_option_schema(agreement["settlement"])
         return SELLER_STAGES[mechanism].agreement_artifacts(agreement, self)
 
     def payment_service(self, db: Any) -> Any:
@@ -198,7 +203,11 @@ class ApiCreditsSettlementComposition:
         no artifact is returned; the readiness returned beside them says why,
         which the caller judges.
         """
-        merged_resources = {**self.mechanism_resources, **resources}
+        merged_resources = {
+            **self.mechanism_resources, **resources,
+            "dispute_authorities": self.disputes.for_publication(),
+            "dispute_interfaces": frozenset({MEDIATION_INTERFACE}),
+        }
         compiled = (
             [
                 compile_settlement_publication_clause(
@@ -285,19 +294,15 @@ def alkahest_ready(readiness: Sequence[MechanismReadiness]) -> bool:
 
 
 def require_coherent_release_model(settlement_config: Any = None) -> None:
-    """Refuse a configured Alkahest section that selects contradictory models.
-
-    A section stating both the oracle-gated and the interruptible model is
-    incoherent configuration rather than an unusable mechanism, so it stops
-    startup, enabled or not; a coherent model API credits cannot deliver is a
-    readiness blocker instead. With no ``settlement_config``, the storefront's
-    own configuration is resolved.
-    """
+    """Refuse Alkahest release models that API-credit delivery cannot honor."""
     if settlement_config is None:
         settlement_config = build_storefront_settlement_registry().resolve(
             storefront_config.settlement_config_mapping(), role="seller"
         )
-    configured_release_model(settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY))
+    require_deliverable_release_models(
+        settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY),
+        SELLER_STAGES[ALKAHEST_MECHANISM_ID].release_models,
+    )
 
 
 def record_servicing_event(event: str, fields: dict[str, Any]) -> None:
@@ -333,7 +338,9 @@ def build_api_credit_settlement_composition(
     )
     seller_wallet_address = storefront_config.seller_wallet_address()
     seller_wallet_key = str(storefront_config.settings.get("wallet.private_key", "") or "")
+    disputes = RegistryDisputePolicy.from_document(storefront_config.settings.as_dict())
     resources: dict[str, Any] = {
+        "disputes": disputes,
         "marketplace_signer": marketplace_signer,
         "clients": alkahest_clients,
         "get_client": lambda chain: alkahest_clients.get(chain or ""),
@@ -344,7 +351,8 @@ def build_api_credit_settlement_composition(
         # address its key does not sign as names two accounts. The storefront
         # submits its issuance evidence on chain with the key, so a missing key
         # or chain makes Alkahest unready. A configured model the Alkahest entry
-        # cannot deliver is reported the same way.
+        # cannot deliver has already refused startup above; preflight reports
+        # one too, to a caller that evaluates readiness apart from startup.
         "wallet": {"address": seller_wallet_address, "private_key": seller_wallet_key},
         "signs_transactions": True,
         "deliverable_release_models": SELLER_STAGES[ALKAHEST_MECHANISM_ID].release_models,
@@ -395,6 +403,7 @@ def build_api_credit_settlement_composition(
         evidence_service=evidence_service,
         private_results=private_results,
         failure_policy=failure_policy,
+        disputes=disputes,
         arkhai_payments_stage=_payments_stage(settlement_config, payments_client_for_owner),
         seller_wallet_address=seller_wallet_address,
     )

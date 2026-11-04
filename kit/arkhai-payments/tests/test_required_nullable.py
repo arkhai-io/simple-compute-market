@@ -2,7 +2,7 @@
 
 The standalone publication represents the duration as a required union with null.
 Every mandate here is a synthetic fixture with deterministic development accounts.
-The kit's own derivation never produces null.
+The kit derives null exactly when the accepted terms leave the case hold uncapped.
 """
 
 from __future__ import annotations
@@ -193,19 +193,20 @@ def test_a_receipt_and_snapshot_for_a_null_mandate_verify():
     assert verify_receipt(embedded, SERVICE.identity, mandate=raw, agreement_json=terms, livemode=False)
 
 
-def test_the_kit_never_derives_null_and_refuses_it():
+def test_the_case_hold_cap_is_null_only_when_the_terms_leave_it_unbounded():
     terms = agreement()
     policy = mandate_policy_for_agreement(terms, config())
     derived = derive_mandate(terms, policy)
-    assert [part.root.maxHoldExtension.root for part in derived.parts] == ["P0D"]
+    assert [part.root.maxHoldExtension for part in derived.parts] == [None]
+    assert wire_json(derived)["parts"][0]["maxHoldExtension"] is None
 
-    unbounded = wire_json(derived)
-    unbounded["parts"][0]["maxHoldExtension"] = None
-    Mandate.model_validate(unbounded)
+    capped = wire_json(derived)
+    capped["parts"][0]["maxHoldExtension"] = "P1D"
+    Mandate.model_validate(capped)
     with pytest.raises(MandatePolicyError):
-        check(unbounded, terms, policy)
+        check(capped, terms, policy)
     stored = PaymentSettlementData.parse(
-        {"mandate": unbounded, "transaction_id": transaction_id(unbounded)}
+        {"mandate": capped, "transaction_id": transaction_id(capped)}
     )
     with pytest.raises(MandatePolicyError):
         stored.require_bound_to(terms)

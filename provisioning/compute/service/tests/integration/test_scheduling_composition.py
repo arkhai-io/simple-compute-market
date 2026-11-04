@@ -12,6 +12,8 @@ commits, or a controlled failure rolls back, together.
 from __future__ import annotations
 
 from dependency_injector import providers
+from market_identity import Ed25519Signer
+from compute_provisioning_service.identity import ProvisioningIdentityContext
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -50,6 +52,13 @@ def _build_container():
 
     container = Container()
     container.session_factory.override(providers.Object(session_factory))
+    # Public deterministic development principals; never use on a public network.
+    container.identity_context.override(ProvisioningIdentityContext(
+        signer=Ed25519Signer(bytes([1]) * 32),
+        storefront_principal=Ed25519Signer(bytes([2]) * 32).identity,
+        admin_principal=Ed25519Signer(bytes([3]) * 32).identity,
+        storefront_site_id="fixture-site",
+    ))
     return container, session_factory
 
 

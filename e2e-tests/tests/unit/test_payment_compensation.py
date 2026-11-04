@@ -83,7 +83,7 @@ def _run_log(run_dir: Path, *events: dict[str, Any], tail: str = "") -> Path:
     return run_dir
 
 
-_ACCEPTED = {"event": "agreement_accepted", "negotiation_id": "negotiation-1"}
+_ACCEPTED = {"event": "negotiation_completed", "status": "agreed", "negotiation_id": "negotiation-1"}
 _APPROVED = {"event": "payment_approved", "transaction_id": "transaction-1"}
 
 

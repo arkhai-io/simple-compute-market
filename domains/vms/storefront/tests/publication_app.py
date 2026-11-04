@@ -312,19 +312,20 @@ class SettlementCompositionDouble:
             for clause in clauses or ()
             if clause.mechanism == "alkahest.v1"
         ]
-        # Each accepted escrow is also an exact option, in the shape the
-        # Alkahest kit publishes, so a buyer can select it explicitly.
-        for escrow in accepted:
-            body = {
-                "mechanism": "alkahest.v1",
-                "asset": escrow["literal_fields"]["token"],
-                "rates": [{**rate, "value": str(rate["value"])} for rate in escrow["rates"]],
-                "params": {"accepted_escrow": escrow},
-            }
-            option_id = derive_settlement_option_id(
-                **{**body, "rates": [RateValue.model_validate(rate) for rate in body["rates"]]}
+        if accepted:
+            built = self.configuration_registry.build_option(
+                MechanismReadiness(
+                    mechanism="alkahest.v1", configured=True, enabled=True, ready=True
+                ),
+                self.settlement_config,
+                role="seller",
+                resources={
+                    "accepted_escrows": accepted,
+                    "wallet": {"address": SELLER_WALLET},
+                    "chains": dict(storefront_config.CHAINS),
+                },
             )
-            options.append({"option_id": option_id, **body})
+            options.extend(built["settlement_options"])
         # Release conditions are derived only under a ready Alkahest, so the
         # double reports Alkahest ready wherever it builds Alkahest options, as
         # the real composition's readiness does.

@@ -6,7 +6,7 @@ import re
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
 
 _ED25519_IDENTIFIER = re.compile(r"[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]")
 _EIP191_IDENTIFIER = re.compile(r"0x[0-9a-f]{40}")
@@ -86,6 +86,17 @@ class RegistryDescriptor(_StrictCarrier):
         max_length=256,
     )
     schema_identity: RegistrySchemaDescriptor = Field(alias="schema")
+    # Interface-owned public advertisement copies are opaque to core.
+    recommended_dispute_authorities: list[dict[str, JsonValue]] | None = Field(
+        default=None, alias="recommendedDisputeAuthorities"
+    )
+
+    @field_validator("recommended_dispute_authorities")
+    @classmethod
+    def omit_empty_recommendations(
+        cls, value: list[dict[str, JsonValue]] | None
+    ) -> list[dict[str, JsonValue]] | None:
+        return value or None
 
     @field_validator("base_url")
     @classmethod

@@ -39,25 +39,43 @@ def negotiation(monkeypatch, tmp_path):
     return captured
 
 
+_DISPUTE = {
+    "interface": "arkhai.mediation.v1", "origin": "https://dispute.example",
+    "account": "11111111-1111-4111-8111-111111111111",
+    "record_key": "example-record-key", "params": {},
+    "advertisement": {"mechanisms": ["arkhai.payments.v1"],
+                      "minimum_dispute_window_seconds": 60, "minimum_case_hold_seconds": None},
+}
+
+
 def _listing(mechanism):
     entry = {
         "chain_name": "anvil", "escrow_address": "0x" + "aa" * 20,
         "literal_fields": {"token": "0x" + "bb" * 20},
         "rates": [{"field": "amount", "per": "hour", "value": "100"}],
     }
-    params = {"accepted_escrow": entry} if mechanism == "alkahest.v1" else {
-        "payee_account": "22222222-2222-4222-8222-222222222222", "asset": "USD",
-    }
+    params = (
+        {"accepted_escrow": entry}
+        if mechanism == "alkahest.v1"
+        else {
+            "payee_account": "22222222-2222-4222-8222-222222222222",
+        }
+    )
     asset = "0x" + "bb" * 20 if mechanism == "alkahest.v1" else "USD"
     rates = [RateValue(field="amount", per="hour", value=100)]
+    body = {"price": {"asset": asset, "rates": rates}, "settlement": {"schema": mechanism, **params}}
+    if mechanism == "arkhai.payments.v1":
+        body["lifecycle"] = {"adjudication": {
+            "version": 1, "dispute": {key: _DISPUTE[key] for key in ("interface", "origin", "account", "record_key", "params")},
+            "dispute_window_seconds": 120, "case_hold_max_seconds": None,
+        }, "delivery_deadline_seconds": 60}
     return {
-        "listing_id": "L-1", "storefront_url": "http://seller", "publisher_id": "publisher",
+        "listing_id": "L-1",
+        "storefront_url": "http://seller",
+        "publisher_id": "publisher",
         "publisher_principals": seller_principals().model_dump(mode="json"),
-        "accepted_escrows": [entry], "settlement_options": [{
-            "mechanism": mechanism, "option_id": derive_settlement_option_id(
-                mechanism=mechanism, asset=asset, rates=rates, params=params,
-            ), "asset": asset, "rates": rates, "params": params,
-        }],
+        "accepted_escrows": [entry],
+        "settlement_options": [{"option_id": derive_settlement_option_id(**body), **body}],
     }
 
 
@@ -65,6 +83,7 @@ def _configure(monkeypatch, mechanism, wallet=True):
     listing = _listing(mechanism)
     monkeypatch.setattr("arkhai_vms_buyer.negotiate_cli.fetch_listing_dict", lambda *a, **kw: listing)
     monkeypatch.setattr("arkhai_vms_buyer.settlement_composition.load_user_config", lambda: {
+        "Dispute": [_DISPUTE],
         "Settlement": {
             "schema_version": 1, "priority": [mechanism],
             "alkahest": {"enabled": mechanism == "alkahest.v1"},
@@ -97,9 +116,11 @@ def test_selected_stage_controls_fresh_prices_and_proposal(negotiation, monkeypa
     assert negotiation["initial_price"] == expected
     assert negotiation["max_price"] == expected * 1.5
     assert negotiation["escrow_proposal"] is None
-    assert negotiation["settlement_selection"].mechanism == mechanism
+    assert negotiation["settlement_selection"].settlement_schema == mechanism
     if mechanism == "arkhai.payments.v1":
-        assert negotiation["settlement_selection"].params == {"payer_account": "11111111-1111-4111-8111-111111111111"}
+        assert negotiation["settlement_selection"].settlement_params == {
+            "payer_account": "11111111-1111-4111-8111-111111111111"
+        }
 
 
 _DEMANDS = [{

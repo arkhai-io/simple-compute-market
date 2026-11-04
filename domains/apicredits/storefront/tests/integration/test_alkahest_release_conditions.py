@@ -205,10 +205,11 @@ async def test_a_contradictory_release_model_refuses_startup(storefront):
     app = _app()
     with _replaced(
         settlement=_settlement(
-            oracle_gated=True, trusted_oracle_addresses=[ORACLE], interruptible=True
+            release_models=["oracle_gated", "interruptible"], trusted_oracle_addresses=[ORACLE],
+            interruptible_oracle_addresses=[ORACLE]
         )
     ):
-        with pytest.raises(ReleaseModelError, match="mutually exclusive"):
+        with pytest.raises(ReleaseModelError, match="cannot deliver"):
             async with app.router.lifespan_context(app):
                 pass
 
@@ -252,10 +253,10 @@ async def test_a_seller_stating_only_a_key_publishes_the_keys_account_as_recipie
 
 UNSETTLEABLE = {
     "interruptible": (
-        {"interruptible": True, "interruptible_oracle_addresses": [ORACLE]},
+        {"release_models": ["interruptible"], "interruptible_oracle_addresses": [ORACLE]},
         "alkahest.release_model_undeliverable",
     ),
-    "no-oracle": ({"oracle_gated": True}, "alkahest.oracle_policy_invalid"),
+    "no-oracle": ({"release_models": ["oracle_gated"]}, "alkahest.oracle_policy_invalid"),
 }
 
 
@@ -266,13 +267,12 @@ async def test_an_unsettleable_section_starts_and_its_status_names_the_blocker(
     """Spec scenario "An Alkahest section that cannot settle makes Alkahest
     unready": the storefront starts, and the administrator's status reports
     Alkahest unready with the configuration blocker."""
-    section, blocker = UNSETTLEABLE[case]
-    async with _started(_settlement(**section)) as (_listings, _public, admin):
-        status = await admin.get_system_status()
-
-    (alkahest,) = [item for item in status.settlement if item["mechanism"] == "alkahest.v1"]
-    assert alkahest["ready"] is False
-    assert (blocker, "configuration") in {(b["code"], b["kind"]) for b in alkahest["blockers"]}
+    section, _blocker = UNSETTLEABLE[case]
+    with pytest.raises(ReleaseModelError, match="cannot deliver"):
+        async with _started(_settlement(**section)):
+            pass
+    assert sqlite_module._sqlite_client is None
+    assert not storefront.exists()
 
 
 @pytest.mark.parametrize("case", sorted(UNSETTLEABLE))
@@ -282,12 +282,12 @@ async def test_supplied_escrows_publish_no_alkahest_option_while_it_is_unready(
     """Spec scenario "An API-credit listing request supplies its escrows":
     with Alkahest unready no condition is derived for them and no Alkahest
     option publishes, so a listing whose only option they were is refused."""
-    section, blocker = UNSETTLEABLE[case]
-    async with _started(_settlement(**section)) as (listings, _public, _admin):
-        with pytest.raises(StorefrontClientError, match=blocker) as refused:
-            await listings.publish_from_quota(_supplied_escrows())
-
-    assert refused.value.status_code == 400
+    section, _blocker = UNSETTLEABLE[case]
+    with pytest.raises(ReleaseModelError, match="cannot deliver"):
+        async with _started(_settlement(**section)):
+            pass
+    assert sqlite_module._sqlite_client is None
+    assert not storefront.exists()
 
 
 async def test_an_address_naming_another_account_leaves_alkahest_unready(storefront):
@@ -316,20 +316,12 @@ async def test_alkahest_clauses_compile_no_option_while_it_is_unready(storefront
     """The clause path: the composition the route uses compiles no Alkahest
     escrow and derives no condition while Alkahest is unready, and its
     readiness names the configuration blocker."""
-    section, blocker = UNSETTLEABLE[case]
-    async with _started(_settlement(**section)):
-        composition = container.resolved_settlement_composition
-        escrows, options, readiness = await composition.publication_artifacts(
-            {
-                "claimant_principal": SELLER_SIGNER.identity,
-                "resource_id": "svc-quota",
-                "service": "Acme Inference",
-            },
-            [dict(ALKAHEST_CLAUSE)],
-        )
-        assert (escrows, options) == ([], [])
-        assert blocker in {b.code for status in readiness for b in status.blockers}
-        assert composition.release_conditions([dict(ESCROW)], readiness=readiness) == []
+    section, _blocker = UNSETTLEABLE[case]
+    with pytest.raises(ReleaseModelError, match="cannot deliver"):
+        async with _started(_settlement(**section)):
+            pass
+    assert sqlite_module._sqlite_client is None
+    assert not storefront.exists()
 
 
 def _clause_request(mechanism: str = "alkahest.v1") -> dict:
@@ -358,24 +350,24 @@ async def test_a_create_unready_for_configuration_before_the_chain_is_reached_an
     storefront, case
 ):
     """Not retryable: the configuration blocker stands whatever the chain answers."""
-    section, blocker = UNSETTLEABLE[case]
-    async with _started(_settlement(**section), probed=False) as (listings, _p, _a):
-        with pytest.raises(StorefrontClientError, match=blocker) as refused:
-            await listings.publish_from_quota(_supplied_escrows())
-
-    assert refused.value.status_code == 400
+    section, _blocker = UNSETTLEABLE[case]
+    with pytest.raises(ReleaseModelError, match="cannot deliver"):
+        async with _started(_settlement(**section), probed=False):
+            pass
+    assert sqlite_module._sqlite_client is None
+    assert not storefront.exists()
 
 
 @pytest.mark.parametrize("case", sorted(UNSETTLEABLE))
 async def test_a_clause_create_while_alkahest_is_unready_for_configuration_answers_400(
     storefront, case
 ):
-    section, blocker = UNSETTLEABLE[case]
-    async with _started(_settlement(**section)) as (listings, _public, _admin):
-        with pytest.raises(StorefrontClientError, match=blocker) as refused:
-            await listings.publish_from_quota(_clause_request())
-
-    assert refused.value.status_code == 400
+    section, _blocker = UNSETTLEABLE[case]
+    with pytest.raises(ReleaseModelError, match="cannot deliver"):
+        async with _started(_settlement(**section)):
+            pass
+    assert sqlite_module._sqlite_client is None
+    assert not storefront.exists()
 
 
 async def test_a_create_before_the_chain_is_reached_answers_503_until_a_probe_reaches_it(

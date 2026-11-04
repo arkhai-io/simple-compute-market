@@ -34,10 +34,11 @@ def _option_listing(**params_overrides) -> dict:
         "settlement_options": [
             {
                 "option_id": "aa" * 32,
-                "mechanism": "alkahest.v1",
-                "asset": _TOKEN,
-                "rates": [{"field": "amount", "per": "hour", "value": "100"}],
-                "params": params,
+                "price": {
+                    "asset": _TOKEN,
+                    "rates": [{"field": "amount", "per": "hour", "value": "100"}],
+                },
+                "settlement": {"schema": "alkahest.v1", **(params or {})},
             }
         ],
     }
@@ -71,6 +72,9 @@ def test_option_token_filters_read_the_embedded_escrow_template(spec) -> None:
 
 def test_option_token_missing_is_underreport_friendly(spec) -> None:
     rateless = _option_listing(accepted_escrow=None)
-    rateless["settlement_options"][0]["params"] = {"channel": "telegram"}
+    rateless["settlement_options"][0]["settlement"] = {
+        "schema": "contact-exchange.v1",
+        "channel": "telegram",
+    }
     assert _match(spec, rateless, option_token=f"in:[{_TOKEN}]")
     assert _match(spec, rateless, option_token_exclude=f"not_in:[{_TOKEN}]")

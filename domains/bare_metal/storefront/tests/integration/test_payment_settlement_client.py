@@ -28,8 +28,9 @@ from buyer_commands import BuyerCommands
 from held_loops import held_loop_controller
 from loopback import serving
 from market_arkhai_payments import PaymentSettlementData
-from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt
+from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt, dispute_lifecycle
 from market_core.schemas import RateValue, SettlementOption, derive_settlement_option_id
+from market_deal_servicing.journal import stable_ref
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from source_sites import SourceSite, listing_source_projection, source_projections
 from storefront_client import StorefrontClient, StorefrontClientError
@@ -45,6 +46,7 @@ from arkhai_bare_metal_storefront.settlement_composition import (
     BareMetalStorefrontSettlementComposition,
 )
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
+from arkhai_bare_metal_buyer.evidence import evidence_store
 
 PAYER = "11111111-1111-4111-8111-111111111111"
 PAYEE = "22222222-2222-4222-8222-222222222222"
@@ -137,16 +139,20 @@ class Provisioning:
 
 
 def _option() -> SettlementOption:
-    params = {"payee_account": PAYEE, "asset": "USD/2", "window": "P7D", "deposit_agreement": False}
+    params = {"payee_account": PAYEE, "window": "P7D", "deposit_agreement": False}
     rates = [RateValue(field="amount", per="hour", value=100)]
+    lifecycle = dispute_lifecycle(DISPUTE)
+    lifecycle["adjudication"]["dispute"]["interface"] = "arkhai.mediation.v1"
+    lifecycle["delivery_deadline_seconds"] = 3600
     return SettlementOption(
         option_id=derive_settlement_option_id(
-            mechanism="arkhai.payments.v1", asset="USD/2", rates=rates, params=params
+            price={"asset": "USD/2", "rates": rates},
+            settlement={"schema": "arkhai.payments.v1", **(params or {})},
+            lifecycle=lifecycle,
         ),
-        mechanism="arkhai.payments.v1",
-        asset="USD/2",
-        rates=rates,
-        params=params,
+        price={"asset": "USD/2", "rates": rates},
+        settlement={"schema": "arkhai.payments.v1", **(params or {})},
+        lifecycle=lifecycle,
     )
 
 
@@ -163,7 +169,6 @@ def _composition(
                 "service_url": "http://127.0.0.1:9",
                 "service_identity": SERVICE.identity.model_dump(mode="json"),
                 "fee_bps": 250,
-                "dispute_authority": DISPUTE,
                 "development_auth": True,
             },
         },
@@ -211,10 +216,12 @@ async def _open(buyer: StorefrontClient) -> dict:
             },
         },
         settlement_selection={
-            "mechanism": option.mechanism,
             "option_id": option.option_id,
+            "settlement": {
+                "schema": option.settlement_schema,
+                **({"payer_account": PAYER} or {}),
+            },
             "expiration_unix": 1_900_000_000,
-            "params": {"payer_account": PAYER},
         },
         selection_only=True,
     )
@@ -615,6 +622,7 @@ async def test_the_buy_command_settles_over_a_run_log_a_later_command_reloads(
     runtime, provisioning = _runtime(tmp_path, payments)
     await _publish(runtime)
     service = SERVICE.identity.model_dump(mode="json")
+    dispute = _option().lifecycle["adjudication"]["dispute"]
     buyer = BuyerCommands(
         monkeypatch,
         tmp_path,
@@ -628,7 +636,15 @@ async def test_the_buy_command_settles_over_a_run_log_a_later_command_reloads(
             f'service_identity = {{scheme = "{service["scheme"]}", '
             f'identifier = "{service["identifier"]}"}}\n'
             "fee_bps = 250\n"
-            f'dispute_authority = "{DISPUTE}"\n'
+            "[[Dispute]]\n"
+            f'interface = "{dispute["interface"]}"\n'
+            f'origin = "{dispute["origin"]}"\n'
+            f'account = "{dispute["account"]}"\n'
+            f'record_key = "{dispute["record_key"]}"\n'
+            "params = {}\n"
+            "[Dispute.advertisement]\n"
+            'mechanisms = ["arkhai.payments.v1"]\n'
+            "minimum_dispute_window_seconds = 60\n"
         ),
     )
     buyer.pay_through(payments)
@@ -650,8 +666,15 @@ async def test_the_buy_command_settles_over_a_run_log_a_later_command_reloads(
             "buy", LISTING, "--option-id", option.option_id, "--ssh-public-key", SSH_KEY
         )
         teardown = buyer.run("teardown", "--run-id", bought["run_id"])
+        retried = buyer.run("teardown", "--run-id", bought["run_id"])
+        assert retried["observed_at"] == teardown["observed_at"]
+        assert retried["acknowledgement"]["receipt_at"] == teardown["acknowledgement"]["receipt_at"]
+        kept = await evidence_store().read(teardown["negotiation_id"])
+        assert {"end_delivery_observation", "end_delivery_receipt"} <= {item.kind for item in kept.items}
 
     assert payments.count("approve") == 1
     assert len(provisioning.begin_calls) == 1
-    assert teardown["state"] == "terminating"
-    assert provisioning.terminated == [("reservation-pay", "buyer_teardown")]
+    assert teardown["delivery"]["status"] == "accepted"
+    assert teardown["acknowledgement"]["delivery"]["progress"] == "tearing_down"
+    assert teardown["payment"]["status"] == "rejected"
+    assert provisioning.terminated == [("reservation-pay", stable_ref(teardown["negotiation_id"], "terminate", "terminate"))]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -36,6 +37,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from .evidence import evidence_store
+from .lifecycle import buyer_lifecycle, run_sync
 from . import common
 from .arkhai_payments import (
     AgreedTerms,
@@ -134,7 +137,7 @@ class AlkahestBuyerStage:
         return validate
 
     def accepted_entry(self, selected):
-        value = selected.option.params.get("accepted_escrow")
+        value = selected.option.settlement_params.get("accepted_escrow")
         if not isinstance(value, Mapping):
             raise ValueError("selected Alkahest option has no accepted escrow payload")
         return dict(value)
@@ -234,10 +237,17 @@ class AlkahestBuyerStage:
             settlement_poll_interval=context.poll_interval,
             settlement_total_timeout=context.timeout, sleep=context.sleep,
         )
-        return hook(negotiation, on_event)
+        def record(stage, payload):
+            if stage == "escrow_created":
+                evidence_store().remember_commitment(negotiation.outcome.negotiation_id, payload["escrow_uid"])
+            on_event(stage, payload)
+        return hook(negotiation, record)
 
     def resume(self, context):
         return _resume_alkahest(context)
+
+    def lifecycle(self, context):
+        return _buyer_lifecycle(context)
 
 
 @dataclass(frozen=True)
@@ -283,6 +293,15 @@ class PaymentsBuyerStage:
             confirm_settlement=context.confirm,
         )(negotiation, on_event)
 
+    def lifecycle(self, context):
+        try:
+            approval = payment_buyer(context.resolve_policy())
+        except ValueError:
+            # A removed payment configuration removes financial capability,
+            # not the committed buyer's receipt-only surrender capability.
+            approval = None
+        return _buyer_lifecycle(context, payment=True, approval=approval)
+
     def resume(self, context):
         deal, log = context.deal, context.log
         if deal.agreement_bytes is None or deal.settlement_data is None:
@@ -302,6 +321,27 @@ class PaymentsBuyerStage:
         if final.get("status") != "ready":
             raise typer.Exit(7)
         return final
+
+
+def _buyer_lifecycle(context, *, payment=False, approval=None):
+    deal = context.deal
+    if not deal.agreement_bytes:
+        raise ValueError("delivery lifecycle requires retained accepted Agreement bytes")
+    if payment:
+        data = PaymentSettlementData.parse(deal.settlement_data)
+        retained = evidence_store()
+        # Approval records a verified commitment before the peer handoff; an
+        # accepted but unfunded negotiation is not a delivery-stage command.
+        record = run_sync(lambda: retained.read(deal.negotiation_id))
+        if not any(item.commitment_ref == data.transaction_id and not item.superseded for item in record.commitments):
+            raise ValueError("delivery lifecycle requires a retained verified payment commitment")
+    return buyer_lifecycle(
+        agreement_bytes=base64.b64decode(deal.agreement_bytes, validate=True),
+        settlement_data=deal.settlement_data, seller_url=deal.seller_url,
+        signer=context.signer, publishers=context.resolve_seller_principals(),
+        commitment_ref=deal.settlement_ref or deal.escrow_uid,
+        approval=approval, timeout=context.timeout,
+    )
 
 
 def _chain_name_from_run_log(run_id: str, *, signer) -> str | None:
@@ -541,6 +581,7 @@ def _resume_alkahest(context: BuyerResumeContext) -> dict:
             )
             raise typer.Exit(4)
         resolved_uid = uids[0]
+        evidence_store().remember_commitment(deal.negotiation_id, resolved_uid)
         log.event("escrow_created", escrow_uid=resolved_uid)
         console.print(f"[green]escrow created[/green]  {resolved_uid}")
     try:

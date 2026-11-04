@@ -30,12 +30,9 @@ def _plan() -> tuple[dict[str, Any], str]:
     }
     option = {
         "option_id": derive_settlement_option_id(
-            mechanism="contact-exchange.v1", asset="introduction", rates=[], params=params
+            settlement={"schema": "contact-exchange.v1", **(params or {})}
         ),
-        "mechanism": "contact-exchange.v1",
-        "asset": "introduction",
-        "rates": [],
-        "params": params,
+        "settlement": {"schema": "contact-exchange.v1", **(params or {})},
     }
 
     artifacts = contact_accepted_obligation_builder(

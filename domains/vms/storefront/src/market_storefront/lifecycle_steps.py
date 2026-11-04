@@ -116,6 +116,8 @@ async def settlement_servicing_step() -> Mapping[str, Any]:
     composition = _container.resolved_settlement_composition
     if composition is None:
         raise LifecycleRouteError(503, "settlement composition is not initialized")
+    if getattr(composition, "lifecycle", None) is not None:
+        await composition.lifecycle.cycle()
     processed = await composition.worker.run_once()
     return {"loop": SETTLEMENT_SERVICING, "processed": int(processed)}
 

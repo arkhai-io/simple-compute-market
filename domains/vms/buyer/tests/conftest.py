@@ -9,7 +9,15 @@ without dragging torch into pytest.
 
 from __future__ import annotations
 
+import pytest
+
 from market_policy.negotiation_middleware import register_negotiation_middleware
 from arkhai_vms_negotiation.policies import bisection_middleware
 
 register_negotiation_middleware("rl")(bisection_middleware)
+
+
+@pytest.fixture(autouse=True)
+def evidence_root(tmp_path, monkeypatch):
+    monkeypatch.setenv("ARKHAI_BUYER_PROFILE_STORE", str(tmp_path / "profiles.json"))
+

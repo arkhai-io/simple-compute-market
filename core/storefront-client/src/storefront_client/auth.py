@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from market_identity import EnvelopeCapture, capture_envelope
+
 import time
 import uuid
 from collections.abc import Mapping
@@ -11,6 +13,7 @@ from typing import Any
 from market_identity import (
     EMPTY_BODY,
     RESPONSE_PROTOCOL,
+    AuthenticatedRequest,
     AuthenticatedResponse,
     Identity,
     RequestEnvelope,
@@ -70,6 +73,7 @@ class SignedRequest:
     body: Any
     content: bytes | None
     headers: dict[str, str]
+    envelope: AuthenticatedRequest
 
 
 def build_authenticated_request(
@@ -132,6 +136,7 @@ def build_authenticated_request(
         body=body,
         content=content,
         headers=headers,
+        envelope=authenticated,
     )
 
 
@@ -144,6 +149,8 @@ def verify_authenticated_response(
     body: Any = EMPTY_BODY,
     now: int | None = None,
     max_skew: int = DEFAULT_MAX_RESPONSE_SKEW,
+    capture: EnvelopeCapture | None = None,
+    raw_body: bytes | None = None,
 ) -> None:
     """Verify one response against an exact trusted publisher set."""
     if not isinstance(expected_publishers, TrustedIdentitySet):
@@ -200,11 +207,17 @@ def verify_authenticated_response(
         expected_operation=request.operation,
         expected_resource=request.resource,
         expected_request_id=request.request_id,
+        capture=capture,
+        raw_body=raw_body,
+        headers=headers,
     )
     if result.code != VerificationCode.VERIFIED:
         raise StorefrontAuthenticationError(
             f"marketplace response authentication failed: {result.code.value}"
         )
+    capture_envelope(capture, envelope=request.envelope, raw_body=request.content or b"",
+                     headers=request.headers, verified_at=int(time.time()) if now is None else now,
+                     expected_principals=TrustedIdentitySet(identities=(request.envelope.principal,)))
 
 
 def response_has_authentication(headers: Mapping[str, str]) -> bool:

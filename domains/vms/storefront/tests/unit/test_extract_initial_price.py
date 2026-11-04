@@ -274,25 +274,24 @@ class TestRoundReference:
 
 _RATED_OPTION = {
     "option_id": "a" * 64,
-    "mechanism": "example.rated.v1",
-    "asset": "usd",
-    "rates": [{"field": "amount", "per": "hour", "value": "10000"}],
-    "params": {},
+    "price": {
+        "asset": "usd",
+        "rates": [{"field": "amount", "per": "hour", "value": "10000"}],
+    },
+    "settlement": {"schema": "example.rated.v1", **({} or {})},
 }
 _RATELESS_OPTION = {
     "option_id": "b" * 64,
-    "mechanism": "example.rated.v1",
-    "asset": "usd",
-    "rates": [],
-    "params": {},
+    "price": {"asset": "usd", "rates": []},
+    "settlement": {"schema": "example.rated.v1", **({} or {})},
 }
 
 
 def _selection(option: dict) -> dict:
     return {
         "settlement_selection": {
-            "mechanism": option["mechanism"],
             "option_id": option["option_id"],
+            "settlement": {"schema": option["settlement"]["schema"]},
             "expiration_unix": 2_000_000_000,
         }
     }

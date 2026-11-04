@@ -35,6 +35,7 @@ from market_site.db import CapacityBucket
 from compute_provisioning.relays.db import PoolRelay, RelayRetiredGrantKey
 from compute_provisioning_service.db.models import (
     DEFAULT_POOL_ID,
+    LeaseEndReportOutbox,
     Host,
     ResourcePool,
 )
@@ -3601,6 +3602,11 @@ def _migrate_relay_lease_grants(engine: Engine) -> None:
     _add_column_if_missing(engine, "relay_port_leases", "grant_key_id", "VARCHAR")
 
 
+def _migrate_lease_end_reports(engine: Engine) -> None:
+    SiteBase.metadata.tables["site_lease_ended_events"].create(engine, checkfirst=True)
+    LeaseEndReportOutbox.__table__.create(engine, checkfirst=True)
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
@@ -3736,4 +3742,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("20261101_001_pool_relays", _migrate_pool_relays),
     Migration("20261101_002_relay_grant_keys", _migrate_relay_grant_keys),
     Migration("20261101_003_relay_lease_grants", _migrate_relay_lease_grants),
+    Migration("20261102_001_lease_end_reports", _migrate_lease_end_reports),
 )

@@ -30,6 +30,9 @@ from .contracts import (
     contract_major,
     lease_state_for_reservation_state,
 )
+from .lease_ends import (
+    LEASE_ENDED_CALLBACK, LeaseEndedEvent, SignedLeaseEndedReport, sign_lease_end, verify_lease_end,
+)
 from .delivery import (
     ACCESS_DELIVERY_KIND,
     ACCESS_DELIVERY_SCHEMA_VERSION,
@@ -151,6 +154,7 @@ __all__ = [
     "LeaseTermination",
     "LeaseView",
     "LifecycleEvent",
+    "LEASE_ENDED_CALLBACK", "LeaseEndedEvent", "SignedLeaseEndedReport", "sign_lease_end", "verify_lease_end",
     "ResultEnvelope",
     "SUPPORTED_COMPUTE_PROVISIONING_MAJOR_VERSIONS",
     "VersionedContractModel",

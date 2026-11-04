@@ -709,7 +709,7 @@ A capacity-backed listing with a durable site mapping MUST route all capacity cl
 
 ### Requirement: Payment publication discloses mandate policy
 
-VM, bare-metal, and API-credit storefronts supporting `arkhai.payments.v1` MUST publish ready payment clauses as independent `settlement_options` beside supported Alkahest alternatives. Every option MUST bind asset, rates, payee account, hold window, and agreement-deposit setting. No Stripe funding profile or provider object MAY enter an option.
+VM, bare-metal, and API-credit storefronts supporting `arkhai.payments.v1` MUST publish ready payment clauses as independent `settlement_options` beside supported Alkahest alternatives. Every option MUST bind asset, rates, payee account, approval window, `adjudication` with its dispute window, and agreement-deposit setting. No Stripe funding profile or provider object MAY enter an option.
 
 #### Scenario: A payment clause is ready
 
@@ -718,7 +718,7 @@ VM, bare-metal, and API-credit storefronts supporting `arkhai.payments.v1` MUST 
 
 #### Scenario: Payment policy is incomplete
 
-- **WHEN** a clause lacks required payee, asset, window, or deposit policy
+- **WHEN** a clause lacks required payee, asset, approval window, dispute window, or deposit policy
 - **THEN** publication rejects it without inferring values from an Alkahest price or mutating accepted deals
 
 ### Requirement: Domain payment publication respects domain capacity
@@ -2771,9 +2771,9 @@ publishes on, the release condition its escrow will use: the arbiter and its dem
 derived by the Alkahest mechanism from the seller's `[Settlement.alkahest]` policy, the
 seller wallet, and the chain's address book, identically for every domain that composes
 Alkahest. Release conditions MUST be derived only for Alkahest clauses whose mechanism is
-ready. A domain MUST declare which release models it can deliver, and a configured release
-model its domain cannot deliver MUST make Alkahest unready with a configuration blocker
-naming the model, rather than refusing startup.
+ready. A domain MUST declare which release models it can deliver, and a storefront whose
+Alkahest section, enabled or not, lists a release model its domain cannot deliver MUST
+refuse to start, naming the model.
 
 #### Scenario: A bare-metal listing offers Alkahest settlement
 
@@ -2786,8 +2786,7 @@ naming the model, rather than refusing startup.
 
 - **WHEN** a bare-metal storefront starts with `[Settlement.alkahest]` configured as
   interruptible
-- **THEN** it starts, Alkahest is reported unready naming the release model, and no
-  listing advertises an Alkahest option
+- **THEN** startup is refused naming the release model, and no listing is published
 
 #### Scenario: Alkahest is unready on a VM storefront
 
@@ -3143,6 +3142,15 @@ declaration's publication settings to repeat them.
 
 - **WHEN** the schedule response for a bare-metal deal names no host
 - **THEN** fulfillment does not begin, and the deal reports the conflict
+
+### Requirement: Lifecycle terms are published per option
+
+A listing MUST publish lifecycle terms, including the dispute window, only inside its settlement options. The VM admin interrupt route MUST identify an Alkahest interruptible deal by its accepted option's release condition, not by a listing field.
+
+#### Scenario: An administrator interrupts an Alkahest deal
+
+- **WHEN** an administrator interrupts a deal whose accepted Alkahest option uses the splitter release condition
+- **THEN** the route accepts it, without reading a listing-level marker
 
 ### Requirement: Bare-metal evidence retains its proof representation
 

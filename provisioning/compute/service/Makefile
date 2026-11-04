@@ -1,7 +1,7 @@
 # Every uv command in this Makefile uses the repository's declared Python version.
 export UV_PYTHON := $(or $(shell cat ../../../.python-version 2>/dev/null),$(error ../../../.python-version not found))
 
-.PHONY: help install reinit serve worker migrate test test-unit test-integration clean build build-image deploy
+.PHONY: help install reinit serve worker migrate first-use-lease-end test test-unit test-integration clean build build-image deploy
 
 .DEFAULT_GOAL := help
 
@@ -32,6 +32,9 @@ worker: ## Start the background-only worker role
 
 migrate: ## Apply ordered service-owned database migrations
 	uv run --find-links $(DIST_DIR) compute-provisioning-migrate
+
+first-use-lease-end: reinit ## Exercise signed lease-end events and replay with temporary state
+	uv run --find-links $(DIST_DIR) python examples/lease_end_first_use.py
 
 test: reinit test-unit test-integration ## Run destination service tests
 

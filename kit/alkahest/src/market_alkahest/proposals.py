@@ -192,6 +192,15 @@ def escrow_proposal_from_accepted_entry(
     if token:
         literal_fields["token"] = token
     selected_chain = entry.get("chain_name")
+    option_demand = entry.get("demand")
+    if option_demand is not None:
+        # Selecting an option fixes its release condition, even when the listing
+        # offers other arbiters for the same chain and escrow contract.
+        demand = authorized_release_condition(
+            {"demands": [option_demand]},
+            chain_name=str(selected_chain or ""),
+            selected=demand,
+        )
     condition = authorized_release_condition(
         listing, chain_name=str(selected_chain or ""), selected=demand
     )
@@ -245,7 +254,8 @@ def validate_selected_escrow_plan(
     if token and str(term.obligation_data.get("token", "")).lower() != token.lower():
         raise ValueError("selected Alkahest plan escrows another token")
     arbiter, demand = encode_authorized_release_condition(
-        listing, chain_name=str(chain or ""), config_path=addr_config_path
+        listing, chain_name=str(chain or ""), selected=entry.get("demand"),
+        config_path=addr_config_path
     )
     if str(term.obligation_data.get("arbiter", "")).lower() != arbiter.lower():
         raise ValueError("selected Alkahest plan names another arbiter")

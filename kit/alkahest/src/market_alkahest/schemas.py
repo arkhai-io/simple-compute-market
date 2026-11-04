@@ -1,8 +1,8 @@
 """Alkahest-owned wire/helper schemas.
 
 These models are intentionally local to the Alkahest kit. Higher-level
-packages can re-export or structurally validate them, but the kit should
-not import market-core just to materialize settlement data.
+packages can re-export or structurally validate them. Public option readers
+use core's envelope accessors; escrow materialization keeps its local models.
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_serializer, field_validator, model_validator
+from market_core.schemas import settlement_option_rates
 
 
 class ERC20TokenMetadata(BaseModel):
@@ -201,6 +202,10 @@ def accepted_demands(accepted_or_proposal: Any) -> list[dict[str, Any]]:
 
 
 def _rates_of(entry: Any) -> list[Any]:
+    if (isinstance(entry, dict) and "option_id" in entry) or hasattr(
+        entry, "option_id"
+    ):
+        return settlement_option_rates(entry)
     if isinstance(entry, dict):
         out = entry.get("rates")
         return out if isinstance(out, list) else []

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from market_identity import EnvelopeCapture, capture_envelope
+
 import time
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
@@ -166,6 +168,8 @@ async def authenticate_request(
     now: int | None = None,
     max_timestamp_skew: int = DEFAULT_MAX_TIMESTAMP_SKEW,
     replay_lease_seconds: int = DEFAULT_REPLAY_LEASE_SECONDS,
+    capture: EnvelopeCapture | None = None,
+    raw_body: bytes | None = None,
 ) -> AuthenticatedPrincipal:
     """Verify an exact role/principal binding and reserve replay before dispatch.
 
@@ -235,6 +239,9 @@ async def authenticate_request(
             "Request ID was reused with changed signed content",
             status_code=409,
         )
+    capture_envelope(capture, envelope=envelope, raw_body=raw_body, headers=headers,
+                     verified_at=int(time.time()) if now is None else now,
+                     expected_principals=expected_principals)
     exact_retry = claim.state in {"pending", "completed"}
     recorded_outcome = claim.recorded_outcome
 

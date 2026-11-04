@@ -15,6 +15,8 @@ Importing this module also installs the RL middleware registrar so
 
 from __future__ import annotations
 
+from market_identity import EnvelopeCapture
+
 import dataclasses
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
@@ -128,6 +130,7 @@ def negotiate_with_seller(
     validate_advertised_plan: Callable[[SettlementPlan], None] | None = None,
     validate_acceptance: Callable[[CoreNegotiationOutcome], None]
     | None = validate_buyer_acceptance,
+    capture: EnvelopeCapture | None = None,
 ) -> NegotiationOutcome:
     """Run a synchronous negotiation with one seller, round-by-round.
 
@@ -186,6 +189,7 @@ def negotiate_with_seller(
         validate_advertised_plan=validate_advertised_plan,
         validate_acceptance=validate_acceptance,
         resolve_seller_principals=resolve_seller_principals,
+        capture=capture,
     )
     values = {
         field.name: getattr(core_outcome, field.name)

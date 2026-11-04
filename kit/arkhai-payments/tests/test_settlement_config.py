@@ -17,6 +17,8 @@ from market_arkhai_payments.settlement_config import (
     payments_client_for_owner,
 )
 from market_identity import Ed25519Signer, Eip191Signer
+from market_deal_lifecycle.configuration import DisputeEntry
+from market_arkhai_payments.fixtures import dispute_lifecycle
 from market_settlement_runtime import SettlementPublicationClause
 
 BUYER = "00000000-0000-4000-8000-000000000011"
@@ -25,13 +27,23 @@ DISPUTE_AUTHORITY = "00000000-0000-4000-8000-000000000013"
 API_KEY_ENV = "ARKHAI_PAYMENTS_TEST_API_KEY"
 
 
+def _resources(clause):
+    authority = DisputeEntry.model_validate({
+        **dispute_lifecycle(DISPUTE_AUTHORITY)["adjudication"]["dispute"],
+        "advertisement": {"mechanisms": [ARKHAI_PAYMENTS_MECHANISM],
+                          "minimum_dispute_window_seconds": 0,
+                          "minimum_case_hold_seconds": None},
+    })
+    return {"publication_clause": clause, "dispute_authorities": (authority,),
+            "dispute_interfaces": frozenset({authority.interface})}
+
+
 def _config(**overrides: Any) -> ArkhaiPaymentsConfig:
     values: dict[str, Any] = {
         "enabled": True,
         "service_url": "https://payments.example",
         "service_identity": Ed25519Signer(bytes(range(32))).identity,
         "fee_bps": 250,
-        "dispute_authority": DISPUTE_AUTHORITY,
         "api_key_env": API_KEY_ENV,
     }
     values.update(overrides)
@@ -39,6 +51,9 @@ def _config(**overrides: Any) -> ArkhaiPaymentsConfig:
 
 
 def test_config_requires_tls_for_non_loopback_and_pins_ed25519_identity() -> None:
+    for retired in (DISPUTE_AUTHORITY, None):
+        with pytest.raises(ValueError, match=r"\[\[Dispute\]\]"):
+            _config(dispute_authority=retired)
     with pytest.raises(ValueError, match="HTTPS"):
         _config(service_url="http://payments.example")
     with pytest.raises(ValueError, match="Ed25519"):
@@ -97,6 +112,7 @@ def test_publication_builder_preserves_option_identity_and_rate_units(
                 "asset": "USD/2",
                 "window": "P7D",
                 "deposit_agreement": True,
+                "dispute_window_seconds": 604800,
             },
         }
     )
@@ -104,32 +120,39 @@ def test_publication_builder_preserves_option_identity_and_rate_units(
     built = arkhai_payments_option_builder(
         config,
         readiness,
-        {"publication_clause": clause},
+        _resources(clause),
         "seller",
     )
+    unselected = {key: value for key, value in _resources(clause).items()
+                  if key != "publication_clause"}
+    assert arkhai_payments_option_builder(config, readiness, unselected, "seller") == {
+        "accepted_escrows": [], "settlement_options": [],
+    }
     registration = create_arkhai_payments_registration()
     option = built["settlement_options"][0]
 
     assert built["accepted_escrows"] == []
-    assert option["mechanism"] == ARKHAI_PAYMENTS_MECHANISM
-    assert option["rates"] == [{"field": "amount", "per": "hour", "value": "125"}]
+    assert option["settlement"]["schema"] == ARKHAI_PAYMENTS_MECHANISM
+    assert option.get("price", {}).get("rates", []) == [
+        {"field": "amount", "per": "hour", "value": "125"}
+    ]
     assert option["option_id"]
     for unit in ("unit", "item"):
         unit_clause = clause.model_copy(update={"rate": "125", "per": unit})
         unit_option = arkhai_payments_option_builder(
-            config, readiness, {"publication_clause": unit_clause}, "seller"
+            config, readiness, _resources(unit_clause), "seller"
         )["settlement_options"][0]
-        assert unit_option["rates"] == [
+        assert unit_option.get("price", {}).get("rates", []) == [
             {"field": "amount", "per": unit, "value": "125"}
         ]
-        assert unit_option["params"] == option["params"]
+        assert unit_option["settlement"] == option["settlement"]
     assert registration.client_factory is None
     assert registration.accepted_obligation_builder is None
     assert registration.settlement_verifier is None
     assert registration.buyer_compatibility(config, option, {})
     assert not registration.buyer_compatibility(
         config,
-        {**option, "asset": "EUR/2"},
+        {**option, "price": {**option["price"], "asset": "not-an-asset"}},
         {},
     )
 
@@ -152,6 +175,7 @@ def test_publication_builder_rejects_precision_loss_and_fractional_base_units(
         "asset": "USD/2",
         "window": "P7D",
         "deposit_agreement": False,
+        "dispute_window_seconds": 604800,
     }
 
     for rate, unit in (("1.001", "hour"), ("1.25", "day"), ("1.25", "unit")):
@@ -168,7 +192,7 @@ def test_publication_builder_rejects_precision_loss_and_fractional_base_units(
             arkhai_payments_option_builder(
                 config,
                 readiness,
-                {"publication_clause": clause},
+                _resources(clause),
                 "seller",
             )
 

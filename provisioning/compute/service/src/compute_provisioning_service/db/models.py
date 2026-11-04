@@ -68,6 +68,23 @@ class CapacityReleaseCallbackOutbox(Base):
 
 
 
+class LeaseEndReportOutbox(Base):
+    """One immutable signed report and its own peer acknowledgement."""
+
+    __tablename__ = "lease_end_report_outbox"
+
+    event_id = Column(String, primary_key=True)
+    capacity_reservation_id = Column(String, nullable=False, index=True)
+    peer = Column(String, nullable=False)
+    report = Column(Text, nullable=False)
+    parked = Column(Boolean, nullable=False, default=False, server_default="0")
+    attempt_count = Column(Integer, nullable=False, default=0, server_default="0")
+    last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    last_attempted_at = Column(DateTime(timezone=True), nullable=True)
+    delivered_at = Column(DateTime(timezone=True), nullable=True)
+
+
 class ProvisioningTrustedPrincipal(Base):
     """Versioned role binding retained through bounded rotation overlap."""
 

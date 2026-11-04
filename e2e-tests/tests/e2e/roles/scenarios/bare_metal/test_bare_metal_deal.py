@@ -218,8 +218,11 @@ def test_bare_metal_complete_deal(
     )
     assert first_access is SshOutcome.ACCEPTED
 
+    surrendered = recover("teardown")
+    assert surrendered["delivery"]["status"] == "accepted", surrendered
+    assert surrendered["acknowledgement"]["receipt_at"] is not None, surrendered
     teardown = wait_for_release(
-        lambda: recover("teardown"),
+        lambda: recover("delivery"),
         timeout_seconds=float(_setting("TEARDOWN_TIMEOUT_SECONDS", 300)),
         poll_interval_seconds=float(_setting("POLL_INTERVAL_SECONDS", 2)),
     )

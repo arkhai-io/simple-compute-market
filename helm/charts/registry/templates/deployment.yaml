@@ -58,6 +58,10 @@ spec:
             - name: REGISTRY_DESCRIPTOR_ACCESS_ACQUISITION_POINTER
               value: {{ .Values.descriptor.accessAcquisitionPointer | quote }}
             {{- end }}
+            {{- if .Values.descriptor.recommendedDisputeAuthorities }}
+            - name: REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES
+              value: {{ .Values.descriptor.recommendedDisputeAuthorities | toJson | quote }}
+            {{- end }}
             # --- sourced from subchart values ---
             - name: DATABASE_URL
               value: {{ .Values.config.databaseUrl | quote }}

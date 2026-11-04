@@ -159,7 +159,7 @@ def test_vm_listing_resource_for_listing_builds_domain_payload() -> None:
     }
 
 
-def test_vm_listing_resource_for_listing_marks_interruptible() -> None:
+def test_vm_listing_resource_for_listing_has_no_release_model() -> None:
     listing_resource = vm_listing_resource_for_listing(
         {
             "offering_mode": "vm",
@@ -169,11 +169,10 @@ def test_vm_listing_resource_for_listing_marks_interruptible() -> None:
             "sla": 0.99,
             "region": "California, US",
         },
-        interruptible=True,
     )
 
-    assert listing_resource["interruptible"] is True
-    assert listing_resource["settlement_model"] == "splitter_refund"
+    assert "interruptible" not in listing_resource
+    assert "settlement_model" not in listing_resource
 
 
 def test_vm_listing_resource_requires_the_candidate_backing() -> None:

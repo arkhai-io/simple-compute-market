@@ -65,6 +65,7 @@ from .db import (
     CapacityBucket,
     CapacityReservation,
     CapacityReservationDebit,
+    LeaseEndedEvent,
 )
 
 logger = logging.getLogger(__name__)
@@ -634,6 +635,8 @@ class CapacityLedgerService:
         mirror_dimension: str = _DEFAULT_MIRROR_DIMENSION,
         release_guard: CapacityReleaseGuard | None = None,
         release_effect: Callable[[Any, str, str], None] | None = None,
+        site_id: str = "local-site",
+        lease_end_effect: Callable[[Session, dict[str, Any]], None] | None = None,
         host_requirement: HostRequirement | None = None,
     ) -> None:
         """``required_attributes`` is an optional coarse local eligibility
@@ -670,6 +673,11 @@ class CapacityLedgerService:
         separately, so a crash cannot leave one returned and not the other. It
         writes in the session and never commits; raising aborts the reclaim.
 
+        ``site_id`` is the configured logical site identity in immutable lease-end
+        events. ``lease_end_effect`` borrows the ending transaction to sign and
+        reserve an independent event-keyed outbox; it never commits, and raising
+        rolls back the transition. Intended-end evidence does not free capacity.
+
         ``host_requirement`` maps each fulfillment provider identity to whether
         its delivery needs a host. When supplied, a declaration that names no
         host is not an admission candidate in a pool whose provider needs one,
@@ -685,6 +693,8 @@ class CapacityLedgerService:
         self._mirror_dimension = mirror_dimension
         self._release_guard = release_guard
         self._release_effect = release_effect
+        self._site_id = site_id
+        self._lease_end_effect = lease_end_effect
         # Re-entrant and held across READS too: the service's SQLite
         # engine is a StaticPool — every session shares one connection,
         # so an unserialized read interleaving with a write transaction
@@ -1510,6 +1520,7 @@ class CapacityLedgerService:
         forced: bool = False,
         failure_reason: str | None = None,
         failure_message: str | None = None,
+        end_context: Mapping[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         """Return a held reservation's capacity to the pool, if the guard permits.
 
@@ -1555,6 +1566,11 @@ class CapacityLedgerService:
                 db, reservation.capacity_reservation_id
             ):
                 return None
+            self._record_lease_end(
+                db, reservation, transition_key="force_release" if forced else "end",
+                context=end_context, cause="force_release" if forced else "release",
+                reason=failure_message or failure_reason,
+            )
             reservation.state = state
             reservation.released_at = datetime.now(timezone.utc).isoformat()
             reservation.failure_reason = failure_reason
@@ -1651,6 +1667,7 @@ class CapacityLedgerService:
                 db, old_capacity_reservation_id
             )
             old_dimensions = _reservation_dimensions(old_reservation, self._mirror_dimension)
+            self._record_lease_end(db, old_reservation, cause="superseded")
             old_reservation.state = ReservationState.released.value
             old_reservation.released_at = datetime.now(timezone.utc).isoformat()
             old_reservation.failure_reason = "superseded"
@@ -1799,6 +1816,7 @@ class CapacityLedgerService:
         capacity_reservation_id: str,
         *,
         release_job_id: str | None = None,
+        end_context: Mapping[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         """Move a reservation into ``releasing``, if its state still allows it.
 
@@ -1829,6 +1847,7 @@ class CapacityLedgerService:
                 return self._reservation_payload(reservation)
             if reservation.state not in _BEGIN_RELEASING_FROM:
                 return None
+            self._record_lease_end(db, reservation, context=end_context)
             reservation.release_requested_at = datetime.now(timezone.utc).isoformat()
             reservation.state = ReservationState.releasing.value
             self._set_release_job_id(reservation, release_job_id=release_job_id)
@@ -1842,6 +1861,7 @@ class CapacityLedgerService:
         reason: str,
         message: str | None = None,
         release_job_id: str | None = None,
+        end_context: Mapping[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         """Record that a release failed, if the reservation is still releasable.
 
@@ -1862,6 +1882,10 @@ class CapacityLedgerService:
                 and reservation.release_job_id != release_job_id
             ):
                 return None
+            self._record_lease_end(
+                db, reservation, transition_key="release_failure", context=end_context,
+                cause="release_failed", reason=message or reason,
+            )
             reservation.state = ReservationState.release_failed.value
             reservation.failure_reason = reason
             reservation.failure_message = message
@@ -2059,6 +2083,43 @@ class CapacityLedgerService:
         )
 
 
+    def _record_lease_end(
+        self, db: Session, reservation: CapacityReservation, *,
+        transition_key: str = "end", context: Mapping[str, Any] | None = None,
+        cause: str = "release", reason: str | None = None,
+    ) -> None:
+        if db.query(LeaseEndedEvent).filter_by(
+            capacity_reservation_id=reservation.capacity_reservation_id, transition_key=transition_key,
+        ).first() is not None:
+            return
+        context = dict(context or {})
+        event_id = str(uuid.uuid4())
+        payload = {
+            "version": 1, "kind": "lease_ended", "event_id": event_id,
+            "capacity_reservation_id": reservation.capacity_reservation_id,
+            "site_id": self._site_id,
+            "effective_at": context.get("effective_at", int(datetime.now(timezone.utc).timestamp())),
+            "source_state": reservation.state, "cause": context.get("cause", cause),
+            "reason": context.get("reason", reason), "caller": context.get("caller"),
+            "claimed_deadline": context.get("claimed_deadline"), "deadline_phase": context.get("deadline_phase"),
+        }
+        db.add(LeaseEndedEvent(
+            event_id=event_id, capacity_reservation_id=reservation.capacity_reservation_id,
+            transition_key=transition_key, payload=payload,
+        ))
+        # Flush before the effect so duplicate transition checks in this session
+        # see the immutable event. The effect may sign and reserve its outbox,
+        # but never commits: a failed reservation must roll back the end too.
+        db.flush()
+        if self._lease_end_effect is not None:
+            self._lease_end_effect(db, dict(payload))
+
+    def lease_end_events(self, capacity_reservation_id: str) -> list[dict[str, Any]]:
+        with self.serialized(), self._session_factory() as db:
+            return [dict(row.payload) for row in db.query(LeaseEndedEvent).filter_by(
+                capacity_reservation_id=capacity_reservation_id,
+            ).order_by(LeaseEndedEvent.event_id)]
+
     def _run_release_effect(self, db: Any, capacity_reservation_id: str, state: str) -> None:
         if self._release_effect is not None:
             self._release_effect(db, capacity_reservation_id, state)
@@ -2111,6 +2172,10 @@ class CapacityLedgerService:
                 continue
             if not self._release_permitted(db, reservation.capacity_reservation_id):
                 continue
+            self._record_lease_end(db, reservation, cause="hold_expired", context={
+                "effective_at": int(expires.timestamp()), "claimed_deadline": int(expires.timestamp()),
+                "deadline_phase": "reservation",
+            })
             reservation.state = ReservationState.released.value
             reservation.released_at = now.isoformat()
             reservation.failure_reason = "hold_expired"

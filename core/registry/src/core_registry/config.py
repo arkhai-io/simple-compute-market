@@ -57,6 +57,11 @@ class Settings(BaseSettings):
         validation_alias="REGISTRY_DESCRIPTOR_ACCESS_ACQUISITION_POINTER",
     )
 
+    registry_descriptor_recommended_dispute_authorities: list[dict] = Field(
+        default_factory=list,
+        validation_alias="REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES",
+    )
+
     # Optional ZeroTier configuration (used by deployment/Makefile, not by app logic)
     zerotier_network: str | None = Field(default=None, env="ZEROTIER_NETWORK")
 

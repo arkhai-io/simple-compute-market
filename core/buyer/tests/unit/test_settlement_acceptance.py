@@ -134,20 +134,19 @@ _PARAMS = {
     "claimant_principal": _SELLER.model_dump(mode="json"),
 }
 _OPTION_ID = derive_settlement_option_id(
-    mechanism="example.payment.v1",
-    asset="usd",
-    rates=[],
-    params=_PARAMS,
+    price={"asset": "usd", "rates": []},
+    settlement={"schema": "example.payment.v1", **(_PARAMS or {})},
 )
 
 
 def _advertised_option() -> SettlementOption:
     return SettlementOption(
         option_id=_OPTION_ID,
-        mechanism="example.payment.v1",
-        asset="usd",
-        rates=[],
-        params={key: dict(value) for key, value in _PARAMS.items()},
+        price={"asset": "usd", "rates": []},
+        settlement={
+            "schema": "example.payment.v1",
+            **({key: dict(value) for key, value in _PARAMS.items()} or {}),
+        },
     )
 
 
@@ -165,7 +164,7 @@ def _agreement(
         seller=_SELLER.model_dump(mode="json"),
         settlement=option,
         amount=amount,
-        asset=option.asset,
+        asset=option.price_asset,
         duration_seconds=3600,
         start_utc="2025-01-01T00:00:00Z",
         accepted_at="2025-01-01T00:00:00Z",
@@ -174,7 +173,7 @@ def _agreement(
 
 def _seller_plan(service_terms: dict) -> SettlementPlan:
     option = _advertised_option()
-    params = dict(option.params)
+    params = dict(option.settlement_params)
     params["payer_principal"] = _BUYER.model_dump(mode="json")
     params["claimant_principal"] = _SELLER.model_dump(mode="json")
     return SettlementPlan(
@@ -200,8 +199,8 @@ def _seller_plan(service_terms: dict) -> SettlementPlan:
 
 def _validate(plan: SettlementPlan) -> None:
     selection = SettlementSelection(
-        mechanism="example.payment.v1",
         option_id=_OPTION_ID,
+        settlement={"schema": "example.payment.v1"},
         expiration_unix=_EXPIRATION,
     )
     _validate_settlement_acceptance(
@@ -247,10 +246,7 @@ _CONTACT_PARAMS = {
     "claimant_principal": _SELLER.model_dump(mode="json"),
 }
 _CONTACT_OPTION_ID = derive_settlement_option_id(
-    mechanism="contact-exchange.v1",
-    asset="introduction",
-    rates=[],
-    params=_CONTACT_PARAMS,
+    settlement={"schema": "contact-exchange.v1", **(_CONTACT_PARAMS or {})}
 )
 
 
@@ -260,12 +256,9 @@ def test_accepts_amountless_introduction_plan() -> None:
 
     option = SettlementOption(
         option_id=_CONTACT_OPTION_ID,
-        mechanism="contact-exchange.v1",
-        asset="introduction",
-        rates=[],
-        params=dict(_CONTACT_PARAMS),
+        settlement={"schema": "contact-exchange.v1", **(dict(_CONTACT_PARAMS) or {})},
     )
-    params = dict(option.params)
+    params = dict(option.settlement_params)
     params["payer_principal"] = _BUYER.model_dump(mode="json")
     params["claimant_principal"] = _SELLER.model_dump(mode="json")
     plan = SettlementPlan(
@@ -295,8 +288,8 @@ def test_accepts_amountless_introduction_plan() -> None:
         ],
     )
     selection = SettlementSelection(
-        mechanism="contact-exchange.v1",
         option_id=_CONTACT_OPTION_ID,
+        settlement={"schema": "contact-exchange.v1"},
         expiration_unix=_EXPIRATION,
     )
     _validate_settlement_acceptance(
@@ -341,14 +334,13 @@ def _amountless_acceptance(raw_rates: list[dict]) -> None:
     rates = [RateValue.model_validate(rate) for rate in raw_rates]
     params = {"claimant_principal": _SELLER.model_dump(mode="json")}
     option_id = derive_settlement_option_id(
-        mechanism="example.v1", asset="introduction", rates=rates, params=params
+        price={"asset": "introduction", "rates": rates},
+        settlement={"schema": "example.v1", **(params or {})},
     )
     option = SettlementOption(
         option_id=option_id,
-        mechanism="example.v1",
-        asset="introduction",
-        rates=rates,
-        params=dict(params),
+        price={"asset": "introduction", "rates": rates},
+        settlement={"schema": "example.v1", **(dict(params) or {})},
     )
     obligation_params = {
         **params,
@@ -374,7 +366,9 @@ def _amountless_acceptance(raw_rates: list[dict]) -> None:
         ],
     )
     selection = SettlementSelection(
-        mechanism="example.v1", option_id=option_id, expiration_unix=_EXPIRATION
+        option_id=option_id,
+        settlement={"schema": "example.v1"},
+        expiration_unix=_EXPIRATION,
     )
     _validate_settlement_acceptance(
         agreement=_agreement(option, amount=0, listing_id="L-amountless"),

@@ -15,6 +15,8 @@ import json
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
+from market_deal_servicing import EndSession
+from market_deal_servicing.evidence import transaction
 from core_storefront.stage_log import stage_event
 from market_capacity_publication import CapacityAdminRouteService, CapacityEffects
 from market_core.schemas import EscrowProposal
@@ -244,8 +246,10 @@ def capacity_admin_routes(
             negotiation_id=str(lifecycle["negotiation_id"]),
             state="released",
         )
-        if runtime.capacity_client is not None:
-            runtime.capacity_client.reservation_sites.pop(reservation_id, None)
+        with transaction(runtime.db.db_path) as conn:
+            EndSession(conn).physical_progress(str(lifecycle["negotiation_id"]), "released")
+        # Retain the accepted site's routing identity for report pull recovery
+        # after release, including when its independent callback was missed.
         # The release is observable in the stage-event log, as every storefront
         # records it, so a caller watching a lease sees it end the same way.
         stage_event(

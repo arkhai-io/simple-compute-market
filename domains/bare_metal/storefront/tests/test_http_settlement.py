@@ -10,9 +10,10 @@ import uuid
 import copy
 
 from market_core.schemas import RateValue, SettlementOption, derive_settlement_option_id
-from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt
+from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt, dispute_lifecycle
 from arkhai_bare_metal_storefront.models import BareMetalSettleRequest
 from arkhai_bare_metal_storefront.fulfillment_service import BareMetalFulfillmentError
+from market_deal_servicing.journal import stable_ref
 from market_identity import Ed25519Signer
 from arkhai_bare_metal_storefront.settlement_composition import (
     BareMetalStorefrontSettlementComposition,
@@ -267,7 +268,7 @@ async def _accepted_runtime(
         settlement=settlement,
         settlement_params={},
         amount=100,
-        asset=settlement.asset,
+        asset=settlement.price_asset,
         duration_seconds=3600,
         start_utc=now,
         provision_terms=message.model_dump(mode="json", exclude_none=True),
@@ -868,7 +869,7 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
 
     assert settled.status == "settlement_verified"
     assert ready["state"] == "active"
-    assert tearing_down["state"] == "terminating"
+    assert tearing_down["delivery"]["progress"] == "tearing_down"
     assert torn_down["state"] == "torn_down"
     assert recorded == {"capacity_reservation_id": "reservation-a", "state": "released"}
     assert released["state"] == "released"
@@ -879,7 +880,7 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
     assert capacity.reserve_calls[0]["claim"]["gpu_model"] == LISTING_HARDWARE["gpu_model"]
     assert capacity.reserve_calls[0]["claim"]["dimensions"] == {"units": 1}
     assert len(provisioning.begin_calls) == 1
-    assert provisioning.terminations == [("reservation-a", "buyer_teardown")]
+    assert provisioning.terminations == [("reservation-a", stable_ref(negotiation_id, "terminate", "terminate"))]
     assert provisioning.teardown_calls == []
     # The storefront never releases capacity itself.
     assert restarted_capacity.site_client.releases == []
@@ -1129,7 +1130,7 @@ async def test_payment_evidence_gates_replay_and_rechecks_receipt_after_restart(
     buyer = Ed25519Signer(bytes.fromhex("66" * 32))
     seller = Ed25519Signer(bytes.fromhex("77" * 32))
     receipt_signer = Ed25519Signer(bytes.fromhex("55" * 32))
-    payments = FakePaymentsClient()
+    payments = FakePaymentsClient(signer=receipt_signer)
     domain = get_market_domain_contract()
     db = SQLiteClient(str(tmp_path / "payment.db"), domain=domain)
     composition = BareMetalStorefrontSettlementComposition.from_raw_config(
@@ -1141,26 +1142,21 @@ async def test_payment_evidence_gates_replay_and_rechecks_receipt_after_restart(
                 "development_auth": True,
                 "service_identity": receipt_signer.identity.model_dump(mode="json"),
                 "fee_bps": 0,
-                "dispute_authority": "00000000-0000-4000-8000-000000000013",
             },
         },
         payments_client_for_owner=payments,
     )
-    params = {
-        "payee_account": PAYEE,
-        "asset": "USD/2",
-        "window": "PT1H",
-        "deposit_agreement": False,
-    }
+    params = {"payee_account": PAYEE, "window": "PT1H", "deposit_agreement": False}
     rates = [RateValue(field="amount", per="hour", value=100)]
     option = SettlementOption(
         option_id=derive_settlement_option_id(
-            mechanism="arkhai.payments.v1", asset="USD/2", rates=rates, params=params
+            price={"asset": "USD/2", "rates": rates},
+            settlement={"schema": "arkhai.payments.v1", **(params or {})},
+            lifecycle=dispute_lifecycle("00000000-0000-4000-8000-000000000013"),
         ),
-        mechanism="arkhai.payments.v1",
-        asset="USD/2",
-        rates=rates,
-        params=params,
+        price={"asset": "USD/2", "rates": rates},
+        settlement={"schema": "arkhai.payments.v1", **(params or {})},
+        lifecycle=dispute_lifecycle("00000000-0000-4000-8000-000000000013"),
     )
     await db.upsert_bare_metal_listing(
         listing_id="listing-payment",

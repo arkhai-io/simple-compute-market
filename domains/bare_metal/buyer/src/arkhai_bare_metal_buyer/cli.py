@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import base64
 import json
+import logging
 import os
+
+from market_deal_lifecycle.configuration import authorities_by_registry
 import time
 import webbrowser
 from collections.abc import Callable
@@ -51,10 +55,11 @@ from market_settlement_runtime import derive_obligation_ref
 
 from .config import BareMetalBuyerConfig, load_bare_metal_buyer_config
 from .fulfillment import BareMetalFulfillmentTransport
+from .evidence import evidence_store
+from .lifecycle import buyer_lifecycle, run_sync
 from market_arkhai_payments import PaymentApproval
 
-from .arkhai_payments import BareMetalSettlementTransport
-from .settlement_composition import BUYER_STAGES
+from .settlement_composition import BUYER_STAGES, validate_authority
 from .settlement_stages import purchase_quote, require_quoted_agreement
 
 # The commands build their collaborators through the factories below: a Typer
@@ -300,6 +305,34 @@ def fulfillment_access(
     _json(fulfillment.access(deal.negotiation_id))
 
 
+def _lifecycle_for_run(run_id: str, config_path: str | None):
+    deal, identity, trust = _recovered_deal(run_id, config_path)
+    config = load_bare_metal_buyer_config(config_path)
+    if not deal.agreement_bytes:
+        raise typer.BadParameter("run has no retained accepted Agreement bytes")
+    return deal, buyer_lifecycle(
+        agreement_bytes=base64.b64decode(deal.agreement_bytes, validate=True),
+        settlement_data=deal.settlement_data, seller_url=deal.seller_url,
+        signer=identity.signer, publishers=trust(), config=config,
+        approval=payment_approval(config) if config.arkhai_payments else None,
+    )
+
+
+@bare_metal_app.command("delivery")
+def delivery_status(
+    run_id: str = typer.Option(...),
+    config: str | None = typer.Option(None, "--config"),
+) -> None:
+    """Read delivery, site reports and authority progress independently."""
+    deal, context = _lifecycle_for_run(run_id, config)
+
+    async def read():
+        async with context as lifecycle:
+            return await lifecycle.read(deal.negotiation_id)
+
+    _json(run_sync(read))
+
+
 @bare_metal_app.command("teardown")
 def teardown_fulfillment(
     run_id: str = typer.Option(...),
@@ -307,8 +340,20 @@ def teardown_fulfillment(
 ) -> None:
     """Revoke buyer access and converge physical capacity release."""
 
-    deal, _, fulfillment = _recovered_transports(run_id, config)
-    _json(fulfillment.teardown(deal.negotiation_id))
+    deal, context = _lifecycle_for_run(run_id, config)
+
+    async def end():
+        async with context as lifecycle:
+            progress = await lifecycle.end_delivery(deal.negotiation_id)
+            # Retain the signed delivery read and its embedded site reports even
+            # without an independently configured site trust root on the buyer.
+            try:
+                await lifecycle.peer.read(deal.negotiation_id)
+            except Exception:
+                logging.getLogger(__name__).warning("delivery read unavailable; end progress is retained")
+            return progress
+
+    _json(run_sync(end))
 
 
 
@@ -391,6 +436,23 @@ def buy_bare_metal(
         )
     identity = fresh_identity()
     with registry_client(buyer_config, identity) as client:
+        recommendations = []
+        if buyer_config.disputes.use_registry_dispute_authorities:
+            try:
+                descriptor = client.get_registry_descriptor()
+                recommendations = descriptor.recommended_dispute_authorities or []
+            except Exception as exc:
+                logging.getLogger(__name__).warning(
+                    "registry descriptor unavailable (%s)", type(exc).__name__
+                )
+        buyer_config = buyer_config.model_copy(update={
+            "dispute_authorities_by_registry": authorities_by_registry(
+                buyer_config.disputes,
+                {buyer_config.registry_url: recommendations},
+                role="buyer",
+                report=logging.getLogger(__name__).warning,
+            ),
+        })
         listing = client.get_listing(listing_id)
     seller_principals = listing.publisher_principals
     if not listing.storefront_url or seller_principals is None:
@@ -403,11 +465,12 @@ def buy_bare_metal(
         raise typer.BadParameter("option_id must identify one advertised option")
     selected = matches[0]
     try:
-        stage = BUYER_STAGES[selected.mechanism]
+        stage = BUYER_STAGES[selected.settlement_schema]
         stage.validate_option(selected)
+        validate_authority(selected, buyer_config)
     except (KeyError, ValueError) as exc:
         raise typer.BadParameter(
-            "buy requires a supported priced settlement option"
+            f"buy requires a supported priced settlement option: {exc}"
         ) from exc
     try:
         amount = purchase_quote(selected, duration_seconds)
@@ -436,15 +499,18 @@ def buy_bare_metal(
         source_registry_authority=buyer_config.registry_authority,
     )
     selection = SettlementSelection(
-        mechanism=selected.mechanism,
         option_id=selected.option_id,
-        params={"payer_account": buyer_config.payer_account},
+        settlement={
+            "schema": selected.settlement_schema,
+            "payer_account": buyer_config.payer_account,
+        },
     )
     try:
         outcome = negotiate_with_seller(
             seller_url=listing.storefront_url,
             principal=identity.principal,
             signer=identity.signer,
+            capture=evidence_store().capture,
             listing_id=listing_id,
             resolve_seller_principals=lambda: seller_principals,
             # The quote is already the whole lease's total, so it is one unit: scaling
@@ -482,7 +548,8 @@ def buy_bare_metal(
                "negotiation_id": refused.negotiation_id})
         raise typer.Exit(code=1) from None
     run_log.event(
-        "agreement_accepted",
+        "negotiation_completed",
+        status="agreed",
         negotiation_id=outcome.negotiation_id,
         agreement_ref=outcome.negotiation_id,
         settlement_data=outcome.settlement_data,
@@ -493,17 +560,13 @@ def buy_bare_metal(
             plan=outcome.settlement_plan,
         ),
     )
-    settlement = BareMetalSettlementTransport(
-        seller_url=listing.storefront_url,
-        principal=identity.principal,
-        signer=identity.signer,
-        resolve_seller_principals=lambda: seller_principals,
-        timeout=buyer_config.timeout_seconds,
-    )
     transaction, fulfillment = stage.settle(
         outcome=outcome,
         approval=approval,
-        transport=settlement,
+        seller_url=listing.storefront_url,
+        signer=identity.signer,
+        publishers=seller_principals,
+        config=buyer_config,
         timeout=payment_timeout_seconds,
         run_log=run_log,
     )
@@ -513,6 +576,8 @@ def buy_bare_metal(
         agreed_amount=outcome.agreed_amount,
         transaction_id=transaction,
         fulfillment=fulfillment,
+        agreement_bytes=outcome.agreement_bytes,
+        settlement_data=outcome.settlement_data,
         accepted_provision_terms=outcome.to_dict().get("accepted_provision_terms"),
         **settlement_acceptance_fields(
             negotiation_id=outcome.negotiation_id,
@@ -553,13 +618,13 @@ def request_introduction(
     if len(matches) != 1:
         raise typer.BadParameter("option_id must identify one advertised option")
     selected = matches[0]
-    if selected.mechanism != CONTACT_MECHANISM or selected.rates:
+    if selected.settlement_schema != CONTACT_MECHANISM or selected.price_rates:
         raise typer.BadParameter(
             "option is not a rateless introduction; use `buy` for priced options"
         )
     selection = SettlementSelection(
-        mechanism=selected.mechanism,
         option_id=selected.option_id,
+        settlement={"schema": selected.settlement_schema},
         expiration_unix=int(time.time()) + expiration_seconds,
     )
     run_log = RunLog.start(
@@ -580,6 +645,7 @@ def request_introduction(
         seller_url=listing.storefront_url,
         principal=identity.principal,
         signer=identity.signer,
+        capture=evidence_store().capture,
         listing_id=listing_id,
         resolve_seller_principals=lambda: publisher_principals,
         initial_price=0.0,

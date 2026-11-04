@@ -12,6 +12,8 @@ from core_storefront.domain_registry import StorefrontDomainRegistry
 from core_storefront.escrow_identity import backfill_escrow_obligation_records
 from core_storefront.stage_log import set_stage_event_db_path
 from market_core import MarketDomainContract
+from market_deal_servicing import create_lifecycle_router
+from market_storefront_kit import get_storefront_container
 from market_storefront_kit import (
     StorefrontComposition,
     StorefrontRouteHooks,
@@ -52,6 +54,10 @@ async def _start_runtime(runtime: BareMetalStorefrontRuntime) -> None:
     records. Every loop then runs on the controller's timer over its
     registered step.
     """
+    if runtime.settlement_composition is not None and runtime.registry_configuration is not None:
+        await runtime.settlement_composition.disputes.refresh(
+            runtime.registry_configuration.client_factory(runtime.marketplace_signer)
+        )
     seed_service_peer_trust(runtime)
     set_stage_event_db_path(runtime.db.db_path)
     if runtime.settlement_runtime is not None:
@@ -76,6 +82,7 @@ async def _stop_runtime(runtime: BareMetalStorefrontRuntime) -> None:
     through the kit's cycle driver; this waits for the loop's task only.
     """
     await runtime.loops.stop_loops()
+    await runtime.lifecycle.close()
 
 
 def build_bare_metal_storefront_app(
@@ -126,7 +133,7 @@ def build_bare_metal_storefront_app(
             ),
             services=service_hooks,
             routes=StorefrontRouteHooks(
-                routers=(http_router, *tuple(routers)),
+                routers=(http_router, create_lifecycle_router(lambda request: get_storefront_container(request).lifecycle.routes()), *tuple(routers)),
                 middleware=(authenticate_response,),
             ),
         )

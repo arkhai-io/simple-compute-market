@@ -111,7 +111,8 @@ def test_runnable_http_contract_includes_fulfillment_claims() -> None:
         "/api/v1/settle/{escrow_uid}/status",
         "/api/v1/fulfillments/{negotiation_id}/status",
         "/api/v1/fulfillments/{negotiation_id}/result",
-        "/api/v1/fulfillments/{negotiation_id}/teardown",
+        "/api/v1/negotiations/{negotiation_id}/lifecycle",
+        "/api/v1/capacity/reservations/{capacity_reservation_id}/lease-ended",
         "/api/v1/admin/pause",
         "/api/v1/admin/resume",
         "/api/v1/system/status",
@@ -161,7 +162,7 @@ async def test_lifespan_exposes_exact_bare_metal_runtime_without_global_lookup(
         assert app.state.storefront_container.domain is runtime.domain
         started = runtime.loops.registered_loop_names()
     assert app.state.storefront_container is None
-    assert started == ["negotiation_watchdog", "publication"]
+    assert started == ["delivery_recovery", "negotiation_watchdog", "publication"]
     assert runtime.loops.registered_loop_names() == []
 
 
@@ -293,9 +294,9 @@ async def test_a_contradictory_release_model_refuses_startup(tmp_path) -> None:
                 wallet="0x" + "33" * 20,
                 chain_clients={"anvil": object()},
                 section={
-                    "oracle_gated": True,
+                    "release_models": ["oracle_gated", "interruptible"],
                     "trusted_oracle_addresses": ["0x" + "cd" * 20],
-                    "interruptible": True,
+                    "interruptible_oracle_addresses": ["0x" + "cd" * 20],
                 },
             ),
         )
@@ -304,7 +305,7 @@ async def test_a_contradictory_release_model_refuses_startup(tmp_path) -> None:
         registry=_registry(), runtime_factory=contradictory_runtime
     )
 
-    with pytest.raises(ReleaseModelError, match="mutually exclusive"):
+    with pytest.raises(ReleaseModelError, match="cannot deliver"):
         async with app.router.lifespan_context(app):
             pass
     # Refused while composing its services: no storefront was ever installed.
@@ -320,7 +321,7 @@ async def test_an_oracle_gated_section_composes(tmp_path) -> None:
             wallet="0x" + "33" * 20,
             chain_clients={"anvil": object()},
             section={
-                "oracle_gated": True,
+                "release_models": ["oracle_gated"],
                 "trusted_oracle_addresses": ["0x" + "cd" * 20],
             },
         ),
@@ -339,9 +340,8 @@ async def test_an_oracle_gated_section_composes(tmp_path) -> None:
 
 ALKAHEST_SECTION = {
     "enabled": True,
-    "oracle_gated": False,
+    "release_models": ["recipient"],
     "trusted_oracle_addresses": [],
-    "interruptible": False,
     "interruptible_oracle_addresses": [],
 }
 # Anvil's first published development account: a key and the address it signs
@@ -880,15 +880,15 @@ async def test_an_omitted_address_is_the_account_its_key_signs_as(monkeypatch, t
 def test_contradictory_release_models_are_refused_at_startup(monkeypatch, tmp_path):
     document = _alkahest(publishable_configuration(tmp_path / "storefront.db"))
     document["Settlement"]["alkahest"].update(
-        oracle_gated=True,
+        release_models=["oracle_gated", "interruptible"],
         # A development address; never used on a public network.
         trusted_oracle_addresses=["0x" + "cd" * 20],
-        interruptible=True,
+        interruptible_oracle_addresses=["0x" + "cd" * 20],
     )
     document["Wallet"] = {"address": WALLET_ADDRESS}
     document["Chains"] = CHAINS
 
-    with pytest.raises(RuntimeError, match="mutually exclusive"):
+    with pytest.raises(RuntimeError, match="cannot deliver"):
         _configured_runtime(
             monkeypatch,
             tmp_path,
@@ -914,31 +914,26 @@ def test_alkahest_inputs_without_a_section_are_refused(monkeypatch, tmp_path, st
 
 
 @pytest.mark.parametrize("enabled", [True, False])
-async def test_a_release_model_bare_metal_cannot_deliver_starts_unready(
+async def test_a_release_model_bare_metal_cannot_deliver_refuses_startup(
     monkeypatch, tmp_path, enabled
 ):
     document = _alkahest(publishable_configuration(tmp_path / "storefront.db"), enabled=enabled)
     document["Settlement"]["alkahest"].update(
-        interruptible=True,
+        release_models=["interruptible"],
         # A development address; never used on a public network.
         interruptible_oracle_addresses=["0x" + "cd" * 20],
     )
     document["Wallet"] = {"address": WALLET_ADDRESS}
     document["Chains"] = CHAINS
 
-    runtime = _configured_runtime(
-        monkeypatch,
-        tmp_path,
-        document,
-        secrets=f'[Wallet]\nprivate_key = "{WALLET_KEY}"\n',
-        build_chain_client=ChainClients(),
-    )
-    alkahest = (await _readiness_by_mechanism(runtime))["alkahest.v1"]
-
-    assert alkahest.ready is False
-    assert ("alkahest.release_model_undeliverable", "configuration") in {
-        (b.code, b.kind) for b in alkahest.blockers
-    }
+    with pytest.raises((RuntimeError, ReleaseModelError), match="cannot deliver"):
+        _configured_runtime(
+            monkeypatch,
+            tmp_path,
+            document,
+            secrets=f'[Wallet]\nprivate_key = "{WALLET_KEY}"\n',
+            build_chain_client=ChainClients(),
+        )
 
 
 def test_a_disabled_section_is_still_configured():
@@ -1104,18 +1099,13 @@ async def test_a_storefront_configured_through_files_starts_and_serves(
     assert (tmp_path / "storefront.db").exists()
 
 
-async def test_a_storefront_configured_for_an_undeliverable_model_starts_and_reports_it(
+async def test_a_storefront_configured_for_an_undeliverable_model_refuses_startup(
     monkeypatch, tmp_path
 ):
-    """The storefront starts from its files configured for a release model it
-    cannot deliver, and its status, read by the administrator through the typed
-    client, reports Alkahest unready naming the model while contact exchange
-    stays ready. The loops start held, so this shows the start and the blocker
-    only; that an unready Alkahest derives no release condition is
-    `kit/alkahest`'s unit test of `escrow_release_conditions`."""
+    """An undeliverable release model refuses startup before any loop starts."""
     document = _alkahest(publishable_configuration(tmp_path / "storefront.db"))
     document["Settlement"]["alkahest"].update(
-        interruptible=True,
+        release_models=["interruptible"],
         # A development address; never used on a public network.
         interruptible_oracle_addresses=["0x" + "cd" * 20],
     )
@@ -1139,22 +1129,10 @@ async def test_a_storefront_configured_for_an_undeliverable_model_starts_and_rep
         ),
     )
 
-    async with app.router.lifespan_context(app):
-        async with StorefrontClient(
-            "http://seller",
-            signer=ADMIN,
-            caller_role="admin",
-            expected_publishers=TrustedIdentitySet(identities=(SELLER.identity,)),
-            transport=httpx.ASGITransport(app=app),
-        ) as admin:
-            status = await admin.get_system_status()
-
-    settlement = {item["mechanism"]: item for item in status.settlement}
-    assert settlement["alkahest.v1"]["ready"] is False
-    assert ("alkahest.release_model_undeliverable", "configuration") in {
-        (b["code"], b["kind"]) for b in settlement["alkahest.v1"]["blockers"]
-    }
-    assert settlement["contact-exchange.v1"]["ready"] is True
+    with pytest.raises((RuntimeError, ReleaseModelError), match="cannot deliver"):
+        async with app.router.lifespan_context(app):
+            pass
+    assert getattr(app.state, "storefront_container", None) is None
 
 
 async def test_startup_does_not_wait_on_a_chain_whose_client_never_finishes_building(

@@ -979,6 +979,9 @@ failing with the executors it found before anything is held or registered.
 
 ## 24. Describe The Target
 
+Create a local target file from the committed example; the destination is generated
+operator configuration, not a file shipped by this branch:
+
 ```bash
 (
   cd e2e-tests/config || exit 1

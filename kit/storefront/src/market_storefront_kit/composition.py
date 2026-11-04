@@ -20,6 +20,8 @@ from core_storefront.domain_registry import (
 )
 from market_core import MarketDomainContract
 
+from .lifecycle import LoopStep, StorefrontLoopController
+
 
 class StorefrontContainer(Protocol):
     """Minimum container contract required by the shared lifespan."""
@@ -164,6 +166,20 @@ def build_composed_storefront_app(
     for middleware in composition.routes.middleware:
         application.middleware("http")(middleware)
     return application
+
+
+def register_deal_watch(
+    controller: StorefrontLoopController, *, step: LoopStep, interval_seconds: float,
+) -> None:
+    """Run an injected seller observation cycle under pause/step ownership.
+
+    Compositions supply the bounded cycle and credentials. The controller owns
+    cadence and serialization, so a servicing kit starts no competing timer.
+    """
+    controller.register_loop(
+        "deal_lifecycle_watch", route="deal_lifecycle_watch", step=step,
+        interval_seconds=interval_seconds,
+    )
 
 
 def get_storefront_container(request: Any) -> StorefrontContainer:

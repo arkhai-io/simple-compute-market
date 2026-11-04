@@ -212,17 +212,25 @@ def _option() -> SettlementOption:
         "literal_fields": {"token": _TOKEN, "recipient": _RECIPIENT},
         "rates": [{"field": "amount", "per": "hour", "value": "100"}],
     }
-    body = {"mechanism": "alkahest.v1", "asset": _TOKEN,
+    body = {
+        "price": {
+            "asset": _TOKEN,
             "rates": [RateValue(field="amount", per="hour", value=100)],
-            "params": {"accepted_escrow": entry}}
+        },
+        "settlement": {"schema": "alkahest.v1", **({"accepted_escrow": entry} or {})},
+    }
     return SettlementOption(option_id=derive_settlement_option_id(**body), **body)
 
 
 def _selected_proposal(amount: int) -> dict:
-    return {"fields": {"amount": amount}, "settlement_selection": {
-        "mechanism": "alkahest.v1", "option_id": _option().option_id,
-        "expiration_unix": 1_800_000_000,
-    }}
+    return {
+        "fields": {"amount": amount},
+        "settlement_selection": {
+            "option_id": _option().option_id,
+            "settlement": {"schema": "alkahest.v1"},
+            "expiration_unix": 1_800_000_000,
+        },
+    }
 
 
 def _proposal(amount: int) -> EscrowProposal:

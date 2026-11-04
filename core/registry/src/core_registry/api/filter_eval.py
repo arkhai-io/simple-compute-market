@@ -54,12 +54,14 @@ the spec-loader edge (one parse per filter at startup).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 from typing import Any
 
 from jsonpath_ng.ext import parse as _jsonpath_parse
+from market_core.schemas import settlement_option_asset, settlement_option_lifecycle
+from market_deal_lifecycle.projections import LIFECYCLE_QUERY_FIELDS, project_terms
 
 from core_registry.api.filter_spec import FilterDecl, FilterSpec
 
@@ -102,6 +104,7 @@ class Criterion:
     values: tuple[Any, ...] | None = None  # for in / not_in
     range_: _Range | None = None
     exists_target: bool | None = None
+    option_scoped: bool = False
 
 
 class FilterParamError(ValueError):
@@ -380,7 +383,10 @@ def build_criteria(
         if decl is None:
             raise FilterParamError(f"unknown filter: {name!r}")
         on_missing = overrides.get(name, decl.on_missing)
-        out.append(_build_criterion(decl, raw, on_missing))
+        out.append(replace(
+            _build_criterion(decl, raw, on_missing),
+            option_scoped=decl.path.startswith("$.settlement_options["),
+        ))
     return out
 
 
@@ -409,6 +415,19 @@ def _resolve(listing: dict[str, Any], crit: Criterion) -> list[Any]:
     present but carries no value); ``not_in:[X]`` against a null value
     falls into ``on_missing`` rather than vacuously passing.
     """
+    if crit.name in LIFECYCLE_QUERY_FIELDS or crit.name == "option_asset":
+        values = []
+        for option in listing.get("settlement_options", []):
+            try:
+                value = (
+                    settlement_option_asset(option) if crit.name == "option_asset"
+                    else project_terms(settlement_option_lifecycle(option)).get(crit.name)
+                )
+            except ValueError:
+                continue
+            if value is not None:
+                values.append(value)
+        return values
     return [m.value for m in crit.path_expr.find(listing) if m.value is not None]
 
 
@@ -469,5 +488,18 @@ def evaluate(listing: dict[str, Any], crit: Criterion) -> bool:
 
 
 def evaluate_all(listing: dict[str, Any], criteria: list[Criterion]) -> bool:
-    """Listing passes iff every criterion passes (AND semantics)."""
-    return all(evaluate(listing, c) for c in criteria)
+    """Lifecycle predicates and their asset must match one and the same option."""
+    lifecycle = [
+        c for c in criteria
+        if c.name in LIFECYCLE_QUERY_FIELDS or c.name == "option_asset"
+    ]
+    if not lifecycle:
+        return all(evaluate(listing, c) for c in criteria)
+    # Include existing mechanism/token option predicates in the correlation;
+    # otherwise a different option could supply the requested price asset.
+    option_criteria = [c for c in criteria if c in lifecycle or c.option_scoped]
+    other = [c for c in criteria if c not in option_criteria]
+    return all(evaluate(listing, c) for c in other) and any(
+        all(evaluate(listing | {"settlement_options": [option]}, c) for c in option_criteria)
+        for option in listing.get("settlement_options", [])
+    )

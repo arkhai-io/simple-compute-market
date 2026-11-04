@@ -42,6 +42,31 @@ def test_descriptor_derives_authority_schema_and_public_posture() -> None:
         "schema": {"id": "api_credits", "version": "1"},
     }
 
+    recommendation = {
+        "interface": "example.dispute.v1",
+        "origin": "https://dispute.example",
+        "account": "acct_example",
+        "record_key": "example-public-key",
+        "params": {},
+        "advertisement": {
+            "mechanisms": ["example.payment.v1"],
+            "minimum_dispute_window_seconds": 60,
+            "minimum_case_hold_seconds": None,
+        },
+    }
+    recommended = build_registry_descriptor(
+        base_url="https://registry.example/credits/",
+        display_name="API Credits Registry",
+        operator_identity="Example Operator",
+        authority_name="credits-registry",
+        authority_principal=signer.identity,
+        filter_spec=_filter_spec(),
+        require_read_api_key=False,
+        acquisition_pointer=None,
+        recommended_dispute_authorities=[recommendation],
+    )
+    assert recommended.to_wire()["recommendedDisputeAuthorities"] == [recommendation]
+
 
 def test_key_gated_descriptor_requires_acquisition_pointer() -> None:
     signer = Ed25519Signer(bytes(range(32)))

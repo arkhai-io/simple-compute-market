@@ -128,7 +128,7 @@ async def _refund_handler(db: Any, context: dict[str, Any]) -> dict[str, Any]:
         agreement, _raw = accepted_agreement(thread or {})
     except (KeyError, TypeError, ValueError):
         return {"action": "refund", "status": "skipped", "reason": "accepted_agreement_unavailable"}
-    stage = SELLER_STAGES.get(agreement.settlement.mechanism)
+    stage = SELLER_STAGES.get(agreement.settlement.settlement_schema)
     if stage is None:
         return {"action": "refund", "status": "skipped", "reason": "refund_not_supported"}
     return await stage.refund_before_delivery(

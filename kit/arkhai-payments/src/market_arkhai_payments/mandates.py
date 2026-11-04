@@ -5,7 +5,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from math import ceil, floor
 import re
-from typing import Any
+from typing import Any, Literal
+
+from market_deal_lifecycle.authorities import derive_stop_authorities
+from market_deal_lifecycle.terms import LifecycleTerms, partial_period
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -81,7 +84,6 @@ class PaymentsOptionParams(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True, validate_default=True)
 
     payee_account: str = Field(pattern=_ACCOUNT_ID)
-    asset: str = Field(pattern=_ASSET)
     window: str = DEFAULT_WINDOW
     deposit_agreement: bool = False
 
@@ -107,13 +109,68 @@ class MandatePolicy(BaseModel):
     amount: int | str
     asset: str = Field(pattern=_ASSET)
     fee_bps: int = Field(ge=0, le=10_000)
-    dispute_authority: str = Field(pattern=_ACCOUNT_ID)
+    lifecycle: LifecycleTerms
 
-    @model_validator(mode="after")
-    def payment_asset_matches_option(self) -> MandatePolicy:
-        if self.asset != self.option.asset:
-            raise ValueError("accepted asset must match the selected payments option")
-        return self
+    @property
+    def dispute_authority(self) -> str:
+        return self.lifecycle.adjudication.dispute.account
+
+
+def derive_part_terms(
+    policy: MandatePolicy, *, kind: Literal["once", "rate"], setup: bool = False,
+) -> dict[str, Any]:
+    """Derive payment permissions and maturity from accepted lifecycle rights.
+
+    Setup encodes Agreement start; the authority clamps an already-past end to
+    approval without changing the stored mandate. Whole-second ends round up so
+    fractional Agreement instants never shorten the paid service's protection.
+    """
+    lifecycle = policy.lifecycle
+    if lifecycle.bond is not None:
+        raise MandatePolicyError("seller-funded bond is unsupported")
+    if setup and kind != "once":
+        raise MandatePolicyError("setup must be a once part")
+    try:
+        start = _utc_seconds(policy.start_utc, "start_utc")
+        end = ceil(start + (0 if setup else policy.duration_seconds))
+        if end > MAX_SAFE_INTEGER:
+            raise ValueError("part end exceeds the JSON wire integer range")
+        dispute = policy.dispute_authority
+        if re.fullmatch(_ACCOUNT_ID, dispute) is None:
+            raise ValueError("dispute authority requires a payments account")
+        supported = frozenset({"charged", "returned", "prorated", "chosen"})
+        stops = derive_stop_authorities(
+            lifecycle.early_termination if kind == "rate" else None,
+            payer=policy.buyer_account,
+            payee=policy.option.payee_account, dispute=dispute,
+            stoppable=kind == "rate", supported_partial_periods=supported,
+        )
+        adjudication = lifecycle.adjudication
+        cap = adjudication.case_hold_max_seconds
+        authorities: dict[str, Any] = {
+            # Rights are an object in the Agreement; its insertion order is
+            # not committed by JCS. The derived permission list must be stable.
+            "stop": [{"account": entry.account, "notice": format_duration(entry.notice_seconds),
+                      "partialPeriod": entry.partial_period} for entry in sorted(
+                          stops, key=lambda entry: ("payer", "payee", "dispute").index(entry.role)
+                      )],
+            "reverse": list(dict.fromkeys((policy.option.payee_account, dispute))),
+            "extend": [dispute],
+        }
+        if kind == "rate":
+            authorities["start"] = [policy.option.payee_account]
+        treatment = (
+            partial_period(lifecycle.early_termination.settles_through, supported)
+            if kind == "rate" and lifecycle.early_termination is not None else "returned"
+        )
+        return {
+            "end": {"at": end, "partialPeriod": treatment},
+            "hold": {"afterStop": format_duration(adjudication.dispute_window_seconds)},
+            "maxHoldExtension": None if cap is None else format_duration(cap),
+            "authorities": authorities,
+        }
+    except ValueError as exc:
+        raise MandatePolicyError(str(exc)) from exc
 
 
 def derive_mandate(agreement_json: dict[str, Any], policy: MandatePolicy) -> Mandate:
@@ -121,6 +178,8 @@ def derive_mandate(agreement_json: dict[str, Any], policy: MandatePolicy) -> Man
 
     if not isinstance(agreement_json, dict):
         raise MandatePolicyError("agreement must be a JSON object")
+    if policy.lifecycle.early_termination is not None:
+        raise MandatePolicyError("early_termination requires a stoppable part")
     try:
         accepted_at = _utc_seconds(policy.accepted_at, "accepted_at")
         start_utc = _utc_seconds(policy.start_utc, "start_utc")
@@ -130,25 +189,10 @@ def derive_mandate(agreement_json: dict[str, Any], policy: MandatePolicy) -> Man
         raise MandatePolicyError(str(exc)) from exc
     if start_utc < accepted_at:
         raise MandatePolicyError("start_utc precedes accepted_at")
-    # The wire uses seconds; rounding must not shorten the accepted hold interval.
-    hold_seconds = ceil(start_utc - accepted_at) + policy.duration_seconds + window
-    if hold_seconds > MAX_SAFE_INTEGER:
-        raise MandatePolicyError("hold duration exceeds the JSON wire integer range")
     expires = floor(accepted_at) + window
     if expires <= accepted_at or expires > MAX_SAFE_INTEGER:
         raise MandatePolicyError("mandate expiry must follow acceptance and fit the wire range")
 
-    # The part owns its lifecycle and the wire requires every list explicitly. Buyer
-    # and seller may each stop it at once. The payer is never a reverse authority:
-    # that would let the buyer claw back earned funds and defeat the hold, and the
-    # service requires the dispute authority there. Nobody may extend the hold, so
-    # it never outlasts the interval the Agreement fixes.
-    parties = list(dict.fromkeys((policy.buyer_account, policy.option.payee_account)))
-    reverse = list(dict.fromkeys((policy.option.payee_account, policy.dispute_authority)))
-    stop = [
-        {"account": party, "notice": IMMEDIATE, "partialPeriod": STOP_CHARGES_PARTIAL_PERIOD}
-        for party in parties
-    ]
     mandate = {
         "from": policy.buyer_account,
         "to": policy.option.payee_account,
@@ -157,9 +201,7 @@ def derive_mandate(agreement_json: dict[str, Any], policy: MandatePolicy) -> Man
                 "kind": "once",
                 "asset": policy.asset,
                 "amount": amount,
-                "hold": {"for": format_duration(hold_seconds)},
-                "authorities": {"stop": stop, "reverse": reverse, "extend": []},
-                "maxHoldExtension": IMMEDIATE,
+                **derive_part_terms(policy, kind="once"),
             }
         ],
         "deal": agreement_hash(agreement_json),
@@ -190,7 +232,8 @@ def check(
     actual_values = wire_json(actual)
     expected_values = wire_json(expected)
     mismatched = sorted(
-        key for key in expected_values if actual_values.get(key) != expected_values[key]
+        key for key in actual_values.keys() | expected_values.keys()
+        if actual_values.get(key) != expected_values.get(key)
     )
     if mismatched:
         raise MandatePolicyError(

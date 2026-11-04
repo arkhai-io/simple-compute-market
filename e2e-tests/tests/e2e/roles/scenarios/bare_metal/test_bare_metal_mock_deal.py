@@ -30,10 +30,13 @@ poller holds.
 
 from __future__ import annotations
 
+import base64
 import logging
 import time
 
 import pytest
+from compute_provisioning_contracts.lease_ends import SignedLeaseEndedReport, verify_lease_end
+from tests.e2e.roles.scenarios.bare_metal.conftest import _pinned, lane_setting
 
 from tests.e2e.roles.helpers.compute_deal import (
     advance_fulfillment_to,
@@ -411,7 +414,7 @@ class TestStage12c_SecondDealActive:
 
 class TestStage12d_BuyerTeardownSentTwice:
     def test_12d_a_repeated_teardown_is_the_same_operation(
-        self, provisioning_client, buyer_fulfillment, deal_state: BareMetalDealState
+        self, provisioning_client, storefront_admin_client, buyer_fulfillment, deal_state: BareMetalDealState
     ):
         """The buyer's teardown, sent again, returns the operation it began.
 
@@ -420,15 +423,26 @@ class TestStage12d_BuyerTeardownSentTwice:
         """
         require_state(deal_state, "_second_deal_active")
         assert_lease_watchdog_held(provisioning_client)
-        first = buyer_fulfillment.teardown(deal_state.second_negotiation_id)
-        again = buyer_fulfillment.teardown(deal_state.second_negotiation_id)
-        assert first.get("state") == "terminating", first
-        # Termination can already have dispatched teardown when the retry
-        # observes it; its durable identities establish the same operation.
-        assert again.get("state") in {"terminating", "teardown_dispatch_pending"}, again
-        for name in ("negotiation_id", "capacity_reservation_id", "fulfillment_id"):
-            assert again.get(name) == first.get(name), (name, first, again)
-        deal_state.second_teardown = first
+        negotiation_id = deal_state.second_negotiation_id
+        reservation_id = buyer_fulfillment.status(negotiation_id)["capacity_reservation_id"]
+        first = buyer_fulfillment.teardown(negotiation_id)
+        again = buyer_fulfillment.teardown(negotiation_id)
+        assert first["delivery"]["progress"] == "tearing_down", first
+        assert again["delivery"]["progress"] == "tearing_down", again
+        for name in ("negotiation_id", "operation_key", "receipt_at", "selected_end"):
+            assert again[name] == first[name], (name, first, again)
+        advance_storefront(storefront_admin_client, "delivery-recovery")
+        delivery = buyer_fulfillment.delivery(negotiation_id)["delivery"]
+        assert delivery["progress"] == "tearing_down", delivery
+        assert delivery["site_reports"], delivery
+        for item in delivery["site_reports"]:
+            report = SignedLeaseEndedReport.model_validate_json(base64.b64decode(item["body"]))
+            event = verify_lease_end(report, capacity_reservation_id=reservation_id,
+                                     site_id=lane_setting("site_id"), expected_sites=_pinned("site_authority"))
+            assert event.cause == "termination"
+        assert provisioning_client.get_lease(reservation_id).status != "released"
+        deal_state.second_teardown = {"capacity_reservation_id": reservation_id, "receipt": first,
+                                      "site_reports": delivery["site_reports"]}
 
 
 class TestStage12e_CapacityReleasedOnce:
@@ -459,3 +473,6 @@ class TestStage12e_CapacityReleasedOnce:
             == deal_state.second_teardown.get("capacity_reservation_id")
         ), released
         assert buyer_fulfillment.status(negotiation_id).get("state") == "released"
+        delivery = buyer_fulfillment.delivery(negotiation_id)["delivery"]
+        assert delivery["progress"] == "released"
+        assert delivery["site_reports"] == deal_state.second_teardown["site_reports"]

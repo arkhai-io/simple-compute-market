@@ -48,7 +48,8 @@ before starting and re-pin if the session spans a day; the entry-point audit in
 - [ ] 2.2 Fail loading, not the phase. A stale configuration is a defect in the
   harness and must not reach the collector-and-candidate path, which would
   attribute it to the product.
-- [ ] 2.3 Add `tools/issue-discovery/tests/test_phase_entrypoints.py` covering:
+- [ ] 2.3 Add the planned file `test_phase_entrypoints.py` under
+      `tools/issue-discovery/tests/`, covering:
   every shipped phase file passes; a missing `workdir` fails and names it; an
   undefined `make` target fails and names both target and directory; a target
   whose prerequisite is undefined fails, which parsing would not have caught; a

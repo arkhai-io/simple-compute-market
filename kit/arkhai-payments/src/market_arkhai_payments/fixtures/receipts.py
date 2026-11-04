@@ -10,6 +10,7 @@ from market_identity import Signer
 
 from market_arkhai_payments.canonical import wire_json
 from market_arkhai_payments.models import Mandate, SignedReceipt
+from market_arkhai_payments.fixtures.arithmetic import initial_periods
 from market_arkhai_payments.receipts import receipt_message, transaction_id
 
 
@@ -28,14 +29,17 @@ def sign_receipt(signer: Signer, receipt: Mapping[str, Any]) -> SignedReceipt:
     )
 
 
-def receipt_parts(mandate: Mandate | Mapping[str, Any]) -> list[dict[str, Any]]:
+def receipt_parts(
+    mandate: Mandate | Mapping[str, Any], *, approved_at: int = 1_800_000_000
+) -> list[dict[str, Any]]:
     """Return receipt parts for a mandate with the fee rounded down per part."""
 
     wire = wire_json(Mandate.model_validate(mandate))
     bps = int(wire["fee"]["bps"])
     parts = []
     for part in wire["parts"]:
-        gross = int(part["amount"])
+        count = initial_periods(part, approved_at) if part["kind"] == "rate" else 1
+        gross = int(part["amount"]) * count
         fee = gross * bps // 10_000
         parts.append(
             {
@@ -44,6 +48,8 @@ def receipt_parts(mandate: Mandate | Mapping[str, Any]) -> list[dict[str, Any]]:
                 "fee": str(fee),
                 "net": str(gross - fee),
                 "hold": part["hold"],
+                **({"rate": {"period": part["period"], "reserveAhead": part["reserveAhead"],
+                             "periodsReserved": str(count)}} if part["kind"] == "rate" else {}),
             }
         )
     return parts
@@ -69,7 +75,7 @@ def build_signed_receipt(
             "from": wire["from"],
             "to": wire["to"],
             "ledger": ledger,
-            "parts": receipt_parts(parsed),
+            "parts": receipt_parts(parsed, approved_at=approved_at),
             "approvedAt": approved_at,
             "issuer": signer.identity.model_dump(mode="json"),
             "livemode": livemode,

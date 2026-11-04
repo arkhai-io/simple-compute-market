@@ -14,6 +14,7 @@ from __future__ import annotations
 import inspect
 import time
 
+import httpx
 import pytest
 from compute_provisioning_client import (
     ComputeProvisioningClient,
@@ -69,6 +70,7 @@ def test_sync_client_retry_fresh_signs_and_rejects_changed_context(monkeypatch, 
     )
     client = SyncComputeProvisioningClient(
         "https://provisioning.example",
+        transport=httpx.MockTransport(lambda _: pytest.fail("sign-only test must not issue HTTP")),
         signer=caller,
         caller_role="admin",
         expected_authorities=TrustedIdentitySet(identities=(authority.identity,)),

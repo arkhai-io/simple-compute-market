@@ -24,7 +24,7 @@ from market_arkhai_payments import (
     PaymentSellerStage,
     servicing_stage,
 )
-from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt
+from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt, dispute_lifecycle
 from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from storefront_client import StorefrontClient, StorefrontClientError
@@ -83,8 +83,12 @@ class Issuer:
 
 
 def _option() -> SettlementOption:
-    params = {"payee_account": PAYEE, "asset": "USD/2", "window": "P7D", "deposit_agreement": False}
-    body = {"mechanism": "arkhai.payments.v1", "asset": "USD/2", "rates": [], "params": params}
+    params = {"payee_account": PAYEE, "window": "P7D", "deposit_agreement": False}
+    body = {
+        "price": {"asset": "USD/2", "rates": []},
+        "settlement": {"schema": "arkhai.payments.v1", **(params or {})},
+        "lifecycle": dispute_lifecycle(DISPUTE),
+    }
     return SettlementOption(option_id=derive_settlement_option_id(**body), **body)
 
 
@@ -157,7 +161,6 @@ async def harness(tmp_path):
             service_url="http://127.0.0.1:9",
             service_identity=SERVICE.identity,
             fee_bps=250,
-            dispute_authority=DISPUTE,
             development_auth=True,
         )
         stage = servicing_stage(config, client_for_owner=payments)
@@ -326,7 +329,6 @@ def _restart(tmp_path, h, *, approved: bool):
         service_url="http://127.0.0.1:9",
         service_identity=SERVICE.identity,
         fee_bps=250,
-        dispute_authority=DISPUTE,
         development_auth=True,
     )
     stage = servicing_stage(config, client_for_owner=payments)

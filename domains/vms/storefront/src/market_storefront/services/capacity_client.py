@@ -540,6 +540,10 @@ class AggregateFulfillmentClient:
 
         return await self._sites[site_id].begin_fulfillment_teardown(fulfillment_id)
 
+    async def get_lease(self, capacity_reservation_id: str, *, site_id: str) -> LeaseView:
+        """Recover signed lease evidence only from the reservation's recorded site."""
+        return await self._sites[site_id].get_lease(capacity_reservation_id)
+
     async def terminate_lease(
         self,
         capacity_reservation_id: str,

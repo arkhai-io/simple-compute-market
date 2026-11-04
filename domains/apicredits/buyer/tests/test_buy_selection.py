@@ -18,19 +18,18 @@ from market_core.schemas import (
 
 from arkhai_apicredits_buyer.buy_cli import select_settlement_for_matches
 
-_PARAMS = {"payee_account": "22222222-2222-4222-8222-222222222222", "asset": "USD/2"}
+_PARAMS = {"payee_account": "22222222-2222-4222-8222-222222222222"}
 
 
 def _option(rate: int) -> SettlementOption:
     rates = [RateValue(field="amount", per="unit", value=rate)]
     return SettlementOption(
         option_id=derive_settlement_option_id(
-            mechanism="arkhai.payments.v1", asset="USD/2", rates=rates, params=_PARAMS
+            price={"asset": "USD/2", "rates": rates},
+            settlement={"schema": "arkhai.payments.v1", **(_PARAMS or {})},
         ),
-        mechanism="arkhai.payments.v1",
-        asset="USD/2",
-        rates=rates,
-        params=dict(_PARAMS),
+        price={"asset": "USD/2", "rates": rates},
+        settlement={"schema": "arkhai.payments.v1", **(dict(_PARAMS) or {})},
     )
 
 
@@ -43,7 +42,9 @@ def _listing(listing_id: str, option: SettlementOption | None) -> dict[str, Any]
 
 
 def _selection(option: SettlementOption) -> SettlementSelection:
-    return SettlementSelection(mechanism=option.mechanism, option_id=option.option_id)
+    return SettlementSelection(
+        option_id=option.option_id, settlement={"schema": option.settlement_schema}
+    )
 
 
 def test_unusable_listings_take_no_try_and_selection_stops_at_the_limit() -> None:

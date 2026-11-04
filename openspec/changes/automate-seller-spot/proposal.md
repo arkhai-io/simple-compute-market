@@ -10,6 +10,7 @@ Interruptible publication, dry-run negotiation evaluation, reservation inspectio
 - Add a reference strategy runner with dry-run/live guards and explicit policy/version/config evidence.
 - Define durable decision evidence separately from best-effort stage-event observability and reference authoritative site/chain state.
 - State: **Retained and substantially narrowed to residual automation.**
+- **To be rescoped** once `agreed-evidence-and-early-termination` is accepted: that change's seller half of the lifecycle interface supplies the active-deal read, the typed client, mechanism-neutral early ends (replacing splitter execution here), resumable end service, and the evidence store. This change keeps the reference strategy runner and its decision evidence, as a caller of that seller half. The items above and `tasks.md` are re-planned at the rescope.
 
 ## Capabilities
 
@@ -25,6 +26,7 @@ None.
 
 ## Dependencies and Related Changes
 
+- Depends on `agreed-evidence-and-early-termination` and `spot-deals-through-arkhai-payments`; until the rescope, the items below describe the earlier, splitter-specific scope.
 - Uses existing interruption planning/truncation APIs and settlement servicing; does not depend on storefront database pruning.
 - Must preserve POOLS-7 fulfillment/teardown authority when that cutover lands.
 

@@ -74,9 +74,8 @@ _ALKAHEST_FIELDS = frozenset(
         "probe_interval_seconds",
         "rpc_timeout_seconds",
         "enabled",
-        "interruptible",
+        "release_models",
         "interruptible_oracle_addresses",
-        "oracle_gated",
         "trusted_oracle_addresses",
     }
 )
@@ -103,7 +102,7 @@ class SettlementMigrationValidationError(SettlementMigrationError):
 class MigrationAction:
     """One redacted migration operation; values are deliberately not represented."""
 
-    kind: Literal["move", "remove"]
+    kind: Literal["move", "remove", "set"]
     source: str
     destination: str | None = None
 
@@ -332,6 +331,34 @@ class _Planner:
                 value=moved_value,
             )
 
+    def migrate_release_models(self) -> None:
+        section_path = ("Settlement", "alkahest")
+        section = _lookup(self.document, section_path)
+        if not isinstance(section, Mapping):
+            return
+        flags = ("oracle_gated", "interruptible")
+        present = [name for name in flags if name in section]
+        for name in present:
+            if type(_plain(section[name])) is not bool:
+                raise SettlementMigrationValidationError(
+                    f"Settlement.alkahest.{name} must be a boolean (value redacted)"
+                )
+        enabled = [name for name in present if _plain(section[name]) is True]
+        if len(enabled) > 1:
+            raise SettlementMigrationConflict(
+                "Settlement.alkahest.oracle_gated", "Settlement.alkahest.interruptible"
+            )
+        destination = (*section_path, "release_models")
+        models = enabled or ["recipient"]
+        if present:
+            source = enabled[0] if enabled else present[0]
+            self.move((*section_path, source), destination, value=models)
+            for name in present:
+                self.remove((*section_path, name))
+        elif "release_models" not in section:
+            _ensure_table(self.document, section_path)["release_models"] = models
+            self.actions.append(MigrationAction("set", _path_text(destination)))
+
     def migrate_address_books(self) -> None:
         """Move each retired address-book key into ``Settlement.alkahest.address_books``.
 
@@ -530,6 +557,7 @@ class _Planner:
         self.migrate_alkahest_policy()
         self.migrate_address_books()
         self.migrate_priority()
+        self.migrate_release_models()
         return tuple(self.actions)
 
 
@@ -547,6 +575,8 @@ def is_legacy_settlement_path(path: str) -> bool:
         "settlement.hosted",
         "settlement.mechanism_priority",
         f"settlement.alkahest.{_SECTION_BOOK_KEY}",
+        "settlement.alkahest.oracle_gated",
+        "settlement.alkahest.interruptible",
     }:
         return True
     if normalized.startswith(
@@ -579,13 +609,13 @@ def environment_renames(
     if role == "seller":
         exact = {
             "STOREFRONT_ORACLE_GATED_LISTINGS": (
-                "STOREFRONT_SETTLEMENT__ALKAHEST__ORACLE_GATED"
+                "STOREFRONT_SETTLEMENT__ALKAHEST__RELEASE_MODELS"
             ),
             "STOREFRONT_TRUSTED_ORACLE_ADDRESS": (
                 "STOREFRONT_SETTLEMENT__ALKAHEST__TRUSTED_ORACLE_ADDRESSES"
             ),
             "STOREFRONT_INTERRUPTIBLE_LISTINGS": (
-                "STOREFRONT_SETTLEMENT__ALKAHEST__INTERRUPTIBLE"
+                "STOREFRONT_SETTLEMENT__ALKAHEST__RELEASE_MODELS"
             ),
             "STOREFRONT_INTERRUPTIBLE_ORACLE_ADDRESS": (
                 "STOREFRONT_SETTLEMENT__ALKAHEST__INTERRUPTIBLE_ORACLE_ADDRESSES"
@@ -946,7 +976,9 @@ def format_migration_result(result: SettlementMigrationResult) -> tuple[str, ...
 
     lines: list[str] = []
     for action in result.actions:
-        if action.destination is None:
+        if action.kind == "set":
+            lines.append(f"set {action.source} (value redacted)")
+        elif action.destination is None:
             lines.append(f"remove {action.source} (value redacted)")
         else:
             lines.append(

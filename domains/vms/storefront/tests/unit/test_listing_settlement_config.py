@@ -113,10 +113,11 @@ async def test_clause_only_create_persists_canonical_clause_before_publication(
     )
     option = {
         "option_id": "example-option",
-        "mechanism": "example.payment.v1",
-        "asset": "usd",
-        "rates": [{"field": "amount", "per": "hour", "value": "200"}],
-        "params": {},
+        "price": {
+            "asset": "usd",
+            "rates": [{"field": "amount", "per": "hour", "value": "200"}],
+        },
+        "settlement": {"schema": "example.payment.v1", **({} or {})},
     }
     db = _repository(
         upsert_listing_with_binding=AsyncMock(),
@@ -191,10 +192,8 @@ async def test_direct_settlement_options_are_rejected() -> None:
         settlement_options=[
             {
                 "option_id": "direct",
-                "mechanism": "example.payment.v1",
-                "asset": "usd",
-                "rates": [],
-                "params": {},
+                "price": {"asset": "usd", "rates": []},
+                "settlement": {"schema": "example.payment.v1", **({} or {})},
             }
         ],
     )
@@ -207,12 +206,19 @@ async def test_direct_settlement_options_are_rejected() -> None:
 async def test_registration_composition_receives_ordered_example_clauses() -> None:
     option = {
         "option_id": "hosted",
-        "mechanism": "example.payment.v1",
-        "asset": "usd",
-        "rates": [{"field": "amount", "per": "hour", "value": "125"}],
-        "params": {
-            "account_ref": "acct-seller",
-            "funding_profile": "us_ach_debit.v1",
+        "price": {
+            "asset": "usd",
+            "rates": [{"field": "amount", "per": "hour", "value": "125"}],
+        },
+        "settlement": {
+            "schema": "example.payment.v1",
+            **(
+                {
+                    "account_ref": "acct-seller",
+                    "funding_profile": "us_ach_debit.v1",
+                }
+                or {}
+            ),
         },
     }
     composition = SimpleNamespace(

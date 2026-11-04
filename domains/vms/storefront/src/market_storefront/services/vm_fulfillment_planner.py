@@ -9,9 +9,9 @@ from market_storefront.models.vm_fulfillment_models import VmFulfillmentPlan
 
 # Evidence statuses whose payload carries verified delivery facts. A seller
 # refund moves the status from ``verified`` through ``refunding`` to
-# ``refunded`` but never changes the facts, so a delivery that started before
-# the refund can still complete from them. Only ``verified`` admits a new
-# delivery start; the delivery-record insert enforces that.
+# ``refunded`` but never changes the facts used for recovery. Physical
+# admission is separate: a confirmed refund records an end and blocks new
+# dispatch or credential disclosure, even for a delivery already started.
 VERIFIED_EVIDENCE_STATUSES = frozenset({"verified", "refunding", "refunded"})
 
 

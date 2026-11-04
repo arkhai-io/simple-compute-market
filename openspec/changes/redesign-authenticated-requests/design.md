@@ -114,6 +114,20 @@ Each of these is a decision gate in `tasks.md`; none is settled here.
 - **`retain-authenticated-request-outcomes`.** Whether it is superseded, narrowed to
   the routes that genuinely need retained outcomes, or folded into this change.
 
+## Coordination with compute delivery
+
+`unify-compute-delivery-path` supplies the first route retry declaration in its
+marketplace-identity MODIFIED block. Consume/generalize it rather than introduce a
+competing rule. Archive unify before this change. This change's eventual MODIFIED
+block must be a superset of every retained clause/scenario: pre-dispatch principal/
+request-ID reservation, first-use skew, changed-reuse refusal, request and response
+signing (including refusals), exact expected-authority verification, and credential-
+capable compute routes re-running live disclosure admission with no retained body.
+Mutating settle retries resume the same operation; old credential bodies are purged,
+and an exact retry after an end may refuse. Retry-policy default/retention choices
+for other routes remain decision gates here. If archive order changes, re-diff both
+blocks against then-current permanent specs before either archive.
+
 ## Consequences for other changes
 
 - `contact-payload-retention` scopes its disclosure to the introduction record and

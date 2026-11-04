@@ -36,6 +36,7 @@ from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
+from market_deal_lifecycle_client import LifecycleClientError
 from core_buyer.introductions import IntroductionPayloadsDeleted, IntroductionTransport
 from dataclasses import replace
 from buyer_commands import BuyerCommands
@@ -65,15 +66,11 @@ def _contact_option() -> dict[str, Any]:
     }
     return {
         "option_id": derive_settlement_option_id(
-            mechanism=CONTACT_MECHANISM,
-            asset="introduction",
-            rates=[],
-            params=params,
+            price={"asset": "introduction", "rates": []},
+            settlement={"schema": CONTACT_MECHANISM, **(params or {})},
         ),
-        "mechanism": CONTACT_MECHANISM,
-        "asset": "introduction",
-        "rates": [],
-        "params": params,
+        "price": {"asset": "introduction", "rates": []},
+        "settlement": {"schema": CONTACT_MECHANISM, **(params or {})},
     }
 
 
@@ -176,8 +173,8 @@ def _opening(option: dict) -> dict:
         },
         "proposal": {
             "settlement_selection": {
-                "mechanism": CONTACT_MECHANISM,
                 "option_id": option["option_id"],
+                "settlement": {"schema": CONTACT_MECHANISM},
                 "expiration_unix": 1_900_000_000,
             },
             "fields": {},
@@ -283,8 +280,8 @@ async def test_contact_options_publish_through_the_composition() -> None:
     )
     assert payload.accepted_escrows == ()
     (option,) = payload.settlement_options
-    assert option["mechanism"] == CONTACT_MECHANISM
-    assert option["rates"] == []
+    assert option["settlement"]["schema"] == CONTACT_MECHANISM
+    assert option.get("price", {}).get("rates", []) == []
     assert "@capacity_broker" not in str(payload.settlement_options)
 
 
@@ -460,7 +457,7 @@ async def _settlement_and_fulfillment_answers(base_url: str, negotiation_id: str
     for name in _FULFILLMENT_READS:
         try:
             answers[name] = getattr(_fulfillment(base_url), name)(negotiation_id)
-        except RuntimeError as exc:
+        except (RuntimeError, LifecycleClientError) as exc:
             answers[name] = exc
     try:
         answers["outsider"] = _fulfillment(base_url, OUTSIDER_SIGNER).status(negotiation_id)
@@ -480,8 +477,13 @@ def _assert_settled_by_introduction(answers: dict) -> None:
         assert "completes by introduction, not settlement" in str(refused)
     for name in _FULFILLMENT_READS:
         refused = answers[name]
-        assert isinstance(refused, RuntimeError), (name, refused)
-        assert "HTTP 404" in str(refused) and "has no fulfillment" in str(refused), refused
+        if name == "teardown":
+            assert isinstance(refused, LifecycleClientError), refused
+            assert refused.status_code == 409
+            assert "settlement-stage Agreement" in str(refused)
+        else:
+            assert isinstance(refused, RuntimeError), (name, refused)
+            assert "HTTP 404" in str(refused) and "has no fulfillment" in str(refused), refused
     # Refused by the buyer authorization every deal's routes run before the
     # stage is resolved, so the answer names nothing of the mechanism. The
     # status is matched with its prefix: the message also names the loopback
@@ -585,7 +587,7 @@ async def test_an_unbacked_listing_published_by_the_storefront_reaches_an_introd
     assert published["capacity_backing"] == "unbacked"
     for term in ("host_id", "physical_host_id", "access_methods"):
         assert term not in published
-    assert option["mechanism"] == CONTACT_MECHANISM
+    assert option["settlement"]["schema"] == CONTACT_MECHANISM
     assert accepted["action"] == "accept"
     assert revealed["counterparty_contact"] == _SELLER_CONTACT
     _assert_settled_by_introduction(answers)

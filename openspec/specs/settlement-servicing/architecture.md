@@ -85,7 +85,20 @@ cryptographically valid for that other principal.
 
 ## Capacity coupling
 
-Commercial abandonment may request early physical termination, but it does not directly free capacity. Settlement servicing shortens or ends the relevant lease intent; physical provisioning must still prove teardown before the site authority releases capacity.
+Commercial abandonment may request early physical termination, but it does not
+free capacity. End service records one attributed delivery instant before physical
+I/O: due ends terminate immediately, future ends truncate the immutable lease
+horizon at second precision. Proven teardown (or an explicit force-release) still
+controls site capacity return. A signed intended-end report, its acknowledgement
+and the capacity-released callback are three different facts.
+
+Admission and end recording share caller-session revision/CAS ordering around
+reserve, dispatch, activation/billing intent and disclosure. Authority reads happen
+before that transaction; stale revisions retry without effects. In-flight physical
+work is adopted before termination. An ambiguous site end retains a classification
+slot; a correlated report adopts the verified controller's filing instead of
+inventing another fault. Classification and seller case filing never delay teardown.
+See [end/admission model](../deal-lifecycle/architecture.md#one-end-instant-transactional-admission).
 
 ## Principal and mechanism boundaries
 
@@ -129,15 +142,53 @@ The seller derives the mandate at acceptance from exact Agreement bytes, the sel
 
 Buyer approval validates both the mandate and local policy. Buyer and seller poll the same deterministic transaction ID; seller settlement reloads accepted state by negotiation ID and verifies the signed receipt against it. A pending transaction authorizes no domain effect. Retries return completed state or re-drive nonterminal provisioning/issuance with the same durable identity.
 
-VM and bare-metal retain selected-site physical authority and teardown; API credits retains its grant and credential authority. Those domain journals are not ledger state. Refund uses `reverse`; hold release, fees, disputes, and cash movement remain payments-service responsibilities. The kit has no servicing daemon.
+VM and bare metal retain selected-site physical authority and teardown; API credits
+retains its grant and credential authority. Those journals are not ledger state.
+Voluntary refund uses payment `reverse`; exceptional delivery ends use the
+Agreement-named dispute authority, not a local stop/refund calculation. Payments
+owns hold release/extensions, fees and cash; the dispute authority owns cases,
+rulings and their effects. Both adapters are stateless. Storefront `DealWatch` and
+end service own repeated observation and orchestration, under the shared loop
+controller rather than a timer in either authority kit.
 
 **Delivery start and refund intent are ordered.** Each domain records two transitions with single-statement compare-and-set writes in its own tables. Delivery start, before any external effect, succeeds only while the deal is verified and carries no refund intent. Refund intent records `refunding` before the reversal is requested: if delivery had not started, it can no longer start; if it had, the delivery completes and its details are kept beside the `refunded` status. A refund first confirms a verified payment exists, and abandons its intent if nothing remains to reverse, so an unpaid deal is never left blocked.
 
 **Attachments must match the deal.** Every Agreement attachment is a deal attachment validated against the transaction's deal hash, so the client and its test fake examine every attachment, return the matching one, and refuse any mismatch as a blocked integration fault.
 
-**Snapshot proofs are not evidence.** A transaction snapshot carries a service proof that the marketplace does not verify. Sellers rely only on the independently signed receipt it embeds, which suffices for single-part gating. A change that reads snapshot part state as evidence must first add snapshot verification, a snapshot vector, and a fixture.
+**Snapshots and receipts have separate verified roles.** The payments kit verifies
+snapshot attestation, exact deal/mandate/receipt, service mode, identity validity
+windows and the caller's durable minimum event sequence before consuming part
+state. Current/retiring receipt pins can validate an old receipt attested by a
+current snapshot without changing its bytes. Published vectors and the shared
+clock-injected `PaymentsAuthority` fixture cover these proofs and per-part events;
+`FakePaymentsClient` consumes that same engine, not a second financial model.
+
+The once-only adapter reads/watches and reverses; it has no start/stop operation.
+Each prepaid once part ends at Agreement term end; setup encodes Agreement start
+and the service clamps it to approval if later. Each hold is after that part's own
+end by the dispute window, separate from approval expiry. Only the Agreement's
+dispute authority gets extend/lift with the accepted cap. Party rate rights are
+codec-derived, not independent client permission defaults.
+
+Watch keeps payment/dispute cursors independent and last verified history separate
+from the current refresh outcome. Respondent discovery signs or contests from
+retained facts and journals the answer before advancing; deal watch waits for
+that answer or confirmed closure. Original semantic filings have one durable
+writer; lost responses resolve/adopt a signed equivalent case, never a fresh
+case key. Initial missing mediation history permits the first filing only.
+Neither cached history nor an absent authority is a current successful refresh.
 
 ## Current limits
+
+Production rate start/stop, funding-timer classification and revised monetary
+remedy execution are not implemented by the once-only adapter. Local case
+filing/observation is not deployed rate/ruling-execution qualification. The
+Agreement pins the dispute origin/key for deal life without mid-deal rotation.
+An unresolved unanswered case holds its deal's dispute cursor. The retention
+observer and refresh-before-prune API are composed, but no production storefront
+prune trigger exists, so seller evidence is retained indefinitely. VM/bare-metal
+respondent lifetimes and term-end recovery differ as recorded in
+[lifecycle limits](../deal-lifecycle/architecture.md#current-limits).
 
 Heartbeat evidence remains persisted but is not an automated adjudication
 policy. Evidence freshness, neutral oracle authority, disputed outcomes, and

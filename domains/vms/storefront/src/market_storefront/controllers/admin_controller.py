@@ -8,6 +8,7 @@ routes to return 404.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import time
@@ -38,7 +39,7 @@ from core_storefront.models.system_models import (
 from core_storefront.stage_log import stage_event
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi_utils.cbv import cbv
-from market_identity import RotationRequest
+from market_identity import RotationRequest, canonical_json
 
 import market_storefront.container as _container
 from market_storefront.services.capacity_client import (
@@ -279,21 +280,48 @@ class AdminController:
     @router.post(
         "/deals/{escrow_uid}/interrupt",
         response_model=InterruptDealResponse,
-        summary="Interrupt an active interruptible compute deal (admin)",
+        summary="Interrupt a hosted negotiation or splitter-backed escrow (admin)",
     )
     async def interrupt_deal(
         self,
         escrow_uid: str,
         body: InterruptDealRequest,
+        request: Request = None,
     ) -> InterruptDealResponse:
-        """End an interruptible deal's capacity lease early.
+        """Interrupt a hosted negotiation or a splitter-backed escrow.
 
-        This is the provider-control-plane half of spot interruption.
-        It validates that the deal's committed settlement plan made it
-        interruptible, finds the live capacity reservation, and truncates
-        that lease to the interruption timestamp. The splitter declaration remains a
-        separate settlement action until the on-chain helper is wired.
+        Hosted notice rights come from the accepted option. Without a right,
+        delivery ends locally while the authority handles the correction.
+        Splitter-backed escrows retain their separate on-chain declaration.
         """
+        thread = await self._db.load_negotiation_thread_row(negotiation_id=escrow_uid)
+        if thread is not None and thread.get("agreement_bytes") is not None:
+            lifecycle = getattr(_container.resolved_settlement_composition, "lifecycle", None)
+            if lifecycle is not None:
+                agreement, _ = lifecycle.accepted(escrow_uid)
+                if agreement["settlement"]["settlement"]["schema"] == "arkhai.payments.v1":
+                    if body.interrupted_at_utc is not None or body.seller_amount is not None or body.refund_amount is not None:
+                        raise HTTPException(status_code=400, detail="Hosted interruption accepts no at or payout amounts")
+                    actor = self._operator(request).principal
+                    key = body.operation_key or hashlib.sha256(canonical_json({
+                        "negotiation_id": escrow_uid, "administrator": actor.model_dump(mode="json"),
+                        "reason": body.reason,
+                    })).hexdigest()
+                    try:
+                        kind, outcome, delivery = await lifecycle.interrupt(
+                            escrow_uid, actor=actor, operation_key=key,
+                            reason=body.reason, dry_run=body.dry_run,
+                        )
+                    except (KeyError, ValueError) as exc:
+                        raise HTTPException(status_code=409, detail=str(exc)) from exc
+                    return InterruptDealResponse(
+                        escrow_uid=escrow_uid, listing_id=agreement["listing_id"],
+                        status="dry_run" if body.dry_run else outcome.status,
+                        interrupted_at_utc=self._interrupt_time(None),
+                        settlement_action="notice_stop" if kind == "stop" else "delivery_end_filing",
+                        lifecycle_outcome=outcome.model_dump(mode="json"),
+                        delivery=delivery.model_dump(mode="json"),
+                    )
         escrow = await self._db.load_escrow(escrow_uid=escrow_uid)
         if escrow is None:
             raise HTTPException(
@@ -534,7 +562,7 @@ class AdminController:
                 dt = dt.replace(tzinfo=timezone.utc)
             else:
                 dt = dt.astimezone(timezone.utc)
-        return dt.strftime("%Y-%m-%d %H:%M")
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
 
     def _deal_is_interruptible(self, *, thread: dict[str, Any] | None) -> bool:
         """Whether the deal's committed plan made it interruptible.
@@ -773,6 +801,10 @@ class AdminController:
             site_id=event["site_id"],
             provider_resource_id=event.get("resource_id"),
         )
+        composition = _container.resolved_settlement_composition
+        lifecycle = getattr(composition, "lifecycle", None)
+        if lifecycle is not None:
+            await asyncio.to_thread(lifecycle.capacity_released, event["capacity_reservation_id"], event["site_id"])
         return applied.model_dump(mode="python")
 
     async def _open_bound_vm_listing_ids(self) -> set[str]:

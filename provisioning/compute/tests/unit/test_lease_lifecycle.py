@@ -60,7 +60,7 @@ class FakeSiteAuthority:
     # The ledger's conditional transitions: each write is refused, returning
     # None and writing nothing, from a state it may not leave.
 
-    def begin_release(self, capacity_reservation_id, *, release_job_id):
+    def begin_release(self, capacity_reservation_id, *, release_job_id, end_context=None):
         """Entering ``releasing`` records when it began."""
         reservation = self.reservations[capacity_reservation_id]
         if reservation["state"] == "releasing":
@@ -74,7 +74,7 @@ class FakeSiteAuthority:
         return reservation
 
     def record_release_failure(
-        self, capacity_reservation_id, *, reason, message=None, release_job_id=None
+        self, capacity_reservation_id, *, reason, message=None, release_job_id=None, end_context=None
     ):
         reservation = self.reservations[capacity_reservation_id]
         if reservation["state"] not in {"reserved", "leased", "releasing"}:
@@ -88,7 +88,7 @@ class FakeSiteAuthority:
         reservation.update(state="release_failed", failure_reason=reason, failure_message=message)
         return reservation
 
-    def record_release_success(self, capacity_reservation_id, *, forced=False, reason=None, message=None):
+    def record_release_success(self, capacity_reservation_id, *, forced=False, reason=None, message=None, end_context=None):
         if not forced and (
             not self.permit_release
             or self.reservations[capacity_reservation_id]["state"] == "unmanaged"
