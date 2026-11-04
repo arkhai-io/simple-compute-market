@@ -2,7 +2,10 @@
 module that does its work.
 
 `run` and `resume` run a step through the wrapper, either granting rules for that
-one run with `--allow`; `run --session` continues a named implementation session; `review` runs a review, `log` and `note` read and write the
+one run with `--allow`; `run --session` continues a named implementation session; `review` runs a review;
+`stop` sends SIGTERM to the change's run in progress — in its clone when it has
+one, else in this checkout — on the owner's word, which the run logs as `stopped`;
+`log` and `note` read and write the
 workflow log, `watch` follows the steps as they run, and `denials` reports a run's
 denials. `record` is a step's own last act when the owner runs it interactively:
 it records the step's outcome, which the wrapper records for an unattended run.
@@ -30,6 +33,7 @@ from change_workflow.log import (branch_decisions, direction, history_log_path, 
                                  record_interactive)
 from change_workflow.records import git_head
 from change_workflow.review import DEFAULT_BASE, review_and_log
+from change_workflow.running import stop
 from change_workflow.watch import denial_report, watch
 from change_workflow.wrapper import Wrapper
 
@@ -137,6 +141,13 @@ def _parser() -> argparse.ArgumentParser:
                         help="start a new reviewer session instead of continuing the last one")
     review.add_argument("--unvalidated", action="store_true",
                         help="run a pre-closeout review without a passing validation of HEAD")
+    stop_ = commands.add_parser(
+        "stop", help="stop the change's run in progress, in its clone when it has one, which "
+                     "is logged `stopped`")
+    stop_.add_argument("change")
+    stop_.add_argument("--step", default=None,
+                       help="the step whose run to stop, when two runs of the change are in "
+                            "progress")
     record = commands.add_parser(
         "record", help="record the outcome of a step run interactively, as its last act")
     record.add_argument("change")
@@ -222,7 +233,8 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None, root: Path = ROOT,
-         wrapper: Wrapper | None = None, environ: Mapping[str, str] = os.environ) -> int:
+         wrapper: Wrapper | None = None, environ: Mapping[str, str] = os.environ,
+         send: Callable[[int, int], None] = os.kill) -> int:
     args = _parser().parse_args(argv)
     wrapper = wrapper or Wrapper(root=root)
     try:
@@ -237,6 +249,13 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
                       echo=lambda line: print(line, flush=True))
             except KeyboardInterrupt:
                 pass
+            return 0
+        if args.command == "stop":
+            # A change worked in its own clone runs its steps there, and each run
+            # is recorded in the checkout it runs in.
+            checkout = clone_of(wrapper.root, args.change) or wrapper.root
+            stopped = stop(wrapper.runs(checkout), args.change, args.step, send)
+            print(f"Sent SIGTERM to {stopped.describe()}; the run logs itself `stopped`.")
             return 0
         path = (history_log_path if args.command == "log" else log_path)(wrapper.root,
                                                                           args.change)

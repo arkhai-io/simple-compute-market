@@ -1,13 +1,32 @@
-"""The record of each unattended run in progress in a checkout.
+"""The record of each unattended run in progress in a checkout, and stopping one.
 
 A round view moves the owner's workspace's branch, so it must not open while a
 step runs there: a step whose checkout moved under it would describe, commit, or
 validate a tree that is not its own. Each run writes one file under
 `<git-dir>/change-runs/` as it starts — its process, step, and change — and
 removes it once its line is in the workflow log, however the run ends, an
-interrupt included. A record whose process is no longer alive is a run killed
-before it could remove it, and counts as none; one whose process id another
-process has since taken reads as a run in progress, which errs toward refusing.
+interrupt included.
+
+A run holds an exclusive `flock` on its record for as long as it runs, and a
+record counts as a run in progress only while that lock is held. The kernel
+releases the lock however the process ends, SIGKILL included, so a record a killed
+run left behind reads as stale rather than as a run; and the lock's descriptor is
+closed in every program the run executes, so neither a process that has since
+taken the run's id nor a child that outlives it passes for the run. The runners
+start their processes through `subprocess`, which executes a program in each; a
+bare fork would share the descriptor, and the lock with it. `flock`
+rather than a POSIX record lock: a record lock belongs to the process, so a reader
+in the run's own process would always acquire it, and its closing the file would
+release the run's lock.
+
+`stop` signals a run on the owner's word: it checks the lock when it selects the
+run and again immediately before it sends SIGTERM, which every run — a step's in
+the wrapper, a review's in its runner — turns into its `stopped` line through
+`termination_ends_the_run`. The two checks and the signal are separate system calls, so a run
+ending between the last check and the signal leaves its id to be signalled; that
+reaches another process only if the kernel hands out its whole process-id range in
+between, to a process of the same user. No test can make that happen, so nothing
+guards it.
 
 The records live in the Git directory, as the round view's own state does, so
 they belong to the checkout the run is in and no branch carries them.
@@ -15,17 +34,20 @@ they belong to the checkout the run is in and no branch carries them.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
+import signal
 import subprocess
+import threading
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timezone
 from pathlib import Path
-from typing import Callable, Iterator
+from typing import Any, Callable, Iterator
 
-from change_workflow.common import Clock, utc_now
+from change_workflow.common import Clock, StepError, utc_now
 
 RUNS = "change-runs"
 
@@ -36,9 +58,41 @@ class Run:
     step: str
     change: str
     started: str
+    # The record the run holds; None for a run described without one.
+    record: Path | None = None
 
     def describe(self) -> str:
         return f"{self.step} of {self.change} (process {self.pid}, started {self.started})"
+
+
+class Terminated(BaseException):
+    """The run was told to stop by a signal while it went on."""
+
+
+@contextmanager
+def termination_ends_the_run() -> Iterator[None]:
+    """Turn SIGTERM into `Terminated` while a run goes on.
+
+    A process killed by SIGTERM's default action writes nothing, and a log whose
+    last line is a run's question cannot tell a run still going from one that
+    died. Raised in the run, the signal ends it as any interruption does: the
+    runner stops the process it can no longer watch, and the run is logged
+    `stopped`, naming the signal. SIGKILL cannot be caught, so a run killed that
+    way still leaves no line. Signal handlers can be set only on the main thread;
+    elsewhere nothing changes.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    def stop(signum: int, _frame: Any) -> None:
+        raise Terminated(f"received {signal.Signals(signum).name}")
+
+    previous = signal.signal(signal.SIGTERM, stop)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous)
 
 
 def runs_directory(root: Path) -> Path | None:
@@ -54,55 +108,114 @@ def runs_directory(root: Path) -> Path | None:
 
 @contextmanager
 def recorded_run(directory: Path | None, step: str, change: str, *,
-                 clock: Clock = utc_now, pid: int | None = None) -> Iterator[None]:
-    """Record a run in `directory` for as long as the block runs."""
+                 clock: Clock = utc_now) -> Iterator[None]:
+    """Record a run in `directory`, holding its lock, for as long as the block runs."""
     if directory is None:
         yield
         return
-    pid = os.getpid() if pid is None else pid
+    pid = os.getpid()
     directory.mkdir(parents=True, exist_ok=True)
     name = f"{pid}-{uuid.uuid4().hex}"
     record = directory / f"{name}.json"
     started = clock().astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    # Written aside and renamed, so a reader never finds the record half-written
-    # and takes it for no run.
+    # Written aside, locked, and then renamed, so a reader never finds the record
+    # half-written or unlocked and takes it for no run. Python opens files
+    # non-inheritable, so no program the run executes keeps the descriptor.
     partial = directory / f"{name}.partial"
-    partial.write_text(json.dumps({"pid": pid, "step": step, "change": change,
-                                   "started": started}), "utf-8")
-    partial.replace(record)
+    with partial.open("w", encoding="utf-8") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        held.write(json.dumps({"pid": pid, "step": step, "change": change,
+                               "started": started}))
+        held.flush()
+        partial.replace(record)
+        try:
+            yield
+        finally:
+            record.unlink(missing_ok=True)
+
+
+def _read(path: Path) -> tuple[Run, bool] | None:
+    """The run `path` records and whether its lock is held; None for a record gone
+    or unreadable."""
     try:
-        yield
-    finally:
-        record.unlink(missing_ok=True)
+        handle = path.open("r", encoding="utf-8")
+    except OSError:
+        return None
+    with handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except BlockingIOError:
+            held = True
+        else:
+            # Released as the file closes.
+            held = False
+        try:
+            entry = json.loads(handle.read())
+        except (OSError, json.JSONDecodeError):
+            return None
+    pid = entry.get("pid") if isinstance(entry, dict) else None
+    if not isinstance(pid, int) or isinstance(pid, bool):
+        return None
+    return Run(pid, str(entry.get("step")), str(entry.get("change")),
+               str(entry.get("started")), path), held
 
 
-def _alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
-
-
-def live_runs(directory: Path | None, alive: Callable[[int], bool] = _alive) -> list[Run]:
-    """The runs recorded in `directory` whose process is alive."""
+def _records(directory: Path | None) -> list[tuple[Run, bool]]:
     if directory is None or not directory.is_dir():
         return []
-    runs = []
-    for path in sorted(directory.glob("*.json")):
-        try:
-            entry = json.loads(path.read_text("utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        pid = entry.get("pid") if isinstance(entry, dict) else None
-        if isinstance(pid, int) and not isinstance(pid, bool) and alive(pid):
-            runs.append(Run(pid, str(entry.get("step")), str(entry.get("change")),
-                            str(entry.get("started"))))
-    return runs
+    return [found for path in sorted(directory.glob("*.json"))
+            if (found := _read(path)) is not None]
 
 
-def runs_in_progress(root: Path, alive: Callable[[int], bool] = _alive) -> list[Run]:
+def live_runs(directory: Path | None) -> list[Run]:
+    """The runs recorded in `directory` whose lock is held."""
+    return [run for run, held in _records(directory) if held]
+
+
+def runs_in_progress(root: Path) -> list[Run]:
     """The runs in progress in the checkout at `root`."""
-    return live_runs(runs_directory(root), alive)
+    return live_runs(runs_directory(root))
+
+
+def select_run(directory: Path | None, change: str, step: str | None = None) -> Run:
+    """The one run in progress of `change` in `directory`, of `step` when named.
+
+    Refused when none is, naming a record left by a run that no longer holds it as
+    stale, and when two are and no step tells them apart.
+    """
+    found = [(run, held) for run, held in _records(directory)
+             if run.change == change and (step is None or run.step == step)]
+    live = [run for run, held in found if held]
+    of = f"{step} of {change}" if step else change
+    if not live:
+        stale = [run for run, held in found if not held]
+        if stale:
+            raise StepError(f"no run of {of} is in progress: the record of "
+                            + "; ".join(f"{run.describe()} at {run.record}" for run in stale)
+                            + " is stale, its run no longer holding it; nothing was signalled")
+        raise StepError(f"no run of {of} is in progress; nothing was signalled")
+    if len(live) > 1:
+        raise StepError(f"{len(live)} runs of {of} are in progress: "
+                        + "; ".join(run.describe() for run in live)
+                        + "; name the one to stop with --step. Nothing was signalled")
+    return live[0]
+
+
+def signal_run(run: Run, send: Callable[[int, int], None] = os.kill) -> None:
+    """Send SIGTERM to `run`, once its lock is checked again to be held."""
+    found = _read(run.record) if run.record is not None else None
+    if found is None or not found[1] or found[0].pid != run.pid:
+        raise StepError(f"{run.describe()} ended before it could be stopped; nothing was "
+                        "signalled")
+    try:
+        send(run.pid, signal.SIGTERM)
+    except ProcessLookupError as exc:
+        raise StepError(f"{run.describe()} ended before it could be stopped") from exc
+
+
+def stop(directory: Path | None, change: str, step: str | None = None,
+         send: Callable[[int, int], None] = os.kill) -> Run:
+    """Stop the run in progress of `change`, of `step` when named, and return it."""
+    run = select_run(directory, change, step)
+    signal_run(run, send)
+    return run

@@ -28,11 +28,7 @@ structured outcome".
 
 from __future__ import annotations
 
-import signal
 import sys
-import threading
-from collections.abc import Iterator
-from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -45,7 +41,7 @@ from change_workflow.harness import (NETWORK_RETRIES, Runner, claude_command, mi
 from change_workflow.log import last_run, log_path, read_log, record_outcome
 from change_workflow.outcome import SCHEMA, load_schema, outcome_problems
 from change_workflow.records import git_head, next_transcript, triage_outcome_problems
-from change_workflow.running import recorded_run, runs_directory
+from change_workflow.running import recorded_run, runs_directory, termination_ends_the_run
 from change_workflow.steps import STEP_TABLE, Model, StepRules, load_steps
 from change_workflow.stream import Stream
 from change_workflow.subagents import subagent_denials
@@ -53,36 +49,6 @@ from change_workflow.subagents import subagent_denials
 
 def step_prompt(rules: StepRules, change: str, arguments: str = "") -> str:
     return f"/{rules.skill} {change}" + (f" {arguments}" if arguments else "")
-
-
-class Terminated(BaseException):
-    """The wrapper was told to stop by a signal while its run went on."""
-
-
-@contextmanager
-def _termination_ends_the_run() -> Iterator[None]:
-    """Turn SIGTERM into `Terminated` while a run goes on.
-
-    A process killed by SIGTERM's default action writes nothing, and a log whose
-    last line is a run's question cannot tell a run still going from one that
-    died. Raised in the wrapper, the signal ends the run as any interruption
-    does: the runner stops the session it can no longer watch, and the run is
-    logged `stopped`, naming the signal, with the session to resume. SIGKILL
-    cannot be caught, so a run killed that way still leaves no line. Signal
-    handlers can be set only on the main thread; elsewhere nothing changes.
-    """
-    if threading.current_thread() is not threading.main_thread():
-        yield
-        return
-
-    def stop(signum: int, _frame: Any) -> None:
-        raise Terminated(f"received {signal.Signals(signum).name}")
-
-    previous = signal.signal(signal.SIGTERM, stop)
-    try:
-        yield
-    finally:
-        signal.signal(signal.SIGTERM, previous)
 
 
 def run_outcome(status: int, result: dict[str, Any] | None, schema: dict[str, Any],
@@ -319,7 +285,7 @@ class Wrapper:
         progress = transcript.with_suffix(".progress")
         named = transcript.relative_to(log.parent).as_posix()
         attempts: list[Stream] = []
-        with _termination_ends_the_run():
+        with termination_ends_the_run():
             outcome, status, failure, model, stream, passed_over, logged = (
                 self._attempt_models(rules, prompt, schema, models, session, granted,
                                      transcript, progress, attempts))

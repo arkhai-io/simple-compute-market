@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import time
 from pathlib import Path
@@ -20,7 +21,7 @@ from typing import Sequence
 import pytest
 
 import change_clone as clones
-from change_workflow import running
+from change_workflow import cli, running
 
 CHANGE = "seed-pool"
 BRANCH = f"feat/{CHANGE}"
@@ -718,6 +719,18 @@ def test_a_run_in_progress_refuses_removal_before_anything_is_copied(
             clones.remove(workspace, CHANGE)
 
     assert clone.is_dir() and not (workspace / REVIEWS).exists()
+
+
+def test_stop_from_the_workspace_signals_the_run_in_the_changes_clone(
+        workspace: Path) -> None:
+    clone = _create(workspace).clone
+    sent: list[tuple[int, int]] = []
+
+    with running.recorded_run(running.runs_directory(clone), "validate", CHANGE):
+        assert cli.main(["stop", CHANGE], root=workspace,
+                        send=lambda pid, signum: sent.append((pid, signum))) == 0
+
+    assert sent == [(os.getpid(), signal.SIGTERM)]
 
 
 def test_a_running_bootstrap_refuses_removal_before_anything_is_copied(

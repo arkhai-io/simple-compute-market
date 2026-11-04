@@ -3,6 +3,8 @@ a review, and its outcome is logged."""
 
 from __future__ import annotations
 
+import os
+import signal
 from pathlib import Path
 from typing import Sequence
 
@@ -11,7 +13,7 @@ import pytest
 from change_workflow.log import log_path, note_orchestrator, read_log
 from change_workflow.review import (ReviewError, claim_record, prior_session, review_and_log,
                                     review_models, run_review)
-from change_workflow.running import live_runs
+from change_workflow.running import Terminated, live_runs
 from change_workflow.steps import Model, load_steps
 from change_workflow_fixtures import (CHANGE, HEAD, RECORDS, VALIDATED, FakeClaude,
                                       claude_review, clock, codex_missing, codex_saying,
@@ -753,6 +755,32 @@ def test_an_interrupted_review_is_logged_stopped(tmp_path: Path) -> None:
     line = read_log(log_path(root, CHANGE))[-1]
     assert (line["outcome"], line["reason"]) == (
         "stopped", "the review did not finish: KeyboardInterrupt")
+
+
+def test_a_review_signalled_mid_run_is_logged_stopped_and_publishes_nothing(
+        tmp_path: Path) -> None:
+    """A stop's SIGTERM reaches the review's interruption path rather than killing
+    the runner before it writes a line."""
+    root = repository(tmp_path)
+    runs = tmp_path / "git" / "change-runs"
+    previous = signal.getsignal(signal.SIGTERM)
+
+    def signalled(command, log: Path) -> int:
+        writing(review_text())(command, log)
+        os.kill(os.getpid(), signal.SIGTERM)
+        raise AssertionError("SIGTERM did not end the review")
+
+    with pytest.raises(Terminated):
+        review_and_log(CHANGE, "design", root=root, clock=clock, runner=signalled,
+                       head=lambda _: HEAD, runs=lambda _: runs)
+
+    line = read_log(log_path(root, CHANGE))[-1]
+    assert (line["step"], line["outcome"], line["reason"]) == (
+        "review", "stopped", "the review did not finish: Terminated: received SIGTERM")
+    assert not list(reviews_of(root).glob("[0-9]*.md"))
+    assert list(runs.iterdir()) == []
+    # The handler is the review's only while its reviewer runs.
+    assert signal.getsignal(signal.SIGTERM) is previous
 
 
 def test_a_review_quoting_an_earlier_records_markers_is_logged_with_its_own(

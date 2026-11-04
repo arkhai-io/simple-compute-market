@@ -275,10 +275,17 @@ def run_codex(command: Sequence[str], log: Path) -> int:
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                    text=True, encoding="utf-8", errors="replace")
         assert process.stdout is not None
-        for line in process.stdout:
-            stream.write(line)
-            for shown in progress.feed(line):
+        try:
+            for line in process.stdout:
+                stream.write(line)
+                for shown in progress.feed(line):
+                    print(shown, file=sys.stderr, flush=True)
+            for shown in progress.close():
                 print(shown, file=sys.stderr, flush=True)
-        for shown in progress.close():
-            print(shown, file=sys.stderr, flush=True)
-        return process.wait()
+            return process.wait()
+        finally:
+            # The review is logged as ended, so a reviewer it can no longer watch
+            # must not go on to write its output.
+            if process.poll() is None:
+                process.kill()
+                process.wait()

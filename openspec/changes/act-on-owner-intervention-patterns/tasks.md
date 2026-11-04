@@ -18,7 +18,7 @@ running step". Touches `scripts/change_workflow/running.py`, `wrapper.py`,
 `review.py`, `harness.py`, `cli.py`, `scripts/run_change_step.py`, and the run
 records' readers `scripts/round_view.py` and `scripts/change_clone.py`.
 
-- [ ] 1.1 Make each run hold an exclusive `fcntl` lock on its record file for as long
+- [x] 1.1 Make each run hold an exclusive `fcntl` lock on its record file for as long
   as it runs, opened without inheritance by the run's children, and make a record
   count as a live run only while its lock is held, for every reader
   (`runs_in_progress`, `live_runs`, `round_view.py`, `change_clone.py`) (D15). Verify:
@@ -26,7 +26,23 @@ records' readers `scripts/round_view.py` and `scripts/change_clone.py`.
   `test_round_view.py` show a record whose lock is free read as no run, a held one as
   a run, and a child process of the run holding no lock; `test_change_clone.py`'s
   run-in-progress cases still pass.
-- [ ] 1.2 Add `python3 scripts/run_change_step.py stop <change> [--step <step>]` (D15):
+  Done: `running.recorded_run` writes the record aside, takes `flock(LOCK_EX)`, then
+  renames it, so no reader sees it unlocked; `live_runs` reads a record as a run only
+  when a non-blocking `LOCK_SH` fails. `flock`, not `lockf`: a POSIX record lock
+  belongs to the process, so an in-process reader would always acquire it and its
+  close would drop the run's lock. The `alive` and `pid` parameters are gone; the
+  record's process is always the holder. `round_view.py` and `change_clone.py` read
+  through `runs_in_progress` and needed no edit. Evidence, differing from the plan's
+  "unit tests" since they use real `flock` and real processes, which `TESTING.md`
+  makes library integration: `test_change_workflow_wrapper.py`
+  `test_a_record_is_a_run_only_while_its_lock_is_held` (held reads as a run; a
+  hand-written record with a free lock reads as none though its pid is alive) and
+  `test_a_killed_runs_record_is_stale_though_its_child_survives` (a real run process
+  SIGKILLed with a grandchild started `close_fds=False` still alive: its record stays
+  and reads as no run); `test_round_view.py`
+  `test_a_held_record_refuses_the_view_and_a_stale_one_does_not` (a real Git checkout's
+  records). `test_change_clone.py`'s run-in-progress case passes, now through the lock.
+- [x] 1.2 Add `python3 scripts/run_change_step.py stop <change> [--step <step>]` (D15):
   it selects the change's live run, or the run of the named step when two are live,
   checks the lock again immediately before sending SIGTERM, and refuses, signalling
   nothing, when no run is live, when two are live and no step is named, when the
@@ -36,7 +52,24 @@ records' readers `scripts/round_view.py` and `scripts/change_clone.py`.
   record, stops it, and finds it ended; the delta scenarios "Nothing is running", "A
   run record outlives its run", and "A run ends while it is being stopped" each map to
   a test.
-- [ ] 1.3 Raise SIGTERM as the wrapper's termination inside `review_and_log`, so a
+  Done: `running.select_run`, `signal_run` and `stop`; the CLI's `stop` command, with
+  `os.kill` injected as `main(send=…)`. Beyond the plan, `stop` reads the runs of the
+  change's clone when it has one (`clone_of`, as `watch` does), since a cloned change's
+  steps run and record there; `test_change_clone.py`
+  `test_stop_from_the_workspace_signals_the_run_in_the_changes_clone` covers it. Tests
+  in `test_run_change_step.py` (unit, with in-process `flock`s and an injected `send`):
+  a signal reaching the one live run; "Nothing is running"
+  (`test_stop_with_nothing_running_refuses_and_signals_nothing`, beside another change's
+  live run); "A run record outlives its run" (`test_stop_refuses_a_stale_record_naming_it`);
+  two live runs refused without `--step` and the review signalled with it; "A run ends
+  while it is being stopped" (`test_a_run_that_ends_before_the_second_check_is_not_signalled`,
+  record removed, and `test_a_run_killed_between_the_checks_is_not_signalled`, record
+  left with its lock released); `ProcessLookupError` at the signal reported as ended.
+  Library integration: `test_a_stopped_step_is_logged_stopped_and_its_agent_ended`
+  starts a real wrapper process running a real agent process through `run_claude`,
+  stops it with the real `os.kill`, and finds it logged `stopped` naming SIGTERM, its
+  agent gone, and its record removed.
+- [x] 1.3 Raise SIGTERM as the wrapper's termination inside `review_and_log`, so a
   stopped review reaches its existing interruption path, is logged `stopped`, publishes
   nothing, and removes its record; and make `run_codex` end the reviewer process it
   started before the run is logged, as `run_claude` does (D15). Verify: unit tests in
@@ -44,12 +77,39 @@ records' readers `scripts/round_view.py` and `scripts/change_clone.py`.
   show a review signalled mid-run logged `stopped` with no record published and its
   reviewer process ended; the delta scenario "Two runs are in progress" maps to a test
   that stops the review and leaves a second live run untouched.
-- [ ] 1.4 Verification: `pytest -q scripts/tests/test_change_workflow_wrapper.py
+  Done: `Terminated` and `termination_ends_the_run` moved from `wrapper.py` to
+  `running.py`, so `review.py` uses them without importing the wrapper; the handler
+  spans only `run_review`, as the wrapper's spans only its attempts. `run_codex` kills
+  its process in a `finally`. Evidence: `test_change_workflow_review.py`
+  `test_a_review_signalled_mid_run_is_logged_stopped_and_publishes_nothing` (unit: a
+  fake runner writes a review, then SIGTERMs its own process; logged `stopped`, no
+  record, run record removed, handler restored); `test_change_workflow_harness.py`
+  `test_a_terminated_codex_run_ends_its_reviewer` and `…_claude_run_ends_its_agent`
+  (library integration: a real child signals its parent and is gone afterwards). "Two
+  runs are in progress": `test_run_change_step.py`
+  `test_stopping_the_review_leaves_the_validation_running` (library integration: a real
+  review process through `review_and_log` and `run_codex`, whose reviewer has written a
+  finished review, beside a real wrapper's validation; `stop --step review` logs the
+  review `stopped`, publishes nothing, keeps the output as `.rejected.md`, ends the
+  reviewer, and leaves the validation, its agent, and its live record untouched).
+- [x] 1.4 Verification: `pytest -q scripts/tests/test_change_workflow_wrapper.py
   scripts/tests/test_change_workflow_review.py scripts/tests/test_change_workflow_harness.py
   scripts/tests/test_run_change_step.py scripts/tests/test_round_view.py
   scripts/tests/test_change_clone.py` (unit, and library integration where a real
   process or Git repository is used) passes; `make test` passes.
   End-to-end: none; no scenario exercises the workflow tooling.
+  Done: the six suites, 375 passed (run as `uv run --no-project --with pytest pytest`);
+  `make test-release-tooling` 1903 passed; `make test` passed before the
+  fresh-context check's fixes, which touched only `scripts/` and its tests, and
+  `make test-release-tooling` passed after them. `make check-change` fails only on the
+  citations of files sections 5 and 8 create (`scripts/check_secrets.py`, its test, and
+  `.agents/skills/guidance-review/SKILL.md`). End-to-end confirmed: no `e2e-tests/`
+  marker exercises the tooling.
+  Handoff: on this machine `make test` ran a uv older than the revision-5 writer, and
+  its subprojects' `uv run` rewrote 52 `uv.lock` files from revision 5 to 3 — the drift
+  section 4 stops. The session put each back by hand (only line 2 differed); until
+  section 4 lands, check `git status` after `make test` and restore any lock it
+  rewrote.
 
 ## 2. A finished triage can be resumed for a revisit (D16)
 

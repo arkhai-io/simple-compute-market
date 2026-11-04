@@ -6,6 +6,8 @@ from __future__ import annotations
 import json
 import os
 import signal
+import subprocess
+import sys
 import uuid
 from pathlib import Path
 
@@ -15,9 +17,9 @@ from change_workflow.common import StepError
 from change_workflow.harness import anchored
 from change_workflow.log import log_path, note_orchestrator, read_log, record_outcome
 from change_workflow.outcome import harness_schema, load_schema, outcome_problems
-from change_workflow.running import Run, live_runs, recorded_run, runs_directory
+from change_workflow.running import Run, Terminated, live_runs, recorded_run, runs_directory
 from change_workflow.steps import Model, load_steps
-from change_workflow.wrapper import Terminated, Wrapper
+from change_workflow.wrapper import Wrapper
 from change_workflow_fixtures import (CHANGE, COMMIT, LIMIT, NETWORK, OPUS, SESSION, VALID,
                                       FakeClaude, clock, event_lines, failed_run, make_wrapper,
                                       not_installed, option, option_rules,
@@ -731,14 +733,66 @@ def test_an_interrupted_run_forgets_its_record_after_its_line(tmp_path: Path) ->
     assert list(runs.iterdir()) == []
 
 
-def test_a_record_whose_process_is_gone_counts_as_no_run(tmp_path: Path) -> None:
+def _stale_record(runs: Path, pid: int, step: str = "triage") -> Path:
+    """A record as a run killed before it could remove it leaves it: written, and
+    its lock released as the run's descriptor closed."""
+    runs.mkdir(parents=True, exist_ok=True)
+    record = runs / f"{pid}-{uuid.uuid4().hex}.json"
+    record.write_text(json.dumps({"pid": pid, "step": step, "change": CHANGE,
+                                  "started": "2026-10-21T09:15:40Z"}), "utf-8")
+    return record
+
+
+def test_a_record_is_a_run_only_while_its_lock_is_held(tmp_path: Path) -> None:
     runs = tmp_path / "change-runs"
-    with recorded_run(runs, "triage", CHANGE, clock=clock, pid=4242):
-        (live,) = live_runs(runs, alive=lambda pid: pid == 4242)
+    with recorded_run(runs, "triage", CHANGE, clock=clock):
+        (live,) = live_runs(runs)
         assert live.describe() == (
-            f"triage of {CHANGE} (process 4242, started 2026-10-21T09:15:40Z)")
-        assert live_runs(runs, alive=lambda pid: False) == []
-    assert live_runs(runs, alive=lambda pid: True) == []
+            f"triage of {CHANGE} (process {os.getpid()}, started 2026-10-21T09:15:40Z)")
+    # A record whose lock is free reads as no run, though its process (this one)
+    # is alive: neither a reused process id nor a survivor passes for the run.
+    stale = _stale_record(runs, os.getpid())
+    assert stale.is_file() and live_runs(runs) == []
+
+
+_HOLDER = """
+import subprocess, sys, time
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from change_workflow.running import recorded_run
+with recorded_run(Path(sys.argv[2]), "validate", "shape-bounds"):
+    # close_fds=False: the record's descriptor is still not passed on.
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"],
+                             close_fds=False)
+    print(child.pid, flush=True)
+    time.sleep(60)
+"""
+
+
+def test_a_killed_runs_record_is_stale_though_its_child_survives(tmp_path: Path) -> None:
+    """Library integration: real processes and the kernel's own lock release."""
+    runs = tmp_path / "change-runs"
+    scripts = Path(__file__).resolve().parents[1]
+    holder = subprocess.Popen([sys.executable, "-c", _HOLDER, str(scripts), str(runs)],
+                              stdout=subprocess.PIPE, text=True)
+    assert holder.stdout is not None
+    child = int(holder.stdout.readline())
+    try:
+        (live,) = live_runs(runs)
+        assert (live.pid, live.step) == (holder.pid, "validate")
+
+        holder.kill()
+        holder.wait()
+
+        os.kill(child, 0)  # The run's child is still alive,
+        assert len(list(runs.glob("*.json"))) == 1  # its record is left behind,
+        assert live_runs(runs) == []  # and nothing holds it.
+    finally:
+        holder.kill()
+        try:
+            os.kill(child, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
 
 
 # A triage names the records it triaged, which the computation routes on.

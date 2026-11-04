@@ -44,7 +44,7 @@ from change_workflow.log import LOG, log_path, read_log, record_outcome, unused_
 from change_workflow.records import (TRANSCRIPTS, ChangedSince, changed_since,
                                      is_documentation, is_record, next_number,
                                      validation_problem)
-from change_workflow.running import recorded_run, runs_directory
+from change_workflow.running import recorded_run, runs_directory, termination_ends_the_run
 from change_workflow.steps import HARNESSES, STEP_TABLE, Model, StepRules, load_steps
 from change_workflow.stream import Stream, transcript_denials
 from find_change import ChangeNotFound, change_directory, is_archived
@@ -507,7 +507,10 @@ def _review_and_log(change: str, kind: str, *, root: Path, clock: Clock,
                               clock=clock)
 
     try:
-        path = run_review(change, kind, root=root, clock=clock, **options)
+        # A stop's SIGTERM ends the review as an interrupt does: the reviewer's
+        # process is ended, nothing is published, and the run is logged `stopped`.
+        with termination_ends_the_run():
+            path = run_review(change, kind, root=root, clock=clock, **options)
     except ReviewError as exc:
         return stopped(str(exc), exc.record)
     except BaseException as exc:
