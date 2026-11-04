@@ -182,14 +182,39 @@ D6; CW-r3ka, CW-h8vm, CW-5qne, CW-w2ld). Touches a new `scripts/change-workflow`
 `scripts/change_workflow/cli.py`, `steps.py`, a new
 `scripts/change_workflow/workflow.mk`, and `scripts/tests/`.
 
-- [ ] 2.1 `scripts/change-workflow`: an executable with no `.py`, which puts
+- [x] 2.1 `scripts/change-workflow`: an executable with no `.py`, which puts
       `scripts/` on the path and runs `change_workflow.cli.main`; `cli.py` parses
       every subcommand of D4's mapping table, including `resume`, `log`, `watch`,
       `denials`, `note`, `convert`, and `check round-view` (D4, "Every operation
-      the scripts offer today carries over").
-- [ ] 2.2 Exit statuses: 0 success; 1 a refusal or failed check, its reason on
+      the scripts offer today carries over"). `cli` resolves the repository once
+      and passes it to each module's `main`; the delegating subcommands build the
+      module's own argument list, so their output and status are the module's.
+      `clone where <change>` shares the `clone` parser: `clone` with `where` and a
+      second word is the lookup, so a change named `where` cannot be cloned by
+      name. Not every part takes `cli`'s repository: `start orchestrate` reads the
+      table under it, but the wrapper and `review` still read the step table and
+      schema from the working directory, as section 1 left them; in production the
+      two are one. `cli.delegated` names the module command line and arguments
+      each delegating subcommand reaches, a seam the tests read directly.
+      `run` is gone from the command: `scripts/run_change_step.py` maps its
+      `run <step> <change> …` onto `start … --unattended` until section 3 removes
+      it, so `start`'s refusals now run there too, after the make target's own.
+      The file is staged as mode 100755; the worktree copy could not be made
+      executable in this session (see the notes below).
+- [x] 2.2 Exit statuses: 0 success; 1 a refusal or failed check, its reason on
       standard error; 2 a usage error, for every subcommand (D6; CW-5qne).
-- [ ] 2.3 `start <step> <change>`: without `--unattended`, opens the interactive
+      argparse's usage errors return 2 rather than exiting; so do the malformed
+      forms argparse cannot judge alone: `clone where` without a change or with
+      `--branch`/`--from`, `find --records --json`, `start`'s unattended-only flags
+      without `--unattended`, `start orchestrate` with anything but the change,
+      sections on a step other than implementation or running backwards, and
+      `convert`'s qualifiers without `--next`. Statuses that moved into the
+      categories, each test updated: `tasks` exits 1, not 2, for an unknown change;
+      `push` exits 1 for any failed `git push` rather than Git's own status; a
+      backwards section range and `convert --kind` without `--next` exit 2, not 1.
+      A session whose harness cannot be started (`claude` not on the path) is a
+      refusal naming it, not a traceback.
+- [x] 2.3 `start <step> <change>`: without `--unattended`, opens the interactive
       session the make target opened (`claude "/change-<step> <change>[ arguments]"`);
       with it, runs the wrapper as `run` did, with `--allow`, `--sections`,
       `--session`, `--arguments`, and `--fresh`. Before either, it refuses an
@@ -197,20 +222,43 @@ D6; CW-r3ka, CW-h8vm, CW-5qne, CW-w2ld). Touches a new `scripts/change-workflow`
       the archived directory, and refuses while a round view is open — the make
       targets' `find_change.py --active` and `round-view-closed` (D4; CW-r3ka's
       scenario). `review` and `push` run the same round-view check.
-- [ ] 2.4 `steps.py` reads an `[orchestrator]` row naming a model and effort and no
+      As the targets did: the steps taking only an active change are read from the
+      graph (every node of the step carries the `NOT_ARCHIVED` entry guard), and
+      so is archive cleanup's refusal of an active change (`ARCHIVED`, the
+      `--archived` the target ran); every other step refuses only an unknown
+      change. The round-view check covers the steps whose targets had
+      `round-view-closed` — implement, triage, merge, closeout, validate, archive
+      cleanup — and not design, planning, or orchestration. The interactive prompt
+      is `/change-<step> <change>` with the sections and arguments, read from no
+      table, as the target's was. Differences: `--allow`, `--session`, and
+      `--fresh` are refused without `--unattended`, where the targets ignored
+      them; sections are named by how many they expand to, interactively as
+      unattended, so `SECTIONS=2` gives `section 2` and `SECTION=1-3` `sections
+      1-3`, where the target followed the variable's name; and interactive
+      sections are checked, so `SECTION=3-1` is refused where the target passed it
+      through.
+- [x] 2.4 `steps.py` reads an `[orchestrator]` row naming a model and effort and no
       permission rules, refusing one with rules; `start orchestrate <change>` opens
       the orchestrating session on it (D5, 3; CW-w2ld). The row itself is added to
-      the table in 3.1.
-- [ ] 2.5 `find --json <change>`: prints `name`, `directory`, `archived`, and
+      the table in 3.1. `load_orchestrator()` returns a Claude `Model`; the row
+      takes `model` and an optional `effort`, and is refused with `allow` or
+      `deny`, any other key, or a forbidden model, by `load_steps` too. `start
+      orchestrate` takes the change alone (no `--unattended`, sections, or
+      arguments) and refuses while the table has no row.
+- [x] 2.5 `find --json <change>`: prints `name`, `directory`, `archived`, and
       `records` (the records directory, or `null` when this checkout holds none),
       and refuses an unknown change with exit 1, naming it; `format` joins it in
-      section 4 (D6; CW-r3ka).
-- [ ] 2.6 `clone where <change>`: D6's four cases in order — an unknown change exits
+      section 4 (D6; CW-r3ka). `find.found` builds the object; `--json` combines
+      with `--active` or `--archived`, and refuses `--records` (exit 2), whose
+      workspace fallback the field does not follow.
+- [x] 2.6 `clone where <change>`: D6's four cases in order — an unknown change exits
       1 naming it, before any clone lookup; a usable clone exits 0 printing its
       path; no clone directory exits 0 printing nothing; an unusable clone directory
       (not a clone of the workspace, its branch not checked out, its bootstrap not
-      succeeded) exits 1 with the reason (D6; CW-r3ka).
-- [ ] 2.7 `scripts/change_workflow/workflow.mk`: the workflow's convenience targets
+      succeeded) exits 1 with the reason (D6; CW-r3ka). `clone.where` holds the
+      three clone cases; run in a change's clone it looks beside the workspace that
+      clone's `workspace` remote names.
+- [x] 2.7 `scripts/change_workflow/workflow.mk`: the workflow's convenience targets
       — `design`, `plan`, `implement`, `review`, `triage`, `validate`, `merge`,
       `closeout`, `archive-cleanup`, `orchestrate`, `change-next`, `change-clone`,
       `change-clone-remove`, `round-view`, `round-done`, `round-view-closed`,
@@ -224,7 +272,23 @@ D6; CW-r3ka, CW-h8vm, CW-5qne, CW-w2ld). Touches a new `scripts/change-workflow`
       dev`, and `CHANGE_WORKFLOW_REVIEW_BASE ?= dev`. A comment at its head says
       its targets and variables carry no compatibility promise (D4; D6; CW-h8vm).
       The root `Makefile` includes it in section 3.
-- [ ] 2.8 Tests, unit: each subcommand reaches its module with today's arguments;
+      Done as the `Makefile`'s targets read, except: the step targets and `review`
+      lose their `round-view-closed` prerequisites and `find_change.py` lines,
+      whose checks `start` and `review` now run (2.3), and so does `push-branch`,
+      since `push` runs the round-view check itself; `check-push-ready` keeps its
+      prerequisite. `validate` passes `ARGUMENTS` in both modes in place of
+      `HELM_ALL_SCENARIOS`, this repository's own variable: section 3's
+      `Makefile` maps it, for instance by a target-specific `validate: ARGUMENTS =
+      …`. `change-graph` runs `python3 -m change_workflow.diagram` with
+      `PYTHONPATH` the command's directory, not the command: D4 and D6 name no
+      subcommand for the diagram's comparison. That departs from CW-r3ka's "every
+      operation … reachable through one command" and "never by importing its
+      code", so it is an open choice for the owner, not settled here: a `check
+      graph` subcommand (classified, as D6 would need, public or internal), or the
+      comparison kept out of the surface as the diagram's own maintenance with
+      CW-r3ka's wording narrowed to match. The recommendation is `check graph`,
+      internal, beside the other checks.
+- [x] 2.8 Tests, unit: each subcommand reaches its module with today's arguments;
       the exit categories, including a usage error; `start`'s refusals of an
       archived change and of an open round view, and the session command it builds
       interactively and unattended; `start orchestrate` on the row's model and
@@ -233,13 +297,55 @@ D6; CW-r3ka, CW-h8vm, CW-5qne, CW-w2ld). Touches a new `scripts/change-workflow`
       clones in a temporary directory; the fragment's targets, with `make -n` from a
       temporary `Makefile` that sets `CHANGE_WORKFLOW_MERGE_FROM` and includes it,
       printing the command each target runs.
-- [ ] 2.9 Verification: the new command and fragment tests, unit; the suites of
+      In `scripts/tests/test_change_workflow_cli.py`: each delegating subcommand
+      hands its module every argument (`cli.delegated`, read directly, flags
+      included), and its output and status equal the module's own command line's on
+      the same temporary repository — where most refuse at their first check, so
+      that half shows the wiring, not the flags; sixteen usage errors exit 2, and
+      `start`'s malformed sections too; `start`'s refusals and the interactive
+      prompts through an injected launcher, a harness that cannot be started, the
+      unattended run through the wrapper fixture; the orchestrator row's six
+      refusals and its model; `clone where` against clones made with `git clone`
+      beside a temporary workspace, plus a lookup run from inside the clone; every
+      fragment target by `make -n`, and `CHANGE_WORKFLOW` and
+      `CHANGE_WORKFLOW_REVIEW_BASE` set by `:=` before the include standing. The entry-point test
+      gains the command run as a process inside and outside a repository, its mode
+      in Git (100755), and the old step runner's mapping of `run`.
+      `test_run_change_step.py`'s `run` calls became `start … --unattended`, on a
+      Git checkout where the step reads `HEAD`, and its review test runs in one.
+- [x] 2.9 Verification: the new command and fragment tests, unit; the suites of
       section 1; `make test-release-tooling`; `make test`; `make check-change
       CHANGE=specify-change-workflow-and-engine`, failing only on the citations of
       files a later section creates; by hand, `scripts/change-workflow next
       specify-change-workflow-and-engine` prints what `python3
       scripts/change_next_step.py specify-change-workflow-and-engine` prints.
       End-to-end: none, and none is owed.
+      Evidence so far: `test_change_workflow_cli.py` (unit, real repositories in a
+      temporary directory, `make -n` of the fragment), 138 passed;
+      `test_change_workflow_entry_points.py` (library integration), 17 passed;
+      the scripts suite, 2002 passed; `make test` passed on the final code; `make check-change` failed only on `check-doc-citations`,
+      every miss a file a later section creates (with `workflow.mk` now resolved);
+      `make check-packaging` passed. Not run: the by-hand comparison — no rule lets
+      this session run `scripts/change-workflow` or `python3
+      scripts/change-workflow` until 3.1 adds the command's rules; the old script
+      printed `{"step": "implement", "sections": [1, 2], …}`, and the subcommand
+      test shows `next` prints what `next_step.main` prints on the same
+      repository. Checked on that evidence once the owner made the command
+      executable; the by-hand comparison was tried again then and is still denied
+      (no rule names the command), so it is owed to 3.9's by-hand checks, which run
+      the command once 3.1's rules exist.
+
+Notes for the next session. No step's rules could make a file executable
+(`chmod`, `git update-index --chmod`, and `git restore` have no rule; `git
+checkout` and `git stash` are denied): the command was staged with `git add
+--chmod=+x` and the owner made the worktree copy executable. A later executable
+file needs the same.
+Owed to section 3 from this section: the root `Makefile` maps `HELM_ALL_SCENARIOS`
+onto the fragment's `validate` `ARGUMENTS`; and `change-graph` (2.7). Asked to
+choose between a `check graph` subcommand (recommended, internal) and narrowing
+CW-r3ka, the owner answered "a.", read as the first option, `check graph`; its
+tier and its wording in the `change-workflow` delta are still to be written down,
+in design or in section 3's plan, before 3.2 drops the `Makefile`'s own target.
 
 ## 3. Every caller moved to the command, and the old scripts removed
 

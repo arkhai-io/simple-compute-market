@@ -19,7 +19,8 @@ checkout first, then, from a clone, in the workspace its `workspace` remote name
 
 Run as a command, it prints the directory relative to the repository root — the
 records directory in the workspace as an absolute path — or names the problem and
-exits non-zero.
+exits 1, or 2 for a malformed argument. With `--json` it prints the change as an
+object a program reads (`found`).
 
 Contract: openspec/specs/change-workflow/spec.md, "Phases and owner touchpoints"
 and "Each change is worked in its own clone".
@@ -27,6 +28,7 @@ and "Each change is worked in its own clone".
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
@@ -130,12 +132,24 @@ def find_records(root: Path, name: str,
                          + (f" or in the workspace {owner}" if owner is not None else ""))
 
 
+def found(root: Path, name: str, directory: Path) -> dict[str, object]:
+    """The change as `--json` prints it, for a program to read: its name, its
+    directory relative to the repository, whether it is archived, and its records
+    directory in this checkout, or None when this checkout holds none."""
+    records = records_directory(root, name)
+    return {"name": name, "directory": directory.relative_to(root).as_posix(),
+            "archived": is_archived(root, directory),
+            "records": records.relative_to(root).as_posix() if records is not None else None}
+
+
 def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
     args = sys.argv[1:] if argv is None else list(argv)
     flags = {arg for arg in args if arg in ("--active", "--archived", "--records")}
-    names = [arg for arg in args if arg not in flags]
-    if len(names) != 1 or len(flags) > 1:
-        print("usage: find_change.py [--active | --archived | --records] <change>",
+    as_json = "--json" in args
+    names = [arg for arg in args if arg not in flags and arg != "--json"]
+    if len(names) != 1 or len(flags) > 1 or (as_json and "--records" in flags):
+        print("usage: find [--active | --archived | --records] [--json] <change>; --json "
+              "prints the records of this checkout alone, so it takes no --records",
               file=sys.stderr)
         return 2
     try:
@@ -162,7 +176,12 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
         print(f"ERROR: change {names[0]!r} is not archived; archive cleanup follows "
               "closeout, which archives it", file=sys.stderr)
         return 1
-    print(directory.relative_to(root).as_posix())
+    try:
+        print(json.dumps(found(root, names[0], directory)) if as_json
+              else directory.relative_to(root).as_posix())
+    except ChangeNotFound as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 

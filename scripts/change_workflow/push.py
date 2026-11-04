@@ -99,7 +99,8 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
         print(f"Ready to push {target.branch} to {target.remote} ({upstream}).")
         return 0
     print("+ " + " ".join(target.command()), flush=True)
-    return subprocess.run(target.command(), cwd=root).returncode
+    # Git's own status, which may be any number, becomes a failed push's 1.
+    return 0 if subprocess.run(target.command(), cwd=root).returncode == 0 else 1
 
 
 if __name__ == "__main__":

@@ -40,8 +40,9 @@ lacks, no uncommitted change, no stash, and no run in progress: anything else wo
 be lost with it.
 
 `clone_of` and `bootstrap_state` are what the next-step computation and the round
-view read; `workspace_of`, which `find` defines, tells a clone from any
-other checkout. Importing the module does nothing.
+view read; `where` is what `clone where` answers, a usable clone told apart from
+none and from one that cannot be used; `workspace_of`, which `find` defines, tells
+a clone from any other checkout. Importing the module does nothing.
 
 Contract: openspec/specs/change-workflow/spec.md, "Each change is worked in its
 own clone".
@@ -189,6 +190,31 @@ def clone_of(workspace: Path, change: str) -> Path | None:
     branch = _marker(directory).get("branch") or default_branch(change)
     if not _checked_out(directory) or _current_branch(directory) != branch:
         return None
+    return directory
+
+
+def where(workspace: Path, change: str) -> Path | None:
+    """The change's clone of `workspace`, once it is usable: a clone of the workspace,
+    with the change's branch checked out and its bootstrap succeeded. None when no
+    clone directory exists, so the change is worked in place.
+
+    A clone directory that exists but is not usable raises `CloneError`, naming why,
+    so neither a broken clone nor a misspelled name is taken for a change worked in
+    place.
+    """
+    _check_name(change)
+    directory = clone_directory(workspace, change)
+    if not directory.exists():
+        return None
+    if not directory.is_dir() or not _is_clone_of(directory, workspace):
+        raise CloneError(f"{directory} is not a clone of {workspace.resolve()}")
+    branch = _marker(directory).get("branch") or default_branch(change)
+    if not _checked_out(directory) or _current_branch(directory) != branch:
+        raise CloneError(f"{directory} does not have {branch} checked out")
+    bootstrap = bootstrap_state(directory)
+    if bootstrap.state != SUCCEEDED:
+        log = f"; its log is {bootstrap.log}" if bootstrap.log else ""
+        raise CloneError(f"{directory}'s bootstrap is {bootstrap.state}{log}")
     return directory
 
 

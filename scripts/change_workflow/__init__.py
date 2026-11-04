@@ -47,7 +47,11 @@ siblings by relative import:
 - `push` — the guarded push of a change's own branch;
 - `skills` — the check that every agent skill is loaded from its one shared source;
 - `hook` — what a Claude Code session re-reads after its context is compacted;
-- `cli` — the command line, which `scripts/run_change_step.py` runs.
+- `cli` — the engine's command, `scripts/change-workflow`, its subcommands
+  dispatched to the modules above.
+
+Beside them, `workflow.mk` is the make fragment whose targets call the command, for
+a repository's `Makefile` to include; it carries no compatibility promise.
 
 Contract: openspec/specs/change-workflow/spec.md, "Unattended step runs end with a
 structured outcome".

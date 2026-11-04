@@ -1,0 +1,18 @@
+#!/usr/bin/env python3
+"""The change workflow's engine, reached as one command: `scripts/change-workflow
+<subcommand>`. It acts on the Git repository containing its working directory.
+
+The engine is the `change_workflow` package beside this file; a repository runs
+this command rather than importing it, so the file has no `.py` and nothing can.
+See `change_workflow/cli.py` for the subcommands.
+"""
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from change_workflow.cli import main  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(main())

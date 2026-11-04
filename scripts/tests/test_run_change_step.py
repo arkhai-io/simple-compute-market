@@ -1,5 +1,5 @@
-"""The workflow's command line, `scripts/run_change_step.py`, and the `make` targets
-that run it."""
+"""The workflow's command line, `change_workflow.cli`, and the `make` targets that
+run it."""
 
 from __future__ import annotations
 
@@ -14,6 +14,13 @@ from change_workflow.cli import expand_sections, main, parse_sections, split_rul
 from change_workflow.log import log_path, read_log, record_outcome
 from change_workflow_fixtures import (CHANGE, COMMIT, DENIALS, VALID, FakeClaude, event_lines,
                                       log_file, make_wrapper, option, option_rules, repository)
+
+
+def _checkout(path: Path) -> Path:
+    """`path` as a Git checkout: a step that reads `HEAD` is started only once the
+    checkout shows no round view open."""
+    subprocess.run(["git", "init", "-q", str(path)], check=True)
+    return path
 
 
 def test_the_command_line_records_a_branch_decision(
@@ -244,9 +251,10 @@ def test_a_non_ascii_digit_is_a_section_name() -> None:
 
 def test_implementation_is_given_its_sections(tmp_path: Path) -> None:
     claude = FakeClaude((event_lines(VALID["finished"]), 0))
+    _checkout(tmp_path)
 
-    assert main(["run", "implement", CHANGE, "--sections", "1-3"], root=tmp_path,
-                wrapper=make_wrapper(tmp_path, claude)) == 0
+    assert main(["start", "implement", CHANGE, "--sections", "1-3", "--unattended"],
+                root=tmp_path, wrapper=make_wrapper(tmp_path, claude)) == 0
 
     assert claude.commands[0][2] == f"/change-implement {CHANGE} sections 1-3"
     assert read_log(log_path(tmp_path, CHANGE))[0]["sections"] == [1, 2, 3]
@@ -256,14 +264,14 @@ def test_the_command_continues_a_named_implementation_session(
         tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     claude = FakeClaude((event_lines(VALID["finished"], session="i-1"), 0),
                         (event_lines(VALID["finished"], session="i-1"), 0))
-    wrapper = make_wrapper(tmp_path, claude)
-    assert main(["run", "implement", CHANGE, "--sections", "8A"], root=tmp_path,
-                wrapper=wrapper) == 0
-
-    assert main(["run", "implement", CHANGE, "--sections", "8B", "--session", "i-1"],
+    wrapper = make_wrapper(_checkout(tmp_path), claude)
+    assert main(["start", "implement", CHANGE, "--sections", "8A", "--unattended"],
                 root=tmp_path, wrapper=wrapper) == 0
-    assert main(["run", "implement", CHANGE, "--session", "other"], root=tmp_path,
-                wrapper=wrapper) == 1
+
+    assert main(["start", "implement", CHANGE, "--sections", "8B", "--session", "i-1",
+                 "--unattended"], root=tmp_path, wrapper=wrapper) == 0
+    assert main(["start", "implement", CHANGE, "--session", "other", "--unattended"],
+                root=tmp_path, wrapper=wrapper) == 1
 
     assert claude.commands[1][2] == f"/change-implement {CHANGE} section 8B"
     assert option(claude.commands[1], "--resume") == "i-1"
@@ -286,8 +294,10 @@ def test_the_command_resumes_by_seq(tmp_path: Path) -> None:
 
 def test_a_fresh_run_is_granted_each_rule_its_allow_values_hold(tmp_path: Path) -> None:
     claude = FakeClaude((event_lines(VALID["finished"]), 0))
+    _checkout(tmp_path)
 
-    assert main(["run", "validate", CHANGE, "--allow", "Bash(gh run download *);Bash(make lock)",
+    assert main(["start", "validate", CHANGE, "--unattended",
+                 "--allow", "Bash(gh run download *);Bash(make lock)",
                  "--allow", "Bash(helm version)"], root=tmp_path,
                 wrapper=make_wrapper(tmp_path, claude)) == 0
 
@@ -322,7 +332,7 @@ def test_allow_values_split_on_semicolons(values: list[str], rules: list[str]) -
 def test_a_stopped_run_exits_non_zero(tmp_path: Path) -> None:
     claude = FakeClaude((event_lines(result=False), 2))
 
-    assert main(["run", "design", CHANGE], root=tmp_path,
+    assert main(["start", "design", CHANGE, "--unattended"], root=tmp_path,
                 wrapper=make_wrapper(tmp_path, claude)) == 1
 
 
@@ -334,14 +344,15 @@ def test_implementation_sections_expand(text: str, sections: list) -> None:
 
 def test_a_backwards_section_range_is_refused(tmp_path: Path,
                                               capsys: pytest.CaptureFixture[str]) -> None:
-    assert main(["run", "implement", CHANGE, "--sections", "3-1"], root=tmp_path,
-                wrapper=make_wrapper(tmp_path, FakeClaude())) == 1
+    # A malformed argument is a usage error.
+    assert main(["start", "implement", CHANGE, "--sections", "3-1", "--unattended"],
+                root=_checkout(tmp_path), wrapper=make_wrapper(tmp_path, FakeClaude())) == 2
     assert "runs backwards" in capsys.readouterr().err
 
 
 def test_the_review_command_exits_non_zero_when_it_stops(
         tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    root = repository(tmp_path)
+    root = _checkout(repository(tmp_path))
 
     assert main(["review", CHANGE, "--kind", "closeout"], root=root) == 1
 

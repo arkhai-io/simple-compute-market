@@ -101,7 +101,8 @@ def test_the_command_refuses_an_unknown_change_and_a_missing_argument(
         tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root = _repository(tmp_path, WELL_FORMED)
 
-    assert check.main(["missing"], root=root) == 2
+    # An unknown change is a refusal; only a malformed argument is a usage error.
+    assert check.main(["missing"], root=root) == 1
     assert "missing" in capsys.readouterr().err
     assert check.main([], root=root) == 2
     assert "usage" in capsys.readouterr().err

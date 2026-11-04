@@ -545,7 +545,8 @@ def test_the_command_shows_the_conversion_then_writes_it_on_confirmation(
 
     assert main(["convert", CHANGE], root=root) == 0
     assert "nothing is written" in capsys.readouterr().out
-    assert main(["convert", CHANGE, "--kind", "design"], root=root) == 1
+    # A qualifier without what it qualifies is a malformed argument, a usage error.
+    assert main(["convert", CHANGE, "--kind", "design"], root=root) == 2
     assert "qualify --next" in capsys.readouterr().err
     assert main(["convert", CHANGE, "--confirm", "--next", "review", "--kind", "design",
                  "--reason", "the owner's words"], root=root) == 0

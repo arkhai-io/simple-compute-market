@@ -42,7 +42,7 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
         tasks = change_directory(root, args[0]) / TASKS_FILE
     except ChangeNotFound as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
-        return 2
+        return 1
     if not tasks.is_file():
         print(f"OK: {args[0]} has no task list yet.")
         return 0

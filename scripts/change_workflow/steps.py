@@ -1,11 +1,12 @@
 """The step table: each step's skill, the permission rules an unattended run of it
-is held to, and the models it runs on.
+is held to, and the models it runs on, and the orchestrating session's model.
 
 The table is `.claude/change-steps.toml`, the workflow's policy. Each step's rules
 are its own plus `common`'s, and each row names its models in priority order,
 each with its harness and effort. The loader refuses a row the policy forbids: a
 model the workflow never runs on, two models of one vendor, or Codex on any step
-but the review.
+but the review. The `[orchestrator]` row names the orchestrating session's model
+and effort, and no permission rules.
 
 Contract: openspec/specs/change-workflow/spec.md, "Unattended runs are held to
 their step's permissions".
@@ -19,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .common import Entry, StepError, repository_root
+from .common import ORCHESTRATOR, Entry, StepError, repository_root
 from .graph import STEPS
 
 # The table's place in the repository the command acts on.
@@ -56,16 +57,53 @@ class StepRules:
     resume_from: str | None = None
 
 
-def load_steps(path: Path | None = None) -> dict[str, StepRules]:
-    """Each step's rules, `common`'s added to its own, and its models, from the table
-    at `path`, or the repository's own."""
+def _read_table(path: Path | None) -> tuple[Path, dict[str, Any]]:
     path = repository_root() / STEP_TABLE if path is None else path
     try:
         table = tomllib.loads(path.read_text("utf-8"))
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise StepError(f"cannot read the step table {path}: {exc}") from exc
-    if unknown := set(table) - {"common", "steps"}:
+    if unknown := set(table) - {"common", "steps", ORCHESTRATOR}:
         raise StepError(f"{path} has unknown tables: {', '.join(sorted(unknown))}")
+    if ORCHESTRATOR in table:
+        _orchestrator(path, table[ORCHESTRATOR])
+    return path, table
+
+
+def load_orchestrator(path: Path | None = None) -> Model:
+    """The model and effort the orchestrating session runs on, from the table's
+    `[orchestrator]` row at `path`, or the repository's own table."""
+    path, table = _read_table(path)
+    if ORCHESTRATOR not in table:
+        raise StepError(f"{path} has no [{ORCHESTRATOR}] row naming the orchestrating "
+                        "session's model and effort")
+    return _orchestrator(path, table[ORCHESTRATOR])
+
+
+def _orchestrator(path: Path, row: Any) -> Model:
+    """The `[orchestrator]` row's model. The orchestrating session runs interactively,
+    with the owner's own permissions, so a rule here would restrict nothing and is
+    refused rather than read as if it did."""
+    where = f"{path}'s [{ORCHESTRATOR}] row"
+    if not isinstance(row, dict):
+        raise StepError(f"{where} is not a table")
+    if rules := sorted(set(row) & {"allow", "deny"}):
+        raise StepError(f"{where} carries no permission rules, but has {', '.join(rules)}: "
+                        "the orchestrating session runs with the owner's own permissions")
+    if set(row) - {"model", "effort"} or not isinstance(row.get("model"), str) or not row["model"]:
+        raise StepError(f"{where} names a model and an effort, and takes nothing else")
+    effort = row.get("effort")
+    if effort is not None and not (isinstance(effort, str) and effort):
+        raise StepError(f"{where} gives {row['model']} an effort that is not a name")
+    if _FORBIDDEN_MODEL.search(row["model"]):
+        raise StepError(f"{where} names {row['model']}, a model the workflow never runs on")
+    return Model("claude", row["model"], effort)
+
+
+def load_steps(path: Path | None = None) -> dict[str, StepRules]:
+    """Each step's rules, `common`'s added to its own, and its models, from the table
+    at `path`, or the repository's own."""
+    path, table = _read_table(path)
     common = table.get("common", {})
     if set(common) - {"allow", "deny"}:
         raise StepError(f"{path}'s common row takes only allow and deny")
