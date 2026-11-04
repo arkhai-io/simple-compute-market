@@ -161,6 +161,30 @@ setting this repository's values (`CHANGE_WORKFLOW_MERGE_FROM := dev`,
 `CHANGE_WORKFLOW_REVIEW_BASE := dev`); the fragment declares its defaults with
 `?=`. At extraction the CLI prints the installed fragment's path for the include.
 
+Every operation the scripts offer today carries over (CW-r3ka), and each
+subcommand not classified otherwise by name in D6 is public (CW-5qne):
+
+| Today | The command |
+|---|---|
+| `run_change_step.py run <step> <change> …` | `start <step> <change> --unattended …` |
+| a step's make target without `UNATTENDED` (`claude "/change-<step> <change>"`) | `start <step> <change>` |
+| `claude --model … --effort … "/change-orchestrate <change>"` in the `Makefile` | `start orchestrate <change>`, on the step table's `[orchestrator]` row (D5, 3) |
+| `run_change_step.py resume`, `review`, `record`, `convert`, `log`, `watch`, `denials`, `note` | the same names, same arguments |
+| `change_next_step.py <change> [--plain]` | `next <change> [--plain]` |
+| `find_change.py [--active] [--records] <change>` | `find [--active] [--records] [--json] <change>` |
+| `change_clone.py create`, `remove` | `clone`, `clone-remove`; `clone where` is new (D6) |
+| `round_view.py start`, `done`, `check` | `round-view`, `round-done`, `check round-view` |
+| `change_history.py sync` | `history` |
+| `change_cost.py <change>` | `cost <change>` |
+| `check_change_index.py`, `check_tasks.py`, `check_push_ready.py check`, `check_agent_skills.py` | `check index`, `check tasks`, `check push`, `check skills` |
+| `check_push_ready.py push` | `push` |
+| `post_compaction_context.py` | `hook post-compaction` |
+
+`check round-view` is what the repository's own targets that refuse while a round
+view is open (`validate-local`, `run-ci`, `code-snapshot`, …) and the skills call;
+`start`, `review`, and `push` run the same check themselves, as their make targets'
+`round-view-closed` prerequisite did.
+
 Rejected: classifying only, which would make the surface eight script paths
 extraction breaks; fixing the defects and leaving the scripts in place, for the
 same reason.
