@@ -727,9 +727,9 @@ guard or a moved `HEAD` commits nothing. Validation and review commit nothing: e
 describes one commit, and a commit of its own would move `HEAD` from under its
 evidence. No step resets, checks out, switches, rebases, stashes, or cleans.
 
-The branch is the guard against unfinished work. Only `dev` is protected, and `dev`
-is not deployed at every commit, so a commit known not to work harms nothing while
-it stays on a change branch. A pushed change branch starts nothing by itself: the
+The branch is the guard against unfinished work. Only `main` and `dev` are
+protected, so a commit known not to work harms nothing while it stays on a change
+branch. A pushed change branch starts nothing by itself: the
 pipeline runs on dispatch and nightly, and `tests.yml` on `dev`, `staging`, and pull
 requests into them.
 

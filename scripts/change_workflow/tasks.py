@@ -14,8 +14,7 @@ skills that act on a task list before they do; its check, `task_problems`, is al
 the next-step computation's own backstop where it routes on sections. Prints each problem with its line and
 exits non-zero, or prints OK.
 
-Contract: openspec/specs/change-workflow/spec.md, "The next step is computed from
-the files".
+Contract: openspec/specs/change-workflow/spec.md, CW-4rqr and CW-5r7l.
 """
 
 from __future__ import annotations

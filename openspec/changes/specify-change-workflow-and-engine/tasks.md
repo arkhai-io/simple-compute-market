@@ -1,15 +1,15 @@
-Sections follow the design's implementation cadence (D14): round 1 consolidates the
-engine behind one command without changing what any step does — the package and its
-fixes (1), the command and the make fragment (2), then every caller moved to it and
-the old scripts removed (3); round 2 adds the conventions and rewrites the
-specifications — the record set's format (4), the index check and the companion's
-two names (5), the graph diagram's move (6), the assumptions test with the tables it
-reads (7), then the `change-workflow` delta and its trace (8), the
+Sections follow the order of the design's implementation cadence (D14): first the
+engine is consolidated behind one command without changing what any step does — the
+package and its fixes (1), the command and the make fragment (2), then every caller
+moved to it and the old scripts removed (3); then the conventions are added and the
+specifications rewritten — the record set's format (4), the index check and the
+companion's two names (5), the graph diagram's move (6), the assumptions test with
+the tables it reads (7), then the `change-workflow` delta and its trace (8), the
 `market-change-workflow` delta (9), and the convention's text (10); closeout (11)
 writes the two capabilities' `README.md` and `index.md`, the diagrams, and the other
 promotions.
 
-Within round 1, the old scripts keep working until section 3 removes them: sections
+The old scripts keep working until section 3 removes them: sections
 1 and 2 leave each old script as an entry point that calls the moved module, so the
 change's own steps — the wrapper `make implement UNATTENDED=1` starts, the skills'
 `find_change.py` and `run_change_step.py record` — run throughout. Section 3 removes
@@ -806,6 +806,15 @@ requirement's heading than its id's passes. `openspec/README.md#capability-docum
 which the check, the `Makefile`, and the closeout skill cite, describes the index
 only once section 10 writes it.
 
+Fixed at review 49's triage (49 F3): that gap is closed. The check also fails on an
+entry whose link is not to its own id's requirement heading in `spec.md`, read as
+the named change's deltas leave it, naming the id and the heading it should reach;
+an id two requirements share is not held to either heading. D15, the check's
+docstring, `openspec/README.md`'s check list, and the planning-governance delta (its
+body and a new scenario) list the case. Tests, unit, in `test_check_spec_index.py`:
+swapped links, a link to the heading in another file, a `./spec.md` path, a shared
+id, and a rename's new heading. Evidence for the round's fixes is under section 10.
+
 ## 6. The graph diagram moved into its capability
 
 Delivers the graph diagram in `openspec/specs/change-workflow/diagrams/`, still held
@@ -969,7 +978,9 @@ real assertion. Left, and owed elsewhere:
 
 - `.agents/skills/change-implement/SKILL.md` says "only `dev` is protected" where
   `push.PROTECTED` refuses `main` and `dev`; a skill's text, outside this section,
-  for the round's triage to settle.
+  for the round's triage to settle. Fixed at review 49's triage (49 F4): the skill,
+  `docs/agents/change-workflow.md`, and the capability's `README.md` now say the
+  change's branch is not protected, only `main` and `dev` are.
 - Until closeout writes `change-workflow`'s `index.md`, the rule the skills and
   `openspec/config.yaml` state — the companion is `README.md` where `index.md`
   exists, `architecture.md` elsewhere — points at an `architecture.md` that is gone.
@@ -1086,6 +1097,17 @@ permanent documents citing the old names (`docs/agents/change-workflow.md`,
 `docs/development/DEPLOYMENT_AND_CONFIG.md`, the capability's `README.md`) are
 closeout's to rewrite (11.9).
 
+Fixed at review 49's triage (49 F2), as a fix rather than a task: each `Contract:`
+line in `scripts/change_workflow/` and the four `scripts/` modules now names the ids
+that hold its rules — `CW-` ids in `change-workflow`, `MCW-` ids in
+`market-change-workflow` (the Helm namespace, the validation parts, the protected
+branches, the forbidden models, the bootstrap) — each id checked against the two
+deltas, and the fresh-context check read each module's docstring against its ids.
+The capability-wide citations with no heading (`hook.py`, `skills.py`,
+`workflow.mk`, the outcome schema) are unchanged. `.claude/change-steps.toml`'s
+header comment is the orchestrator's, edited on the owner's word once the triage is
+complete, outside its fix commit.
+
 ## 9. The `market-change-workflow` specification
 
 Delivers this repository's own workflow requirements as their own capability: the
@@ -1139,7 +1161,7 @@ the values (`main` and `dev`, `make init`, the dispatch list in
 ## 10. The indexed organization's text
 
 Delivers the convention as written guidance: how an indexed capability's documents
-are organized, and what closeout writes into `index.md` (D15; D14's round 2). Touches
+are organized, and what closeout writes into `index.md` (D15). Touches
 `openspec/README.md` and `openspec/specs/README.md`.
 
 - [x] 10.1 `openspec/README.md#capability-documentation-pattern`: a capability may
@@ -1187,6 +1209,24 @@ sentence. Owed elsewhere: `.agents/skills/change-closeout/SKILL.md`'s promotion 
 the revised summary are for the round's triage to carry into it. Closeout's own
 additions to these documents (11.9: the two principles, the proposal's interface
 rule) are not here.
+
+Review 49's triage fixed four findings against `ff9fbd029` (validation 52 passed,
+the Helm part waived): 49 F1, the plan's preamble no longer assigns sections to
+review rounds, only their order; 49 F2 under section 8; 49 F3 under section 5;
+49 F4 under section 7. Evidence: `test_check_spec_index.py` and
+`test_check_change.py` (unit, real files in a temporary directory), 43 passed; the
+scripts suite, as `make test-release-tooling` runs it within `make test`, 2090
+passed; `make test` passed; `make check-packaging`, `make check-agent-skills`, and
+`make check-comment-hygiene` passed; `make check-change` failed only on
+`check-doc-citations`, its misses the files closeout creates (the two `index.md`,
+`market-change-workflow`'s `spec.md`), its specification index check passing. The
+fresh-context check of the diff found no blocking defect; fixed: ids missing from
+`next_step.py`'s and `wrapper.py`'s citations and one misplaced in
+`cost_report.py`'s, the index entry's link read past whitespace, a shared id held
+to a heading, and two reflowed lines. Declined: `MCW-ca51` for `clone.py` (its
+removal check reads `dev` as the merged branch, not the merge's default), and
+naming `main` and `dev` as "the repository's" in the skill and the companion, which
+already named this repository's values, and which closeout rewrites (11.9).
 
 ## 11. Closeout
 

@@ -561,7 +561,9 @@ where its rule went. An id may be cited, so a citation survives a requirement's
 renaming. A check run by `make check-change` fails, in a capability with an
 `index.md`, on a requirement with no id, two sharing one, an id `index.md` omits
 or lists twice, a listed id in neither `spec.md` nor the change's own deltas, a
-retired id in use, or a link that does not resolve. The deltas clause lets
+retired id in use, a link that does not resolve, or an entry whose link is not to
+its own id's requirement heading (added at review 49's triage, 49 F3, since a link
+that resolves may still reach another requirement). The deltas clause lets
 closeout's promotion write `index.md` before the archive puts the requirement in
 `spec.md`.
 

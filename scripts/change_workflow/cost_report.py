@@ -14,8 +14,7 @@ with the gap before each, since a resumed session's first turn after its cache
 expired rewrites its whole context: the cost of openings, of misses, and of warm
 turns can be told apart.
 
-Contract: openspec/specs/change-workflow/spec.md, "Unattended runs record their
-cost".
+Contract: openspec/specs/change-workflow/spec.md, CW-u7da.
 """
 
 from __future__ import annotations

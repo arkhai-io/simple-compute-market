@@ -3,8 +3,9 @@
 ### Requirement: Indexed capability documentation
 
 A capability MAY organize its documentation by an index: an `index.md` beside its
-`spec.md` that lists each requirement by id, with a link and a summary line, under
-the parts and groups of its table of contents, and the ids it retired. In such a
+`spec.md` that lists each requirement by id, with a link to its heading in `spec.md`
+and a summary line, under the parts and groups of its table of contents, and the
+ids it retired. In such a
 capability every requirement's name MUST begin with its id — the capability's
 prefix and four random characters from `[a-z0-9]` — and an id MUST NOT be reused.
 
@@ -31,6 +32,11 @@ prefix and four random characters from `[a-z0-9]` — and an id MUST NOT be reus
 
 - **WHEN** a requirement takes an id that `index.md` lists as retired
 - **THEN** `make check-change` fails, naming the id
+
+#### Scenario: An index entry links to another requirement's heading
+
+- **WHEN** `index.md` lists `CW-a8tf` with a link to the heading of `CW-r3ka`
+- **THEN** `make check-change` fails, naming `CW-a8tf` and its own heading
 
 ## MODIFIED Requirements
 

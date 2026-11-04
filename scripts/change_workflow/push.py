@@ -11,8 +11,8 @@ The check reports and never repairs: each refused state means something
 unexpected happened, and fixing it automatically would hide that. The push sends
 exactly HEAD and is never forced, so a remote branch that has moved on rejects it.
 
-Contract: openspec/specs/change-workflow/spec.md, "Guarded push of a change
-branch".
+Contract: openspec/specs/change-workflow/spec.md, CW-59c7;
+openspec/specs/market-change-workflow/spec.md, MCW-farr.
 """
 
 from __future__ import annotations

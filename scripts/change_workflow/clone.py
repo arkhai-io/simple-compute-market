@@ -44,8 +44,8 @@ view read; `where` is what `clone where` answers, a usable clone told apart from
 none and from one that cannot be used; `workspace_of`, which `find` defines, tells
 a clone from any other checkout. Importing the module does nothing.
 
-Contract: openspec/specs/change-workflow/spec.md, "Each change is worked in its
-own clone".
+Contract: openspec/specs/change-workflow/spec.md, CW-yib2, CW-8jyb, CW-8npg, and
+CW-xx5f; openspec/specs/market-change-workflow/spec.md, MCW-uqlq.
 """
 
 from __future__ import annotations

@@ -287,8 +287,8 @@ leaves its work uncommitted for its resume, or, on your word, for the orchestrat
 session to commit to a separate work-in-progress branch; one stopped by a refusing
 guard or a moved `HEAD` commits nothing. Work left uncommitted after a step finished is that
 step's defect: the orchestrating session brings it to you and commits it only on
-your word. The branch is the guard against unfinished work: only `dev` is
-protected.
+your word. The branch is the guard against unfinished work: a change's branch
+is not protected; only `main` and `dev` are.
 
 **The merge before closeout.** Once the pre-closeout triage advances the change,
 the merge step (`change-merge`) brings the branch the change lands on into the

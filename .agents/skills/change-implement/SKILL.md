@@ -259,10 +259,10 @@ the design does not make, do not guess and do not work around it:
 2. For a return to design or planning, commit what the section has — its code,
    tests, and notes — as one work-in-progress commit, checking no task for it: the
    message names the change and the section, says the work is in progress, and why
-   the change returns. No check need pass first: only `dev` is protected, and a
-   commit known not to work harms nothing on the change's branch, while no session
-   is left to commit the work, and a dirty checkout blocks every later step's
-   guarded push. Push it with `scripts/change-workflow push`; if it refuses, stop
+   the change returns. No check need pass first: the change's branch is not
+   protected — only `main` and `dev` are — and a commit known not to work harms
+   nothing on it, while no session is left to commit the work, and a dirty
+   checkout blocks every later step's guarded push. Push it with `scripts/change-workflow push`; if it refuses, stop
    and report its reasons, leaving the commit as it is.
 3. Tell the owner, and recommend the way back: a design question returns the change
    to design (`change-design`); a plan defect goes to planning (`change-plan`); an

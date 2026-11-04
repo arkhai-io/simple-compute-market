@@ -22,8 +22,8 @@ the recorded denials before the change moves on. A run whose session took furthe
 turns after an outcome is logged with its last, the earlier ones kept beside it as
 `earlier`.
 
-Contract: openspec/specs/change-workflow/spec.md, "Unattended step runs end with a
-structured outcome".
+Contract: openspec/specs/change-workflow/spec.md, CW-js86, CW-4vma, CW-1a4d,
+CW-k5mk, CW-xgq3, CW-0ia3, CW-ebmo, CW-1dld, CW-tl5v, and CW-yzer.
 """
 
 from __future__ import annotations

@@ -22,8 +22,7 @@ records directory in the workspace as an absolute path — or names the problem 
 exits 1, or 2 for a malformed argument. With `--json` it prints the change as an
 object a program reads (`found`).
 
-Contract: openspec/specs/change-workflow/spec.md, "Phases and owner touchpoints"
-and "Each change is worked in its own clone".
+Contract: openspec/specs/change-workflow/spec.md, CW-1iaz and CW-c3he.
 """
 
 from __future__ import annotations

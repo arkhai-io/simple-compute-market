@@ -57,8 +57,9 @@ as it ends, so a part can be watched while it runs, then a summary, which it als
 writes as `summary.json` beside the logs for the validation report. A step's
 result is `passed`, `failed`, or `warning`; a warning does not fail the part.
 
-Contract: openspec/specs/change-workflow/spec.md, "Validation observes a committed
-slice" and "Each Helm validation is isolated in its change's namespace".
+Contract: openspec/specs/change-workflow/spec.md, CW-a7dw, CW-af15, and CW-zkhs;
+openspec/specs/market-change-workflow/spec.md, MCW-v3tf, MCW-qeja, MCW-8h0r,
+MCW-2lzw, MCW-fnuh, MCW-a0hu, MCW-notv, MCW-7bia, MCW-epkd, and MCW-7ts3.
 """
 
 from __future__ import annotations

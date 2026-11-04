@@ -51,8 +51,8 @@ While a view is open the branch it moved does not point at the round's commit,
 so every step that describes a commit refuses in that checkout (`check`). The
 state lives in the Git directory of the checkout whose branch the view moved.
 
-Contract: openspec/specs/change-workflow/spec.md, "Triage of an implementation
-round".
+Contract: openspec/specs/change-workflow/spec.md, CW-aoby, CW-4svs, CW-9mrq,
+CW-78ul, CW-n44s, CW-uq5q, CW-gd24, and CW-rgws.
 """
 
 from __future__ import annotations

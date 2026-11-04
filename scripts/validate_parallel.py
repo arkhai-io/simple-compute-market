@@ -37,8 +37,8 @@ part needs the clone's environments; its change is read from where it stands. Ea
 run's output is kept as `<change>.log`, with `report.json` beside it, under
 `.snapshot/parallel-validation/<time>/` in the checkout this runs from.
 
-Contract: openspec/specs/change-workflow/spec.md, "Each Helm validation is isolated
-in its change's namespace", scenario "Two changes are validated at once".
+Contract: openspec/specs/market-change-workflow/spec.md, MCW-fnuh, scenario "Two
+changes are validated at once".
 """
 
 from __future__ import annotations

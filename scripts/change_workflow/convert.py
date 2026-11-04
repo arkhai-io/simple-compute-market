@@ -41,8 +41,8 @@ names — writing nothing. A log holding a line of a newer format is refused bef
 anything else is read of it: a later engine wrote it, and nothing converts a log
 backwards.
 
-Contract: openspec/specs/change-workflow/spec.md, "The next step is computed from the
-files".
+Contract: openspec/specs/change-workflow/spec.md, CW-qj77, CW-h12x, CW-42me,
+CW-o1ca, CW-zniv, CW-ajcm, and CW-95xp.
 """
 
 from __future__ import annotations

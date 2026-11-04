@@ -26,8 +26,7 @@ pipeline run (`**Pipeline:** run <id>`). Transcripts are not read for it: they
 cite whatever a session read, another clone's evidence included. Named evidence
 the clone does not hold is reported, not refused.
 
-Contract: openspec/specs/change-workflow/spec.md, "Each change is worked in its
-own clone".
+Contract: openspec/specs/change-workflow/spec.md, CW-hak6 and CW-rf50.
 """
 
 from __future__ import annotations

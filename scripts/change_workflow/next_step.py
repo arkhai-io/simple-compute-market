@@ -78,8 +78,9 @@ section's heading is not routed on (`task_problems`, which
 `tasks` runs for the skills). `--plain` prints the result as
 lines rather than JSON.
 
-Contract: openspec/specs/change-workflow/spec.md, "The next step is computed from
-the files".
+Contract: openspec/specs/change-workflow/spec.md, CW-4rqr, CW-tel3, CW-m70n,
+CW-l866, CW-0wna, CW-8tdv, CW-nkys, CW-izj1, CW-tnp6, CW-4c3e, CW-zcx8, CW-sd34,
+CW-9fbu, CW-x7jd, CW-qj77, CW-v6nj, CW-p7xk, CW-4x66, CW-8npg, and CW-9tzd.
 """
 
 from __future__ import annotations

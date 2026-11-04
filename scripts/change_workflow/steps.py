@@ -8,8 +8,8 @@ model the workflow never runs on, two models of one vendor, or Codex on any step
 but the review. The `[orchestrator]` row names the orchestrating session's model
 and effort, and no permission rules.
 
-Contract: openspec/specs/change-workflow/spec.md, "Unattended runs are held to
-their step's permissions".
+Contract: openspec/specs/change-workflow/spec.md, CW-qu42, CW-ebmo, CW-zq4h, and
+CW-w2ld; openspec/specs/market-change-workflow/spec.md, MCW-y37w.
 """
 
 from __future__ import annotations

@@ -173,6 +173,65 @@ def test_a_link_to_a_heading_the_deltas_take_away_does_not_resolve(tmp_path: Pat
                for problem in problems(tmp_path, CHANGE))
 
 
+def test_an_entry_linked_to_another_requirements_heading_is_named(tmp_path: Path) -> None:
+    # Both links resolve, each to the other requirement.
+    index = (INDEX.replace("spec.md#requirement-ef-a8tf-the-flow-starts", "SWAP")
+             .replace("spec.md#requirement-ef-q4ze-the-flow-ends",
+                      "spec.md#requirement-ef-a8tf-the-flow-starts")
+             .replace("SWAP", "spec.md#requirement-ef-q4ze-the-flow-ends"))
+    _capability(tmp_path, index=index)
+
+    found = problems(tmp_path)
+
+    assert found == [
+        "example-flow: index.md:7: EF-a8tf links to spec.md#requirement-ef-q4ze-the-flow-"
+        "ends, not to its requirement's heading spec.md#requirement-ef-a8tf-the-flow-starts",
+        "example-flow: index.md:8: EF-q4ze links to spec.md#requirement-ef-a8tf-the-flow-"
+        "starts, not to its requirement's heading spec.md#requirement-ef-q4ze-the-flow-ends",
+    ]
+
+
+def test_an_entry_linked_to_its_heading_in_another_file_is_named(tmp_path: Path) -> None:
+    capability = _capability(tmp_path, index=INDEX.replace(
+        "](spec.md#requirement-ef-q4ze", "](README.md#requirement-ef-q4ze"))
+    (capability / "README.md").write_text("### Requirement: EF-q4ze The flow ends\n", "utf-8")
+
+    assert problems(tmp_path) == [
+        "example-flow: index.md:8: EF-q4ze links to README.md#requirement-ef-q4ze-the-flow-"
+        "ends, not to its requirement's heading spec.md#requirement-ef-q4ze-the-flow-ends"]
+
+
+def test_an_entry_linked_through_a_relative_path_to_its_heading_passes(tmp_path: Path) -> None:
+    _capability(tmp_path, index=INDEX.replace("](spec.md#requirement-ef-q4ze",
+                                              "](./spec.md#requirement-ef-q4ze"))
+
+    assert problems(tmp_path) == []
+
+
+def test_an_id_two_requirements_share_is_not_held_to_either_heading(tmp_path: Path) -> None:
+    # The shared id is the problem; which heading its entry should reach is not
+    # known until it is fixed.
+    _capability(tmp_path, spec=SPEC.replace("EF-q4ze", "EF-a8tf"),
+                index=INDEX.replace("[EF-q4ze](spec.md#requirement-ef-q4ze",
+                                    "[EF-a8tf](spec.md#requirement-ef-a8tf"))
+
+    found = problems(tmp_path)
+
+    assert any("two requirements share the id EF-a8tf" in problem for problem in found)
+    assert not any(" links to " in problem for problem in found), found
+
+
+def test_an_entry_is_held_to_its_heading_as_the_deltas_leave_it(tmp_path: Path) -> None:
+    # The old name's heading still resolves before the archive, but not once the
+    # rename merges, and the entry's own heading is the new name.
+    _capability(tmp_path)
+    _delta(tmp_path, RENAMED)
+
+    assert any("EF-q4ze links to spec.md#requirement-ef-q4ze-the-flow-ends, not to its "
+               "requirement's heading spec.md#requirement-ef-q4ze-the-flow-stops" in problem
+               for problem in problems(tmp_path, CHANGE))
+
+
 def test_a_retired_id_written_as_its_old_link_is_retired(tmp_path: Path) -> None:
     index = INDEX.replace("- `EF-zz00` — its rule moved to EF-q4ze.",
                           "- [EF-zz00](spec.md) — its rule moved to EF-q4ze.")

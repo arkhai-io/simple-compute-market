@@ -53,6 +53,6 @@ siblings by relative import:
 Beside them, `workflow.mk` is the make fragment whose targets call the command, for
 a repository's `Makefile` to include; it carries no compatibility promise.
 
-Contract: openspec/specs/change-workflow/spec.md, "Unattended step runs end with a
-structured outcome".
+Contract: openspec/specs/change-workflow/spec.md, CW-r3ka, CW-5qne, CW-m7fk, and
+CW-c2tw.
 """

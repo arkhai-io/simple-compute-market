@@ -12,9 +12,10 @@ prefix, a hyphen, and four characters from `[a-z0-9]`.
 
 The check fails, naming each, on: a requirement whose name begins with no such id;
 two requirements sharing an id; an id `index.md` omits or lists twice; a listed id
-in neither `spec.md` nor the named change's deltas; a retired id in use; and a link
-in `index.md` whose file or heading does not resolve. A capability with no
-`index.md` is not checked.
+in neither `spec.md` nor the named change's deltas; a retired id in use; a link in
+`index.md` whose file or heading does not resolve; and an entry whose link is not to
+its own id's requirement heading in `spec.md`. A capability with no `index.md` is
+not checked.
 
 Closeout writes `index.md` before the archive merges the change's deltas into
 `spec.md`, so with a change named its deltas count as the archive will leave them:
@@ -104,22 +105,36 @@ def read_deltas(text: str) -> Deltas:
 
 
 @dataclass(frozen=True)
+class Entry:
+    """One listed id, the line it is on, and where its link points."""
+
+    line: int
+    id: str
+    target: str
+
+
+@dataclass(frozen=True)
 class Index:
     prefix: str | None
-    listed: list[str]
+    entries: list[Entry]
     retired: list[str]
     links: list[tuple[int, str]]
 
+    @property
+    def listed(self) -> list[str]:
+        return [entry.id for entry in self.entries]
+
 
 def read_index(text: str) -> Index:
-    """The prefix `index.md` declares, the ids it lists and retires, and each link
-    with its line number. A retired id may be written bare, in backticks, or as the
-    link its entry carried before it was retired."""
+    """The prefix `index.md` declares, the ids it lists with their links and the ids
+    it retires, and each link with its line number. A retired id may be written
+    bare, in backticks, or as the link its entry carried before it was retired."""
     prefix = match["prefix"] if (match := _PREFIX.search("\n".join(_outside_fences(text)))) \
         else None
-    entry = re.compile(r"^\s*(?:[-*+]|\|)\s*\[(?P<id>[A-Z]+-[a-z0-9]{4})\]\(")
+    entry = re.compile(r"^\s*(?:[-*+]|\|)\s*\[(?P<id>[A-Z]+-[a-z0-9]{4})\]"
+                       r"\((?P<target>[^)\s]*)")
     retiring = re.compile(r"^\s*(?:[-*+]|\|)\s*[`\[]?(?P<id>[A-Z]+-[a-z0-9]{4})\b")
-    listed: list[str] = []
+    entries: list[Entry] = []
     retired: list[str] = []
     links: list[tuple[int, str]] = []
     in_retired = False
@@ -130,8 +145,8 @@ def read_index(text: str) -> Index:
         if in_retired and (found := retiring.match(line)):
             retired.append(found["id"])
         elif not in_retired and (found := entry.match(line)):
-            listed.append(found["id"])
-    return Index(prefix, listed, retired, links)
+            entries.append(Entry(number, found["id"], found["target"]))
+    return Index(prefix, entries, retired, links)
 
 
 def _duplicates(values: Sequence[str]) -> list[str]:
@@ -162,6 +177,13 @@ def _requirement_anchor(name: str) -> str:
     return slug(f"Requirement: {name}")
 
 
+def _links_to(capability: Path, target: str, anchor: str) -> bool:
+    """Whether an entry's link is to `anchor` in the capability's `spec.md`."""
+    path, _, fragment = target.partition("#")
+    return bool(path) and (capability / path).resolve() == (capability / SPEC).resolve() \
+        and fragment == anchor
+
+
 def capability_problems(capability: Path, deltas: Deltas | None = None) -> list[str]:
     """Each way `capability`'s `spec.md` and `index.md` disagree; empty when they
     agree, or when it has no `index.md`."""
@@ -184,9 +206,11 @@ def capability_problems(capability: Path, deltas: Deltas | None = None) -> list[
              if requirement not in names]
     problems = []
     ids = []
+    requirement_of: dict[str, str] = {}
     for requirement in [*names, *added]:
         if found := pattern.match(requirement):
             ids.append(found["id"])
+            requirement_of.setdefault(found["id"], requirement)
         else:
             problems.append(f"{name}: requirement {requirement!r} begins with no id "
                             f"({index.prefix}- and four characters from [a-z0-9])")
@@ -204,6 +228,17 @@ def capability_problems(capability: Path, deltas: Deltas | None = None) -> list[
     problems += [f"{name}: {INDEX}:{line}: the link {target} does not resolve: {why}"
                  for line, target in index.links
                  if (why := _link_problem(capability, target, deltas))]
+    # A link that resolves may still reach another requirement's heading, so each
+    # entry is held to the heading of the requirement its own id names.
+    shared = set(_duplicates(ids))
+    for entry in index.entries:
+        if entry.id not in requirement_of or entry.id in shared:
+            continue
+        anchor = _requirement_anchor(requirement_of[entry.id])
+        if not _links_to(capability, entry.target, anchor):
+            problems.append(f"{name}: {INDEX}:{entry.line}: {entry.id} links to "
+                            f"{entry.target}, not to its requirement's heading "
+                            f"{SPEC}#{anchor}")
     return problems
 
 
