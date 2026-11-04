@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-import change_next_step as nxt
+from change_workflow import next_step as nxt
 from change_workflow.cli import main
 from change_workflow.common import StepError
 from change_workflow.convert import (ADVANCE, ANOTHER_ROUND, OTHER, RETURNED, convert_change,

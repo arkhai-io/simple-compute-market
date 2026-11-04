@@ -21,17 +21,17 @@ import sys
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
-from change_clone import clone_of
-from change_workflow.common import KINDS, ORCHESTRATOR, ROOT, StepError
-from change_workflow.convert import convert_change
-from change_workflow.harness import UNATTENDED_RUN
-from change_workflow.log import (branch_decisions, direction, history_log_path, last_entries,
-                                 log_path, note_orchestrator, note_round, read_log,
-                                 record_interactive)
-from change_workflow.records import git_head
-from change_workflow.review import DEFAULT_BASE, review_and_log
-from change_workflow.watch import denial_report, watch
-from change_workflow.wrapper import Wrapper
+from .clone import clone_of
+from .common import ORCHESTRATOR, StepError, repository_root
+from .convert import convert_change
+from .graph import KINDS
+from .harness import UNATTENDED_RUN
+from .log import (branch_decisions, direction, history_log_path, last_entries, log_path,
+                  note_orchestrator, note_round, read_log, record_interactive)
+from .records import git_head
+from .review import DEFAULT_BASE, review_and_log
+from .watch import denial_report, watch
+from .wrapper import Wrapper
 
 DESCRIPTION = "Run a step of an OpenSpec change unattended, and keep the change's workflow log."
 # Where Claude Code gives every command it starts the id of its session. The
@@ -221,11 +221,12 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Sequence[str] | None = None, root: Path = ROOT,
+def main(argv: Sequence[str] | None = None, root: Path | None = None,
          wrapper: Wrapper | None = None, environ: Mapping[str, str] = os.environ) -> int:
     args = _parser().parse_args(argv)
-    wrapper = wrapper or Wrapper(root=root)
     try:
+        root = repository_root() if root is None else root
+        wrapper = wrapper or Wrapper(root=root)
         if args.command == "watch":
             # A change worked in its own clone writes its progress files there, and
             # the workspace receives them only when archive cleanup copies the

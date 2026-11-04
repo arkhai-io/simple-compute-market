@@ -2,38 +2,22 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
-import change_clone as clones
+from change_workflow import clone as clones
 from change_workflow import graph
+from change_workflow import next_step as nxt
+from change_workflow import round_view as rounds
 from change_workflow.common import StepError
+from change_workflow.find import change_directory
 from change_workflow.log import (append_entry, log_path, note_orchestrator, note_round,
                                  read_log, record_outcome, unused_direction)
-from find_change import change_directory
-
-SCRIPTS = Path(__file__).resolve().parents[1]
-
-
-def _load(name: str):
-    spec = importlib.util.spec_from_file_location(name, SCRIPTS / f"{name}.py")
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    # Registered before it runs: its dataclasses look their module up by name.
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-nxt = _load("change_next_step")
-rounds = sys.modules["round_view"]
 
 CHANGE = "shape-bounds"
 # The review kind the design records below are named for.

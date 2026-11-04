@@ -55,8 +55,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Protocol, Sequence
 
-import change_clone
 import change_namespace
+from change_workflow import clone as change_clone
 
 ROOT = Path(__file__).resolve().parents[1]
 LOG_ROOT = Path(".snapshot/parallel-validation")

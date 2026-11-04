@@ -16,9 +16,9 @@ from typing import Sequence
 
 import pytest
 
-import change_clone
-import change_history as history
-import find_change
+from change_workflow import clone as change_clone
+from change_workflow import find as find_change
+from change_workflow import history
 
 CHANGE = "seed-pool"
 ARCHIVED = Path("openspec/changes/archive/2026-10-22-seed-pool")

@@ -9,11 +9,11 @@ from pathlib import Path
 import pytest
 
 from change_workflow.cli import main
+from change_workflow.find import ARCHIVE, CHANGES, change_directory
 from change_workflow.log import log_path, record_outcome
 from change_workflow.watch import watch
 from change_workflow_fixtures import (CHANGE, COMMIT, VALID, FakeClaude, event_lines,
                                       make_wrapper, two_turn_lines)
-from find_change import ARCHIVE, CHANGES, change_directory
 
 
 def test_a_runs_denials_are_listed_with_the_calls_after_each(

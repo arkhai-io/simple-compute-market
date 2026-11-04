@@ -80,7 +80,7 @@ from typing import Callable, Sequence
 
 import change_namespace
 import ci_evidence
-from find_change import REVIEWS, ChangeNotFound, change_directory
+from change_workflow.find import REVIEWS, ChangeNotFound, change_directory
 
 ROOT = Path(__file__).resolve().parents[1]
 LOG_ROOT = Path(".snapshot/validation")

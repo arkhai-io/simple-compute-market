@@ -13,7 +13,7 @@ A join is the set of records an exit waits for: the round's triage waits for its
 sections, the owner's reading, its validation, and its implementation review, each
 supplied by a step of its own.
 
-`scripts/change_next_step.py` interprets the table: it reads the exit the last
+`next_step` interprets the table: it reads the exit the last
 step's outcome named, or the owner's direction, from the change's log, checks it
 against the exits the table declares, and follows it through its guards. A guard is
 checked against the readings that computation supplies (`Readings`), so the table
@@ -47,8 +47,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
-from change_workflow.common import StepError
-from change_workflow.records import is_documentation, is_record
+from .common import StepError
+from .records import is_documentation, is_record
 
 Result = dict[str, Any]
 # What the reading of where the change stands hands a guard: the run whose outcome
@@ -435,6 +435,13 @@ TABLE: tuple[Declaration, ...] = _STEPS + (
 NODES: dict[Node, Declaration] = {declaration.node: declaration for declaration in TABLE}
 # The steps whose nodes are told apart by the kind of review they are or triage.
 _KINDED = {node.step for node in NODES if node.kind}
+# The steps the table's nodes run and the kinds of review it declares, in the
+# table's order: the workflow's whole vocabulary of steps and kinds. Every other
+# part takes them from here, so a step or kind added to the table needs no other
+# list updated.
+STEPS: tuple[str, ...] = tuple(dict.fromkeys(d.runs for d in TABLE if d.runs))
+KINDS: tuple[str, ...] = tuple(dict.fromkeys(node.kind for node in NODES
+                                             if node.step == "review" and node.kind))
 
 
 class TargetError(StepError):

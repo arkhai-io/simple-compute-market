@@ -25,7 +25,7 @@ from typing import Callable, Sequence
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from find_change import ChangeNotFound, change_directory, is_archived  # noqa: E402
+from change_workflow.find import ChangeNotFound, change_directory, is_archived  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 # The validator version openspec/README.md pins, run through whichever package

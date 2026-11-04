@@ -36,7 +36,7 @@ working directory (D4; D5 fixes 1, 2, 4; CW-r3ka's repository clause, CW-9fbu's
 single source). Touches `scripts/change_workflow/` and `scripts/tests/`; the old
 scripts become entry points calling the moved modules.
 
-- [ ] 1.1 Move each engine script into `scripts/change_workflow/` as a module:
+- [x] 1.1 Move each engine script into `scripts/change_workflow/` as a module:
       `change_next_step.py` → `next_step.py`, `change_clone.py` → `clone.py`,
       `round_view.py` → `round_view.py`, `change_history.py` → `history.py`,
       `find_change.py` → `find.py`, `change_cost.py` → `cost_report.py` (beside the
@@ -45,35 +45,133 @@ scripts become entry points calling the moved modules.
       `check_agent_skills.py` → `skills.py`, `post_compaction_context.py` →
       `hook.py` (D4), with `git mv` so history follows. Imports within the package
       are relative; no module reaches a sibling script through `sys.path`.
-- [ ] 1.2 Break the cycle: `convert` imports what it needs of the computation from
+      Done; every package module, the existing ones included, now imports its
+      siblings relatively, and the moved modules lost their shebangs.
+- [x] 1.2 Break the cycle: `convert` imports what it needs of the computation from
       `next_step` inside the package, and the package imports no script (D4;
-      design Context).
-- [ ] 1.3 `index.py` exposes the change index's reading — its rows, each row's
+      design Context). Done: `convert`, `log`, `review`, and `cli` import `.find`,
+      `.next_step`, and `.clone`.
+- [x] 1.3 `index.py` exposes the change index's reading — its rows, each row's
       status and dependencies — as public names the computation uses; the
-      computation no longer imports `_DEPENDENCY` (D4).
-- [ ] 1.4 `common.py`: `STEPS` and `KINDS` come from `graph`'s declaration, and no
-      other module keeps a list of steps or kinds (D5, 1; CW-9fbu).
-- [ ] 1.5 `common.py`: the repository root is the working directory's Git top level,
+      computation no longer imports `_DEPENDENCY` (D4). `Row.dependencies` yields
+      a `Dependency(entry, name, phase)` per `Depends on` entry, `name` None for a
+      malformed one; the index check and the computation both read it. The
+      computation still treats an empty cell as no dependency, and the check still
+      flags one, as before.
+- [x] 1.4 `common.py`: `STEPS` and `KINDS` come from `graph`'s declaration, and no
+      other module keeps a list of steps or kinds (D5, 1; CW-9fbu). They are
+      declared in `graph` itself (`STEPS` the table's `runs`, `KINDS` its review
+      nodes' kinds, in table order) and imported from there: `common` cannot import
+      `graph`, which imports `common`. `records` used `KINDS` for the triage-outcome
+      check and is imported by `graph`, so `triaged_problems` and
+      `triage_outcome_problems` moved from `records` to `outcome`, which already
+      imports `graph`. `STEPS`' order changed to the table's; only an error
+      message's list shows it. The computation's step-to-phase map
+      (`next_step._STEP_PHASE`), a second list of the steps, is now derived from the
+      table too: the earliest phase of the one node running a step, none for
+      review and triage; the map is unchanged, and a test pins it.
+- [x] 1.5 `common.py`: the repository root is the working directory's Git top level,
       found once per command, refusing outside a repository and naming the
       directory; every module takes it from there rather than from
       `Path(__file__)` (D5, 2; CW-r3ka). In this checkout and in a change's clone
-      it is the same directory as before.
-- [ ] 1.6 `__init__.py` lists every module, `common` and `subagents` among them,
+      it is the same directory as before. `repository_root()` runs `git rev-parse
+      --show-toplevel` and raises `NotInRepository` (a `StepError`); each module's
+      `main` takes `root=None` and resolves it, refusing with exit 1 and the
+      directory named. The step table, the outcome schema, and the diagram source
+      are relative paths: `load_steps()`, `load_schema()`, `Wrapper`, `run_review`,
+      and `run_codex`'s working directory resolve the repository again from the
+      working directory when given no path, which within one command is the same
+      answer; a caller passing another `root` still gets this repository's table
+      and schema of the working directory's repository, which the tests rely on:
+      `scripts/tests` now passes only when pytest runs inside a checkout, as every
+      make target runs it. Not "once per command" literally, then: section 2's
+      `cli` resolves it once for what it dispatches. Unreachable through the entry
+      points, but new: outside a repository `diagram.main` with an explicit
+      source, `Wrapper()` without a root, and the post-compaction hook refuse, and
+      `run_review` reports the repository before a bad kind.
+      Correction: the root is the same as before only where the working directory
+      is in the checkout the script sits in. The orchestrate skill runs a clone's
+      scripts by path from the workspace (`python3 <clone>/scripts/…`), and the
+      post-compaction hook runs from `$CLAUDE_PROJECT_DIR`'s path whatever the
+      session's directory, so each old entry point sets the working directory to
+      its own checkout before calling `main` (1.7). The command itself acts on the
+      working directory's repository, as CW-r3ka says.
+- [x] 1.6 `__init__.py` lists every module, `common` and `subagents` among them,
       each with its concern (D5, 4).
-- [ ] 1.7 Each old script path is an entry point of a few lines that calls its
-      moved module's `main`, so every caller keeps working until section 3.
-- [ ] 1.8 Tests: every `scripts/tests/test_change_*`, `test_find_change.py`,
+- [x] 1.7 Each old script path is an entry point of a few lines that calls its
+      moved module's `main`, so every caller keeps working until section 3. Each
+      also changes to its own checkout's top level first, so a caller running it
+      by path from another directory acts on that checkout, as with `ROOT`. The
+      four importers (`check_change.py`, `check_doc_citations.py`,
+      `validate_slice.py`, `validate_parallel.py`) import `change_workflow.find`
+      and `change_workflow.clone` directly until 3.4 moves them to the command, so
+      the entry points re-export nothing. `check_comment_hygiene.py`'s one exempt
+      line follows `TASKS_FILE` to `scripts/change_workflow/next_step.py`.
+- [x] 1.8 Tests: every `scripts/tests/test_change_*`, `test_find_change.py`,
       `test_round_view.py`, `test_check_change_index.py`, `test_run_change_step.py`,
       and `change_workflow_fixtures.py` import the moved modules; new unit tests
       for the root's resolution (inside a repository's subdirectory, in a clone, and
       outside any repository, refused with the directory named) and that `graph`
-      alone declares the steps and kinds.
-- [ ] 1.9 Verification: the moved suites pass with no assertion changed but
+      alone declares the steps and kinds. Also `test_check_tasks.py`,
+      `test_check_push_ready.py`, `test_check_agent_skills.py`,
+      `test_post_compaction_context.py`, and `test_validate_parallel.py`, which
+      loaded the old scripts; `test_run_change_step.py` and the fixtures needed no
+      change. New: `test_change_workflow_common.py` — the root in a temporary
+      repository's subdirectory, in a clone, by default from the working
+      directory, in this checkout, and refused outside any repository; every
+      module's `main` refusing there and writing nothing; the steps and kinds as
+      the table declares them, and no module but `graph` assigning `STEPS` or
+      `KINDS` (by name only: a list kept under another name would pass), and the
+      computation's step-to-phase map as the table gives it. And
+      `test_change_workflow_entry_points.py`, which runs each old script path as a
+      process from a directory outside any repository, with arguments that get it
+      past finding the repository and stop it before it writes — a change name no
+      change may have, or a read-only action — and shows it reaches its module
+      without being refused there; section 3 removes it with the scripts. The
+      orchestrate skill's pointer to the computation's result contract follows it
+      to `scripts/change_workflow/next_step.py`.
+- [x] 1.9 Verification: the moved suites pass with no assertion changed but
       imports, which proves behaviour unchanged; the new root and vocabulary tests,
       unit; `make test-release-tooling`; `make test`; `make check-change
       CHANGE=specify-change-workflow-and-engine`, failing only on the citations of
       files a later section creates. End-to-end: none of `e2e-tests/` exercises the
       workflow tooling, and none is owed.
+      Evidence: `make test-release-tooling` (unit, `scripts/tests`), 1859 passed
+      after the fresh-context fixes; `test_change_workflow_common.py` (unit, real
+      repositories in a temporary directory where the root is what is proven, as
+      the plan's preamble sets the engine's tests), 21 passed;
+      `test_change_workflow_entry_points.py` (library integration: each entry point
+      run as a process against this checkout), 12 passed; `make test` passed;
+      `make check-change` failed only on `check-doc-citations`, every miss a file a
+      later section creates (`workflow.mk`, `trace.md`, `check_spec_index.py`, the
+      assumptions and index tests, and the two capabilities' new documents).
+      What the moved suites prove: they pass an explicit `root`, so they show the
+      modules behave as before once given a repository, not the move from the
+      script's location to the working directory, which the new tests cover. Not
+      every assertion is untouched: `test_check_comment_hygiene.py` expects the
+      exempt file at its new path; `test_change_workflow_graph.py`'s
+      `{d.runs …} <= set(STEPS)` is now true by construction, since `STEPS` is
+      derived from the table, and the vocabulary test pins the set instead;
+      `test_change_workflow_steps.py` builds its absolute `STEP_TABLE` from the now
+      relative constant.
+
+Notes for the next session. The engine's mains take `root: Path | None = None`
+and resolve it with `repository_root()`; section 2's `cli` should resolve it once
+and pass it to each subcommand. The old entry points' usage strings
+(`find_change.py`, `change_next_step.py`, `check_tasks.py`) and the step prompts
+naming `scripts/run_change_step.py` (`harness.py`, `review.py`, `convert.py`'s
+`convert` command, which `next` prints) are left for the command: changing them is
+section 2's and 3's. `tasks.main` exits 2 for an unknown change, where D6 calls it
+a refusal (1): section 2.2 settles the exit categories.
+
+For section 3: the orchestrate skill runs a clone's engine by path from the
+workspace (`python3 <clone>/scripts/change_next_step.py`, `…/run_change_step.py
+note`, `… record`); the command acts on its working directory's repository, so
+those calls must run in the clone — `make -C <clone> change-next`, or the command
+started with the clone as its working directory — not `<clone>/scripts/change-workflow`
+from the workspace, which would act on the workspace. Likewise the hook's new
+wiring (3.1) acts on the hook's working directory rather than on
+`$CLAUDE_PROJECT_DIR`'s checkout.
 
 ## 2. The command and the make fragment
 

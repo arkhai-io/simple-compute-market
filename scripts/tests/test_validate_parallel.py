@@ -13,8 +13,8 @@ from typing import Sequence
 
 import pytest
 
-import change_clone
 import validate_parallel as check
+from change_workflow import clone as change_clone
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RELEASE = "arkhai-node-operator"

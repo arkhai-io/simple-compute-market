@@ -15,9 +15,8 @@ from pathlib import Path
 import pytest
 
 from change_workflow import diagram, graph
-from change_workflow.common import STEPS
 from change_workflow.diagram import DIAGRAMS, EXPORT, SOURCE, drawn
-from change_workflow.graph import (ARCHIVE_CLEANUP, CLOSEOUT_TRIAGE, DESIGN, NODES, OWNER,
+from change_workflow.graph import (ARCHIVE_CLEANUP, CLOSEOUT_TRIAGE, DESIGN, NODES, OWNER, STEPS,
                                    TABLE, WAIT, Node)
 
 ROOT = Path(__file__).resolve().parents[2]

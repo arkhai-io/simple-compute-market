@@ -2,26 +2,12 @@
 
 from __future__ import annotations
 
-import importlib.util
-import sys
 from pathlib import Path
 
 import pytest
 
-SCRIPTS = Path(__file__).resolve().parents[1]
-
-
-def _load(name: str):
-    spec = importlib.util.spec_from_file_location(name, SCRIPTS / f"{name}.py")
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-check = _load("check_tasks")
-nxt = sys.modules["change_next_step"]
+from change_workflow import next_step as nxt
+from change_workflow import tasks as check
 
 CHANGE = "shape-bounds"
 # Joined at run time: this file is scanned for task-number references like any

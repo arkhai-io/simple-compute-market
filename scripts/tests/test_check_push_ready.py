@@ -7,21 +7,15 @@ proves it; a fake Git would only restate the guard's assumptions.
 
 from __future__ import annotations
 
-import importlib.util
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
+from change_workflow import push as guard
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = REPO_ROOT / "scripts" / "check_push_ready.py"
-_SPEC = importlib.util.spec_from_file_location("check_push_ready", SCRIPT)
-assert _SPEC is not None and _SPEC.loader is not None
-guard = importlib.util.module_from_spec(_SPEC)
-sys.modules[_SPEC.name] = guard
-_SPEC.loader.exec_module(guard)
 
 
 def _git(cwd: Path, *args: str) -> str:

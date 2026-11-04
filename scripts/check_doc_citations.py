@@ -34,7 +34,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from find_change import ChangeNotFound, change_directory, is_archived  # noqa: E402
+from change_workflow.find import ChangeNotFound, change_directory, is_archived  # noqa: E402
 from tombstones import is_tombstone  # noqa: E402
 
 #: Directories whose paths `AGENTS.md` requires to resolve when cited.

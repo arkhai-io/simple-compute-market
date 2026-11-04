@@ -36,12 +36,12 @@ from datetime import timezone
 from pathlib import Path
 from typing import IO, Any, Callable, Sequence
 
-from change_workflow.common import KINDS, ORCHESTRATOR, STEPS, Clock, Entry, StepError, utc_now
-from change_workflow.graph import (NODES, ROUND, Node, Standing, TargetError, entry_refusal,
-                                   node_of, section_ids)
-from change_workflow.outcome import outcome_problems
-from change_workflow.records import NUMBERED, next_number, triage_outcome_problems
-from find_change import ARCHIVE, ChangeNotFound, change_directory, find_records
+from .common import ORCHESTRATOR, Clock, Entry, StepError, utc_now
+from .find import ARCHIVE, ChangeNotFound, change_directory, find_records
+from .graph import (KINDS, NODES, ROUND, STEPS, Node, Standing, TargetError, entry_refusal,
+                    node_of, section_ids)
+from .outcome import outcome_problems, triage_outcome_problems
+from .records import NUMBERED, next_number
 
 LOG = "workflow.jsonl"
 FORMAT = 2

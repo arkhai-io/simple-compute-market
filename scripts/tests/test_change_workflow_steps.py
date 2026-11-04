@@ -8,9 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from change_workflow.common import ROOT, STEPS, StepError
-from change_workflow.steps import STEP_TABLE, Model, load_steps
+from change_workflow import steps
+from change_workflow.common import StepError
+from change_workflow.graph import STEPS
+from change_workflow.steps import Model, load_steps
 from change_workflow_fixtures import CHANGE, OPUS, SONNET
+
+ROOT = Path(__file__).resolve().parents[2]
+STEP_TABLE = ROOT / steps.STEP_TABLE
 
 MODELS = 'models = [{ harness = "claude", model = "claude-opus-5-5", effort = "high" }]\n'
 

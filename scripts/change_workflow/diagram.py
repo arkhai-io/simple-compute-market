@@ -25,8 +25,8 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Sequence
 
-from change_workflow import graph
-from change_workflow.common import ROOT
+from . import graph
+from .common import StepError, repository_root
 
 DIAGRAMS = Path("docs/development/diagrams")
 SOURCE = DIAGRAMS / "change-workflow-graph.drawio"
@@ -83,10 +83,18 @@ def drift(source: str, table: Sequence[graph.Declaration] = graph.TABLE) -> list
     return problems
 
 
-def main(source: Path = ROOT / SOURCE,
-         table: Sequence[graph.Declaration] = graph.TABLE) -> int:
+def main(source: Path | None = None,
+         table: Sequence[graph.Declaration] = graph.TABLE, root: Path | None = None) -> int:
+    """Report whether the diagram at `source`, the repository's own by default, draws
+    `table`."""
+    try:
+        root = repository_root() if root is None else root
+    except StepError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    source = root / SOURCE if source is None else source
     problems = drift(source.read_text("utf-8"), table)
-    shown = source.relative_to(ROOT) if source.is_relative_to(ROOT) else source
+    shown = source.relative_to(root) if source.is_relative_to(root) else source
     if not problems:
         print(f"{shown} draws the table.")
         return 0

@@ -19,9 +19,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from change_workflow.common import ROOT, STEPS, Entry, StepError
+from .common import Entry, StepError, repository_root
+from .graph import STEPS
 
-STEP_TABLE = ROOT / ".claude" / "change-steps.toml"
+# The table's place in the repository the command acts on.
+STEP_TABLE = Path(".claude/change-steps.toml")
 HARNESSES = ("claude", "codex")
 # Models the workflow never runs on, whatever a row says.
 _FORBIDDEN_MODEL = re.compile(r"fable|astra", re.I)
@@ -54,8 +56,10 @@ class StepRules:
     resume_from: str | None = None
 
 
-def load_steps(path: Path = STEP_TABLE) -> dict[str, StepRules]:
-    """Each step's rules, `common`'s added to its own, and its models."""
+def load_steps(path: Path | None = None) -> dict[str, StepRules]:
+    """Each step's rules, `common`'s added to its own, and its models, from the table
+    at `path`, or the repository's own."""
+    path = repository_root() / STEP_TABLE if path is None else path
     try:
         table = tomllib.loads(path.read_text("utf-8"))
     except (OSError, tomllib.TOMLDecodeError) as exc:

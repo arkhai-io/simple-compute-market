@@ -33,7 +33,7 @@ starting") and the `make change-watch` line.
 ## Recover from the files
 
 On every start and after compaction, read `AGENTS.md` and its required documents,
-this skill, and the result contract in `scripts/change_next_step.py`. Run:
+this skill, and the result contract in `scripts/change_workflow/next_step.py`. Run:
 
 ```text
 python3 scripts/change_next_step.py <change>

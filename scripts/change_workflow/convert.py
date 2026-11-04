@@ -53,14 +53,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from change_next_step import EXIT, Computation, Record, Route, target_label
-from change_workflow import graph
-from change_workflow.common import ORCHESTRATOR, STEPS, Clock, Entry, StepError, utc_now
-from change_workflow.graph import (IMPLEMENTATION_TRIAGE, PRE_CLOSEOUT_REVIEW, VALIDATE, Node,
-                                   TargetError, entry_refusal, node_of)
-from change_workflow.log import (FORMAT, decision_line, log_path, numbered, ran, replace_log,
-                                 unmarked)
-from find_change import ChangeNotFound
+from . import graph
+from .common import ORCHESTRATOR, Clock, Entry, StepError, utc_now
+from .find import ChangeNotFound
+from .graph import (IMPLEMENTATION_TRIAGE, PRE_CLOSEOUT_REVIEW, STEPS, VALIDATE, Node,
+                    TargetError, entry_refusal, node_of)
+from .log import FORMAT, decision_line, log_path, numbered, ran, replace_log, unmarked
+from .next_step import EXIT, Computation, Record, Route, target_label
 
 CONVERSION = "convert"
 # The target a returned outcome's `return_to`, the phase it returns to, names.
