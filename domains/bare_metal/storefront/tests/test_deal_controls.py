@@ -296,7 +296,9 @@ async def test_admin_reserve_takes_the_listings_machine(tmp_path) -> None:
 async def test_admin_reserve_matches_the_claim_the_site_receives(tmp_path) -> None:
     """A required attribute is matched against the claim as the site receives
     it: the listing's machine pinned by ``resource_id`` and its quantities
-    under ``dimensions``, compared as values, not as their string forms."""
+    under ``dimensions``, compared exactly, so a boolean never stands for the
+    claim's integer unit (requirement "A bare-metal listing sells one whole
+    unit")."""
     runtime, _negotiation_id, capacity = await _runtime(tmp_path)
     app = _app(runtime)
     refused = []
@@ -309,6 +311,7 @@ async def test_admin_reserve_matches_the_claim_the_site_receives(tmp_path) -> No
             for required in (
                 {"resource_id": "resource-2"},
                 {"dimensions": {"units": 2}},
+                {"dimensions": {"units": True}},
             ):
                 with pytest.raises(StorefrontClientError) as refusal:
                     await admin.admin_reserve_capacity(
@@ -320,7 +323,7 @@ async def test_admin_reserve_matches_the_claim_the_site_receives(tmp_path) -> No
     [call] = capacity.reserve_calls
     assert call["claim"]["resource_id"] == "resource-1"
     assert call["claim"]["dimensions"] == {"units": 1}
-    assert [refusal.status_code for refusal in refused] == [409, 409]
+    assert [refusal.status_code for refusal in refused] == [409, 409, 409]
 
 
 async def test_admin_reserve_refuses_a_listing_no_authority_stands_behind(tmp_path) -> None:

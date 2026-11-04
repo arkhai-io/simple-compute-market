@@ -11,6 +11,7 @@ records. Verify and evaluate write nothing.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
@@ -178,6 +179,19 @@ def settlement_admin_routes(
     )
 
 
+def _claim_states(claimed: Any, required: Any) -> bool:
+    """Whether a claim's value is exactly what an administrator required.
+
+    Scalar attributes compare in the string form the claim holds them in.
+    Structured values compare as JSON, so a type the claim does not hold never
+    matches: Python's equality would take a required ``True`` for the claim's
+    integer ``1``.
+    """
+    if isinstance(required, Mapping):
+        return json.dumps(claimed, sort_keys=True) == json.dumps(required, sort_keys=True)
+    return claimed == str(required)
+
+
 def capacity_admin_routes(
     runtime: "BareMetalStorefrontRuntime",
 ) -> CapacityAdminRouteService:
@@ -204,12 +218,9 @@ def capacity_admin_routes(
         # A whole machine is reserved as its listing describes it; an
         # administrator's required attribute it does not match finds nothing.
         # The match is against the claim the site receives, its machine pinned
-        # and its quantities structured under `dimensions`: scalar attributes
-        # compare in the string form the claim holds them in, structured ones
-        # as values.
-        if any(
-            claim.get(str(name)) != (value if isinstance(value, Mapping) else str(value))
-            for name, value in required.items()
+        # and its quantities structured under `dimensions`.
+        if not all(
+            _claim_states(claim.get(str(name)), value) for name, value in required.items()
         ):
             return None
         return await CapacityEffects(runtime.capacity_client).reserve(

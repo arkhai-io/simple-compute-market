@@ -1973,6 +1973,15 @@ The claimed attributes MUST come from the storefront's trusted record of the acc
 listing, never from buyer input. A trusted record that carries no claimed attributes at all,
 rather than an empty set of them, MUST refuse the claim.
 
+An administrator's reservation of a capacity-backed bare-metal listing MUST construct the
+same claim, pinned to the listing's Physical Resource. Each attribute the administrator
+requires MUST equal the value that claim carries under the same name, its `resource_id`
+and its `dimensions` included: scalar values in the string form the claim holds them in,
+structured values exactly, in type as well as value. A reservation requiring anything the
+claim does not carry MUST be refused as a conflict without asking the site, and MUST NOT
+change the claim the site receives. A reservation requiring no attribute reserves the
+listing's claim as constructed.
+
 #### Scenario: A declaration changes model after acceptance
 
 - **WHEN** a buyer accepts a capacity-backed bare-metal listing published with
@@ -1991,6 +2000,20 @@ rather than an empty set of them, MUST refuse the claim.
 
 - **WHEN** a buyer accepts an unbacked bare-metal listing
 - **THEN** no capacity claim is constructed
+
+#### Scenario: An administrator re-reserves a released machine by its resource
+
+- **WHEN** an administrator reserves a capacity-backed bare-metal listing whose Physical
+  Resource has been released, requiring that listing's `resource_id` and
+  `dimensions: {units: 1}`
+- **THEN** the site receives the listing's claim pinned to that Physical Resource and
+  returns a reservation
+
+#### Scenario: An administrator requires what the claim does not carry
+
+- **WHEN** an administrator reserves a capacity-backed bare-metal listing requiring another
+  `resource_id`, `dimensions: {units: 2}`, or `dimensions: {units: true}`
+- **THEN** the reservation is refused as a conflict and the site is not asked
 
 ### Requirement: Bare-metal opening rechecks its listing against its source
 
