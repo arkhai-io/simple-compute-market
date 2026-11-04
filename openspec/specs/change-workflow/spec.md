@@ -1918,8 +1918,8 @@ checked, and one that failed or was inconclusive MUST be brought to the owner.
   finding a change by name, active or archived: `scripts/change-workflow find`
   (`scripts/change_workflow/find.py`).
 - The workflow graph: `scripts/change_workflow/graph.py`; its diagram,
-  `docs/development/diagrams/change-workflow-graph.drawio` and its SVG export, held
-  to the table by `scripts/change_workflow/diagram.py` (`make change-graph`,
+  `openspec/specs/change-workflow/diagrams/change-workflow-graph.drawio` and its SVG
+  export, held to the table by `scripts/change_workflow/diagram.py` (`make change-graph`,
   `scripts/change-workflow check graph`).
 - An interactive run's outcome recorded: `scripts/change-workflow record`; a
   change's records converted to the log's format: `scripts/change-workflow convert`

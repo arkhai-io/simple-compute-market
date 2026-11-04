@@ -121,8 +121,8 @@ each step — a review by its kind, a triage by the kind of review it triages �
 exits, the records a join waits for, the guards on each exit with the step that
 satisfies each, and the entry guards without which a step cannot do its work.
 The `change-workflow` architecture shows it as a diagram laid out by hand,
-`docs/development/diagrams/change-workflow-graph.drawio` and its SVG export, and a
-test fails when the source, or the copy of it the export embeds, draws a box or an
+`openspec/specs/change-workflow/diagrams/change-workflow-graph.drawio` and its SVG
+export, and a test fails when the source, or the copy of it the export embeds, draws a box or an
 edge the table does not, or misses one. A change to the table redraws the source in
 draw.io, from what `make change-graph` reports — each box and edge to add, change,
 or remove — and exports the SVG again with the source embedded; the SVG is never

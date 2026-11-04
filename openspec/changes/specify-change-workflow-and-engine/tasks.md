@@ -815,14 +815,34 @@ to the graph table (D12). Touches
 `openspec/specs/change-workflow/architecture.md`, and
 `scripts/tests/test_change_workflow_graph.py`.
 
-- [ ] 6.1 `git mv` the diagram's `.drawio` and `.svg` to
+- [x] 6.1 `git mv` the diagram's `.drawio` and `.svg` to
       `openspec/specs/change-workflow/diagrams/`; `diagram.py`, `graph.py`'s
       docstring, the graph test, and the companion's embed and source link name the
       new path (D12).
-- [ ] 6.2 Verification: `make change-graph` says the diagram draws the table; the
+      Done; Git records both as renames. The companion's embed and source link are
+      now `diagrams/…`, beside it, and the graph test reads that relative path from
+      `diagram.DIAGRAMS`. Also moved: the two other permanent citations of the old
+      path, `docs/agents/change-workflow.md` and the spec's Evidence. No rule lets
+      the step make a directory, so the Write tool created the destination with a
+      placeholder at the source's new path, which `git mv -f` then replaced with
+      the moved file.
+- [x] 6.2 Verification: `make change-graph` says the diagram draws the table; the
       graph tests, unit; `make check-change
       CHANGE=specify-change-workflow-and-engine`, failing only on the citations of
       files a later section creates. End-to-end: none, and none is owed.
+      Evidence: `test_change_workflow_graph.py`, `test_change_workflow_cli.py`, and
+      `test_change_workflow_command.py`, 229 passed — among them the graph test
+      that runs `make change-graph` as a process on this checkout and finds it
+      printing `openspec/specs/change-workflow/diagrams/change-workflow-graph.drawio
+      draws the table.`, and the command run as `check graph`; `make change-graph`
+      itself is denied to this step as a Bash call, so that test stands for the
+      by-hand run. `make check-change` failed only on `check-doc-citations`, every
+      miss a file a later section creates; `make test` passed; `make
+      check-packaging` passed.
+
+Notes for the next session. Section 7 renames the companion that embeds the diagram;
+its links are relative (`diagrams/…`), so they hold through the rename, and the
+graph test's `ARCHITECTURE` constant moves with it.
 
 ## 7. The assumptions test, and the two tables it reads
 

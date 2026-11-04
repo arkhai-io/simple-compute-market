@@ -246,7 +246,8 @@ def test_the_export_embeds_the_diagram_it_draws() -> None:
 
 def test_the_architecture_shows_the_export_and_names_its_source() -> None:
     document = (ROOT / ARCHITECTURE).read_text("utf-8")
-    to_diagrams = "../../../" + DIAGRAMS.as_posix()
+    # The diagram lives in its capability, beside the document that shows it.
+    to_diagrams = DIAGRAMS.relative_to(ARCHITECTURE.parent).as_posix()
 
     assert f"]({to_diagrams}/{EXPORT.name})" in document
     assert f"]({to_diagrams}/{SOURCE.name})" in document

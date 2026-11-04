@@ -36,7 +36,8 @@ refuses every entry while it is not met (`entry_refusal`); a waivable one takes 
 owner's direction as its override.
 
 The change-workflow architecture shows the table as a diagram laid out by hand,
-held to the boxes and edges the table draws (`drawing`; see `diagram`). A durable
+`openspec/specs/change-workflow/diagrams/change-workflow-graph.drawio`, held to the
+boxes and edges the table draws (`drawing`; see `diagram`). A durable
 change to the workflow is a change to this table, made as an OpenSpec change. See
 openspec/specs/change-workflow/architecture.md, "Routing is code, with the model as
 backstop".

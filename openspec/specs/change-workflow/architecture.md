@@ -246,10 +246,10 @@ The diagram of the graph, as the table declares it:
 each box a node with its entry guards, each edge an exit labelled with what it is
 taken on and its guards, numbered in the legend, and the round's join a hexagon.
 
-![The workflow graph: every node, exit, join, and guard of the table](../../../docs/development/diagrams/change-workflow-graph.svg)
+![The workflow graph: every node, exit, join, and guard of the table](diagrams/change-workflow-graph.svg)
 
 The diagram is laid out by hand. Its source is
-[`change-workflow-graph.drawio`](../../../docs/development/diagrams/change-workflow-graph.drawio);
+[`change-workflow-graph.drawio`](diagrams/change-workflow-graph.drawio);
 the SVG beside it is exported from it in draw.io with the source embedded, so it also
 opens in draw.io, and is never edited by hand. A test holds the source to the table's
 boxes and edges, whatever their layout, and the copy the export embeds to the
