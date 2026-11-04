@@ -8,7 +8,10 @@ of each guidance edit. Corrections found while loading the change reshaped sever
 of these; they are folded into the context below. The triage of design review 20
 amended D15 (the review runner's interrupt, and the run's identity as a held lock),
 D17's place in the cadence, D20 (a period ledger), and D24 (the key-block measure, and
-a seventh check for the lock revision).
+a seventh check for the lock revision). The triage of design review 31 made D15 record
+the window between its last lock check and the signal as an accepted risk, gave D24's
+private-key check to gitleaks, and put D24's uv-version guard in `uv_project.py` for
+every lock writer.
 
 ## Context
 
@@ -377,12 +380,20 @@ not today, so no orphaned reviewer goes on to write output after the stop.
 exclusive lock on its record file for as long as it runs; a record counts as a live run
 only while its lock is held, for `stop` and for the round view's check alike. `stop`
 checks the lock when it selects the run and again immediately before it signals. A
-stale record — its lock free, the run killed before it could remove it — a changed
-identity, or a run that exits meanwhile is a refusal that signals nothing. The kernel
-releases the lock however the process ends, SIGKILL included, and the lock's file
-descriptor is not inherited by the run's children, so neither a reused process id nor
-a surviving child can pass for the run. The check and the signal are microseconds
-apart, so a process id reused inside that window is not a practical case.
+stale record — its lock free, the run killed before it could remove it — or a run that
+ends before the second check is a refusal that signals nothing. The kernel releases the
+lock however the process ends, SIGKILL included, and the lock's file descriptor is not
+inherited by the run's children, so neither a reused process id nor a surviving child
+can pass for the run.
+
+The second check and the signal are two system calls, and the lock cannot make them
+atomic (31 F1): a run that ends between them leaves its process id to be signalled.
+That window is an accepted risk. The signal reaches another process only if the kernel
+hands out its whole process-id range — 32768 ids at the smallest `pid_max`, usually
+4194304 — between the two calls, and the new process belongs to the same user, since
+a signal to another user's process fails. No test can deliberately trigger that, so
+guarding it would be the speculative guard code D8 rules out. The tests cover a stale
+record and a run that ends between selection and the second check.
 
 The orchestrating session
 records the owner's interrupt as an owner's decision line that resolves nothing, then
@@ -401,6 +412,12 @@ work waits uncommitted for its resume.
 - **Rejected: comparing the process's recorded start time** (20 F2). It needs
   `/proc/<pid>/stat` on Linux and another source elsewhere, a platform branch for the
   guarantee the held lock gives through `fcntl` on both.
+- **Rejected: signalling through a process handle** (31 F1). `pidfd_open` and
+  `pidfd_send_signal` bind the signal to the process, but are Linux-only: the same
+  platform branch as the start time.
+- **Rejected: a per-run control channel** (31 F1). A FIFO beside each record, read by a
+  thread in the run, which signals itself, closes the window on every platform. It adds
+  a thread and a protocol to every runner to remove a risk no test can trigger.
 
 ### D16 — A revisit after the fixes resumes the finished triage
 
@@ -735,7 +752,7 @@ From the agent's memory, reviewed on 2026-11-04:
 
 ### D24 — The change's closing checks enforce seven written rules
 
-All but the key-block and lock-revision rules run in `make check-change CHANGE=<change>`, against the
+All but the private-key and lock-revision rules run in `make check-change CHANGE=<change>`, against the
 change's documents or its diff from its merge-base with the branch it lands on, which
 every step that commits already runs:
 
@@ -755,16 +772,25 @@ every step that commits already runs:
    parts reset — which admits a larger bump replacing a smaller one
    (`docs/development/RELEASING.md`, "Versioning policy"). A missing bump is not
    checked; the rule does not require one.
-4. **Private-key blocks**, in `scripts/check_public_content.py` beside its rules: a
-   `-----BEGIN … PRIVATE KEY-----` block is found across real newlines and literal
-   `\n` escapes alike, since a key pasted into a source string is one physical line,
-   as the existing fixtures are. Its body, with whitespace and escapes removed, is
-   refused when 32 or more base64 characters remain, reported by location without its
-   content. No real private key is that short — the smallest, an Ed25519 or X25519 key
-   in PKCS#8, has a 64-character body — and the existing fixtures, whose bodies are
-   `fixture`, `material` and `legacy-fixture`, pass. Line wrapping does not matter.
-   Tests cover a key wrapped at short lines, a key embedded as one escaped string, and
-   a key added in an intermediate outgoing commit that a later commit deletes.
+4. **Private keys**, through gitleaks (MIT), a maintained secret scanner, at a pinned
+   release, as D10 asks (31 F3). It runs beside `scripts/check_public_content.py`
+   wherever that runs — the pre-commit hook on staged additions, the guarded push and
+   the pre-push hook on every outgoing commit, and the Public content workflow on every
+   commit since the event base — with its output redacted, so a finding names its
+   location without the key. `check_public_content.py` keeps its own rules (home paths,
+   planning paths, the private denylist), which no general scanner knows. Its
+   private-key rule is understood to match a whole `BEGIN … PRIVATE KEY` block with a
+   minimum body, so a key wrapped at any length or written as one escaped string is
+   refused and the existing fixtures, whose bodies are `fixture`, `material` and
+   `legacy-fixture`, pass; that understanding is unverified against gitleaks' source.
+   So the first work on this check runs the pinned release against the repository's
+   tree, a key wrapped at short lines, a key embedded as one escaped string, and a key
+   added in an intermediate outgoing commit that a later commit deletes. If a fixture
+   is refused or a key passes, the change returns to design rather than working around
+   it. A body edited into an existing block beneath an unchanged header is a known
+   limitation: a diff-reading scanner sees no header in that patch.
+   `ARCHITECTURE.md`'s "Public repository content checks" records it with how to
+   install the pinned release, and review remains the safeguard there.
 5. **Local imports.** An import inside a function that the diff adds to a `.py` file
    has a comment on its own line or the line above giving its reason
    (`openspec/README.md`, closeout part 2). Whether the reason is sound stays with
@@ -780,8 +806,10 @@ every step that commits already runs:
      writes revision 5, established by running uv during implementation; CI's pins in
      `tests.yml` and `e2e.yml` and `docs/development/BUILD_AND_PACKAGING.md` move to
      it. The check stays a minimum, not an exact pin.
-   - `scripts/uv_project.py reinit`, which every package's `make init` runs and which
-     may rewrite a lock, runs the uv-version check first, as `make lock` does.
+   - `scripts/uv_project.py` runs the uv-version check before its `lock` and `reinit`
+     commands run uv (31 F2). Every lock writer goes through it: `make lock`,
+     `make review-locks`, and every package's `make init` through `reinit`. `make lock`
+     keeps its `check-uv-version` prerequisite, so it refuses before building wheels.
    - The locks still at revision 3 are relocked to 5.
 
    `BUILD_AND_PACKAGING.md`'s explanation and `check_uv_version.py`'s docstring cover
@@ -810,6 +838,14 @@ runs the workflow's steps needs a uv at or above the new minimum.
 - **Rejected: allowlisting fixture words, or refusing every key block** (20 F4). The
   first needs a checker edit for every new fixture word. The second makes every fixture
   build its header at runtime.
+- **Rejected: an in-house whole-body key rule** (31 F3). Measuring the body across
+  real and escaped breaks, as 20 F4 settled, needs the whole post-image of each changed
+  file to see a header the patch leaves out, and a way to tie a block to added lines.
+  That is a secret scanner of our own where a maintained one exists.
+- **Rejected: detect-secrets, or pre-commit-hooks' `detect-private-key`** (31 F3). Both
+  are understood to match the header alone, so both refuse the fixtures: the first
+  would need a baseline of them, and the second has no commit-range mode for outgoing
+  commits and CI.
 - **Rejected: keeping the uv minimum at 0.12 and relocking back to revision 3** (21 R1).
   The owner raises the minimum instead, toward the release that already writes the
   repository's locks.
@@ -843,7 +879,8 @@ evidence serves the guidance review alone, so it lives in that skill (D20).
   publishing check and in `change-review`'s required finding format together (D17), so
   round 1's own review is written in the format its publisher checks. One session for
   the seven checks and the capability-index row (D24), the lock revision first, with
-  the raised uv minimum and the relock. Skills should describe tooling that exists, so
+  the raised uv minimum and the relock, and gitleaks' fixture and key cases confirmed
+  before it is wired in. Skills should describe tooling that exists, so
   the code comes first; the two sessions are independent, and are reviewed and
   validated together.
 - **Round 2 — the skills and guidance, two sessions.** One session for the workflow

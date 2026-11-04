@@ -8,9 +8,9 @@ recorded as it started, so that the run is logged `stopped` with its session and
 process the run started is ended; when two
 runs of the change are in progress, the command MUST name the step it stops, and it
 MUST refuse, stopping nothing, when no run of the change is in progress. The command
-MUST signal only a process it verifies is still the recorded run, when it selects the
-run and again immediately before the signal, and MUST refuse, signalling nothing, a
-record whose run no longer holds it or a run that ends meanwhile. The owner's
+MUST verify that the recorded run still holds its record, when it selects the run and
+again immediately before the signal, and MUST refuse, signalling nothing, a record
+whose run no longer holds it at either check. The owner's
 interrupt MUST be recorded as an owner's decision that resolves no run. A stopped run
 MUST then be recovered as any stop is: resumed with the owner's words, rerun, or
 resolved by the owner's decision. A stop MUST commit nothing, and an interrupted
@@ -36,6 +36,12 @@ review MUST publish nothing.
 
 - **WHEN** the stop command finds a record whose run is no longer holding it
 - **THEN** it refuses, naming the record as stale, and signals nothing
+
+#### Scenario: A run ends while it is being stopped
+
+- **WHEN** the run the stop command selected ends before the check immediately before
+  the signal
+- **THEN** the command refuses and signals nothing
 
 #### Scenario: Nothing is running
 
@@ -131,9 +137,9 @@ list; when a package version differs from its version at the merge-base with the
 branch the change lands on by more than one SemVer step; when an import its diff adds
 inside a function has no comment giving its reason; or when a capability with a
 specification has no row in the capability index, or a row links no capability. The
-public-content check MUST find a private-key block across real line breaks and escaped
-ones alike, and MUST refuse one whose body, without whitespace and escapes, holds 32 or
-more base64 characters, reporting its location without its content. The packaging
+public-content checks MUST refuse a private key in added content through a maintained
+secret scanner at a pinned release, whether the key is wrapped at any length or written
+as one escaped string, reporting its location without its content. The packaging
 checks MUST fail when a committed lock carries a lock revision other than the one the
 repository's minimum uv writes, and every command that may rewrite a lock MUST first
 refuse a uv older than that minimum.
@@ -175,20 +181,20 @@ refuse a uv older than that minimum.
 #### Scenario: A key fixture carries no key material
 
 - **WHEN** a test fixture holds a private-key block whose body is the word `fixture`
-- **THEN** the public-content check passes it
+- **THEN** the public-content checks pass it
 
 #### Scenario: A real key is staged
 
-- **WHEN** a staged file holds a private-key block with base64 key lines, wrapped at
-  any length
-- **THEN** the public-content check refuses it, naming the file and line without
+- **WHEN** a staged addition holds a private-key block with base64 key lines, wrapped
+  at any length
+- **THEN** the public-content checks refuse it, naming the file and line without
   echoing the key
 
 #### Scenario: A key is embedded as one escaped string
 
 - **WHEN** an added source line holds a private-key block as one string, its line
   breaks written as `\n` escapes, with key material for a body
-- **THEN** the public-content check refuses it, naming the file and line without
+- **THEN** the public-content checks refuse it, naming the file and line without
   echoing the key
 
 #### Scenario: A lock is written by another uv release
@@ -197,11 +203,11 @@ refuse a uv older than that minimum.
   repository's minimum uv writes
 - **THEN** the packaging checks fail, naming the lock and both revisions
 
-#### Scenario: A package environment is refreshed with an older uv
+#### Scenario: A lock is rewritten with an older uv
 
-- **WHEN** a package's environment is refreshed, which may rewrite its lock, with a uv
-  older than the repository's minimum
-- **THEN** the refresh refuses before running uv, naming both versions
+- **WHEN** a project is relocked, or a package's environment is refreshed, which may
+  rewrite its lock, with a uv older than the repository's minimum
+- **THEN** the command refuses before running uv, naming both versions
 
 ## MODIFIED Requirements
 
