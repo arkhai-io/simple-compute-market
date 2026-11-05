@@ -49,6 +49,9 @@ allow = [
   "Bash(printenv CLAUDE_CODE_SESSION_ID)",
   # The installed uv's version, which decides the lock revision it writes.
   "Bash(uv --version)", "Bash(uv self version)",
+  # The secret scan reads the tree and history; installing its scanner is the
+  # operator's, through make install-gitleaks.
+  "Bash(make check-secrets)", "Bash(make check-secrets *)",
 ]
 deny = [
   "Bash(git push*)", "Bash(git reset*)", "Bash(git checkout*)", "Bash(git switch*)",
