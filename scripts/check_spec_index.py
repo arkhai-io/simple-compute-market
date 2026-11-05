@@ -21,8 +21,8 @@ Closeout writes `index.md` before the archive merges the change's deltas into
 `spec.md`, so with a change named its deltas count as the archive will leave them:
 an id its deltas add or rename to is in the specification, its headings resolve,
 and a requirement its deltas remove or rename from is gone. A capability the change
-creates has no `spec.md` before the archive; its links to `spec.md` resolve against
-the deltas alone.
+creates has no `spec.md` before the archive; when its deltas add a requirement, its
+links to `spec.md` resolve against the deltas alone.
 
 Usage: `make check-spec-index [CHANGE=<change>]`.
 """
@@ -82,10 +82,14 @@ def anchors(text: str) -> set[str]:
 @dataclass
 class Deltas:
     """What a change's delta for one capability leaves once archived: the
-    requirement names it adds or renames to, and those it removes or renames from."""
+    requirement names it adds, modifies, or renames to, and those it removes or
+    renames from. `added` holds only the names it adds, the one operation that can
+    create a capability's `spec.md`: a modification or rename needs a requirement
+    already there."""
 
     present: list[str] = field(default_factory=list)
     removed: list[str] = field(default_factory=list)
+    added: list[str] = field(default_factory=list)
 
 
 def read_deltas(text: str) -> Deltas:
@@ -103,6 +107,8 @@ def read_deltas(text: str) -> Deltas:
                 requirement := _REQUIREMENT.match(line)):
             (deltas.removed if operation == "REMOVED" else deltas.present).append(
                 requirement["name"])
+            if operation == "ADDED":
+                deltas.added.append(requirement["name"])
     return deltas
 
 
@@ -166,8 +172,9 @@ def _link_problem(capability: Path, target: str, deltas: Deltas) -> str | None:
     file = (capability / path).resolve() if path else capability / INDEX
     is_spec = file == (capability / SPEC).resolve()
     # A capability new with the change has no spec.md until the archive writes it
-    # from the deltas, so its links resolve against what the deltas add.
-    if not file.exists() and not (is_spec and deltas.present):
+    # from the requirements the deltas add, so its links resolve against the deltas;
+    # deltas that add none cannot write it, and it stays missing.
+    if not file.exists() and not (is_spec and deltas.added):
         return f"its file {path} does not exist"
     if not fragment or file.is_dir():
         return None

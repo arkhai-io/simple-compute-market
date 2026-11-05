@@ -141,12 +141,22 @@ def test_a_capability_the_change_creates_resolves_against_its_delta(tmp_path: Pa
     assert any("its file spec.md does not exist" in problem for problem in problems(tmp_path))
 
 
-def test_a_missing_spec_a_delta_adds_nothing_to_is_still_missing(tmp_path: Path) -> None:
+@pytest.mark.parametrize("delta", [
+    "",
+    "## ADDED Requirements\n",
+    "## REMOVED Requirements\n\n### Requirement: EF-zz00 Gone\n\n**Reason**: gone.\n",
+    # A modification or rename needs a requirement already there, so neither can
+    # write a missing spec.md, even naming every id the index lists.
+    "## MODIFIED Requirements\n\n" + SPEC.split("## Requirements\n\n", 1)[1],
+    "## RENAMED Requirements\n\n- FROM: `### Requirement: EF-zz00 Old`\n"
+    "- TO: `### Requirement: EF-a8tf The flow starts`\n",
+], ids=["empty", "empty-added", "removed-only", "modified-only", "renamed-only"])
+def test_a_missing_spec_a_delta_adds_nothing_to_is_still_missing(tmp_path: Path,
+                                                                 delta: str) -> None:
     capability = tmp_path / "openspec/specs/example-flow"
     capability.mkdir(parents=True)
     (capability / "index.md").write_text(INDEX, "utf-8")
-    _delta(tmp_path, "## REMOVED Requirements\n\n### Requirement: EF-zz00 Gone\n\n"
-                     "**Reason**: gone.\n")
+    _delta(tmp_path, delta)
 
     assert any("its file spec.md does not exist" in problem
                for problem in problems(tmp_path, CHANGE))
@@ -188,6 +198,15 @@ def test_a_rename_counts_its_new_name_and_drops_its_old(tmp_path: Path) -> None:
                                                 ["EF-q4ze The flow ends"])
     capability = _capability(tmp_path, index=INDEX.replace("the-flow-ends", "the-flow-stops"))
     assert capability_problems(capability, deltas) == []
+
+
+def test_only_an_added_requirement_counts_as_added() -> None:
+    deltas = read_deltas(ADDED + "\n" + RENAMED + "\n## MODIFIED Requirements\n\n"
+                         "### Requirement: EF-a8tf The flow starts\n\nIt MUST start.\n"
+                         "\n## REMOVED Requirements\n\n### Requirement: EF-zz00 Gone\n")
+
+    assert deltas.added == ["EF-n3w1 The flow pauses"]
+    assert read_deltas(RENAMED).added == []
 
 
 def test_a_renamed_and_modified_requirement_is_one_requirement(tmp_path: Path) -> None:

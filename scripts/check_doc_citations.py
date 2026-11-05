@@ -24,9 +24,8 @@ unarchived path resolves against its archive directory, so the archive move
 itself is never reported. Before it is archived, a citation of a capability's
 `spec.md` that the change's own delta creates resolves, since closeout checks
 citations before the archive writes that file from the delta. A change's
-`reviews/` are excluded too:
-review records are untracked working notes, never part of the branch, so a
-citation in one is not a citation the branch makes.
+`reviews/` are excluded too: review records are untracked working notes, never
+part of the branch, so a citation in one is not a citation the branch makes.
 """
 
 from __future__ import annotations
@@ -37,6 +36,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from check_spec_index import read_deltas  # noqa: E402
 from tombstones import is_tombstone  # noqa: E402
 from workflow_command import WorkflowRefused, found_change  # noqa: E402
 
@@ -102,9 +102,12 @@ def documents(root: Path, change: str | None = None) -> list[Path]:
 
 def _created_specs(directory: Path) -> set[str]:
     """Each capability's `spec.md`, as cited, that an active change's deltas write
-    when the change is archived."""
+    when the change is archived. Only a delta that adds a requirement can write one:
+    a modification, removal, or rename needs a requirement already there. The delta
+    is read by the index check's parser, so the two checks agree on what it adds."""
     return {f"openspec/specs/{delta.parent.name}/spec.md"
-            for delta in directory.glob("specs/*/spec.md")}
+            for delta in directory.glob("specs/*/spec.md")
+            if read_deltas(delta.read_text(encoding="utf-8", errors="ignore")).added}
 
 
 def unresolvable(

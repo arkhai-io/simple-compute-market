@@ -878,6 +878,24 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
       reports such a citation, since that view holds permanent documents to what
       exists; and the rules' `origin` (CW-8jyb, CW-xx5f) names the workspace's own
       remote by Git's convention, not one of this repository's values.
+      Implementation review 88 F1 found both exceptions looser than a `spec.md`
+      the delta creates: the citation check accepted any delta file, even an empty
+      or remove-only one, and the index check a modify-only one. On the owner's
+      direction both now require the delta to add a requirement, the only operation
+      that can write a missing `spec.md`: `read_deltas` records the added names
+      apart (`Deltas.added`), the index check's missing-file exemption reads them,
+      and the citation check reads each delta with the same parser. Unit tests
+      show an empty, empty-ADDED, remove-only, modify-only, and rename-only delta
+      each leaves the citation and the index links unresolved, a delta adding a
+      requirement beside a removal still resolves, and `added` holds only ADDED
+      names. Evidence: the scripts suite (unit, `make test-release-tooling`) 2176
+      passed; `make test` passed; `make check-packaging` passed; `make
+      check-change` passed. The fresh-context check found no defect; its requested
+      tests (a direct `added` test, a mixed delta that resolves, a rename-only
+      citation case) were added, a delta is read tolerating invalid UTF-8 as
+      documents are, and a reflowed docstring line was mended. Declined: the
+      citation check's module docstring sentence "The existence test this
+      replaces" predates this correction and is outside it.
 - [x] 11.11 Archival: `openspec archive specify-change-workflow-and-engine -y`,
       merging the deltas into `change-workflow`, the new `market-change-workflow`,
       and `planning-governance`; where the archive writes a placeholder Purpose for
