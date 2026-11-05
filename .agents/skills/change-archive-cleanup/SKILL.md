@@ -133,7 +133,9 @@ again, to be resumed, or its outcome recorded with the command above.
   log <change>` shows that line — the direction is the
   waiver, its reason the owner's. Otherwise stop and ask the owner, naming the paths
   and the commits that changed them, whether the correction is validated first
-  (`make validate CHANGE=<change>`) or they waive the check. Interactively, the
+  (`make validate CHANGE=<change>`) or they waive the check. Recommend the waiver
+  when a criterion of `docs/agents/change-workflow.md`'s "Waivers" holds, naming
+  the criterion and its evidence; with none holding, recommend none. Interactively, the
   owner answers in the session: record a waiver as their direction, and compute
   again, which then names archive cleanup:
 
@@ -143,8 +145,20 @@ again, to be resumed, or its outcome recorded with the command above.
 
   Record a waiver as one line of the
   archived change's `interventions.jsonl` (`"finding": "validated"`, under the
-  closeout review's record name, the owner's reason as the disposition), with the
-  Edit tool, and commit it with the index edit (step 5). The check itself stands: a
+  closeout review's record name, the owner's reason as the disposition, and, for a
+  waiver you recommended, the recommendation and its criterion as the
+  `agent_position`), with the Edit tool, and commit it with the index edit (step
+  5). A recommendation the owner declines is a line too, in the same form with
+  their reason. This run commits nothing as it stops, so once the owner has
+  answered, name the declined recommendation and their reason in the message you
+  end with, which the workflow log keeps; the run after the validation reads the
+  log (`scripts/change-workflow log <change>`) for it, or, run interactively, asks
+  the owner, and writes the line with its index edit. Likewise write, with the
+  index edit, the line of each waiver a validation recommended in a record no
+  triage read — each `NN-validation.md` with no triage file beside it whose `##
+  Environment` records one — under its record, its `finding` the part, the
+  recommendation and criterion as the `agent_position`, and the owner's answer as
+  the disposition. The check itself stands: a
   merge carries every commit on the branch, whichever change wrote it.
 - **Worktree.** It is clean, and `scripts/change-workflow check round-view` passes.
 
@@ -195,7 +209,7 @@ the index check is the one that sees this edit.
 
 ## 5. Commit
 
-Commit the index edit, with a waiver's ledger line when step 1 recorded one, as
+Commit the index edit, with the waiver ledger lines step 1 recorded, as
 one commit whose message names the change and says its archive is cleaned up and
 which dependents it released. Then push it with `scripts/change-workflow push`,
 the guarded push of exactly `HEAD`; if it refuses, stop and report its reasons.

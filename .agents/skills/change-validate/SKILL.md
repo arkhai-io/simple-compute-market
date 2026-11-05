@@ -378,14 +378,23 @@ the change, and triage cannot fix it. Settle it now:
 
 1. Stop, and tell the owner the failure, its evidence, and the remedy — for
    example, another change's namespace to scale to zero, a volume that outlived
-   its deletion (`volumes gone`) to delete, the daemon to restart.
+   its deletion (`volumes gone`) to delete, the daemon to restart. When it is a
+   known environmental failure, already diagnosed in an earlier validation record
+   of this change, recommend beside the remedy that the owner may waive the part
+   instead, naming that record, as `docs/agents/change-workflow.md`'s "Waivers" gives the criterion;
+   with no criterion holding, recommend none. Only the owner waives: a part they
+   waive is `inconclusive`, as one they decline to remedy is.
 2. Wait for the owner's word: either the owner carries out the remedy, or names the
    action for you to take. Take only the action named.
 3. Rerun that part. It is a new attempt with its own directory; the earlier
    attempt stays as evidence, and the record reports both.
 
 When the owner declines, or the remedy cannot be applied now, the part is
-`inconclusive`. Never rerun a failed step only to get a pass: a rerun is to tell an
+`inconclusive`. A waiver you recommended goes in the record's `## Environment`,
+taken or declined, with its criterion: validation commits nothing, so the triage
+that reads the record writes its ledger line, and archive cleanup writes it for a
+record no triage reads — a validation of the merged `HEAD`, or one before closeout
+or archive cleanup. Never rerun a failed step only to get a pass: a rerun is to tell an
 environmental fault from a failure, or to validate after a remedy, and its first
 result is always reported.
 
@@ -471,8 +480,9 @@ Not owed: `<job>` — <conclusion>, <each failure: the test and its exception ty
 
 ## Environment
 
-<each environmental failure: its evidence, the remedy, what the owner decided, and
-the attempt that followed; or `None.`>
+<each environmental failure: its evidence, the remedy, any waiver you recommended
+with its criterion and the earlier record, what the owner decided, and the attempt
+that followed; or `None.`>
 
 ## Failures
 

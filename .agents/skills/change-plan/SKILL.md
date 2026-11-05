@@ -170,9 +170,15 @@ plan on an answer the design review did not cover.
 2. Settle the question as `change-design` settles a decision, and record it in
    `design.md`.
 3. Ask the owner whether the change needs another design review for it, or whether
-   they waive the review. A waiver is the owner's call. Record it as a ledger entry
-   with `"review": "plan"`, the decision as `finding`, lens `readiness`, basis
-   `judgement`, and a null severity, stating what was waived and why; this session
+   they waive the review, recommending the waiver when a criterion of
+   `docs/agents/change-workflow.md`'s "Waivers" holds — the decision is confined to
+   one requirement's wording, or to a choice the design review already weighed —
+   naming it, and none otherwise. A waiver is the owner's call. Record it as a
+   ledger entry with `"review": "plan"`, the decision as `finding`, lens
+   `readiness`, basis `judgement`, and a null severity, stating what was waived and
+   why, and, when you recommended it, the recommendation and criterion as the
+   `agent_position`; a recommendation the owner declines is such an entry too,
+   committed with `design.md` on the return below. This session
    goes on to plan, and its outcome names the plan's exit. When the owner wants the
    review instead, commit what `design.md` gained, as section 7 commits the plan,
    and end the session as a return: record `returned`, `next` `{"step":

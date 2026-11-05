@@ -198,7 +198,9 @@ For an implementation round, also take:
   severity `blocking`. Check each diagnosis against the logs it cites, under
   `.snapshot/`, rather than trusting it. Its `## Environment` entries and an
   `inconclusive` part are missing evidence, never findings: say what evidence is
-  missing and whether the round can be judged without it. Observations it records
+  missing and whether the round can be judged without it. A waiver the validation
+  recommended, which its `## Environment` records with its criterion, is a ledger
+  line you append (step 4), taken or declined. Observations it records
   about other changes or about the validation tooling are presented, not triaged as
   findings against this change. Read every untriaged validation record, not only
   the latest: an earlier record's `V<n>` failures are presented too, merged with
@@ -521,7 +523,9 @@ owner's revisit resumes this session (step 7). A later revision of that entry us
 
 A waiver you recommended (step 1) is an entry whether the owner takes it or not:
 its `agent_position` names the recommendation and its criterion, and its
-`owner_disposition` the owner's word, with their reason when they decline it.
+`owner_disposition` the owner's word, with their reason when they decline it. So
+is a waiver the validation recommended, under its record (`NN-validation`), its
+`finding` the part it waived.
 
 After writing ledger entries, say how many you appended and for which findings.
 The ledger is often a new, untracked file whose changes do not show in a diff, so
@@ -668,9 +672,10 @@ contradict its status misleads every agent that reads the index — then run
 
 Whichever exit it names, a triage of any kind then commits what it changed
 and no fix commit (step 5) already holds — the change's documents its
-dispositions edited, `interventions.jsonl`, the index row, and any other tracked
-file an `edit` or a recorded defect changed — as one commit naming the change and
-the review, and
+dispositions edited, `interventions.jsonl` with any line the orchestrating session
+left uncommitted for you, such as a declined waiver of this design review, the
+index row, and any other tracked file an `edit` or a recorded defect changed — as
+one commit naming the change and the review, and
 pushes it with `scripts/change-workflow push`, so the next step reads a committed change from
 a clean worktree. After a pre-closeout review such a commit needs no validation
 when it changes only paths under `openspec/` and `docs/`: closeout's own checks

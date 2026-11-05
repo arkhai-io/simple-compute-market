@@ -1324,7 +1324,7 @@ test, `openspec/specs/market-change-workflow/README.md`. Implements the delta
 requirements `CW-k2rv`, `CW-h7lq`, `CW-w4ne`, `CW-r8vz`, `CW-q3dm` and `CW-n6wy` in the
 skills.
 
-- [ ] 10.1 `change-orchestrate`: relay the table and an advancing exit as any message;
+- [x] 10.1 `change-orchestrate`: relay the table and an advancing exit as any message;
   on the owner's word, interrupt a running step with `scripts/change-workflow stop
   <change> [--step <step>]` and record the interrupt as an owner's decision resolving
   nothing (`scripts/change-workflow note <change> orchestrator --by owner …`), then
@@ -1334,13 +1334,37 @@ skills.
   owner's words, then resolve the stopped step (D15, D16). Verify: the skill names each
   command as sections 1 and 2 implemented it and the merge placed it under
   `scripts/change-workflow`.
-- [ ] 10.2 `change-review`: the design and pre-closeout scope lenses ask whether new
+  Done: "Relay each discussion turn" relays the table and an advancing exit as any
+  message, adding no prompt to confirm them; the opening says the session stays free
+  for the owner mid-step; a new "Interrupting and revisiting", citing the guide's
+  two paragraphs, gives `stop <change> [--step]`, the refusals relayed, the
+  interrupt's `note --by owner --decision` resolving no run, recovery as any stop (a
+  review rerun, never resumed), and the revisit in section 2's order — each running
+  step stopped, `note --by owner --resumes <triage-seq>`, `resume --seq --answer` as
+  its own background command, then each stopped step resolved, one line per run;
+  after `done`, the pull request. "Record decisions through the log's writer" names
+  `--resumes`. Beyond the task, for D22 and CW-n6wy: the design-review waiver's
+  ledger line names the design step's recommendation, and a declined
+  recommendation is a line too, left for the design review's triage to commit
+  (whose step 6 now says so), with the commit-hold sentence, the "ledger line you
+  write" sentence and the guide's Orchestration row following. Commands checked
+  against `scripts/change_workflow/cli.py` by the fresh-context check: `stop`
+  (`--step`, reading the clone), `note … --resumes`, `resume --seq --answer`.
+- [x] 10.2 `change-review`: the design and pre-closeout scope lenses ask whether new
   scope is a small understood fix, kept, or large or vague work, split, and the
   implementation consistency lens admits a found defect the notes record, each citing
   `openspec/README.md#defects-found-during-a-change` (D6). `change-implement`: a
   small, understood defect found while implementing is fixed and recorded in the
   section's notes as outside the plan (D6). Verify: `make check-agent-skills` passes.
-- [ ] 10.3 `change-design`: record decisions under `### D<n> — <title>` headings and
+  Done: the design scope lens keeps a small understood fix or favoured unification
+  and splits large or vague work; the implementation consistency lens admits a
+  defect fixed outside the plan and recorded in the task notes or a triage record,
+  an unrecorded one being a finding; the pre-closeout scope lens keeps a small fix
+  and sends large work to its own change or a gap; each cites the section.
+  `change-implement` step 3 fixes a small, understood defect and records it in the
+  section's notes as outside the plan, and records a large one where "Deferred
+  work" says. `make check-agent-skills` passes.
+- [x] 10.3 `change-design`: record decisions under `### D<n> — <title>` headings and
   name each in "Knowledge to promote" (D24 item 1); state documentation destinations,
   test levels and evidence rather than asking them (D12); ask the splitting question
   as `openspec/README.md#defects-found-during-a-change` frames it (D6); and, finishing
@@ -1348,12 +1372,66 @@ skills.
   (D22). `change-validate` recommends a waiver on a known environmental failure, and
   `change-archive-cleanup` before its validation, when a criterion holds (D22).
   Verify: `make check-agent-skills` passes.
-- [ ] 10.4 Verification: `make check-agent-skills` passes;
+  Done: `change-design` step 6 records each decision under `### D<n> — <title>` and
+  names it in "Knowledge to promote" (the `no permanent destination` form, which
+  `make check-change` checks); "Classify each decision" carries D12's bookkeeping
+  paragraph; step 5's splitting question cites the defects section; step 7, after a
+  return, recommends waiving another design review by the criterion, the
+  orchestrating session writing the ledger line. `change-validate` step 5
+  recommends, beside the remedy, waiving a part on a known environmental failure,
+  naming the earlier record; the record's `## Environment` keeps the recommendation
+  and the owner's answer, and `change-triage` step 1 makes it a ledger line in an
+  implementation round, under the validation's record, and archive cleanup for a
+  record no triage read. `change-archive-cleanup`
+  recommends waiving its validation by the criterion, its waiver line naming the
+  recommendation, and a declined one is named in its message for the run after the
+  validation to log. Outside the plan, from the fresh-context check:
+  `change-plan`'s waiver of another design review after a return made inside
+  planning now recommends by the criterion too, and logs a declined
+  recommendation. `make check-agent-skills` passes.
+- [x] 10.4 Verification: `make check-agent-skills` passes;
   `pytest -q scripts/tests/test_change_workflow_assumptions.py` (unit) passes, any make
   target or repository path the skills newly name listed in
   `openspec/specs/market-change-workflow/README.md`'s tables (`MCW-5tgp`); `make
   check-change CHANGE=act-on-owner-intervention-patterns` passes. End-to-end: none; no
   scenario exercises the skills.
+  Done: `make check-agent-skills` passes; the roles test (unit) 11 passed, run as `uv
+  run --no-project --with pytest pytest`, the skills naming no new target or path;
+  `make check-change` passes all twelve checks; `make test` passed, its scripts suite
+  2367 passed, rewriting no lock (run before the fresh-context fixes, which touched
+  only Markdown; the cheap checks were rerun after them). End-to-end confirmed:
+  none. No CI evidence is owed.
+  Fresh-context check: fixed — a declined design-review waiver's line nothing
+  committed (triage step 6 commits it now); a validation's recommended waiver was
+  logged only where a triage reads the record (archive cleanup now writes the
+  rest, below); archive cleanup's declined line was
+  left to a run told nothing of it; orchestrate said a triage with nothing to
+  discuss asks nothing even when it recommends another round; `change-plan` asked
+  for a waiver without recommending; triage's step 4 had no form for a validation's
+  waiver; archive cleanup's "typically"
+  criterion could never hold for its paths;
+  `change-review` admitted a defect recorded only in task notes and said large
+  work "is split out" beside "rarely split"; orchestrate's revisit spoke of one
+  stopped step where two may run, offered to resume a stopped review, and said a
+  revisit's direction names no run; validate's recommendation read as replacing the
+  remedy.
+  A second check found the fixes holding but for three points, fixed: the first
+  fix had kept an untriaged validation's waiver in its record alone, an unwritten
+  exception to CW-n6wy, so archive cleanup, which commits the ledger and reads the
+  validation records, now writes the line of each waiver a validation no triage
+  read recommended; archive cleanup's declined recommendation now carries the
+  owner's reason in the message it ends with; and the guide's "Waivers" and D22 in
+  `design.md` now name planning's recommendation and which step writes each line a
+  non-committing step leaves.
+  Outside the plan's file list, each recorded above: `change-plan/SKILL.md` (its
+  waiver recommendation), `change-triage/SKILL.md` (step 1's validation waiver
+  line, step 4's form, step 6's commit of an orchestrator-left line),
+  `docs/agents/change-workflow.md` (the Orchestration row and "Waivers"), and D22
+  in `design.md`.
+  Handoff: closeout's promotion of D22 (11.9) carries which step writes each
+  recommended waiver's line, now in the guide's "Waivers". Section 9's commit was
+  not pushed on its own: the guarded push refused while this section's edits were
+  uncommitted and `git stash` was denied, so both commits went out together.
 
 ## 11. Closeout
 

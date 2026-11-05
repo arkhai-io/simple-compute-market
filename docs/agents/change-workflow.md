@@ -40,7 +40,7 @@ memory.
 | Closeout | `change-closeout` | `make closeout CHANGE=<change>` | permanent documents, the promotion record, the archived change, one commit |
 | Closeout review | `change-review` | `make review CHANGE=<change> KIND=closeout` | `reviews/NN-closeout.md` |
 | Archive cleanup | `change-archive-cleanup` | `make archive-cleanup CHANGE=<change>` | the index (dependents released, row `archived`), any waiver as a ledger line, one commit, `reviews/pull-request.md`; the capacity figure its latest validation measured (`make record-capacity`), in a commit of its own, or none when nothing was measured; then tears down the change's validation namespace and images (`make -C helm teardown`) and, for a change worked in its own clone, copies its history into your workspace (`make change-history`) |
-| Orchestration | `change-orchestrate` | `make orchestrate CHANGE=<change>` | the change's clone and branch, `orchestrator` and `round` lines in the workflow log — your directions among them, on your word — the conversion of a change's records on your word, the owner's notes on a round, the ledger line of a waived design review, workflow commits on your word, its own observations of the tooling |
+| Orchestration | `change-orchestrate` | `make orchestrate CHANGE=<change>` | the change's clone and branch, `orchestrator` and `round` lines in the workflow log — your directions among them, on your word — the conversion of a change's records on your word, the owner's notes on a round, the ledger line of a waived design review, or of a recommended waiver of one you declined, workflow commits on your word, its own observations of the tooling |
 
 Every step but the review opens an interactive Claude Code session. With
 `UNATTENDED=1` the same target runs the step headless instead, through
@@ -756,8 +756,11 @@ over time.
 A step that meets a guard the owner may waive recommends a waiver when a written
 criterion holds, naming the criterion and its evidence in the message it already
 sends the owner: triage when a round's review and validation name different
-commits, design finishing after a return, validation on a known environmental
-failure, and archive cleanup before its validation. The merge before closeout
+commits, design finishing after a return, or planning that settled a design
+question itself, validation on a known environmental failure, and archive cleanup
+before its validation. A step that commits nothing leaves the line to one that
+does: triage writes a validation's in a round, and archive cleanup the line of a
+validation no triage read. The merge before closeout
 judges whether its own validation may be waived, as "The merge before closeout"
 above says. For the others, a waiver may be recommended when:
 

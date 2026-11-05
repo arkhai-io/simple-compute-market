@@ -641,6 +641,12 @@ judges and recommends. The criteria, in `docs/agents/change-workflow.md`, "Waive
 
 A waiver is always a ledger line; a recommended one's `agent_position` names the
 recommendation and criterion, and a recommendation the owner declines is a correction.
+Planning that settles a design question itself recommends waiving another design
+review as design does after a return. A step that commits nothing leaves the line to
+one that does: validation's to the triage that reads its record in a round, or, for
+a record no triage reads, to archive cleanup; a design review's waiver to the
+orchestrating session, committed with planning or, declined, with that review's
+triage.
 So a guidance review can count recommendations and acceptances by criterion, the
 evidence a later review would use to propose waivers taken by default.
 
