@@ -53,6 +53,17 @@ Marketplace identity and transaction credentials have independent lifetimes. Wal
 
 Run logs persist the canonical public principal, signature-contract version, accepted obligation and operation identities, and domain state required to resume. They do not serialize credential material. Recovery checks the complete recorded principal and permits a different credential only when a completed rotation authorizes it as an active replacement, before submitting another authenticated or settlement mutation.
 
+A protocol `signer` field is public evidence only when it is exactly the canonical
+`{scheme, identifier}` mapping validated by the identity codec. Run-log validation
+preserves that evidence unchanged while refusing signer objects, private fields,
+noncanonical or extended mappings, and secret/provider carriers at every nesting
+level. The field name alone grants no exception.
+
+Settlement polling sends only public status to progress observers. The complete
+authenticated delivery result returns through its private result boundary, so
+credentials cannot enter a run log through a progress callback. Retained journals
+remain recovery evidence; reading or resuming them does not rewrite their events.
+
 ## Configured mechanism choice and buyer actions
 
 The buyer intersects installed, enabled registration compatibility with its
