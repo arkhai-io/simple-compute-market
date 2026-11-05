@@ -1,0 +1,24 @@
+# The gitleaks configuration the public-content checks run (scripts/check_secrets.py),
+# at the release scripts/gitleaks-pins.toml pins. Every rule is gitleaks' own but one.
+#
+# gitleaks' `private-key` rule accepts any 64 or more characters between a
+# `BEGIN ... PRIVATE KEY-----` header and the next `KEY-----`, dashes included. A
+# short fixture's END marker comes too soon to end a match, so the match runs on to
+# the next block in the same scan and two fixtures read as one key. The rule here
+# keeps the 64-character minimum body but admits no run of five dashes in it, so a
+# match ends at its own block's END marker and never reaches another header. A real
+# key's body — base64 wrapped at any length, or one string with `\n` escapes — is
+# far longer than 64 characters and is refused; a fixture whose body is a word, such
+# as `fixture`, is passed however many share a file.
+# See docs/development/ARCHITECTURE.md, "Public repository content checks".
+
+[extend]
+useDefault = true
+disabledRules = ["private-key"]
+
+[[rules]]
+id = "private-key-block"
+description = "A private key block whose body holds key material"
+regex = '''(?i)-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----(?:[^-]|-{1,4}[^-]){64,}-----END'''
+keywords = ["-----begin"]
+tags = ["key", "private-key"]

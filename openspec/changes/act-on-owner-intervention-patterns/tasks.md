@@ -473,6 +473,70 @@ implemented sections 6 and 4, before this section's session starts:
   installs the pinned gitleaks with its checksum checked, and the real-scanner cases in
   `scripts/tests/test_check_secrets.py` run and pass rather than being skipped.
 
+Gate run, 2026-11-05: the key rule holds, and the change returns to design over
+gitleaks' other default rules. No task above is checked.
+
+- Done, committed as work in progress: `.gitleaks.toml` (extends the default
+  configuration, `disabledRules = ["private-key"]`, adds `private-key-block`, the
+  design's regex made case-insensitive and admitting PGP's `PRIVATE KEY BLOCK`);
+  `scripts/check_secrets.py` (`--staged`, `--base`, `--outgoing REMOTE`, `--pre-push
+  REMOTE`; ranges with `--diff-merges=separate`; `--redact`; `--ignore-gitleaks-allow`,
+  since D24 rejects per-fixture `gitleaks:allow` markers and D9 exception markers; a
+  missing or other release refused through `install_gitleaks.problem()`; findings as
+  `[<commit>:]<file>:<line>: <rule>`, gitleaks' failure an error rather than a pass);
+  `scripts/tests/test_check_secrets.py`, 19 passed: 9 unit cases (injected runner and
+  version check: the staged and range arguments, the outgoing range's exclusions, the
+  pre-push ref updates and a deletion skipped, the version refusal naming both releases
+  and running nothing, a finding reported without its content, an unfinished scan an
+  error, three ways) and 10 library integration cases against the real gitleaks over
+  temporary repositories and the repository's own tree (skipped without the pinned release unless `GITLEAKS_REQUIRED=1`, which
+  fails them instead and which 5.3 is to set in `tests.yml`). Nothing is wired in: the
+  hooks, the guarded push, `make check-public-content`, the workflow, and the
+  `make check-secrets` target are 5.3's, and `ARCHITECTURE.md` is 5.4's.
+- Gate results, gitleaks 8.30.1 (`scripts/gitleaks-pins.toml`, linux_x64 sha256
+  `551f6fc8…70eb`), each a test in that suite: the extending configuration turns the
+  default `private-key` rule off and runs the repository's rule (keys are reported as
+  `private-key-block`, and no `private-key` finding appears anywhere, though the tree's
+  two fixtures in `test_hosts_api.py` are what the default rule joins); the
+  repository's tree, scanned as one parentless commit of `HEAD`'s tree, has no key-rule
+  finding; two fixtures in one file pass, staged and committed; a key wrapped at 64 and
+  at 16 characters is refused naming its file and the header's line, its body not
+  echoed; a key as one escaped string is refused; a fixture before a real key does not
+  hide it; a key marked `gitleaks:allow` is refused; a key an intermediate commit adds
+  and a later one deletes is refused naming the adding commit; a key written only in a
+  merge resolution is refused naming the merge, and the same range scanned without
+  `--diff-merges=separate` does not find it. Every condition 5.1 names for the key
+  rule is met.
+- Why the change returns: D24 item 4 keeps every other default rule ("the scan modes,
+  the redaction, and every other rule stay gitleaks'"), and the same tree scan under
+  them reports 114 findings in 47 tracked files: `generic-api-key` 74, `jwt` 38,
+  `curl-auth-header` 2. They are the repository's own development fixtures: the
+  `dev-env/identities/` and `dev-env/bare-metal/` identity files, the Anvil address
+  files under `helm/charts/dev-env/files/`, `e2e-tests/config/`, the storefronts'
+  `.env.*.docker` files, test fixtures under `domains/`, `kit/` and `provisioning/`,
+  the JWTs of `tools/frp-grant-admission/vector/frp-grant-1.json`, and examples in
+  `docs/`. Wired in as designed, the hook, the guarded push and CI would refuse any
+  added line of those shapes: a new or moved fixture, and a merge of `dev` whose
+  patch against its first parent carries one, since merges are compared with each
+  parent. That is 5.1's "a fixture is refused", for fixtures the design did not
+  consider, and the design decides nothing about them.
+- Options for design. (A) Run the repository's key rule alone, `useDefault = false`:
+  exactly what the delta requirement asks, no exceptions, and none of gitleaks'
+  provider-token rules, which the repository has never had. (B) Keep the default
+  rules but also disable the three that fire on the tree: measured here (the
+  configuration edited and the tree scanned with every finding counted, then put
+  back), the tree has no finding at all and every key case still passes; gitleaks'
+  provider-specific rules stay, with no exception markers, and a later fixture that
+  trips one is a rule-list edit. (C) Keep every rule and allowlist the fixtures by path
+  or value: an exception list, which D9 and 38 F1's reasoning reject. (D) Keep every
+  rule and rewrite the 47 files' fixtures to assemble at runtime: the churn 20 F4
+  rejected. Recommendation: B, which keeps the scanner's value beyond keys at no cost
+  on the current tree; A if the owner wants the check to claim no more than the
+  requirement states.
+- For the next session: once design settles this, edit `disabledRules` (or
+  `useDefault`), restore the tree test's assertion to `found == []` if the tree is
+  then clean, and continue with 5.1's record and 5.2–5.5 from the work above.
+
 ## 6. A change's closing checks enforce five more written rules (D24 items 1, 2, 3, 5, 6)
 
 Delivers the destination, history-wording, version-bump, local-import, and
