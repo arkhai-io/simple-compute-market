@@ -2,7 +2,7 @@
 
 ### Requirement: Lanes run payment scenarios against an in-lane payments double
 
-The VM, bare-metal and API-credit lanes MUST each run a payments double that wraps the payments kit's `PaymentsAuthority` engine and mirrors the payments service's HTTP API: its routes, bearer authentication, approval admission, read authorization, idempotency and error codes. The double MUST always sign `livemode: false`, MUST be reached over HTTPS under a lane CA the lane's callers trust through `SSL_CERT_FILE`, and MUST hold only labelled public development fixtures. Its suite and documentation MUST claim only the once-only surface; passing against it MUST NOT be reported as hosted-ledger, funding or live evidence.
+The VM, bare-metal and API-credit lanes MUST each run a payments double that wraps the payments kit's `PaymentsAuthority` engine and mirrors the payments service's HTTP API: its routes, bearer authentication, approval admission, read authorization, idempotency and error codes. The double MUST always sign `livemode: false`, MUST be reached over HTTPS under a lane CA the lane's callers trust through their payments configuration's CA bundle path, and MUST hold only labelled public development fixtures. Its suite and documentation MUST claim only the once-only surface; passing against it MUST NOT be reported as hosted-ledger, funding or live evidence.
 
 #### Scenario: A lane's once-only payment scenario runs
 
@@ -42,6 +42,25 @@ The VM payment scenario's stages that need a dispute authority to accept a filed
 
 - **WHEN** the VM lane runs its payment scenario with the lane's payments double and no mediation target
 - **THEN** the commit, delivery, replay and servicing stages run, servicing reporting the deal `running`, and the operator-end case and refund stages report a blocked skip naming the mediation target
+
+### Requirement: A lane's runner reads committed lane profiles
+
+Each lane MUST run its test runner under committed profiles: a shared payments profile holding the lane double's target, accounts, CA bundle path and buyer credentials, then a profile of the lane's own holding only what differs by lane, selected by the lane target's choice of profiles. The runner's environment MUST carry no payments setting or credential. The buyer's payments token MUST reach the buyer process under the variable the payments settings name, written by the harness from its resolved settings. Every value a lane profile restates from a fixture or identity file MUST be held to it by a test.
+
+#### Scenario: A lane runs its payment scenario
+
+- **WHEN** a lane target runs its markers against its stack
+- **THEN** the runner loads the shared payments profile and the lane's own profile, and the payment scenario reaches the double with the configured CA and the buyer's token
+
+#### Scenario: A run selects no lane profile
+
+- **WHEN** the runner runs with no lane profile selected
+- **THEN** it has no payments target, and the payment scenarios report their blocked prerequisite
+
+#### Scenario: A restated value drifts from its fixture
+
+- **WHEN** a lane profile states a token, account or key that differs from the fixture or identity file it restates
+- **THEN** a repository test fails naming both
 
 ## MODIFIED Requirements
 

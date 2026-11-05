@@ -2,50 +2,55 @@
 
 ### Requirement: A storefront chart trusts a deployment-supplied CA bundle
 
-The storefront and bare-metal storefront charts MUST offer an option that mounts a CA bundle from a deployment-supplied ConfigMap key, or alternatively a Secret key, into the storefront container and sets `SSL_CERT_FILE` to it. The chart MUST name no CA itself and supply no default, and MUST render neither the mount nor the variable when the option is unset.
+The storefront and bare-metal storefront charts MUST offer an option that mounts a CA bundle from a deployment-supplied ConfigMap key, or alternatively a Secret key, into the storefront container and derives the agent configuration's `[Settlement.arkhai_payments].ca_bundle_path` from the option's presence, naming the mounted file. The chart MUST refuse a configuration that states a different `ca_bundle_path` while the option is set, MUST name no CA itself and supply no default, MUST NOT set `SSL_CERT_FILE`, and MUST render neither the mount nor the setting when the option is unset.
 
 #### Scenario: The option names a ConfigMap key
 
 - **WHEN** a release sets the CA bundle option naming a ConfigMap and key
-- **THEN** the storefront container mounts that key and its `SSL_CERT_FILE` names the mounted file
+- **THEN** the storefront container mounts that key, the rendered configuration's `ca_bundle_path` names the mounted file, and no `SSL_CERT_FILE` is set
 
 #### Scenario: The option names a Secret key
 
 - **WHEN** a release sets the CA bundle option naming a Secret and key instead
-- **THEN** the storefront container mounts that key and its `SSL_CERT_FILE` names the mounted file
+- **THEN** the storefront container mounts that key and the rendered configuration's `ca_bundle_path` names the mounted file
+
+#### Scenario: The configuration states another bundle path
+
+- **WHEN** a release sets the CA bundle option and its agent configuration states a different `ca_bundle_path`
+- **THEN** rendering fails naming both paths
 
 #### Scenario: The option is unset
 
 - **WHEN** a release leaves the option unset
-- **THEN** no bundle is mounted and `SSL_CERT_FILE` is not set
+- **THEN** no bundle is mounted and the chart adds no `ca_bundle_path`
 
-### Requirement: A storefront chart injects the payments key from a deployment Secret
+### Requirement: A storefront's secrets reach it through its secret overlay
 
-The storefront and bare-metal storefront charts MUST offer an option naming a Secret and key that holds the storefront's payments API key, and MUST expose it to the storefront container under the environment variable the agent configuration's `[Settlement.arkhai_payments].api_key_env` names. The chart MUST refuse the option when the configuration names no `api_key_env`, and MUST render no variable when the option is unset.
+A storefront's payments key, dispute credentials and wallet key MUST reach it as settings in its secret overlay (`storefront.secrets.toml`, or the API-credit storefront's secret layer), which a deployment supplies from a Secret, never as an environment variable its configuration names and never in a chart's public `config`. The storefront charts MUST offer no option that exposes a payments key as an environment variable, and their values schema MUST refuse a secret payments or dispute credential setting in `config`.
 
-#### Scenario: The key option is set
+#### Scenario: A storefront is configured for payments
 
-- **WHEN** a release names a Secret and key for the payments key and the agent configuration sets `api_key_env`
-- **THEN** the storefront container's environment has that variable from that Secret key
+- **WHEN** a release configures a storefront for Arkhai payments
+- **THEN** its payments key is `[Settlement.arkhai_payments].api_key` in the runtime Secret's overlay, and its pod environment carries no payments variable
 
-#### Scenario: The configuration names no key variable
+#### Scenario: The public configuration states a payments key
 
-- **WHEN** a release sets the key option but the agent configuration has no `api_key_env`
-- **THEN** rendering fails naming the missing setting
+- **WHEN** a release's agent `config` states `[Settlement.arkhai_payments].api_key`
+- **THEN** the values schema refuses it before anything renders
 
 #### Scenario: A storefront offers only payments
 
 - **WHEN** a release configures a storefront with payments and with Wallet, Chains and Alkahest removed and RPC off
-- **THEN** the chart renders it with the payments configuration, the CA bundle and the key variable, and nothing for the removed settings
+- **THEN** the chart renders it with the payments configuration and the CA bundle, and nothing for the removed settings
 
 ### Requirement: The local release rehearses a deployment's payments interface
 
-The local Helm release MUST configure payments through the same values a deployment supplies — the agent's payments configuration, the payments key Secret and the CA bundle ConfigMap — and MUST NOT use `development_auth`. Its deploy target MUST enable the payments double's subchart, which release values never enable, once per namespace, and the local deployment MUST supply the key Secret and CA ConfigMap from the committed development fixtures by default, through its out-of-band step for local Secrets rather than through chart values. The subchart MUST take its server certificate and key from a named existing Secret when one is given.
+The local Helm release MUST configure payments through the same values a deployment supplies — the agent's payments configuration, the runtime secret overlay and the CA bundle option — and MUST NOT use `development_auth`. Its deploy target MUST enable the payments double's subchart, which release values never enable, once per namespace, and the local deployment MUST supply the seller token in each storefront's runtime secret overlay and the CA ConfigMap from the committed development fixtures by default, through its out-of-band step for local Secrets rather than through chart values. The subchart MUST take its server certificate and key from a named existing Secret when one is given.
 
 #### Scenario: The local release is deployed
 
 - **WHEN** the local deploy target installs the release
-- **THEN** the payments double runs, the storefronts are configured for payments through the deployment-facing options, and no storefront uses development authentication
+- **THEN** the payments double runs, the storefronts are configured for payments through the deployment-facing values, and no storefront uses development authentication
 
 #### Scenario: A deployment supplies its own TLS
 
@@ -54,7 +59,7 @@ The local Helm release MUST configure payments through the same values a deploym
 
 ### Requirement: A storefront checks its payments access from its own container
 
-Each storefront CLI MUST offer `check-payments --account <id>`, which loads the storefront's configuration as the running storefront does, reads the named account's balance through the payments kit with the storefront's own credential and trust, prints one JSON outcome containing no credential, and exits nonzero naming the failing step: configuration, credential, transport, or the service's refusal code. The storefront charts MUST offer a Helm test that runs it directly, not through the storefront's entrypoint, with the storefront's image, configuration and secrets mounts, identity credential, CA bundle mount and `SSL_CERT_FILE`, and payments-key variable, rendered from the same chart definitions as the storefront Deployment, and without the storefront's data volume, health probes, or network-overlay capabilities and device.
+Each storefront CLI MUST offer `check-payments --account <id>`, which loads the storefront's configuration as the running storefront does, reads the named account's balance through the payments kit with the storefront's own key and configured trust, prints one JSON outcome containing no credential, and exits nonzero naming the failing step: configuration, credential, transport, or the service's refusal code. The storefront charts MUST offer a Helm test that runs it directly, not through the storefront's entrypoint, with the storefront's image, configuration and secrets mounts, identity credential, and CA bundle mount, rendered from the same chart definitions as the storefront Deployment, and without the storefront's data volume, health probes, or network-overlay capabilities and device.
 
 #### Scenario: The storefront can reach its payments service
 
@@ -63,33 +68,65 @@ Each storefront CLI MUST offer `check-payments --account <id>`, which loads the 
 
 #### Scenario: The storefront does not trust the payments origin
 
-- **WHEN** the storefront's CA bundle does not cover the payments service's certificate
+- **WHEN** the storefront's configured CA bundle does not cover the payments service's certificate
 - **THEN** the check prints a `failed` outcome naming the transport step and exits nonzero
 
 #### Scenario: The storefront's CA bundle cannot be loaded
 
-- **WHEN** the bundle `SSL_CERT_FILE` names is missing, unreadable, or malformed
-- **THEN** the check prints a `failed` outcome naming the transport step, before any request, and exits nonzero
+- **WHEN** the bundle `ca_bundle_path` names is missing, unreadable, or malformed
+- **THEN** the check prints a `failed` outcome naming the configuration step, before any request, and exits nonzero
 
 #### Scenario: A deployment reruns the check
 
 - **WHEN** a deployment runs the storefront chart's Helm test
-- **THEN** the check runs with the storefront's image, configuration, credential, CA mount and key variable, and mounts no storefront data volume, so it does not depend on where the storefront's volume is attached
+- **THEN** the check runs with the storefront's image, configuration, secret overlay, credential and CA mount, and mounts no storefront data volume, so it does not depend on where the storefront's volume is attached
+
+### Requirement: A stack's configuration lives in committed files
+
+Every Compose stack the repository runs — each end-to-end lane and the full local stack — MUST take its configuration from committed overlay, profile and secret-overlay files. A Makefile MAY choose which configuration loads, such as the provisioning mode or the runner's profiles, and MUST NOT generate or carry configuration values. A base or domain Compose file MUST carry only values its topology fixes; a deployment's own binds and values MUST be in its overlay, and a base file MUST NOT give a credential or definition document a committed fallback.
+
+#### Scenario: A lane stack is brought up
+
+- **WHEN** a lane target brings its stack up
+- **THEN** it names only the lane's Compose files and the run's provisioning mode, and every value the stack reads is in a committed file
+
+#### Scenario: A base stack runs without its overlay
+
+- **WHEN** an operator brings up a base stack file without an overlay binding its credentials
+- **THEN** the services that need them refuse to start, and no committed development value is used
+
+### Requirement: The registry reads profile-shaped env files
+
+The registry MUST load, after its default dotenv files, `config-<profile>.env` from `CONFIG_DIRECTORY` for each entry of `ACTIVE_PROFILES` in order, a later file overriding an earlier one and the process environment overriding every file. Its filter specification path MUST be a setting those files can carry. The registry chart MUST render its settings from its values into a ConfigMap profile mounted under `CONFIG_DIRECTORY`, MUST take secret settings as a profile from a named existing Secret (`secretProfile`), MUST refuse the retired `auth.bootstrapKeySecret` and `auth.adminKeySecret` naming `secretProfile`, and MUST set as container environment only the two resolver variables.
+
+#### Scenario: A lane registry layers a lane profile
+
+- **WHEN** a registry runs with `ACTIVE_PROFILES` naming its own profile and then a lane profile
+- **THEN** it takes its identity and descriptor from the first file and the lane's recommended dispute authorities from the second
+
+#### Scenario: The registry chart renders a release
+
+- **WHEN** the registry chart renders a release with a `secretProfile`
+- **THEN** the Deployment's environment holds only `CONFIG_DIRECTORY` and `ACTIVE_PROFILES`, the rendered and secret profiles are mounted under the configuration directory, and both are named in `ACTIVE_PROFILES`
+
+#### Scenario: A values file uses a retired key Secret
+
+- **WHEN** a release's registry values set `auth.adminKeySecret` or `auth.bootstrapKeySecret`
+- **THEN** rendering fails naming `secretProfile`
 
 ## MODIFIED Requirements
 
 ### Requirement: A storefront's configuration reaches it through its configuration system
 
 Every configuration value of a storefront MUST be supplied through its configuration system:
-its configuration files and its loader's documented override layer. A value MAY be supplied
-outside that system only when it controls which configuration is loaded — the configuration
-directory and the profiles to layer — when it must be kept from the loader, as the signing
-credential is and as a credential the configuration names by variable is, such as the payments
-key `[Settlement.arkhai_payments].api_key_env` names, or when something other than the loader
-reads it from the process environment, such as the TLS trust bundle `SSL_CERT_FILE` names. A
-storefront's chart MUST know a configuration value only where the deployment itself needs it for
-a stated reason, such as the port its container, probes, and Service share, and MUST supply
-outside the configuration system only values of those three kinds. Conformance is a compliance
+its configuration files, its secret overlay, and its loader's documented override layer. A
+secret MUST reach it as a setting in its secret overlay, never as an environment variable its
+configuration names. A value MAY be supplied outside that system only when it controls which
+configuration is loaded — the configuration directory and the profiles to layer — or when it
+must be kept from the loader, as the signing credential is. A storefront's chart MUST know a
+configuration value only where the deployment itself needs it for a stated reason, such as the
+port its container, probes, and Service share, or the CA bundle path it mounts, and MUST supply
+outside the configuration system only values of those two kinds. Conformance is a compliance
 check of the source and charts, not a runtime refusal: a storefront MUST NOT refuse to start
 because a value reached it through its environment, and the loader's override layer remains
 available to an operator.
@@ -102,13 +139,7 @@ available to an operator.
 
 #### Scenario: The chart renders a storefront's environment
 
-- **WHEN** the bare-metal chart is rendered without its CA bundle and payments key options
+- **WHEN** the bare-metal chart is rendered, with or without its CA bundle option
 - **THEN** its pod environment carries only the configuration directory and the signing
-  credential, and every other value is in a mounted configuration file
-
-#### Scenario: The chart renders a storefront's payments access
-
-- **WHEN** the bare-metal chart is rendered with its CA bundle and payments key options
-- **THEN** its pod environment carries, beyond the configuration directory and the signing
-  credential, only `SSL_CERT_FILE` naming the mounted bundle and the variable `api_key_env`
-  names, and every other value is in a mounted configuration file
+  credential, and every other value, the payments key and CA bundle path included, is in a
+  mounted configuration or secret overlay file
