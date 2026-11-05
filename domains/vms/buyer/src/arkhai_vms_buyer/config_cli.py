@@ -223,6 +223,9 @@ def config_migrate(
 
 _INIT_USER_TEMPLATE = """\
 # arkhai buyer config — see `market config path` for this file's location
+# Explicit consent to the configured registry's dispute recommendations.
+use_registry_dispute_authorities = true
+
 # Marketplace signing identity comes only from the selected durable buyer
 # profile. Metadata defaults to $XDG_DATA_HOME/arkhai/buyer/profiles.json;
 # credentials remain in the exact keyring.v1, secret_file.v1, or
@@ -277,17 +280,14 @@ priority = []
 enabled = false
 # Each chain's address book; a chain not named uses the SDK's built-in addresses.
 # address_books = { ethereum_sepolia = "/path/to/alkahest.json" }
-# oracle_gated = false
+# release_models = ["recipient"]
 # trusted_oracle_addresses = []
-# interruptible = false
-# interruptible_oracle_addresses = []
 
 [Settlement.arkhai_payments]
 enabled = false
 # service_url = "https://<PAYMENTS_SERVICE>"
 # service_identity = { scheme = "ed25519", identifier = "<RECEIPT_SIGNING_KEY>" }
 # fee_bps = 250
-# dispute_authority = "<DISPUTE_AUTHORITY_ACCOUNT>"
 # api_key_env = "ARKHAI_PAYMENTS_API_KEY"   # names the variable; the key stays in the environment
 # attach_agreement = false                  # deposit the exact Agreement with the approval
 

@@ -9,6 +9,8 @@ from typing import Any
 
 from core_storefront.publication_runner import NoSettlementOption, PublicationPayload
 from market_core import SettlementStageTable
+from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
+from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from market_core.schemas import SettlementOption
 from .alkahest_lifecycle import alkahest_servicing
 from .settlement_stages import (
@@ -28,7 +30,7 @@ from market_alkahest import (
     ALKAHEST_CONFIG_KEY,
     ORACLE_GATED_RELEASE,
     RECIPIENT_RELEASE,
-    configured_release_model,
+    require_deliverable_release_models,
     create_alkahest_registration,
     escrow_release_conditions,
 )
@@ -115,6 +117,7 @@ class BareMetalStorefrontSettlementComposition:
     payments_client_for_owner: ClientForOwner | None = field(default=None, repr=False)
     payments_stage: PaymentSellerStage | None = field(default=None, init=False, repr=False)
 
+    disputes: RegistryDisputePolicy = field(default_factory=lambda: RegistryDisputePolicy.from_document({}), repr=False)
     seller_stages: SettlementStageTable[Any] = SELLER_STAGES
 
     def __post_init__(self) -> None:
@@ -123,10 +126,11 @@ class BareMetalStorefrontSettlementComposition:
         ):
             raise ValueError("enabled settlement mechanism has no seller stage")
         self.registry.validate(self.config, role="seller")
-        # A section selecting contradictory release models is incoherent and
-        # refused here; a coherent model bare metal cannot deliver is an
-        # Alkahest readiness blocker, given the deliverable models as a resource.
-        configured_release_model(self.config.mechanisms.get(ALKAHEST_CONFIG_KEY))
+        stage = self.seller_stages.get(ALKAHEST_MECHANISM)
+        require_deliverable_release_models(
+            self.config.mechanisms.get(ALKAHEST_CONFIG_KEY),
+            getattr(stage, "release_models", ()),
+        )
         object.__setattr__(self, "resources", MappingProxyType(dict(self.resources)))
         # Accepted payment deals are serviced whether or not new payment options
         # are published, so the stage follows the servicing fields, not `enabled`.
@@ -143,12 +147,14 @@ class BareMetalStorefrontSettlementComposition:
         *,
         resources: Mapping[str, Any] | None = None,
         payments_client_for_owner: ClientForOwner | None = None,
+        disputes: RegistryDisputePolicy | None = None,
     ) -> "BareMetalStorefrontSettlementComposition":
         registry = build_bare_metal_settlement_registry()
         return cls(
             registry=registry,
             config=registry.resolve(raw_settlement, role="seller"),
-            resources=resources or {},
+            resources={**(resources or {}), **({"disputes": disputes} if disputes is not None else {})},
+            disputes=disputes or RegistryDisputePolicy.from_document({}),
             payments_client_for_owner=payments_client_for_owner,
         )
 
@@ -243,6 +249,8 @@ class BareMetalStorefrontSettlementComposition:
                 role="seller",
                 resources={
                     **self.resources,
+                    "dispute_authorities": self.disputes.for_publication(),
+                    "dispute_interfaces": frozenset({MEDIATION_INTERFACE}), "compute": True,
                     "publication_clause": clause,
                     "candidate": dict(candidate),
                     # The site the listing binding records, so a mechanism

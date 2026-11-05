@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from typing import Any
 
 from core_buyer.buyer_config import ResolvedBuyerIdentity
+from core_buyer.registry_config import resolve_indexer_urls
+from market_deal_lifecycle.selection import AuthoritySelection
+from market_deal_lifecycle.terms import TermContext
+from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from core_buyer.settlement import BuyerSettlementPolicy
 from market_config.config_loader import load_user_config
 from market_alkahest.schemas import EscrowProposal
@@ -18,6 +23,7 @@ from market_settlement_runtime import (
 )
 
 from .common import refuse_retired_address_book_keys, resolve_fresh_buyer_identity
+from .disputes import buyer_dispute_authorities
 from .settlement_stages import AlkahestBuyerStage, PaymentBuyerStage
 
 BUYER_STAGES = SettlementStageTable({
@@ -31,7 +37,7 @@ def buyer_stage(agreement: Any) -> Any:
     if accepted.settlement is None:
         raise ValueError("accepted Agreement has no settlement option")
     try:
-        return BUYER_STAGES[accepted.settlement.mechanism]
+        return BUYER_STAGES[accepted.settlement.settlement_schema]
     except KeyError as exc:
         raise ValueError("unsupported accepted API-credit settlement mechanism") from exc
 
@@ -48,8 +54,11 @@ def accepted_listing_record(match: Mapping[str, Any], proposal: Any) -> dict[str
     """
     if isinstance(proposal, EscrowProposal):
         return BUYER_STAGES["alkahest.v1"].listing_record(match)
-    if isinstance(proposal, SettlementSelection) and proposal.mechanism in BUYER_STAGES:
-        return BUYER_STAGES[proposal.mechanism].listing_record(match)
+    if (
+        isinstance(proposal, SettlementSelection)
+        and proposal.settlement_schema in BUYER_STAGES
+    ):
+        return BUYER_STAGES[proposal.settlement_schema].listing_record(match)
     return {}
 
 
@@ -78,6 +87,7 @@ def resolve_buyer_settlement_policy(
     *,
     identity: ResolvedBuyerIdentity | None = None,
     action_capable: bool = True,
+    registry_urls: str | None = None,
 ) -> BuyerSettlementPolicy:
     """Resolve the shared hierarchy without constructing unused mechanisms."""
     document = dict(load_user_config() if config is None else config)
@@ -92,11 +102,23 @@ def resolve_buyer_settlement_policy(
         raise ValueError("[Settlement] must be a table")
     registry = buyer_settlement_registry()
     settlement = registry.resolve(raw, role="buyer")
+    authorities = buyer_dispute_authorities(
+        document, identity if action_capable else None,
+        resolve_indexer_urls(override=registry_urls) if identity is not None else (),
+    )
     return BuyerSettlementPolicy(
         config=settlement,
         registry=registry,
         stages=BUYER_STAGES,
-        public_context={},
+        option_preference=AuthoritySelection(authorities, contexts={
+            "arkhai.payments.v1": TermContext(
+                mechanism="arkhai.payments.v1", has_adapter=True,
+                dispute_interfaces=frozenset({MEDIATION_INTERFACE}),
+            ),
+        }, report=logging.getLogger(__name__).info),
+        public_context={
+            "dispute_authorities_by_registry": authorities,
+        },
     )
 
 

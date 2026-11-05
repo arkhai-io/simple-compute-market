@@ -1221,12 +1221,11 @@ def _alkahest_option() -> dict:
     rates = [RateValue(field="amount", per="hour", value=100)]
     return SettlementOption(
         option_id=derive_settlement_option_id(
-            mechanism="alkahest.v1", asset=TOKEN, rates=rates, params=params
+            price={"asset": TOKEN, "rates": rates},
+            settlement={"schema": "alkahest.v1", **(params or {})},
         ),
-        mechanism="alkahest.v1",
-        asset=TOKEN,
-        rates=rates,
-        params=params,
+        price={"asset": TOKEN, "rates": rates},
+        settlement={"schema": "alkahest.v1", **(params or {})},
     ).model_dump(mode="json")
 
 
@@ -1253,8 +1252,8 @@ async def test_an_exact_alkahest_selection_is_refused_with_nothing_accepted(
                     initial_amount=None,
                     provision_terms=_opening()["provision_terms"],
                     settlement_selection={
-                        "mechanism": option["mechanism"],
                         "option_id": option["option_id"],
+                        "settlement": {"schema": option["settlement"]["schema"]},
                         "expiration_unix": int(time.time()) + 3600,
                     },
                     selection_only=True,
@@ -1368,12 +1367,11 @@ def _contact_option() -> dict:
     }
     return {
         "option_id": derive_settlement_option_id(
-            mechanism=CONTACT_MECHANISM, asset="introduction", rates=[], params=params
+            price={"asset": "introduction", "rates": []},
+            settlement={"schema": CONTACT_MECHANISM, **(params or {})},
         ),
-        "mechanism": CONTACT_MECHANISM,
-        "asset": "introduction",
-        "rates": [],
-        "params": params,
+        "price": {"asset": "introduction", "rates": []},
+        "settlement": {"schema": CONTACT_MECHANISM, **(params or {})},
     }
 
 
@@ -1422,8 +1420,8 @@ async def _open_contact(app, option: dict) -> dict | StorefrontClientError:
                 },
                 proposal_fields={},
                 settlement_selection={
-                    "mechanism": CONTACT_MECHANISM,
                     "option_id": option["option_id"],
+                    "settlement": {"schema": CONTACT_MECHANISM},
                     "expiration_unix": int(time.time()) + 3600,
                 },
                 selection_only=True,

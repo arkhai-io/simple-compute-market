@@ -120,8 +120,8 @@ def _with_agreement(
     if acceptance.accepted_at is None or acceptance.agreement.start_utc is None:
         raise NegotiationStateError("accepted Agreement lacks fixed acceptance timestamps")
     plan = artifacts.get("settlement_plan")
-    asset = settlement.asset if settlement is not None else None
-    if asset is None and isinstance(plan, Mapping):
+    asset = settlement.price_asset if settlement is not None else None
+    if settlement is None and isinstance(plan, Mapping):
         obligations = plan.get("obligations")
         if isinstance(obligations, list) and obligations and isinstance(obligations[0], Mapping):
             raw_asset = obligations[0].get("asset")
@@ -146,7 +146,9 @@ def _with_agreement(
         seller=acceptance.seller_principal.model_dump(mode="json"),
         settlement=settlement,
         settlement_params=(
-            SettlementSelection.model_validate(selection).params if selection is not None else {}
+            SettlementSelection.model_validate(selection).settlement_params
+            if selection is not None
+            else {}
         ),
         amount=acceptance.agreed_amount,
         asset=asset,
@@ -158,8 +160,8 @@ def _with_agreement(
     agreement_bytes = agreement.model_dump_json(exclude_none=True).encode("utf-8")
     artifacts["agreement"] = agreement
     artifacts["agreement_bytes"] = base64.b64encode(agreement_bytes).decode("ascii")
-    if settlement is not None and settlement.mechanism in data_dispatch:
-        data = data_dispatch[settlement.mechanism](json.loads(agreement_bytes))
+    if settlement is not None and settlement.settlement_schema in data_dispatch:
+        data = data_dispatch[settlement.settlement_schema](json.loads(agreement_bytes))
         if data is not None:
             artifacts["settlement_data"] = dict(data)
     return artifacts
@@ -349,7 +351,7 @@ def _time_scaled_total(option: SettlementOption, duration_seconds: int) -> int |
     one, or one that scales by a counted unit names no time price here.
     """
 
-    amount_rates = [rate for rate in option.rates if rate.field == "amount"]
+    amount_rates = [rate for rate in option.price_rates if rate.field == "amount"]
     if len(amount_rates) != 1 or not rate_scales_by_time(amount_rates[0]):
         return None
     return compute_rate_total(amount_rates[0], duration_seconds)
@@ -580,21 +582,21 @@ def build_bare_metal_negotiation_runtime(
         # under the listing's release condition, which a selection cannot
         # build, so its exact selection is refused.
         if (
-            selection.mechanism not in seller_stages
-            or selection.mechanism not in accepted_obligation_dispatch
+            selection.settlement_schema not in seller_stages
+            or selection.settlement_schema not in accepted_obligation_dispatch
         ):
             raise BareMetalNegotiationRefusal(
                 "exact settlement selection uses an unsupported mechanism",
                 status_code=400,
             )
-        build_obligation = accepted_obligation_dispatch[selection.mechanism]
+        build_obligation = accepted_obligation_dispatch[selection.settlement_schema]
         if (
             build_obligation is None
-            and not seller_stages[selection.mechanism].settles_from_agreement
+            and not seller_stages[selection.settlement_schema].settles_from_agreement
         ):
             raise BareMetalNegotiationRefusal(
                 "settlement_selection_requires_plan: "
-                f"{selection.mechanism} settles only under a settlement plan, "
+                f"{selection.settlement_schema} settles only under a settlement plan, "
                 "which an exact selection cannot build; open with an escrow proposal",
                 status_code=409,
             )
@@ -615,7 +617,7 @@ def build_bare_metal_negotiation_runtime(
                 option
                 for option in options
                 if option.option_id == selection.option_id
-                and option.mechanism == selection.mechanism
+                and option.settlement_schema == selection.settlement_schema
             ),
             None,
         )
@@ -626,7 +628,7 @@ def build_bare_metal_negotiation_runtime(
             )
         # A deal that provisions the listed machine is held to the same
         # admission rules and records the same terms however it settles.
-        provisions = seller_stages[selection.mechanism].fulfils_through_capacity
+        provisions = seller_stages[selection.settlement_schema].fulfils_through_capacity
         terms: BareMetalTerms | None = None
         if provisions:
             trusted_listing = await request.repository.load_bare_metal_listing_payload(
@@ -679,7 +681,7 @@ def build_bare_metal_negotiation_runtime(
             # to carry an amount, so the Agreement's amount is the whole payment.
             # A time-priced option is accepted only at its own total for the
             # requested duration: a buyer's amount is never taken as given.
-            if sum(rate.field == "amount" for rate in selected_option.rates) > 1:
+            if sum(rate.field == "amount" for rate in selected_option.price_rates) > 1:
                 raise BareMetalNegotiationRefusal(
                     "selected option advertises more than one amount rate",
                     status_code=400,
@@ -856,6 +858,7 @@ def build_bare_metal_negotiation_runtime(
         await repository.record_bare_metal_settlement_acceptance(
             negotiation_id=acceptance.negotiation_id,
             agreement_bytes=base64.b64decode(artifacts["agreement_bytes"], validate=True),
+            settlement_data=artifacts.get("settlement_data"),
         )
         plan = artifacts.get("settlement_plan")
         if isinstance(plan, Mapping):

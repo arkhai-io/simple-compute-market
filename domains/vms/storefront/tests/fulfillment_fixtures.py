@@ -1,7 +1,14 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+import hashlib
+import sqlite3
+import time
+from market_deal_servicing import DeliveryRecord, EndSession, create_schema
+from datetime import datetime, timezone, timedelta
+
+from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -44,6 +51,20 @@ class VmLifecycleFixture:
             db_path=self.db.db_path,
             registry=self.db.domain_registry,
         )
+
+
+def seed_delivery_admission(db, *, negotiation_id="neg-1", commitment_ref="escrow-1"):
+    """Supply the committed lifecycle boundary to isolated repository tests."""
+    now = int(time.time())
+    with sqlite3.connect(db.db_path) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        create_schema(conn)
+        if conn.execute("SELECT 1 FROM servicing_delivery WHERE negotiation_id=?", (negotiation_id,)).fetchone():
+            return
+        EndSession(conn).register(DeliveryRecord(
+            negotiation_id=negotiation_id, seller=SELLER_PRINCIPAL, commitment_ref=commitment_ref,
+            start_at=now - 10, term_end=now + 3600, committed_at=now - 10,
+        ))
 
 
 async def make_vm_lifecycle_fixture(
@@ -169,6 +190,28 @@ async def make_vm_lifecycle_fixture(
         settlement_ref=escrow_uid,
         **dict(context_payload or {}),
     )
+    now = datetime.now(timezone.utc) - timedelta(seconds=10)
+    start = (context_payload or {}).get("start_utc", now.isoformat())
+    facts = evidence.evidence["delivery"]["payload"]
+    facts["start_utc"] = start
+    facts["lease_end_utc"] = (
+        datetime.fromisoformat(start.replace("Z", "+00:00")) + timedelta(seconds=facts["duration_seconds"])
+    ).isoformat()
+    body = {"price": {"asset": "USD/2", "rates": []}, "settlement": {"schema": "alkahest.v1"}}
+    agreement = Agreement(
+        negotiation_id=negotiation_id, listing_id=listing_id, listing_hash="0" * 64,
+        buyer=BUYER_PRINCIPAL.model_dump(mode="json"), seller=SELLER_PRINCIPAL.model_dump(mode="json"),
+        settlement=SettlementOption(option_id=derive_settlement_option_id(**body), **body),
+        settlement_params={}, amount=100, asset="USD/2", start_utc=start,
+        accepted_at=now.isoformat(), duration_seconds=facts["duration_seconds"],
+        provision_terms=facts["provision_terms"],
+    )
+    raw = agreement.model_dump_json(exclude_none=True).encode()
+    await db.commit_agreed_terms(
+        negotiation_id=negotiation_id, agreed_price=100, agreed_duration_seconds=facts["duration_seconds"],
+        agreement_bytes=raw, accepted_at=agreement.accepted_at, agreed_start_utc=start,
+    )
+    evidence = replace(evidence, evidence={**evidence.evidence, "agreement_sha256": hashlib.sha256(raw).hexdigest()})
     await db.save_vm_settlement_evidence(evidence)
     await db.insert_vm_delivery(negotiation_id=negotiation_id)
     plan = build_vm_fulfillment_plan(evidence=evidence)

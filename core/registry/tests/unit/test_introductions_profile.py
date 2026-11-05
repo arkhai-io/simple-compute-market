@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from market_deal_lifecycle.projections import LIFECYCLE_QUERY_FIELDS
+
 import pytest
 
 from core_registry.api.filter_eval import build_criteria, evaluate_all
@@ -25,10 +27,10 @@ def _listing(**overrides) -> dict:
         "settlement_options": [
             {
                 "option_id": "aa" * 32,
-                "mechanism": "contact-exchange.v1",
-                "asset": "introduction",
-                "rates": [],
-                "params": {"channel": "telegram", "terms": "prose"},
+                "settlement": {
+                    "schema": "contact-exchange.v1",
+                    **({"channel": "telegram", "terms": "prose"} or {}),
+                },
             }
         ],
     }
@@ -44,7 +46,9 @@ def _match(spec, listing, **params) -> bool:
 def test_profile_loads_with_schema_identity(spec) -> None:
     assert spec.schema_identity is not None
     assert spec.schema_identity.id == "introductions.market"
-    assert {item.name for item in spec.filters} == {"region", "mechanism", "channel"}
+    assert {item.name for item in spec.filters} == {
+        "region", "mechanism", "channel", "option_asset", *LIFECYCLE_QUERY_FIELDS,
+    }
 
 
 def test_sparse_listings_stay_discoverable(spec) -> None:
@@ -53,10 +57,10 @@ def test_sparse_listings_stay_discoverable(spec) -> None:
         settlement_options=[
             {
                 "option_id": "bb" * 32,
-                "mechanism": "contact-exchange.v1",
-                "asset": "introduction",
-                "rates": [],
-                "params": {"terms": "prose only, no stated channel"},
+                "settlement": {
+                    "schema": "contact-exchange.v1",
+                    **({"terms": "prose only, no stated channel"} or {}),
+                },
             }
         ],
     )

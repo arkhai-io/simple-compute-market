@@ -25,6 +25,7 @@ from core_storefront.auth import (
 )
 from core_storefront.service_peers import SERVICE_PEER_ROLE, ServicePeerTrust
 from market_identity import EMPTY_BODY, Identity
+from compute_provisioning_contracts import LEASE_ENDED_CALLBACK, LeaseEndedEvent, SignedLeaseEndedReport
 
 import market_storefront.container as _container
 
@@ -63,14 +64,23 @@ def _storefront_signer():
     return signer
 
 
+def _lease_report_resource(path: str) -> str | None:
+    prefix, suffix = LEASE_ENDED_CALLBACK["path"].split("{capacity_reservation_id}")
+    if path.startswith(prefix) and path.endswith(suffix):
+        resource = path[len(prefix):-len(suffix)]
+        if resource and "/" not in resource:
+            return resource
+    return None
+
+
 def _callback(request: Request, body: Any) -> ServiceCallback | None:
     path = request.url.path.rstrip("/")
     # System status is readable by two callers, and the middlewares dispatch on
     # the asserted role: the administrator middleware hands a request asserting
     # `service` straight through to this one. A service peer reads status to
     # confirm its own signing path works, which is the only side-effect-free
-    # service operation there is — the other is the capacity-released
-    # callback. The read names no site and returns readiness alone, so every
+    # service operation there is; the callbacks record lease intent and proven
+    # capacity return. The read names no site and returns readiness alone, so every
     # configured site's peer may make it.
     if request.method == "GET" and path == "/api/v1/system/status":
         site_ids = tuple(
@@ -89,6 +99,16 @@ def _callback(request: Request, body: Any) -> ServiceCallback | None:
             site_ids,
             EMPTY_BODY,
         )
+    reservation = _lease_report_resource(path)
+    if reservation is not None and request.method == "POST":
+        try:
+            report = SignedLeaseEndedReport.model_validate(body)
+            event = LeaseEndedEvent.model_validate_json(report.payload)
+        except ValueError as exc:
+            raise AuthError("Malformed lease-ended report", status_code=400) from exc
+        if event.capacity_reservation_id != reservation:
+            raise AuthError("Lease-ended callback reservation differs from path", status_code=400)
+        return ServiceCallback("POST", LEASE_ENDED_CALLBACK["operation"], reservation, (event.site_id,), body)
     operation = _CALLBACK_OPERATIONS.get(path)
     if operation is None or request.method != "POST":
         return None
@@ -238,7 +258,9 @@ async def service_peer_callback_middleware(request: Request, call_next):
     """Authenticate service callbacks before dispatch and sign their responses."""
 
     path = request.url.path.rstrip("/")
-    is_callback = request.method == "POST" and path in _CALLBACK_OPERATIONS
+    is_callback = request.method == "POST" and (
+        path in _CALLBACK_OPERATIONS or _lease_report_resource(path) is not None
+    )
     is_status = (
         request.method == "GET"
         and path == "/api/v1/system/status"

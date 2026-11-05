@@ -1,0 +1,11 @@
+---
+- name: restart frps
+  ansible.builtin.systemd:
+    name: frps
+    state: restarted
+    daemon_reload: true
+
+- name: restart relay fail2ban
+  ansible.builtin.systemd:
+    name: fail2ban
+    state: restarted

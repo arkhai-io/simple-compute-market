@@ -43,16 +43,18 @@ def test_stored_data_is_bound_to_the_exact_agreement():
         stored.require_bound_to(agreement(amount="20000"))
     with pytest.raises(MandatePolicyError):
         stored.require_bound_to(agreement(payer=OTHER))
+    changed_authority = agreement()
+    changed_authority["settlement"]["lifecycle"]["adjudication"]["dispute"]["account"] = OTHER
+    with pytest.raises(MandatePolicyError):
+        stored.require_bound_to(changed_authority)
 
 
 def test_accepted_data_survives_later_policy_changes():
-    """Fee and dispute authority are read from the accepted mandate, not current config."""
+    """Fees stay bound to acceptance; authority identity is fixed by the option."""
     stored = PaymentSettlementData.for_agreement(agreement(), config(fee_bps=250))
-    # A later configuration with another fee and dispute authority derives a
-    # different mandate for new deals, yet the accepted one stays valid.
-    later = PaymentSettlementData.for_agreement(
-        agreement(), config(fee_bps=0, dispute_authority=OTHER)
-    )
+    # New deals can use different fees and authorities, yet an accepted one
+    # stays valid against its own option and acceptance-time policy.
+    later = PaymentSettlementData.for_agreement(agreement(dispute=OTHER), config(fee_bps=0))
     assert later.transaction_id != stored.transaction_id
     stored.require_bound_to(agreement())
 
@@ -72,9 +74,13 @@ def test_extra_reverse_authorities_are_refused():
 
 def test_policy_requires_payments_selection_payer_and_trusted_policy():
     other = agreement()
-    other["settlement"] = dict(other["settlement"], mechanism="alkahest.v1")
+    other["settlement"]["settlement"]["schema"] = "alkahest.v1"
     with pytest.raises(MandatePolicyError):
         mandate_policy_for_agreement(other, config())
+    missing_lifecycle = agreement()
+    del missing_lifecycle["settlement"]["lifecycle"]
+    with pytest.raises(MandatePolicyError, match="lifecycle.adjudication.dispute"):
+        mandate_policy_for_agreement(missing_lifecycle, config())
     missing_payer = agreement()
     missing_payer["settlement_params"] = {}
     with pytest.raises(MandatePolicyError):

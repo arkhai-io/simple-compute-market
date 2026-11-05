@@ -11,9 +11,12 @@ records. Verify and evaluate write nothing.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
+from market_deal_servicing import EndSession
+from market_deal_servicing.evidence import transaction
 from core_storefront.stage_log import stage_event
 from market_capacity_publication import CapacityAdminRouteService, CapacityEffects
 from market_core.schemas import EscrowProposal
@@ -178,6 +181,19 @@ def settlement_admin_routes(
     )
 
 
+def _claim_states(claimed: Any, required: Any) -> bool:
+    """Whether a claim's value is exactly what an administrator required.
+
+    Scalar attributes compare in the string form the claim holds them in.
+    Structured values compare as JSON, so a type the claim does not hold never
+    matches: Python's equality would take a required ``True`` for the claim's
+    integer ``1``.
+    """
+    if isinstance(required, Mapping):
+        return json.dumps(claimed, sort_keys=True) == json.dumps(required, sort_keys=True)
+    return claimed == str(required)
+
+
 def capacity_admin_routes(
     runtime: "BareMetalStorefrontRuntime",
 ) -> CapacityAdminRouteService:
@@ -200,11 +216,15 @@ def capacity_admin_routes(
             claim = whole_machine_claim(context)
         except ClaimAttributesMissing as exc:
             raise LookupError(str(exc)) from exc
+        claim["resource_id"] = str(context["physical_resource_id"])
         # A whole machine is reserved as its listing describes it; an
         # administrator's required attribute it does not match finds nothing.
-        if any(claim.get(str(name)) != str(value) for name, value in required.items()):
+        # The match is against the claim the site receives, its machine pinned
+        # and its quantities structured under `dimensions`.
+        if not all(
+            _claim_states(claim.get(str(name)), value) for name, value in required.items()
+        ):
             return None
-        claim["resource_id"] = str(context["physical_resource_id"])
         return await CapacityEffects(runtime.capacity_client).reserve(
             binding, claim=claim, deal_ref=dict(deal_ref)
         )
@@ -226,8 +246,10 @@ def capacity_admin_routes(
             negotiation_id=str(lifecycle["negotiation_id"]),
             state="released",
         )
-        if runtime.capacity_client is not None:
-            runtime.capacity_client.reservation_sites.pop(reservation_id, None)
+        with transaction(runtime.db.db_path) as conn:
+            EndSession(conn).physical_progress(str(lifecycle["negotiation_id"]), "released")
+        # Retain the accepted site's routing identity for report pull recovery
+        # after release, including when its independent callback was missed.
         # The release is observable in the stage-event log, as every storefront
         # records it, so a caller watching a lease sees it end the same way.
         stage_event(

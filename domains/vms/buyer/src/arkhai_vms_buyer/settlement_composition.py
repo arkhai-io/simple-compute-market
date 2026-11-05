@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 
 import typer
 from core_buyer.buyer_config import ResolvedBuyerIdentity
+from core_buyer.registry_config import registry_descriptors, resolve_indexer_urls
+from market_deal_lifecycle.configuration import authorities_by_registry, dispute_config
+from market_deal_lifecycle.selection import AuthoritySelection
+from market_deal_lifecycle.terms import TermContext
+from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from core_buyer.settlement import BuyerSettlementPolicy, SelectedSettlementOption
 from market_alkahest import create_alkahest_registration
 from market_arkhai_payments import create_arkhai_payments_registration
@@ -55,7 +61,9 @@ def advertised_plan_validator(match: Mapping[str, Any]):
     selected = match.get("_selected_settlement")
     if not isinstance(selected, SelectedSettlementOption):
         return None
-    return buyer_stage(selected.selection.mechanism).plan_validator(match, selected)
+    return buyer_stage(selected.selection.settlement_schema).plan_validator(
+        match, selected
+    )
 
 
 def accepted_listing_record(match: Mapping[str, Any], _proposal: Any) -> dict[str, Any]:
@@ -67,13 +75,13 @@ def accepted_listing_record(match: Mapping[str, Any], _proposal: Any) -> dict[st
     selected = match.get("_selected_settlement")
     if not isinstance(selected, SelectedSettlementOption):
         return {}
-    return buyer_stage(selected.selection.mechanism).listing_record(match)
+    return buyer_stage(selected.selection.settlement_schema).listing_record(match)
 
 
 def validate_buyer_acceptance(outcome) -> None:
     if outcome.agreement is None or outcome.agreement.settlement is None:
         raise RuntimeError("accepted work has no Agreement settlement option")
-    buyer_stage(outcome.agreement.settlement.mechanism).validate_acceptance(outcome)
+    buyer_stage(outcome.agreement.settlement.settlement_schema).validate_acceptance(outcome)
 
 
 def _alkahest_command_group():
@@ -145,6 +153,7 @@ def resolve_buyer_settlement_policy(
     *,
     identity: ResolvedBuyerIdentity | None = None,
     action_capable: bool = True,
+    registry_urls: str | None = None,
 ) -> BuyerSettlementPolicy:
     """Strictly resolve the common buyer ``[Settlement]`` hierarchy."""
 
@@ -160,11 +169,34 @@ def resolve_buyer_settlement_policy(
         raise ValueError("[Settlement] must be a table")
     registry = buyer_settlement_registry()
     settlement = registry.resolve(raw, role="buyer")
+    disputes = dispute_config(document, role="buyer")
+    descriptors = (
+        registry_descriptors(
+            signer=identity.signer, urls=resolve_indexer_urls(override=registry_urls)
+        )
+        if identity is not None and action_capable and disputes.use_registry_dispute_authorities
+        else {}
+    )
+    authorities = authorities_by_registry(
+        disputes,
+        {url: descriptor.recommended_dispute_authorities or [] if descriptor else []
+         for url, descriptor in descriptors.items()},
+        role="buyer",
+        report=logging.getLogger(__name__).warning if identity is not None else lambda _: None,
+    )
     return BuyerSettlementPolicy(
         config=settlement,
         registry=registry,
         stages=buyer_settlement_stages(),
-        public_context={},
+        option_preference=AuthoritySelection(authorities, contexts={
+            "arkhai.payments.v1": TermContext(
+                mechanism="arkhai.payments.v1", has_adapter=True, compute=True,
+                dispute_interfaces=frozenset({MEDIATION_INTERFACE}),
+            ),
+        }, report=logging.getLogger(__name__).info),
+        public_context={
+            "dispute_authorities_by_registry": authorities,
+        },
     )
 
 
@@ -173,6 +205,4 @@ def alkahest_entry_from_selection(
 ) -> dict[str, Any] | None:
     """Decode the mechanism-owned accepted escrow only after selection."""
 
-    return buyer_stage(selected.selection.mechanism).accepted_entry(selected)
-
-
+    return buyer_stage(selected.selection.settlement_schema).accepted_entry(selected)

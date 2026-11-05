@@ -1,7 +1,7 @@
 """VM's part of the canonical compute deal against a real KVM host.
 
 The real-provisioning lane deals on one host an environment owner describes in
-the run's target (``e2e_harness.real_vm_target``): this driver registers that
+the run's target (``e2e_harness.real_provisioning_target``): this driver registers that
 host's supply, negotiates a key generated for the run, reads the access the
 storefront delivered, and finds the real jobs the deal runs. It implements
 ``ComputeDealDriver`` alone. A real lane has no mock gate to hold a job at, so
@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -29,14 +29,15 @@ import pytest
 from compute_provisioning_contracts import ConnectionSubmission
 from storefront_client import StorefrontClientError
 
-from e2e_harness.real_vm_target import RealVmTarget
+from e2e_harness.real_provisioning_target import VmHost
 from tests.e2e.roles.helpers.compute_deal import advance_fulfillment_to
 from tests.e2e.roles.helpers.compute_deal_stages import (
     DURATION_HOURS,
     E2E_LEASE_EXPIRY_BACKDATE,
     ComputeDealState,
 )
-from tests.e2e.roles.helpers.ssh_access import SshEndpoint
+from tests.e2e.roles.helpers.ssh_access import SshEndpoint, SshHeartbeat
+from tests.e2e.roles.helpers.real_provisioning import JobWatch, RealComputeObservations, configured_relay
 from tests.e2e.roles.scenarios.vms.compute_deal_driver import VmDealDriverBase
 from tests.e2e.roles.scenarios.vms.host_registry import (
     provision_e2e_executor,
@@ -54,14 +55,6 @@ REAL_RESOURCE_ID = "compute-e2e-real-001"
 #: The region the listing and the declaration both state: the seller's inventory
 #: guard compares it by equality, and it names no real place.
 REAL_REGION = "e2e-real-host"
-#: How long a job on the real host has to reach a terminal status. Sized for a
-#: create — the cloud image's download, the guest's install, and its first
-#: boot — on a host and network nobody here controls.
-JOB_BOUND_SECONDS = 1800
-#: The pause between reads of a job's status.
-JOB_POLL_SECONDS = 10
-#: How much of a failed or late job's logs a failure message carries.
-_LOG_TAIL = 4000
 #: The most listings one read of the storefront's listings asks for: the
 #: largest page the storefront serves, which refuses a larger limit.
 _LISTING_PAGE = 200
@@ -93,6 +86,19 @@ class RealVmDealState(ComputeDealState):
     delivered_access: Optional[SshEndpoint] = None
     #: A VM list job on the host no longer names the guest.
     _guest_absent: bool = False
+    heartbeat: Optional[SshHeartbeat] = None
+    second_negotiation_id: Optional[str] = None
+    _second_escrow_expiration_unix: Optional[int] = None
+    second_escrow_uid: Optional[str] = None
+    _second_settlement_submitted: bool = False
+    second_fulfillment_id: Optional[str] = None
+    second_create_job_id: Optional[str] = None
+    second_vm_name: Optional[str] = None
+    second_access: Optional[SshEndpoint] = None
+    _second_create_preserved_session: bool = False
+    second_teardown_fulfillment_id: Optional[str] = None
+    _second_guest_absent: bool = False
+    _second_removal_preserved_session: bool = False
 
 
 def vm_executor_is_real(execution: Any) -> Any:
@@ -111,7 +117,8 @@ def vm_executor_is_real(execution: Any) -> Any:
     return entries[0]
 
 
-def target_connection(target: RealVmTarget) -> ConnectionSubmission:
+
+def target_connection(target: VmHost) -> ConnectionSubmission:
     """The connection the provisioning service reaches the target's host by.
 
     The key is named by where the service reads it; the target never carries
@@ -119,26 +126,26 @@ def target_connection(target: RealVmTarget) -> ConnectionSubmission:
     guest is reached at its own forwarded or relayed port, never the host's
     tenant-facing port, so none is stated.
     """
-    host = target.host
+    host = target
     return ConnectionSubmission(
         kind="ssh",
         version=2,
         public={
-            "ssh_host": host.ssh_host,
-            "ssh_port": host.ssh_port,
-            "ssh_user": host.ssh_user,
-            "key_path": host.ssh_key_path,
-            "public_host": host.public_host,
+            "ssh_host": host.connection.ssh_host,
+            "ssh_port": host.connection.ssh_port,
+            "ssh_user": host.connection.ssh_user,
+            "key_path": host.connection.ssh_key_path,
+            **({"public_host": host.access.public_host} if host.access.mode == "direct" else {}),
         },
     )
 
 
-def assert_registered_as_target(registered: Any, target: RealVmTarget) -> None:
+def assert_registered_as_target(registered: Any, target: VmHost) -> None:
     """The registered host is the target's: its pool and its whole connection."""
     wanted = target_connection(target)
     connection = registered.connection
     stated = {name: connection.public.get(name) for name in wanted.public}
-    assert registered.host_id == target.host.host_id, registered
+    assert registered.host_id == target.host_id, registered
     assert registered.enabled, f"host {registered.host_id!r} is disabled: {registered!r}"
     assert registered.pool_id == REAL_POOL_ID, (
         f"host {registered.host_id!r} is in pool {registered.pool_id!r}, not {REAL_POOL_ID!r}"
@@ -191,85 +198,6 @@ def listed_guests(job: Any) -> list[str]:
     return [str(guest["name"]) for guest in guests]
 
 
-@dataclass
-class JobWatch:
-    """Reads the jobs a deal's reservation runs, and waits for one to finish."""
-
-    provisioning_client: Any
-    bound: float = JOB_BOUND_SECONDS
-    poll_interval: float = JOB_POLL_SECONDS
-    clock: Callable[[], float] = time.monotonic
-    sleep: Callable[[float], None] = time.sleep
-
-    def reservation_jobs(self, capacity_reservation_id: str) -> list[Any]:
-        return list(
-            self.provisioning_client.list_jobs(
-                capacity_reservation_id=capacity_reservation_id,
-                limit=100,
-                sort="created_at_asc",
-            ).jobs
-        )
-
-    def only_job(
-        self,
-        capacity_reservation_id: str,
-        *,
-        host_id: str,
-        besides: tuple[str, ...] = (),
-        context: str,
-    ) -> Any:
-        """The one job the reservation ran besides ``besides``, on ``host_id``.
-
-        ``context`` says what the deal's fulfillment is doing, for a failure to
-        name.
-        """
-        jobs = [
-            job
-            for job in self.reservation_jobs(capacity_reservation_id)
-            if job.job_id not in besides
-        ]
-        assert jobs, (
-            f"reservation {capacity_reservation_id} ran no job besides "
-            f"{list(besides)}; {context}"
-        )
-        assert len(jobs) == 1, (
-            f"reservation {capacity_reservation_id} ran {len(jobs)} jobs besides "
-            f"{list(besides)}, where one was expected: "
-            f"{[(job.job_id, job.status, job.host_id) for job in jobs]}; {context}"
-        )
-        (job,) = jobs
-        assert job.host_id == host_id, (
-            f"job {job.job_id} of reservation {capacity_reservation_id} ran on "
-            f"{job.host_id!r}, not the target host {host_id!r}"
-        )
-        return job
-
-    def until_succeeded(self, job_id: str, *, describe: str) -> Any:
-        """The job once it succeeds; fails once it fails, or at the bound."""
-        deadline = self.clock() + self.bound
-        while True:
-            job = self.provisioning_client.get_job(job_id)
-            if job.status == "succeeded":
-                return job
-            if job.status in ("failed", "cancelled"):
-                raise AssertionError(
-                    f"{describe} {job_id} {job.status}: "
-                    f"{job.error or 'no error recorded'}\n{self._logs(job_id)}"
-                )
-            if self.clock() >= deadline:
-                raise AssertionError(
-                    f"{describe} {job_id} did not finish within {self.bound}s; its "
-                    f"last status was {job.status!r}\n{self._logs(job_id)}"
-                )
-            self.sleep(max(0.0, min(self.poll_interval, deadline - self.clock())))
-
-    def _logs(self, job_id: str) -> str:
-        try:
-            logs = self.provisioning_client.get_job_logs(job_id).logs or ""
-        except Exception as error:
-            return f"Its logs could not be read: {error}"
-        return f"Its logs, last {_LOG_TAIL} characters:\n{logs[-_LOG_TAIL:]}"
-
 
 def assert_guest_absent(
     watch: JobWatch, vm_operator_client: Any, *, host_id: str, vm_name: str
@@ -288,11 +216,11 @@ def assert_guest_absent(
 
 
 @dataclass
-class RealVmComputeDealDriver(VmDealDriverBase):
+class RealVmComputeDealDriver(VmDealDriverBase, RealComputeObservations):
     """VM's ``ComputeDealDriver`` for a real host: no mock gate, by construction."""
 
     vm_operator_client: Any
-    target: RealVmTarget
+    target: VmHost
     #: The OpenSSH public line of the key generated for this run.
     buyer_public_key: str
     #: The listing's shape, as the scenario's listing states it; the pool states
@@ -303,21 +231,29 @@ class RealVmComputeDealDriver(VmDealDriverBase):
     dispatch_bound: float = DISPATCH_BOUND_SECONDS
 
     @property
+    def listing_status_after_first_fulfillment(self) -> str:
+        return "open"
+
+
+
+
+    @property
     def capacity(self) -> dict[str, int]:
         """What the host sells, in the VM capacity dimensions."""
-        return self.target.host.capacity.model_dump()
+        return self.target.capacity.model_dump()
 
     def seed_supply(self) -> None:
         """Register the target's pool, host, and capacity, and load the projection.
 
         The host is registered with the target's connection, replacing the one
         an earlier run left; the declaration states everything the host sells
-        and no GPU, so the one deal takes all of it.
+        and no GPU, while the listing sells the explicit smaller guest shape.
         """
+        configured_relay(self.provisioning_client, self.target)
         host = provision_e2e_executor(
             self.provisioning_client,
             self.site_capacity_admin_client,
-            host=self.target.host.host_id,
+            host=self.target.host_id,
             pool_id=REAL_POOL_ID,
             resource_id=REAL_RESOURCE_ID,
             sellable_units=None,
@@ -325,12 +261,14 @@ class RealVmComputeDealDriver(VmDealDriverBase):
             attributes={"region": REAL_REGION, "sla": "90.0"},
             listing_shapes={"vm": [self.listing_shape]},
             connection=target_connection(self.target),
+            provider_config=({"relay_id": self.target.access.relay_id}
+                             if self.target.access.mode == "relay" else {}),
         )
-        assert host.host_id == self.target.host.host_id
+        assert host.host_id == self.target.host_id
         refresh_storefront_projections(self.storefront_admin_client)
 
     def registered_host(self) -> Any:
-        return self.provisioning_client.get_host(self.target.host.host_id)
+        return self.provisioning_client.get_host(self.target.host_id)
 
     def listing_for_run(self) -> Optional[Any]:
         """The listing an earlier run left on the lane's resource, adopted paused.
@@ -339,7 +277,7 @@ class RealVmComputeDealDriver(VmDealDriverBase):
         rerun derives the same source from the same target, so a second listing
         on it is refused: a rerun takes over the listing already there. None on
         the resource returns nothing, for the run to create its own. Exactly
-        one, open, stating everything the host sells is paused unless it is
+        one, open, stating the target listing shape is paused unless it is
         already, read back paused and open, and returned. Any other finding
         fails naming the listings and the capacity, for an operator to recover,
         and changes nothing.
@@ -347,7 +285,7 @@ class RealVmComputeDealDriver(VmDealDriverBase):
         listings = self._listings_on_resource()
         if not listings:
             return None
-        capacity = self.capacity
+        capacity = self.target.listing_shape.model_dump()
         stated = [
             (listing, {name: listing.listing_resource.get(name) for name in capacity})
             for listing in listings
@@ -355,7 +293,7 @@ class RealVmComputeDealDriver(VmDealDriverBase):
         (listing, shape), *others = stated
         assert not others and listing.status == "open" and shape == capacity, (
             f"the storefront holds listings on resource {REAL_RESOURCE_ID!r} this "
-            f"run cannot adopt, where one open listing of the target's capacity "
+            f"run cannot adopt, where one open listing of the target's listing shape "
             f"{capacity} can be: "
             + "; ".join(
                 f"{each.listing_id} {each.status!r} paused={each.paused} {each_shape}"
@@ -421,13 +359,14 @@ class RealVmComputeDealDriver(VmDealDriverBase):
             f"the delivered access names {endpoint.host!r}, not {expected!r}, the "
             f"address the target's {self.target.access.mode!r} access reaches"
         )
+        self.assert_relay_delivery(deal_state.fulfillment_id, endpoint)
         return endpoint
 
     def _buyer_address(self) -> str:
         """The address a buyer reaches the guest at under the target's access mode."""
         if self.target.access.mode == "direct":
-            return self.target.host.public_host
-        raise AssertionError(f"access mode {self.target.access.mode!r} is not one this driver proves")
+            return self.target.access.public_host
+        return configured_relay(self.provisioning_client, self.target).relay_addr
 
     def reserve_released_capacity(
         self, storefront_admin_client: Any, *, listing_id: str, escrow_uid: str
@@ -448,36 +387,38 @@ class RealVmComputeDealDriver(VmDealDriverBase):
 
     # -- the deal's real jobs ---------------------------------------------
 
-    def reservation_of(self, fulfillment_id: str) -> tuple[str, str]:
-        """The capacity reservation a fulfillment serves, and its state."""
-        status = self.provisioning_client.get_fulfillment_status(fulfillment_id)
-        return status.capacity_reservation_id, status.state
 
-    def create_job(self, fulfillment_id: str) -> Any:
-        """The deal's create job, once it succeeded."""
-        reservation, state = self.reservation_of(fulfillment_id)
-        job = self.jobs.only_job(
-            reservation,
-            host_id=self.target.host.host_id,
-            context=f"fulfillment {fulfillment_id} is {state!r}",
-        )
-        return self.jobs.until_succeeded(job.job_id, describe="create job")
 
-    def teardown_job(self, fulfillment_id: str, *, create_job_id: str) -> Any:
-        """The deal's teardown job, the one job besides its create, once it succeeded."""
-        reservation, state = self.reservation_of(fulfillment_id)
-        job = self.jobs.only_job(
-            reservation,
-            host_id=self.target.host.host_id,
-            besides=(create_job_id,),
-            context=f"fulfillment {fulfillment_id} is {state!r}",
-        )
-        return self.jobs.until_succeeded(job.job_id, describe="teardown job")
 
     def assert_guest_absent(self, vm_name: str) -> list[str]:
         return assert_guest_absent(
-            self.jobs, self.vm_operator_client, host_id=self.target.host.host_id, vm_name=vm_name
+            self.jobs, self.vm_operator_client, host_id=self.target.host_id, vm_name=vm_name
         )
+
+    def second_deal_state(self, state: RealVmDealState) -> RealVmDealState:
+        """A recovery view over the second deal's independently recorded identities."""
+        return RealVmDealState(
+            seller_listing_id=state.seller_listing_id,
+            negotiation_id=state.second_negotiation_id,
+            real_escrow_uid=state.second_escrow_uid,
+            fulfillment_id=state.second_fulfillment_id,
+            create_job_id=state.second_create_job_id,
+            vm_name=state.second_vm_name,
+            _settle_preflight_passed=state._second_settlement_submitted,
+            _guest_absent=state._second_guest_absent,
+        )
+
+    def recover_both(self, state: RealVmDealState) -> None:
+        """Attempt both recoveries even when one fails; preserve both diagnostics."""
+        failures = []
+        for name, deal in (("second", self.second_deal_state(state)), ("first", state)):
+            if deal._settle_preflight_passed and not deal._guest_absent:
+                try:
+                    self.tear_down_after_failure(deal)
+                except (Exception, pytest.fail.Exception) as error:
+                    failures.append(f"{name} deal: {error}")
+        if failures:
+            raise AssertionError("; ".join(failures))
 
     # -- a failed run ---------------------------------------------------
 
@@ -558,7 +499,7 @@ class RealVmComputeDealDriver(VmDealDriverBase):
             "create job": deal_state.create_job_id,
             "teardown job": None,
             "guest": deal_state.vm_name,
-            "host": self.target.host.host_id,
+            "host": self.target.host_id,
         }
         try:
             fulfillment_id = deal_state.fulfillment_id or self.dispatched_fulfillment(deal_state)
@@ -568,7 +509,7 @@ class RealVmComputeDealDriver(VmDealDriverBase):
             known["fulfillment"] = fulfillment_id
             reservation, state = self.reservation_of(fulfillment_id)
             known["reservation"] = reservation
-            host_id = self.target.host.host_id
+            host_id = self.target.host_id
             if not known["create job"]:
                 known["create job"] = self.jobs.only_job(
                     reservation, host_id=host_id, context=f"fulfillment {fulfillment_id} is {state!r}"

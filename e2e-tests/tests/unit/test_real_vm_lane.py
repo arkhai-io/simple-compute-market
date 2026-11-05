@@ -13,7 +13,7 @@ from __future__ import annotations
 import importlib
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from compute_provisioning_client import ComputeProvisioningError
@@ -27,9 +27,12 @@ from compute_provisioning_contracts import (
 from storefront_client import StorefrontClientError
 from storefront_client.models import ListingListResponse, ListingSummary
 
-from e2e_harness.real_vm_target import RealVmTarget
+from e2e_harness.real_provisioning_target import VmHost
 from tests.e2e.roles.helpers.compute_deal import DealLease
-from tests.e2e.roles.scenarios.vms.host_registry import register_e2e_host
+from tests.e2e.roles.helpers.compute_deal_stages import Stage09b_SettlementReadyAndCredentials
+from tests.e2e.roles.scenarios.vms.host_registry import (
+    provision_e2e_executor, register_e2e_host, register_e2e_pool,
+)
 from tests.e2e.roles.scenarios.vms.real_compute_deal_driver import (
     REAL_POOL_ID,
     REAL_RESOURCE_ID,
@@ -42,6 +45,7 @@ from tests.e2e.roles.scenarios.vms.real_compute_deal_driver import (
     delivered_endpoint,
     target_connection,
     vm_executor_is_real,
+    configured_relay,
 )
 
 real_lane = importlib.import_module("tests.e2e.roles.scenarios.vms.test_real_provisioning_deal")
@@ -50,18 +54,18 @@ HOST = "example-kvm-1"
 RESERVATION = "reservation-1"
 #: RFC 5737 documentation addresses and a fictitious key path, as in the
 #: committed example target; they name no real host.
-TARGET = RealVmTarget.model_validate({
-    "version": 1,
-    "host": {
-        "host_id": HOST,
+TARGET = VmHost.model_validate({
+    "domain": "vm",
+    "host_id": HOST,
+    "connection": {
         "ssh_host": "192.0.2.10",
         "ssh_user": "provisioner",
         "ssh_port": 22,
         "ssh_key_path": "/run/secrets/example-host-key",
-        "public_host": "198.51.100.7",
-        "capacity": {"vcpu_count": 7, "ram_gb": 28, "disk_gb": 160},
     },
-    "access": {"mode": "direct"},
+    "capacity": {"vcpu_count": 7, "ram_gb": 28, "disk_gb": 160},
+    "listing_shape": {"vcpu_count": 2, "ram_gb": 4, "disk_gb": 30},
+    "access": {"mode": "direct", "public_host": "198.51.100.7"},
 })
 
 
@@ -394,7 +398,7 @@ def test_a_failed_list_job_fails():
 def _preflight(chosen: str) -> RealVmDealState:
     state = RealVmDealState(_evaluate_settle_passed=True, _evaluate_settle_host_id=chosen)
     real_lane.TestStage08a2_SettlementPreviewChoseTheTarget().test_08a2_the_settlement_preview_chose_the_target_host(
-        TARGET, state
+        TARGET, MagicMock(spec=RealVmComputeDealDriver), state
     )
     return state
 
@@ -407,7 +411,7 @@ def test_the_preflight_fails_and_settlement_stays_blocked_when_another_host_was_
     state = RealVmDealState(_evaluate_settle_passed=True, _evaluate_settle_host_id="kvm-other")
     with pytest.raises(AssertionError, match="chose host 'kvm-other', not the target"):
         real_lane.TestStage08a2_SettlementPreviewChoseTheTarget().test_08a2_the_settlement_preview_chose_the_target_host(
-            TARGET, state
+            TARGET, MagicMock(spec=RealVmComputeDealDriver), state
         )
     assert state._settle_preflight_passed is False
 
@@ -416,7 +420,8 @@ def test_the_preflight_fails_and_settlement_stays_blocked_when_another_host_was_
 # A rerun's listing, and the re-reservation's claim
 # ---------------------------------------------------------------------------
 
-CAPACITY = TARGET.host.capacity.model_dump()
+CAPACITY = TARGET.capacity.model_dump()
+LISTING_SHAPE = TARGET.listing_shape.model_dump()
 
 
 def _listing(
@@ -426,7 +431,7 @@ def _listing(
     return ListingSummary.from_dict({
         "listing_id": listing_id, "status": status, "paused": paused,
         "listing_resource": {
-            "offering_mode": "vm", "resource_id": resource_id, **CAPACITY, **shape,
+            "offering_mode": "vm", "resource_id": resource_id, **LISTING_SHAPE, **shape,
         },
     })
 
@@ -505,7 +510,7 @@ def test_a_listing_this_run_cannot_adopt_fails_naming_the_listings_and_the_capac
     with pytest.raises(AssertionError) as failure:
         _driver(storefront_admin_client=storefront).listing_for_run()
     message = str(failure.value)
-    assert f"the target's capacity {CAPACITY}" in message, message
+    assert f"the target's listing shape {LISTING_SHAPE}" in message, message
     for listing in listings:
         shape = {name: listing.listing_resource[name] for name in CAPACITY}
         assert f"{listing.listing_id} {listing.status!r} paused={listing.paused} {shape}" in message, message
@@ -766,3 +771,196 @@ def test_a_gpu_declaration_is_still_read_from_its_mirror():
     free = _lease_over({"value": 1, "available_units": 1})
     assert held.resource_consumed(None, "res-1") is True
     assert free.resource_consumed(None, "res-1") is False
+
+
+
+def test_executor_fixture_refuses_unready_relay_before_lifecycle_holds():
+    section = TARGET.model_dump()
+    section["access"] = {"mode": "relay", "relay_id": "example-vm-relay"}
+    target = VmHost.model_validate(section)
+    client = MagicMock()
+    client.get_system_status.return_value.execution = SimpleNamespace(
+        executors=[SimpleNamespace(offering_mode="vm", mocked=False)],
+    )
+    client.get_relay.return_value = SimpleNamespace(id="example-vm-relay", enabled=False)
+    with pytest.raises(AssertionError, match="disabled"):
+        real_lane.real_vm_execution.__wrapped__(target, client)
+    assert [call[0] for call in client.method_calls] == ["get_system_status", "get_relay"]
+
+
+def _relay_target():
+    section = TARGET.model_dump()
+    section["access"] = {"mode": "relay", "relay_id": "example-vm-relay"}
+    return VmHost.model_validate(section)
+
+
+def _relay(**changes):
+    fields = dict(id="example-vm-relay", relay_addr="192.0.2.22", enabled=True,
+                  token_configured=True, grant_keys=SimpleNamespace(active=SimpleNamespace(kid="example-kid")))
+    return SimpleNamespace(**{**fields, **changes})
+
+
+@pytest.mark.parametrize(("changes", "reason"), [
+    ({"enabled": False}, "disabled"),
+    ({"token_configured": False}, "token"),
+    ({"grant_keys": SimpleNamespace(active=None)}, "active grant key"),
+    ({"id": "another-relay"}, "another identity"),
+])
+def test_relay_preflight_refuses_unusable_operator_configuration(changes, reason):
+    client = MagicMock()
+    client.get_relay.return_value = _relay(**changes)
+    with pytest.raises(AssertionError, match=reason):
+        configured_relay(client, _relay_target())
+    assert [call[0] for call in client.method_calls] == ["get_relay"]
+
+
+def test_direct_target_does_not_read_or_create_a_relay():
+    client = MagicMock()
+    assert configured_relay(client, TARGET) is None
+    assert client.method_calls == []
+
+
+def test_relay_endpoint_is_the_reservations_leased_port():
+    driver = _driver()
+    driver.target = _relay_target()
+    client = MagicMock()
+    client.get_relay.return_value = _relay()
+    client.get_fulfillment_status.return_value = SimpleNamespace(capacity_reservation_id=RESERVATION, state="active")
+    holding = SimpleNamespace(owner_kind="fulfillment", owner_id=RESERVATION,
+                              remote_port=30022, host_id=HOST, released_at=None)
+    client.list_relay_leases.return_value = SimpleNamespace(leases=[holding])
+    driver.provisioning_client = client
+    driver.storefront_client = MagicMock()
+    driver.storefront_client.get_settle_status.return_value.extra = {
+        "connection_details": {"host": "192.0.2.22", "port": 30022, "user": "vmuser"},
+    }
+    state = RealVmDealState(real_escrow_uid="escrow", fulfillment_id="fulfillment")
+    assert driver.delivered_access(state).port == holding.remote_port
+    holding.remote_port += 1
+    with pytest.raises(AssertionError, match="differs"):
+        driver.delivered_access(state)
+
+
+def test_released_relay_port_requires_release_expiry_and_no_active_owner():
+    driver = _driver()
+    driver.target = _relay_target()
+    client = MagicMock()
+    client.get_fulfillment_status.return_value = SimpleNamespace(capacity_reservation_id=RESERVATION, state="torn_down")
+    holding = SimpleNamespace(owner_kind="fulfillment", owner_id=RESERVATION,
+                              remote_port=30022, released_at=datetime.now(timezone.utc),
+                              grant_expires_at=datetime.now(timezone.utc))
+    client.list_relay_leases.return_value = SimpleNamespace(leases=[holding])
+    driver.provisioning_client = client
+    endpoint = delivered_endpoint(SimpleNamespace(extra={"connection_details": {
+        "host": "192.0.2.22", "port": 30022, "user": "vmuser",
+    }}))
+    driver.assert_relay_released("f-1", endpoint)
+    holding.released_at = None
+    with pytest.raises(AssertionError, match="record release"):
+        driver.assert_relay_released("f-1", endpoint)
+    holding.released_at = datetime.now(timezone.utc)
+    holding.grant_expires_at = None
+    with pytest.raises(AssertionError, match="grant expiry"):
+        driver.assert_relay_released("f-1", endpoint)
+
+
+def test_both_deals_are_recovered_even_when_second_recovery_fails():
+    class RecordingRecovery(RealVmComputeDealDriver):
+        def tear_down_after_failure(self, state):
+            self.attempted.append(state.negotiation_id)
+            if state.negotiation_id == "second":
+                raise AssertionError("second-guest-remains")
+
+    driver = RecordingRecovery(**vars(_driver()))
+    driver.attempted = []
+    state = RealVmDealState(
+        negotiation_id="first", _settle_preflight_passed=True,
+        second_negotiation_id="second", second_escrow_uid="escrow-2",
+        _second_settlement_submitted=True,
+    )
+    with pytest.raises(AssertionError, match="second deal: second-guest-remains"):
+        driver.recover_both(state)
+    assert driver.attempted == ["second", "first"]
+
+
+def test_real_listing_sells_two_guest_shapes_without_changing_declared_capacity():
+    driver = _driver()
+    assert driver.capacity == CAPACITY
+    assert driver.listing_status_after_first_fulfillment == "open"
+    assert real_lane.offer_resource.__wrapped__(TARGET)["vcpu_count"] == LISTING_SHAPE["vcpu_count"]
+    for dimension, amount in LISTING_SHAPE.items():
+        assert 2 * amount <= CAPACITY[dimension]
+
+
+@pytest.mark.parametrize(("expected", "observed"), [("open", "open"), ("closed", "closed"), ("open", "closed"), ("closed", "open")])
+def test_shared_ready_stage_checks_each_lanes_actual_capacity_expectation(expected, observed):
+    admin = MagicMock()
+    admin.wait_for_settlement.return_value = SimpleNamespace(ready=True, status="ready")
+    admin.get_listing.return_value = SimpleNamespace(status=observed)
+    driver = SimpleNamespace(listing_status_after_first_fulfillment=expected, assert_delivery=MagicMock())
+    state = RealVmDealState(real_escrow_uid="escrow", provisioning_result_injected=True,
+                            seller_listing_id="listing", negotiation_id="negotiation", _listing_reconciled=True)
+    call = lambda: Stage09b_SettlementReadyAndCredentials().test_09b_settlement_ready_credentials_and_listing_closed(admin, driver, state)
+    if expected == observed:
+        call()
+        assert state.settlement_status == "ready"
+    else:
+        with pytest.raises(AssertionError, match="Expected listing status"):
+            call()
+        assert state.settlement_status is None
+
+
+def test_pool_registration_sends_and_reconciles_relay_config_through_typed_client():
+    class PoolTransport:
+        def __init__(self):
+            self.row = None
+            self.operations = []
+
+        def authenticated_request(self, method, path, *args, **kwargs):
+            body = args[0].model_dump(exclude_none=True) if args else None
+            self.operations.append((method, body))
+            if method == "GET":
+                if self.row is None:
+                    raise ComputeProvisioningError("missing", status_code=404)
+            elif method == "POST":
+                self.row = {**body, "created_at": datetime.now(timezone.utc),
+                            "updated_at": datetime.now(timezone.utc)}
+            elif method == "PATCH":
+                self.row.update(body)
+            else:
+                raise AssertionError(method)
+            return self.row
+
+    transport = PoolTransport()
+    relay = {"relay_id": "example-vm-relay"}
+    shape = real_lane.capacity_source_for(real_lane.offer_resource.__wrapped__(TARGET))["listing_shape"]
+    kwargs = dict(pool_id="example-pool", listing_mode="specific_resource",
+                  listing_shapes={"vm": [shape]})
+    created = register_e2e_pool(transport, provider_config=relay, **kwargs)
+    assert created.provider_config == relay
+    assert [body["provider_config"] for method, body in transport.operations if method == "POST"] == [relay]
+    transport.operations.clear()
+    register_e2e_pool(transport, provider_config=relay, **kwargs)
+    assert [method for method, _ in transport.operations] == ["GET"]
+    register_e2e_pool(transport, **kwargs)
+    assert transport.row["provider_config"] == relay
+    register_e2e_pool(transport, provider_config={}, **kwargs)
+    assert transport.row["provider_config"] == {}
+    assert [body["provider_config"] for method, body in transport.operations if method == "PATCH"] == [{}]
+
+
+    class ExecutorTransport(PoolTransport, FakeHosts):
+        def __init__(self):
+            PoolTransport.__init__(self)
+            FakeHosts.__init__(self)
+
+    transport = ExecutorTransport()
+    site = SimpleNamespace(register_resource=AsyncMock(return_value={"registered": True}))
+    host = provision_e2e_executor(
+        transport, site, host=HOST, resource_id=REAL_RESOURCE_ID,
+        attributes={"region": "example-region"}, pool_id="example-pool",
+        sellable_units=None, capacity=CAPACITY, connection=target_connection(TARGET),
+        listing_shapes={"vm": [shape]}, provider_config=relay,
+    )
+    assert host.host_id == HOST and transport.row["provider_config"] == relay
+    assert site.register_resource.await_args.kwargs["capacity"] == CAPACITY

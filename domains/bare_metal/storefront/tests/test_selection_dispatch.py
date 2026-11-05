@@ -70,7 +70,9 @@ def _intro_registration() -> MechanismRegistration:
         section: BaseModel, option: Any, context: Mapping[str, Any]
     ) -> AcceptedObligationArtifacts:
         raw = option if isinstance(option, Mapping) else option.model_dump()
-        params = dict(raw["params"])
+        params = {
+            key: value for key, value in raw["settlement"].items() if key != "schema"
+        }
         return AcceptedObligationArtifacts(
             obligation={
                 "payer": "buyer",
@@ -149,15 +151,11 @@ def _intro_option() -> dict[str, Any]:
     }
     return {
         "option_id": derive_settlement_option_id(
-            mechanism=INTRO_MECHANISM,
-            asset="introduction",
-            rates=[],
-            params=params,
+            price={"asset": "introduction", "rates": []},
+            settlement={"schema": INTRO_MECHANISM, **(params or {})},
         ),
-        "mechanism": INTRO_MECHANISM,
-        "asset": "introduction",
-        "rates": [],
-        "params": params,
+        "price": {"asset": "introduction", "rates": []},
+        "settlement": {"schema": INTRO_MECHANISM, **(params or {})},
     }
 
 
@@ -242,8 +240,8 @@ def _request(
         },
         proposal={
             "settlement_selection": {
-                "mechanism": option["mechanism"],
                 "option_id": option["option_id"],
+                "settlement": {"schema": option["settlement"]["schema"]},
                 "expiration_unix": 1_900_000_000,
             },
             "fields": fields or {},
@@ -275,7 +273,10 @@ async def test_non_scalar_selection_accepts_without_provisioning_inputs(
 
 async def test_selection_with_uncomposed_mechanism_is_rejected(tmp_path) -> None:
     service, option = await _service(tmp_path)
-    tampered = dict(option, mechanism="unknown.v1")
+    tampered = {
+        **option,
+        "settlement": {**option["settlement"], "schema": "unknown.v1"},
+    }
     with pytest.raises(BareMetalNegotiationRefusal, match="unsupported mechanism"):
         await service.open(
             request=_request(tampered),
@@ -324,12 +325,11 @@ def _payment_option(hourly: int = 100) -> dict[str, Any]:
     rates = [RateValue(field="amount", per="hour", value=hourly)]
     return SettlementOption(
         option_id=derive_settlement_option_id(
-            mechanism=PAYMENT_MECHANISM, asset="usd", rates=rates, params={}
+            price={"asset": "usd", "rates": rates},
+            settlement={"schema": PAYMENT_MECHANISM, **({} or {})},
         ),
-        mechanism=PAYMENT_MECHANISM,
-        asset="usd",
-        rates=rates,
-        params={},
+        price={"asset": "usd", "rates": rates},
+        settlement={"schema": PAYMENT_MECHANISM, **({} or {})},
     ).model_dump(mode="json")
 
 
@@ -419,7 +419,7 @@ async def test_agreement_only_selection_is_accepted_with_its_agreement(tmp_path)
     agreement_bytes = base64.b64decode(response.agreement_bytes)
     agreement = json.loads(agreement_bytes)
     assert agreement["negotiation_id"] == response.negotiation_id
-    assert agreement["settlement"]["mechanism"] == PAYMENT_MECHANISM
+    assert agreement["settlement"]["settlement"]["schema"] == PAYMENT_MECHANISM
     # Settlement data is derived from the exact Agreement bytes both parties keep.
     assert calls == [agreement]
     assert response.settlement_data == {

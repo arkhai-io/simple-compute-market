@@ -164,8 +164,9 @@ a second pool:
    through the API.
 2. Move each host to it: restate the host's entry with the new `pool_id` in the
    host document, or update it through the host API. The move runs the host
-   pool-change hooks; the VM hook refuses moving a host whose VM tunnel a buyer
-   holds to a pool dialling another relay, so wait for those leases to end.
+   pool-change hooks; the relays' hook refuses moving a host whose relayed
+   delivery a buyer holds to a pool dialling another relay, so wait for those
+   leases to end.
 3. Move each capacity declaration to it once it holds no live reservation: a
    declaration does not move pools while a hold, reservation, assignment, or
    workload is resolved through its pool.
@@ -242,12 +243,13 @@ configures none keeps its registered hosts as they are.
 
 #### A refused host move keeps the service down
 
-The VM pool-change hook refuses moving a host whose VM tunnel a buyer holds to a
-pool dialling another relay, or to no pool. A changed document making that move
-fails the start, and under the chart's `Recreate` no pod serves while it does,
-so the buyer's leases cannot drain. Revert the edit and roll the release again
-to recover. Validating the changed document first reports the refusal, coded
-`pool_change_refused`, without the outage.
+The relays' host hooks refuse moving a host whose relayed delivery a buyer holds
+to a pool dialling another relay, or to no pool, and refuse a host in a
+relay-backed pool whose connection address is that pool's relay's. A changed
+document making such a write fails the start, and under the chart's `Recreate`
+no pod serves while it does, so a buyer's leases cannot drain. Revert the edit
+and roll the release again to recover. Validating the changed document first
+reports the refusal, coded `pool_change_refused`, without the outage.
 
 #### Exporting and importing the registry
 

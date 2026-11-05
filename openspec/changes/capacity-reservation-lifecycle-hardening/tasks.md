@@ -36,8 +36,14 @@
 - [ ] 3.3 Assert the near-miss explicitly: keying on listing identity alone must not be
       possible, since two counterparties on one listing would collapse into one
       reservation.
-- [ ] 3.4 Focused tests: retried placement returns the same reservation; two
-      counterparties on one listing get two; placement after expiry admits fresh.
+- [ ] 3.4 Normalize dimensions/attributes, selected pool/site, offering mode and lease
+      window for same-key comparison; reject changed reuse. Recover the recorded
+      reservation identity/state across held, committed and released states, including
+      acknowledgement loss. Unresolved expired/released replay is repair-required or
+      classified end, never a replacement hold. Known expired-hold replacement is a
+      distinct explicit placement with a fresh logical identity. Verify exact replay,
+      conflicts, cross-state recovery and two counterparties receiving distinct holds.
+      This slice gates unify/renewable acknowledgement-gap work, not all hardening.
 
 ## 4. Terminal reservation retention
 

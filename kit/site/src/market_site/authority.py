@@ -21,7 +21,7 @@ class SiteAuthorityPort(Protocol):
     # undoing what an operator or a completed release recorded.
 
     def begin_release(
-        self, capacity_reservation_id: str, *, release_job_id: str
+        self, capacity_reservation_id: str, *, end_context: dict[str, Any] | None = None, release_job_id: str
     ) -> dict[str, Any] | None: ...
 
     def record_release_failure(
@@ -31,6 +31,7 @@ class SiteAuthorityPort(Protocol):
         reason: str,
         message: str | None = None,
         release_job_id: str | None = None,
+        end_context: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None: ...
 
     def record_release_success(
@@ -38,6 +39,7 @@ class SiteAuthorityPort(Protocol):
         capacity_reservation_id: str,
         *,
         forced: bool = False,
+        end_context: dict[str, Any] | None = None,
         reason: str | None = None,
         message: str | None = None,
     ) -> dict[str, Any] | None: ...
@@ -61,7 +63,7 @@ class SiteAuthorityLedger(Protocol):
     def get_reservation(self, capacity_reservation_id: str) -> dict[str, Any] | None: ...
 
     def begin_releasing(
-        self, capacity_reservation_id: str, *, release_job_id: str | None = None
+        self, capacity_reservation_id: str, *, end_context: dict[str, Any] | None = None, release_job_id: str | None = None
     ) -> dict[str, Any] | None: ...
 
     def record_release_failed(
@@ -71,6 +73,7 @@ class SiteAuthorityLedger(Protocol):
         reason: str,
         message: str | None = None,
         release_job_id: str | None = None,
+        end_context: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None: ...
 
     def release(
@@ -78,6 +81,7 @@ class SiteAuthorityLedger(Protocol):
         *,
         capacity_reservation_id: str,
         forced: bool = False,
+        end_context: dict[str, Any] | None = None,
         failure_reason: str | None = None,
         failure_message: str | None = None,
     ) -> dict[str, Any] | None: ...
@@ -107,10 +111,10 @@ class LedgerSiteAuthority:
         return self._ledger.get_reservation(capacity_reservation_id)
 
     def begin_release(
-        self, capacity_reservation_id: str, *, release_job_id: str
+        self, capacity_reservation_id: str, *, end_context: dict[str, Any] | None = None, release_job_id: str
     ) -> dict[str, Any] | None:
         return self._ledger.begin_releasing(
-            capacity_reservation_id, release_job_id=release_job_id
+            capacity_reservation_id, release_job_id=release_job_id, end_context=end_context
         )
 
     def record_release_failure(
@@ -120,13 +124,14 @@ class LedgerSiteAuthority:
         reason: str,
         message: str | None = None,
         release_job_id: str | None = None,
+        end_context: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         """Record a failed release; refused once an operator or a release won."""
         return self._ledger.record_release_failed(
             capacity_reservation_id,
             reason=reason,
             message=message,
-            release_job_id=release_job_id,
+            release_job_id=release_job_id, end_context=end_context,
         )
 
     def record_release_success(
@@ -134,6 +139,7 @@ class LedgerSiteAuthority:
         capacity_reservation_id: str,
         *,
         forced: bool = False,
+        end_context: dict[str, Any] | None = None,
         reason: str | None = None,
         message: str | None = None,
     ) -> dict[str, Any] | None:
@@ -143,7 +149,7 @@ class LedgerSiteAuthority:
         """
         return self._ledger.release(
             capacity_reservation_id=capacity_reservation_id,
-            forced=forced,
+            forced=forced, end_context=end_context,
             failure_reason=reason,
             failure_message=message,
         )

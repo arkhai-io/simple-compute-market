@@ -1,0 +1,15 @@
+---
+- name: Remove only this buyer proxy and apply its removal
+  ansible.builtin.shell: |
+    set -euo pipefail
+    source {{ relay_proxy_teardown_library | quote }}
+    config={{ relay_client_config | quote }}
+    port=$(awk -F ' = ' '$1 == "webServer.port" {print $2; exit}' "$config")
+    [[ "$port" =~ ^[0-9]+$ ]] && [ "$port" -gt 0 ] && [ "$port" -lt 1024 ]
+    remove_guest_proxy "$config" {{ relay_proxy_name | quote }} "http://127.0.0.1:$port/api/reload"
+    printf '%s\n' "$GUEST_PROXY"
+  args:
+    executable: /bin/bash
+  register: relay_proxy_removal
+  changed_when: relay_proxy_removal.stdout | trim == 'removed'
+  no_log: true

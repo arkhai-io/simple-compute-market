@@ -11,6 +11,8 @@ from typing import Any
 
 from market_core import SettlementEvidence
 
+from market_storefront.delivery_records import DeliveryEnded
+
 from market_storefront.services.capacity_client import capacity_binding_for_listing
 from market_storefront.services.vm_fulfillment_planner import build_vm_fulfillment_plan
 
@@ -45,6 +47,8 @@ async def persist_delivery_fields_with_retry(
                 )
             await db.update_vm_delivery(negotiation_id=negotiation_id, **fields)
             return True
+        except DeliveryEnded:
+            raise
         except Exception as exc:
             last_exc = exc
             if attempt < attempts:
@@ -468,6 +472,8 @@ async def fulfill_vm_obligation(
             connection_details = json.dumps(provision_result)
         else:
             connection_details = provision_result
+    except DeliveryEnded:
+        raise
     except Exception as error:
         if apply_failure_policy is not None:
             try:
@@ -506,6 +512,9 @@ async def fulfill_vm_obligation(
             "ssh_public_key": ssh_public_key,
         }
 
+    await get_sqlite_client().update_vm_delivery(
+        negotiation_id=negotiation_id, fulfillment_phase="disclose",
+    )
     cred_order_id = seller_order_id or order_id
     if authentication and cred_order_id:
         try:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -208,6 +209,7 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
             arkhai_payments_stage=None,
             payments_coordinator=None,
             settlement_config=SimpleNamespace(priority=()),
+            disputes=SimpleNamespace(refresh=AsyncMock()),
             repository=SimpleNamespace(load_settlement_obligation=None),
             runtime=None,
         )

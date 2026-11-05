@@ -21,6 +21,9 @@ from typing import Any
 
 import pytest
 from arkhai_bare_metal_buyer import cli
+from arkhai_bare_metal_buyer.config import BareMetalBuyerConfig
+from market_arkhai_payments import ArkhaiPaymentsConfig
+from market_deal_lifecycle.configuration import DisputeConfig, DisputeEntry
 from arkhai_bare_metal_buyer.settlement_stages import purchase_quote
 from core_buyer.negotiation_client import NegotiationOutcome
 from market_core.schemas import (
@@ -39,6 +42,14 @@ from typer.testing import CliRunner
 _BUYER = Ed25519Signer(bytes([1]) * 32)
 _SELLER = Ed25519Signer(bytes([2]) * 32)
 
+_DISPUTE = {
+    "interface": "arkhai.mediation.v1", "origin": "https://dispute.example",
+    "account": "11111111-1111-4111-8111-111111111111",
+    "record_key": "example-record-key", "params": {},
+    "advertisement": {"mechanisms": ["arkhai.payments.v1"],
+                      "minimum_dispute_window_seconds": 60, "minimum_case_hold_seconds": None},
+}
+
 _ACCEPTED_TERMS = {
     "domain": "bare_metal",
     "payload": {"duration_seconds": 3600, "access_method": "ssh"},
@@ -47,12 +58,13 @@ _ACCEPTED_TERMS = {
 
 def _option(mechanism: str, asset: str, rates: list[dict[str, Any]]) -> SettlementOption:
     values = [RateValue.model_validate(rate) for rate in rates]
-    option_id = derive_settlement_option_id(
-        mechanism=mechanism, asset=asset, rates=values, params={}
-    )
-    return SettlementOption(
-        option_id=option_id, mechanism=mechanism, asset=asset, rates=values, params={}
-    )
+    body = {"price": {"asset": asset, "rates": values}, "settlement": {"schema": mechanism}}
+    if mechanism == "arkhai.payments.v1":
+        body["lifecycle"] = {"adjudication": {
+            "version": 1, "dispute": {key: _DISPUTE[key] for key in ("interface", "origin", "account", "record_key", "params")},
+            "dispute_window_seconds": 120, "case_hold_max_seconds": None,
+        }, "delivery_deadline_seconds": 60}
+    return SettlementOption(option_id=derive_settlement_option_id(**body), **body)
 
 
 _PAYMENT = _option(
@@ -93,9 +105,11 @@ def _compose(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, option: Settlement
     accepted outcome before returning it, as the real negotiator does.
     """
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
-    config = SimpleNamespace(
-        payer_account="buyer-account",
-        arkhai_payments=SimpleNamespace(enabled=True),
+    config = BareMetalBuyerConfig(
+        payer_account="11111111-1111-4111-8111-111111111111",
+        disputes=DisputeConfig(entries=[DisputeEntry.model_validate(_DISPUTE)]),
+        arkhai_payments=ArkhaiPaymentsConfig(enabled=True),
+        registry_principals=(_SELLER.identity,),
         registry_url="https://registry.example",
         registry_authority="registry-test",
         default_max_rounds=3,
@@ -139,9 +153,8 @@ def _compose(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, option: Settlement
     )
     monkeypatch.setattr(cli, "registry_client", registry)
     monkeypatch.setattr(cli, "negotiate_with_seller", negotiate)
-    monkeypatch.setattr(cli, "BUYER_STAGES", {option.mechanism: stage})
+    monkeypatch.setattr(cli, "BUYER_STAGES", {option.settlement_schema: stage})
     monkeypatch.setattr(cli, "payment_approval", lambda _config: object())
-    monkeypatch.setattr(cli, "BareMetalSettlementTransport", lambda **_kwargs: object())
     return seen
 
 
@@ -181,9 +194,8 @@ def _payment_outcome(*, amount: int, duration_seconds: int) -> NegotiationOutcom
         agreed_amount=amount,
         accepted_provision_terms=dict(_ACCEPTED_TERMS),
         settlement_selection=SettlementSelection(
-            mechanism=_PAYMENT.mechanism,
             option_id=_PAYMENT.option_id,
-            params={"payer_account": "buyer-account"},
+            settlement={"schema": _PAYMENT.settlement_schema, "payer_account": "buyer-account"},
         ),
         agreement=Agreement(
             negotiation_id="negotiation-1",
@@ -194,7 +206,7 @@ def _payment_outcome(*, amount: int, duration_seconds: int) -> NegotiationOutcom
             settlement=_PAYMENT,
             settlement_params={"payer_account": "buyer-account"},
             amount=amount,
-            asset=_PAYMENT.asset,
+            asset=_PAYMENT.price_asset,
             duration_seconds=duration_seconds,
             start_utc="2030-01-01T00:00:00Z",
             accepted_at="2030-01-01T00:00:00Z",
@@ -267,7 +279,7 @@ def test_an_agreement_off_the_quote_ends_the_run_before_approval(
     assert result.exit_code == 1, result.output
     assert seen["acceptances"] == [] and seen["settlements"] == []
     events = _events(tmp_path)
-    assert {"agreement_accepted", "payment_approved"}.isdisjoint(e["event"] for e in events)
+    assert {"negotiation_completed", "payment_approved"}.isdisjoint(e["event"] for e in events)
     ended = _run_ended(tmp_path)
     assert ended["status"] == "exited"
     assert ended["reason"].startswith("agreement_off_quote: seller Agreement")
@@ -299,8 +311,8 @@ def test_request_introduction_records_dictionary_terms_when_the_deal_is_agreed(
         agreed_amount=0,
         accepted_provision_terms=dict(_ACCEPTED_TERMS),
         settlement_selection=SettlementSelection(
-            mechanism=_INTRODUCTION.mechanism,
             option_id=_INTRODUCTION.option_id,
+            settlement={"schema": _INTRODUCTION.settlement_schema},
             expiration_unix=4_000_000_000,
         ),
         settlement_plan=_introduction_plan(),

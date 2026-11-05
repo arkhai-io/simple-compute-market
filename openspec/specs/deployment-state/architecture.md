@@ -62,6 +62,8 @@ VM-only, bare-metal-only, and combined deployments select storefront processes i
 
 Schema evolution is additive by default. A non-additive change needs an explicit expand/contract plan that identifies the period in which old and new readers or writers coexist. Public package and wire compatibility similarly belong to the owning capability rather than being inferred from a shared repository version.
 
+Persisted accepted evidence can outlive the writer that produced it. Preserve its protocol-owned representation while records remain retained, and make any incompatible reader or writer transition explicit across the supported lifetime. A typed application view is derived from the verified representation; it does not replace the retained bytes or relax digest/signature checks. Deletion, tombstoning, and reader support floors remain owned by the relevant capability. Zero nonterminal contracts does not establish that a reader is unused: retained terminal evidence and supported buyer recovery may still require it. This bounded rule does not establish cross-domain artifact discovery or automatic retirement tooling.
+
 ## Identity credential delivery
 
 Public identity and secret credentials have different deployment carriers because they have different disclosure and authority properties. Supported public principals and trust pins are safe to render in ordinary profiles and ConfigMaps and must be inspectable so operators can audit the trust target. Possession of a private signing credential grants the ability to impersonate that principal, so it is mounted from an approved Secret boundary and exposed only to the role's composition root when it constructs the signer.
@@ -110,13 +112,43 @@ recovery using those immutable bindings.
 
 ## Arkhai payment consumers
 
-The independently operated payments service owns its ledger, transactions, hold release, fees, disputes, and provider operations. SCM installs `arkhai-kit-arkhai-payments` from `.dist`; its wire models come from the published JSON Schema rather than service implementation imports.
+The independently operated payments service owns ledger, transactions, hold
+release/extensions, fees and provider operations. The independent Agreement-named
+dispute authority owns cases, outcomes and their payment effects. SCM installs `arkhai-kit-arkhai-payments` from `.dist`; its wire models come from the published JSON Schema rather than service implementation imports.
 
-Buyer and seller roles configure the trusted service origin, Ed25519 receipt identity, fee and dispute policy, and a credential environment-variable name under `[Settlement.arkhai_payments]`. WorkOS user-scoped API keys reach only the owning process, separately from marketplace signer Secrets. HTTPS is required outside loopback. Generated public config and images contain no resolved API key, provider object, or payment-service persistence.
+Buyer and seller roles configure trusted payment origin, Ed25519 receipt identity,
+fee policy and an API-key environment-variable name under
+`[Settlement.arkhai_payments]`. Ordered root `[[Dispute]]` preferences and separate
+full-identity `[[DisputeCredential]]` bindings configure dispute participation.
+Signed registry descriptors may recommend authorities; buyers explicitly opt in,
+local identity vetoes prevail and recommendations stay registry-specific. WorkOS user-scoped API keys reach only the owning process, separately from marketplace signer Secrets. HTTPS is required outside loopback. Generated public config and images contain no resolved API key, provider object, or payment-service persistence.
 
 Storefront-owned migrations persist exact Agreement bytes and opaque settlement data together in negotiation threads; domain receipt and physical/grant progress remain separately role-owned. VM and bare-metal trust the accepted selected-site provisioner independently of payment trust. API-credit deployments retain a separate credits authority and gated application. Payment-only Ed25519 buyers and sellers require no wallet or chain configuration.
 
 Legacy Stripe consumer settings are rejected, not mapped to Arkhai accounts, mandates, or transaction IDs. Accepted Arkhai recovery uses its original Agreement, mandate, transaction identity, and domain progress rather than a priority fallback.
+
+## Lifecycle state and coordinated rollout
+
+Seller evidence, end/admission/effect journals and cursors live in the storefront's
+own database and ordered migrations. Buyer exact-byte evidence and retry plans
+live under a composition-supplied profile-adjacent root, not in replay caches.
+Site event/outbox records live in provisioning persistence, independently of
+capacity-release acknowledgements. These stores contain evidence or physical
+progress, never a copy of authority ledger/case state to decide money from.
+
+The option envelope is a forward-only wire boundary: coordinate registries,
+storefronts and buyer clients, republish every mechanism's listings and discard
+incompatible disposable accepted state only with explicit operator ownership.
+No old-key reader or priority failover reinterprets an accepted deal. Site/report
+receiver and buyer/end endpoint pairs upgrade together; there is no legacy
+teardown fallback. Unsupported report pushes park for the original peer and
+remain recoverable by authenticated pull until explicit resumption after upgrade.
+
+Payment receipt pins support bounded current/retiring identity windows. Dispute
+origin/record-key pins do not: accepted deals remain bound to the old origin/key,
+including unbounded case life. Public renderings contain public trust projections,
+not credential references or resolved secrets. See
+[operator authority configuration](../../../docs/development/DEPLOYMENT_AND_CONFIG.md#dispute-authority-preferences).
 
 ## Current limits
 

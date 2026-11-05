@@ -65,14 +65,33 @@ class PoolChangeRefusedError(ValueError):
     """
 
 
+class ConnectionChangeRefusedError(PoolChangeRefusedError):
+    """A connection-change hook refused a new connection for a placed host.
+
+    A pool-change refusal's kind, because both refuse a write that a rule
+    about a pool's hosts forbids, and every caller answers them alike: as a
+    conflict with current state.
+    """
+
+
 #: Called inside the transaction moving a host between pools, before it
 #: commits, with ``(db, host_id, current_pool_id, new_pool_id)``; either pool is
 #: ``None`` for an unplaced host, so unplacing a host is a move like any other.
 #: A hook refuses the move by raising ``PoolChangeRefusedError``, which rolls
-#: back the whole transaction. Every pool assignment of an existing host goes
-#: through the hooks, whether it comes from an update or an imported inventory,
-#: so no path moves a host around a subscriber.
+#: back the whole transaction. Every pool assignment goes through the hooks,
+#: whether it comes from a registration, an update, an imported inventory, or a
+#: host definitions document, so no path moves a host around a subscriber.
 PoolChangeHook = Callable[[Session, str, Optional[str], Optional[str]], None]
+
+#: Called inside the transaction that gives a placed host a new connection,
+#: before it commits, with ``(db, host_id, pool_id)``; the session already holds
+#: the new connection. A hook refuses it by raising
+#: ``ConnectionChangeRefusedError``, which rolls back the whole transaction. A
+#: write that also moves the host runs the pool-change hooks instead, which see
+#: the new connection, so each write runs one set of checks. With the
+#: pool-change hooks, a rule about which connections a pool's hosts may have
+#: sees every host write that could break it.
+ConnectionChangeHook = Callable[[Session, str, str], None]
 
 
 class PoolUnstated(Enum):
@@ -151,10 +170,12 @@ class HostAuthority:
         *,
         codecs: ConnectionCodecs,
         pool_change_hooks: Sequence[PoolChangeHook] = (),
+        connection_change_hooks: Sequence[ConnectionChangeHook] = (),
     ) -> None:
         self._session_factory = session_factory
         self._codecs = codecs
         self._pool_change_hooks = tuple(pool_change_hooks)
+        self._connection_change_hooks = tuple(connection_change_hooks)
 
     # ------------------------------------------------------------------
     # Reads
@@ -269,12 +290,16 @@ class HostAuthority:
         secret never equals the stored one, since newly protected material
         cannot be compared with stored ciphertext: an imported inventory
         embedding a rotated key replaces the stored key rather than keeping it.
-        A pool move runs every pool-change hook before anything about the host
-        changes.
+        A new host stating a pool is placed as a move from no pool, and a moved
+        host's new connection is in the session before the pool-change hooks
+        run, so a rule about which connections a pool's hosts may have sees the
+        host as it will be; a placed host given a new connection without a move
+        runs the connection-change hooks instead.
 
         Raises ``UnknownPoolError`` for a stated pool that does not exist and
         ``ValueError`` for a connection the codec refuses, both before writing,
-        and ``PoolChangeRefusedError`` when a hook refuses the move.
+        and ``PoolChangeRefusedError`` when a hook refuses the move or the new
+        connection.
         """
         stated = pool_id is not POOL_UNSTATED
         if stated and pool_id is not None:
@@ -284,10 +309,15 @@ class HostAuthority:
             host = Host(
                 host_id=host_id,
                 enabled=True if enabled is None else enabled,
-                pool_id=pool_id if stated else None,
+                pool_id=None,
             )
             host.set_connection(self._build(connection, previous=None))
             db.add(host)
+            if stated and pool_id is not None:
+                # Flushed so a hook's query of the host finds it: the service's
+                # sessions do not autoflush.
+                db.flush()
+                self._move_to_pool(db, host, pool_id)
             return "created"
         stored = existing.connection()
         built = self._build(connection, previous=stored)
@@ -308,21 +338,25 @@ class HostAuthority:
             and target_enabled == existing.enabled
         ):
             return "unchanged"
-        self._move_to_pool(db, existing, target_pool)
         if not same_connection:
             existing.set_connection(built)
+        moved = self._move_to_pool(db, existing, target_pool)
+        if not same_connection and not moved:
+            self._connection_changed(db, existing)
         existing.enabled = target_enabled
         return "updated"
 
     def register_host(self, data: HostCreate) -> HostResponse:
         """Register a host in the pool it names, or unplaced when it names none."""
         connection = self._build(data.connection, previous=None)
-        host = Host(host_id=data.host_id, enabled=data.enabled, pool_id=data.pool_id)
+        host = Host(host_id=data.host_id, enabled=data.enabled, pool_id=None)
         host.set_connection(connection)
         with self._session_factory() as db:
-            if data.pool_id is not None:
-                self._require_pool_exists(db, data.pool_id)
             db.add(host)
+            db.flush()
+            # Placed as a move from no pool, so a rule about which hosts a pool
+            # may hold sees a host registered into it as it sees one moved in.
+            self._move_to_pool(db, host, data.pool_id)
             db.commit()
             db.refresh(host)
             return _view(host)
@@ -341,8 +375,11 @@ class HostAuthority:
                 )
             if data.enabled is not None:
                 host.enabled = data.enabled
+            moved = False
             if "pool_id" in data.model_fields_set:
-                self._move_to_pool(db, host, data.pool_id)
+                moved = self._move_to_pool(db, host, data.pool_id)
+            if data.connection is not None and not moved:
+                self._connection_changed(db, host)
             db.commit()
             db.refresh(host)
             return _view(host)
@@ -408,16 +445,27 @@ class HostAuthority:
             previous=previous,
         )
 
-    def _move_to_pool(self, db: Session, host: Host, pool_id: Optional[str]) -> None:
-        """Assign ``pool_id`` to an existing host, or unplace it for ``None``;
-        a real move runs the hooks."""
+    def _move_to_pool(self, db: Session, host: Host, pool_id: Optional[str]) -> bool:
+        """Assign ``pool_id`` to a host, or unplace it for ``None``; a real move
+        runs the hooks, and is reported as ``True``. A host placed as it is
+        registered moves from no pool, so the hooks see it in the session, with
+        its connection."""
         if pool_id is not None:
             self._require_pool_exists(db, pool_id)
         if host.pool_id == pool_id:
-            return
+            return False
         for hook in self._pool_change_hooks:
             hook(db, host.host_id, host.pool_id, pool_id)
         host.pool_id = pool_id
+        return True
+
+    def _connection_changed(self, db: Session, host: Host) -> None:
+        """Run the connection-change hooks for a host given a new connection
+        in place: an unplaced host has no pool whose rule could refuse it."""
+        if host.pool_id is None:
+            return
+        for hook in self._connection_change_hooks:
+            hook(db, host.host_id, host.pool_id)
 
     def _set_enabled(self, host_id: str, enabled: bool) -> HostResponse:
         with self._session_factory() as db:
@@ -441,6 +489,8 @@ class HostAuthority:
 
 
 __all__ = [
+    "ConnectionChangeHook",
+    "ConnectionChangeRefusedError",
     "HostAuthority",
     "HostChange",
     "HostNotFoundError",

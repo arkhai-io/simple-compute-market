@@ -30,9 +30,8 @@ from arkhai_bare_metal_storefront.settlement_composition import (
 
 ALKAHEST_SECTION = {
     "enabled": True,
-    "oracle_gated": False,
+    "release_models": ["recipient"],
     "trusted_oracle_addresses": [],
-    "interruptible": False,
     "interruptible_oracle_addresses": [],
 }
 

@@ -26,6 +26,8 @@ from unittest.mock import patch
 from urllib.request import Request
 
 import pytest
+import httpx
+from market_deal_lifecycle_client import LifecycleClient
 from arkhai_vms import VmProvisionTerms, make_vm_provision_terms
 from core_buyer.registry_config import RegistryAuthority
 from core_buyer.buyer_config import ResolvedBuyerIdentity
@@ -63,6 +65,7 @@ from market_arkhai_payments import (
     transaction_id,
 )
 from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
+from market_arkhai_payments.fixtures import dispute_lifecycle
 
 _ESCROW_ADDR = "0x" + "cd" * 20
 _BUYER_ADDR = "0x" + "cc" * 20
@@ -725,8 +728,12 @@ def test_payment_dispatch_and_run_recovery_ignore_stray_escrow(tmp_path, monkeyp
     payee = "22222222-2222-4222-8222-222222222222"
     config = _config()
     provision = _provision()
-    params = {"payee_account": payee, "asset": "USD/2", "window": "P7D", "deposit_agreement": False}
-    option_body = {"mechanism": "arkhai.payments.v1", "asset": "USD/2", "rates": [], "params": params}
+    params = {"payee_account": payee, "window": "P7D", "deposit_agreement": False}
+    option_body = {
+        "price": {"asset": "USD/2", "rates": []},
+        "settlement": {"schema": "arkhai.payments.v1", **(params or {})},
+        "lifecycle": dispute_lifecycle(payer),
+    }
     option = SettlementOption(option_id=derive_settlement_option_id(**option_body), **option_body)
     agreement = Agreement(
         negotiation_id="neg-payment", listing_id="seller-1", listing_hash="0" * 64,
@@ -741,7 +748,7 @@ def test_payment_dispatch_and_run_recovery_ignore_stray_escrow(tmp_path, monkeyp
         buyer_account=payer, option=PaymentsOptionParams.model_validate(params),
         accepted_at=agreement.accepted_at, start_utc=agreement.start_utc,
         duration_seconds=agreement.duration_seconds, amount=agreement.amount, asset=agreement.asset,
-        fee_bps=250, dispute_authority=payer,
+        fee_bps=250, lifecycle=option.lifecycle,
     ))
     data = {
         "mandate": mandate.model_dump(mode="json", by_alias=True, exclude_none=True),
@@ -751,7 +758,7 @@ def test_payment_dispatch_and_run_recovery_ignore_stray_escrow(tmp_path, monkeyp
         "Settlement": {"schema_version": 1, "priority": ["arkhai.payments.v1"], "arkhai_payments": {
             "enabled": True, "service_url": "http://127.0.0.1",
             "service_identity": BUYER_SIGNER.identity.model_dump(mode="json"),
-            "fee_bps": 250, "dispute_authority": payer, "development_auth": True,
+            "fee_bps": 250, "development_auth": True,
         }},
         "vms": {"payer_account": payer},
     }
@@ -797,7 +804,22 @@ def test_payment_dispatch_and_run_recovery_ignore_stray_escrow(tmp_path, monkeyp
         settlement_poll_interval=0, settlement_total_timeout=1, sleep=lambda _s: None,
         settlement_policy=settlement_composition.resolve_buyer_settlement_policy(),
     )
-    responses = [{"status": "provisioning"}, {"status": "ready"}] * 2
+    def peer(request):
+        submitted = json.loads(request.content)
+        assert submitted["kind"] == "commit"
+        assert submitted["commitment_ref"] == transaction_id(mandate)
+        body = {"outcome": {"status": "accepted"}}
+        legacy_request = Request(str(request.url), data=request.content, headers=dict(request.headers), method="POST")
+        return httpx.Response(200, json=body, headers=signed_response_headers(legacy_request, body))
+
+    original_client = LifecycleClient.__init__
+
+    def peer_transport(self, *args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(peer)
+        return original_client(self, *args, **kwargs)
+
+    monkeypatch.setattr(LifecycleClient, "__init__", peer_transport)
+    responses = [{"status": "ready"}] * 2
     with _patched_transport(_urlopen_sequence(responses)):
         result = hook(NegotiationResult(match=match, outcome=outcome, attempts=[]), lambda stage, body: log.event(stage, **body))
         # New admission changes cannot redirect this accepted operation.

@@ -51,6 +51,7 @@ priority = ["alkahest.v1"]
 
 [Settlement.alkahest]
 enabled = true
+release_models = ["recipient"]
 """
 
 
@@ -481,14 +482,32 @@ mechanism_priority = ["alkahest.v1"]
     assert stat.S_IMODE(result.backup_path.stat().st_mode) == 0o600
 
 
-def test_successful_migration_rerun_is_byte_identical_noop(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("flags", "models"),
+    [
+        ("oracle_gated = true", ["oracle_gated"]),
+        ("interruptible = true", ["interruptible"]),
+        ("oracle_gated = false\ninterruptible = false", ["recipient"]),
+        ("", ["recipient"]),
+    ],
+)
+def test_successful_migration_rerun_is_byte_identical_noop(
+    tmp_path: Path, flags: str, models: list[str]
+) -> None:
     path = tmp_path / "buyer.toml"
     _write(
         path,
-        """[settlement]
-mechanism_priority = ["alkahest.v1"]
-""",
+        '[Settlement]\npriority = ["alkahest.v1"]\n'
+        '[Settlement.alkahest]\nenabled = true\n' + flags + "\n",
     )
+    before = path.read_bytes()
+    preview = migrate_settlement_config(
+        path, role="buyer", check=True, installed=_ALKAHEST_ONLY,
+        validator=_accept_typed_candidate,
+    )
+    assert preview.changed is True
+    assert path.read_bytes() == before
+    assert not path.with_suffix(".toml.bak").exists()
     first = migrate_settlement_config(
         path,
         role="buyer",
@@ -497,6 +516,10 @@ mechanism_priority = ["alkahest.v1"]
         validator=_accept_typed_candidate, installed=_ALKAHEST_ONLY,
     )
     migrated = path.read_bytes()
+    section = tomllib.loads(migrated.decode())["Settlement"]["alkahest"]
+    assert section["release_models"] == models
+    assert "oracle_gated" not in section
+    assert "interruptible" not in section
     backup = first.backup_path
     assert backup is not None
     backup_bytes = backup.read_bytes()
@@ -633,9 +656,10 @@ keep = "yes" # unrelated comment
     ]
     alkahest = document["Settlement"]["alkahest"]
     assert alkahest["enabled"] is True
-    assert alkahest["oracle_gated"] is True
+    assert alkahest["release_models"] == ["oracle_gated"]
+    assert "oracle_gated" not in alkahest
     assert alkahest["trusted_oracle_addresses"] == ["0x111"]
-    assert alkahest["interruptible"] is False
+    assert "interruptible" not in alkahest
     assert alkahest["interruptible_oracle_addresses"] == []
     assert alkahest["address_books"] == {
         "one": "/etc/alkahest.json",
@@ -688,6 +712,8 @@ def test_environment_mapping_renames_only_marketplace_consumer_aliases() -> None
         "trusted_oracle_address",
         "Chains.anvil.alkahest_address_config_path",
         "Settlement.alkahest.address_config_path",
+        "Settlement.alkahest.oracle_gated",
+        "Settlement.alkahest.interruptible",
     ],
 )
 def test_legacy_config_edit_paths_are_rejected_with_exact_command(path: str) -> None:

@@ -54,7 +54,7 @@ def purchase_from_run_logs(run_dir: Path) -> Purchase:
                 event = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if event.get("event") == "agreement_accepted":
+            if event.get("event") == "negotiation_completed" and event.get("status") == "agreed":
                 negotiation_id = event.get("negotiation_id")
             elif event.get("event") == "payment_approved":
                 transaction_id = event.get("transaction_id")

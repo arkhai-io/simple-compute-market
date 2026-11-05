@@ -24,8 +24,8 @@ async def test_readiness_reconciliation_preserves_listing_identity_and_accepted_
         authorities=TEST_SITE_AUTHORITIES,
     )
     accepted_terms = {
-        "mechanism": "example.payment.v1",
         "option_id": "accepted-option",
+        "settlement": {"schema": "example.payment.v1"},
     }
     stored = {
         "listing_id": "listing-stable",
@@ -71,10 +71,11 @@ async def test_readiness_reconciliation_preserves_listing_identity_and_accepted_
     )
     new_option = {
         "option_id": "newly-ready-option",
-        "mechanism": "example.payment.v1",
-        "asset": "usd",
-        "rates": [{"field": "amount", "per": "hour", "value": "125"}],
-        "params": {},
+        "price": {
+            "asset": "usd",
+            "rates": [{"field": "amount", "per": "hour", "value": "125"}],
+        },
+        "settlement": {"schema": "example.payment.v1", **({} or {})},
     }
     composition = SimpleNamespace(
         publication_artifacts=AsyncMock(return_value=([], [new_option], ()))

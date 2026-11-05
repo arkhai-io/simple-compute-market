@@ -15,6 +15,8 @@ The command composes VM inputs over core buyer orchestration.
 
 from __future__ import annotations
 
+from .evidence import evidence_store
+
 import json
 import os
 import time
@@ -225,6 +227,7 @@ def _run_resume_from(
                     settlement_plan=resume_point.settlement_plan,
                 ),
                 resolve_seller_principals=resolve_seller_principals,
+                capture=evidence_store().capture,
             )
         except RuntimeError as exc:
             run_log.event("negotiation_failed", error=str(exc))
@@ -463,7 +466,7 @@ def register(app: typer.Typer) -> None:
         ssh = None if explain else resolve_ssh_public_key(override=ssh_public_key)
         try:
             settlement_policy = resolve_buyer_settlement_policy(
-                identity=identity,
+                identity=identity, registry_urls=registry_urls,
             )
         except ValueError as exc:
             typer.secho(str(exc), err=True, fg=typer.colors.RED)
@@ -547,7 +550,9 @@ def register(app: typer.Typer) -> None:
         )
         matches = []
         for match, selected in selected_matches:
-            selected = buyer_stage(selected.selection.mechanism).prepare_selection(selected)
+            selected = buyer_stage(
+                selected.selection.settlement_schema
+            ).prepare_selection(selected)
             normalized = dict(match)
             normalized["_selected_settlement"] = selected
             normalized["settlement_options"] = [selected.option.model_dump(mode="json")]
@@ -667,7 +672,9 @@ def register(app: typer.Typer) -> None:
             selected = match.get("_selected_settlement")
             if selected is None:
                 return None
-            return buyer_stage(selected.selection.mechanism).proposal(match, selected)
+            return buyer_stage(selected.selection.settlement_schema).proposal(
+                match, selected
+            )
 
         run_log = RunLog.start(
             command="market buy",
@@ -763,6 +770,7 @@ def register(app: typer.Typer) -> None:
             max_negotiation_rounds=max_rounds,
             derive_prices=None,
             chain=negotiation_chain,
+            capture=evidence_store().capture,
         )
         settle_hook = make_legacy_settle_hook(
             config=config,

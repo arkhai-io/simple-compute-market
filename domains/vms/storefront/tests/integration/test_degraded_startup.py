@@ -120,9 +120,13 @@ class _Chain:
 
 
 @pytest.fixture
-async def lifecycle_registry():
+async def lifecycle_registry(monkeypatch):
     """A clean loop registry and pause flag, as a fresh process has; every
     timer startup started is cancelled and awaited before the event loop closes."""
+    # Refusals must come from the loopback peers, not an ambient proxy.
+    for variable in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"):
+        monkeypatch.delenv(variable, raising=False)
+        monkeypatch.delenv(variable.lower(), raising=False)
     await lifecycle.reset_for_tests()
     yield
     await lifecycle.reset_for_tests()

@@ -1,4 +1,6 @@
 **
+!provisioning/compute/iac/
+!provisioning/compute/iac/**
 !.dist/
 !.dist/*.whl
 !domains/vms/provisioning/iac/

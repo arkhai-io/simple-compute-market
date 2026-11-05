@@ -99,7 +99,7 @@ _CAPACITY_RELEASED = "/api/v1/admin/fulfillment/events/capacity-released"
 _CAPACITY_RELEASED_OPERATION = "fulfillment_capacity_released"
 
 
-async def test_the_only_service_callback_is_capacity_released():
+async def test_static_service_callback_is_capacity_released():
     assert _CALLBACK_OPERATIONS == {_CAPACITY_RELEASED: _CAPACITY_RELEASED_OPERATION}
 
 

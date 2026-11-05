@@ -61,7 +61,9 @@ from market_core.schemas import (
 from market_identity import (
     EMPTY_BODY,
     AuthenticatedResponse,
+    EnvelopeCapture,
     Identity,
+    capture_envelope,
     RequestEnvelope,
     Signer,
     TrustedIdentitySet,
@@ -407,12 +409,12 @@ def _validate_agreement_acceptance(
         selected = agreement.settlement
         if selected is None or (
             selected.option_id != expected_selection.option_id
-            or selected.mechanism != expected_selection.mechanism
+            or selected.settlement_schema != expected_selection.settlement_schema
         ):
             raise RuntimeError("seller Agreement differs from selected settlement option")
         if advertised_option is not None and selected != advertised_option:
             raise RuntimeError("seller Agreement changed the advertised settlement option")
-        if agreement.asset != selected.asset:
+        if agreement.asset != selected.price_asset:
             raise RuntimeError("seller Agreement asset differs from its selected option")
 
 def _validate_selection_echo(
@@ -461,7 +463,7 @@ def _option_bargains_amount(option: SettlementOption) -> bool:
     ``nativeAmount``, say), or with none, is take-it-or-leave-it, so its
     acceptance carries no negotiated amount.
     """
-    return any(rate.field == "amount" for rate in option.rates)
+    return any(rate.field == "amount" for rate in option.price_rates)
 
 
 def _validate_settlement_acceptance(
@@ -550,7 +552,7 @@ def _validate_settlement_acceptance(
         raise RuntimeError(
             "seller settlement_plan obligation substituted an accepted party"
         )
-    if obligation.mechanism != expected_selection.mechanism:
+    if obligation.mechanism != expected_selection.settlement_schema:
         raise RuntimeError(
             "seller settlement_plan mechanism differs from the selected option"
         )
@@ -592,26 +594,29 @@ def _validate_settlement_acceptance(
     assert advertised_option is not None
     if (
         advertised_option.option_id != expected_selection.option_id
-        or advertised_option.mechanism != expected_selection.mechanism
+        or advertised_option.settlement_schema != expected_selection.settlement_schema
     ):
         raise RuntimeError(
             "buyer settlement selection does not identify the advertised option"
         )
-    if obligation.asset != advertised_option.asset:
+    if (
+        advertised_option.price is not None
+        and obligation.asset != advertised_option.price_asset
+    ):
         raise RuntimeError(
             "seller settlement_plan asset differs from the advertised option"
         )
     if validate_advertised_plan is not None:
         validate_advertised_plan(plan)
         return
-    expected_params = dict(advertised_option.params)
+    expected_params = dict(advertised_option.settlement_params)
     expected_params["payer_principal"] = buyer_principal.model_dump(mode="json")
     expected_params["claimant_principal"] = reply_seller.model_dump(mode="json")
     if obligation.params != expected_params:
         raise RuntimeError(
             "seller settlement_plan params differ from the advertised option"
         )
-    condition = advertised_option.params.get("condition")
+    condition = advertised_option.settlement_params.get("condition")
     expected_conditions = [dict(condition)] if isinstance(condition, Mapping) else []
     # service_terms are deliberately not compared against the advertised
     # option: they carry seller service context established during the
@@ -705,6 +710,7 @@ def _authenticated_json(
     request_id: str | None = None,
     timestamp: int | None = None,
     expected_response_role: str = "seller",
+    capture: EnvelopeCapture | None = None,
 ) -> dict[str, Any]:
     """Send one v2-authenticated JSON request and verify a pinned response."""
 
@@ -750,11 +756,13 @@ def _authenticated_json(
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            text = resp.read().decode("utf-8")
+            raw_response = resp.read()
+            text = raw_response.decode("utf-8")
             response_headers = getattr(resp, "headers", None)
             response_status = int(getattr(resp, "status", 200))
     except urllib.error.HTTPError as exc:
-        text = exc.read().decode("utf-8", errors="replace")
+        raw_response = exc.read()
+        text = raw_response.decode("utf-8", errors="replace")
         response_headers = getattr(exc, "headers", None)
         response_status = int(exc.code)
     except Exception as exc:
@@ -817,11 +825,17 @@ def _authenticated_json(
         expected_operation=operation,
         expected_resource=resource,
         expected_request_id=request_id,
+        capture=capture,
+        raw_body=raw_response,
+        headers=dict(response_headers or {}),
     )
     if not verification.verified:
         raise RuntimeError(
             f"{method} {url} response authentication failed: {verification.code.value}"
         )
+    capture_envelope(capture, envelope=authenticated, raw_body=data or b"", headers=headers,
+                     verified_at=int(time.time()),
+                     expected_principals=TrustedIdentitySet(identities=(principal,)))
     if not 200 <= response_status < 300:
         raise AuthenticatedHTTPError(
             f"{method} {url} -> authenticated HTTP {response_status}: {text[:500]}",
@@ -880,6 +894,7 @@ def negotiate_with_seller(
     policy_params: Optional[dict[str, Any]] = None,
     validate_advertised_plan: Callable[[SettlementPlan], None] | None = None,
     validate_acceptance: Callable[[NegotiationOutcome], None] | None = None,
+    capture: EnvelopeCapture | None = None,
 ) -> NegotiationOutcome:
     """Run a synchronous negotiation with one seller, round-by-round.
 
@@ -1009,7 +1024,8 @@ def negotiate_with_seller(
     if advertised_option is not None and expected_selection is not None:
         if (
             advertised_option.option_id != expected_selection.option_id
-            or advertised_option.mechanism != expected_selection.mechanism
+            or advertised_option.settlement_schema
+            != expected_selection.settlement_schema
         ):
             raise RuntimeError(
                 "buyer settlement selection does not identify the advertised option"
@@ -1209,6 +1225,7 @@ def negotiate_with_seller(
             operation="negotiate_new",
             resource=listing_id,
             expected_response_principals=trusted_seller_principals,
+            capture=capture,
         )
 
         raw_neg_id = reply.get("negotiation_id")
@@ -1381,6 +1398,7 @@ def negotiate_with_seller(
                     operation="negotiate_continue",
                     resource=neg_id,
                     expected_response_principals=resolve_seller_principals(),
+                    capture=capture,
                 )
             except Exception as notify_exc:
                 logger.warning(
@@ -1412,6 +1430,7 @@ def negotiate_with_seller(
             operation="negotiate_continue",
             resource=neg_id,
             expected_response_principals=trusted_seller_principals,
+            capture=capture,
         )
 
         # If our chain rejected (shape guard veto), the buyer terminates

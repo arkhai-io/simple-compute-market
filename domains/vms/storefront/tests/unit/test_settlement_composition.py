@@ -39,7 +39,7 @@ from market_storefront.settlement_composition import (
 from market_storefront.settlement_stages import vm_seller_stages
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests._settings_overrides import replaced_setting
-from tests.fulfillment_fixtures import vm_delivery_evidence
+from tests.fulfillment_fixtures import vm_delivery_evidence, seed_delivery_admission
 
 _BUYER_SIGNER = Ed25519Signer(b"\x31" * 32)
 _SELLER_SIGNER = Ed25519Signer(b"\x32" * 32)
@@ -146,10 +146,8 @@ async def _persist_accepted_negotiation(
         }
     }
     option_body = {
-        "mechanism": "alkahest.v1",
-        "asset": "0x" + "22" * 20,
-        "rates": [],
-        "params": params,
+        "price": {"asset": "0x" + "22" * 20, "rates": []},
+        "settlement": {"schema": "alkahest.v1", **(params or {})},
     }
     option = SettlementOption(
         option_id=derive_settlement_option_id(**option_body), **option_body
@@ -162,7 +160,7 @@ async def _persist_accepted_negotiation(
         seller=_SELLER.model_dump(mode="json"),
         settlement=option,
         amount=42,
-        asset=option.asset,
+        asset=option.price_asset,
         duration_seconds=3600,
         start_utc="2026-01-01T00:00:00Z",
         accepted_at="2026-01-01T00:00:00Z",
@@ -195,6 +193,7 @@ async def _persist_accepted_negotiation(
 
 
 def _prepared(db: SQLiteClient, *, escrow_uid: str = "0xescrow") -> PreparedSettlement:
+    seed_delivery_admission(db, commitment_ref=escrow_uid)
     obligation = _obligation()
     obligation_ref = derive_obligation_ref("neg-1", 0, obligation)
     return PreparedSettlement(
@@ -560,11 +559,8 @@ def test_composition_rejects_repository_domain_mismatch_before_registration(
 
 
 @pytest.mark.asyncio
-async def test_a_release_model_the_domain_cannot_deliver_composes_and_is_unready(tmp_path):
-    """The composition hands Alkahest readiness the models its domain's entry
-    declares, so a coherent model outside them is a configuration blocker
-    rather than a startup refusal. VM's own entry delivers every model, so a
-    contract declaring fewer stands in for a domain that delivers fewer."""
+async def test_a_release_model_the_domain_cannot_deliver_refuses_composition(tmp_path):
+    """A domain cannot start while offering a model its stage cannot deliver."""
     base = build_vm_storefront_domain()
     stages = base.settlement.seller_stages
     restricted = SettlementStageTable(
@@ -583,26 +579,22 @@ async def test_a_release_model_the_domain_cannot_deliver_composes_and_is_unready
         "priority": ["alkahest.v1"],
         "alkahest": {
             "enabled": True,
-            "interruptible": True,
+            "release_models": ["interruptible"],
             # A development address; never used on a public network.
             "interruptible_oracle_addresses": ["0x" + "cd" * 20],
         },
     }
 
-    with replaced_setting("settlement", settlement):
-        composition = build_vm_settlement_composition(
+    with (
+        replaced_setting("settlement", settlement),
+        pytest.raises(ValueError, match="cannot deliver"),
+    ):
+        build_vm_settlement_composition(
             domain=db.domain_registry.resolve_mode("vm").contract,
             sqlite_client=db,
             alkahest_clients={},
             marketplace_signer=_SELLER_SIGNER,
         )
-        readiness = await composition.readiness()
-
-    (alkahest,) = [status for status in readiness if status.mechanism == "alkahest.v1"]
-    assert alkahest.ready is False
-    assert ("alkahest.release_model_undeliverable", "configuration") in {
-        (blocker.code, blocker.kind) for blocker in alkahest.blockers
-    }
 
 
 @pytest.mark.asyncio

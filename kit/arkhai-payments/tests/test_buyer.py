@@ -62,13 +62,24 @@ def test_a_seller_transaction_id_for_another_mandate_is_refused():
         _approval(FakePaymentsClient(signer=SERVICE)).check(agreement_bytes(terms), data)
 
 
-def test_a_mandate_the_buyer_policy_does_not_derive_is_refused():
+@pytest.mark.parametrize("change", ["fee", "stop", "hold", "extend", "cap", "reverse"])
+def test_a_mandate_the_buyer_policy_does_not_derive_is_refused(change):
     terms = agreement()
-    lower_fee = derive_mandate(terms, mandate_policy_for_agreement(terms, config(fee_bps=0)))
-    data = {
-        "mandate": lower_fee.model_dump(mode="json", by_alias=True, exclude_none=True),
-        "transaction_id": transaction_id(lower_fee),
-    }
+    mandate = _seller_data(terms)["mandate"]
+    part = mandate["parts"][0]
+    if change == "fee":
+        mandate["fee"] = {"bps": 0}
+    elif change == "stop":
+        part["authorities"]["stop"] = [
+            {"account": mandate["to"], "notice": "PT0S", "partialPeriod": "charged"}
+        ]
+    elif change == "hold":
+        part["hold"] = {"afterStop": "PT0S"}
+    elif change == "cap":
+        part["maxHoldExtension"] = "PT0S"
+    else:
+        part["authorities"][change] = [OTHER]
+    data = {"mandate": mandate, "transaction_id": transaction_id(mandate)}
     with pytest.raises(MandatePolicyError):
         _approval(FakePaymentsClient(signer=SERVICE)).check(agreement_bytes(terms), data)
 

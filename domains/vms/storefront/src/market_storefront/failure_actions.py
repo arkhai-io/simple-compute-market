@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
+import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
 
+from market_core.schemas import settlement_option_schema
 from core_storefront.stage_log import stage_event
 from market_alkahest.alkahest import get_escrow_codec_for
 from market_alkahest.plans import escrow_terms_from_settlement_plan
@@ -21,10 +24,18 @@ from market_capacity_publication import (
     capacity_availability,
     remote_site_clients,
 )
-from market_identity import Identity
+from market_deal_lifecycle_contracts.models import EvidenceItem
+from market_deal_servicing import EndSession
+from market_deal_servicing.end import EndService
+from market_deal_servicing.evidence import EvidenceSession, transaction
+from market_deal_servicing.journal import Classification, FinalRequest, atomic
+from market_identity import Identity, canonical_json
 from market_settlement_runtime import FailurePolicy
 
 import market_storefront.container as _container
+from market_storefront.delivery_lifecycle import VmPhysicalEnd
+from market_storefront.delivery_records import register_delivery
+from market_storefront.end_classification import classification_for
 
 from market_storefront.services.capacity_client import (
     build_capacity_runtime,
@@ -300,6 +311,63 @@ async def _refund_from_escrow_proposal(
     }
 
 
+async def _end_failed_delivery(db, ctx, capacity):
+    thread = await _load_failed_thread(db, ctx)
+    if not thread or not _accepted_mechanism(thread):
+        return None
+    negotiation_id = thread["negotiation_id"]
+    now = int(time.time())
+    with transaction(db.db_path) as conn, atomic(conn):
+        committed = conn.execute(
+            "SELECT 1 FROM vm_settlement_evidence WHERE negotiation_id=? AND status IN ('verified','refunding','refunded')",
+            (negotiation_id,),
+        ).fetchone()
+        if committed is None:
+            return None
+        register_delivery(conn, negotiation_id)
+        end = EndSession(conn)
+        record = end.read(negotiation_id)
+        # Establish a missed deadline before a later lawful end can obscure it.
+        end.admit(negotiation_id, record.phase, record.revision, now=now)
+        record = end.read(negotiation_id)
+        ref = "fulfillment-failure:" + (ctx.provider_job_id or ctx.capacity_reservation_id or negotiation_id)
+        prior = next((request for request in end.requests(negotiation_id) if request.source_ref == ref), None)
+        if prior is None:
+            selected = end.selected_end(negotiation_id)
+            controlling = classification_for(end, negotiation_id, selected.source_ref) if selected else None
+            lawful = controlling is not None and controlling.lawful and selected.ended_at <= now
+            EvidenceSession(conn).put(negotiation_id, EvidenceItem(
+                evidence_id=ref, kind="fulfillment_failure", classification="seller_assertion",
+                recorded_at=now, body=base64.b64encode(canonical_json(ctx.__dict__)),
+            ))
+            classification = Classification(
+                kind=controlling.kind if lawful else "provisioning_failure",
+                evidence_refs=[ref, selected.source_ref] if lawful else [ref],
+            )
+            request = FinalRequest(
+                negotiation_id=negotiation_id, source_ref=ref, ended_at=now,
+                observed_at=now, actor=record.seller, cause=ctx.reason or "provisioning_failed",
+                source="fulfillment_failure", evidence_refs=[ref],
+                controlling_source_ref=selected.source_ref if lawful else None,
+            )
+            end.record_end(
+                request, now=now, classification=classification,
+                filing_intent=None if lawful else end.failure_filing(
+                    request, now=now, delivered=record.available_at is not None,
+                ),
+            )
+    lifecycle = getattr(_container.resolved_settlement_composition, "lifecycle", None)
+    service = lifecycle.end if lifecycle is not None and lifecycle.db is db else EndService(
+        db.db_path, VmPhysicalEnd(db, capacity=capacity), clock=lambda: int(time.time()),
+    )
+    await service.drive_physical(negotiation_id)
+    with transaction(db.db_path) as conn:
+        view = EndSession(conn).view(negotiation_id)
+    return FulfillmentFailurePolicyResult(
+        capacity_reservation_id=ctx.capacity_reservation_id, state=view.progress,
+    )
+
+
 async def _release_capacity(
     db: Any,
     ctx: FulfillmentFailureContext,
@@ -312,6 +380,10 @@ async def _release_capacity(
     release: the reopen it reports is best-effort, refreshed from
     ``site_projections`` when one is given and skipped when not.
     """
+    ended = await _end_failed_delivery(db, ctx, capacity)
+    if ended is not None:
+        return ended
+    # Capacity held outside a committed deal has no delivery to end.
     result = FulfillmentFailurePolicyResult(
         capacity_reservation_id=ctx.capacity_reservation_id
     )
@@ -411,7 +483,7 @@ def _accepted_mechanism(thread: dict[str, Any]) -> str | None:
     except ValueError:
         return None
     selected = agreement.get("settlement") if isinstance(agreement, dict) else None
-    mechanism = selected.get("mechanism") if isinstance(selected, dict) else None
+    mechanism = settlement_option_schema(selected) if isinstance(selected, dict) else None
     return mechanism if isinstance(mechanism, str) else None
 
 

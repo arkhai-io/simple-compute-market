@@ -43,6 +43,7 @@ review.
 | Assumption | Here |
 |---|---|
 | The protected branches the guarded push refuses, and the remote it pushes to | `main` and `dev`; `origin` |
+| The public-content check the guarded push runs over the branch's name and its outgoing commits, imported from beside the engine's package | `scripts/check_public_content.py`, its local denylist named by Git's `scm.publicContentDenyFile` |
 | The branch a review reads the change against | `dev` |
 | The change index's path | `openspec/changes/README.md` |
 | The guidance documents a session re-reads after its context is compacted | `docs/development/ARCHITECTURE.md`, `docs/development/TESTING.md`, `docs/development/DEPLOYMENT_AND_CONFIG.md`, `openspec/README.md` |

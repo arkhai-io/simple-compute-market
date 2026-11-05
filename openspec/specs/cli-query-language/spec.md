@@ -53,9 +53,18 @@ Each `--settlement` occurrence MUST form one typed conjunction over one `Settlem
 - **WHEN** accepted Terms pin an option selected through a settlement clause and its mechanism later becomes disabled or unready
 - **THEN** recovery resumes the pinned obligation without evaluating another clause
 
+### Requirement: Common settlement fields include the lifecycle projections
+
+The settlement DSL MUST reserve common fields for option identity and mechanism-neutral values (mechanism, option ID, asset) and for the lifecycle codec's projections: `adjudication.dispute.interface`, `adjudication.dispute.account`, `early_termination.payer`, `early_termination.payee`, `early_termination.payee.notice_seconds`, `early_termination.premature_stop_penalty` and `delivery_deadline_seconds`. A registration MAY add typed fields only under its configuration-key namespace.
+
+#### Scenario: A clause filters on a lifecycle term and a mechanism field
+
+- **WHEN** a buyer compiles a clause on `adjudication.dispute.account` and `alkahest.chain`
+- **THEN** the first is evaluated as a common lifecycle projection for every mechanism's options, and the second only through the Alkahest registration's typed projection
+
 ### Requirement: Settlement fields have common and mechanism-owned namespaces
 
-The settlement DSL MUST reserve common fields for immutable option identity and mechanism-neutral values, including mechanism, option ID, and asset. A settlement registration MAY contribute typed public projection fields only under its configuration-key namespace, such as `arkhai_payments.deposit_agreement` or `alkahest.chain`. Unknown, role-inapplicable, secret, credential, provider-administrator, raw RPC, or non-public fields MUST be rejected. Shared parsing and selection MUST treat contributed values as typed projections and MUST NOT interpret opaque mechanism parameters.
+The settlement DSL MUST separate immutable common fields, lifecycle-codec projections and namespaced typed public mechanism projections. It MUST reject unknown, role-inapplicable, secret, credential, provider-administrator, raw RPC or other non-public fields, and shared parsing and selection MUST treat contributed values as typed projections, never interpreting opaque mechanism parameters.
 
 #### Scenario: Qualified Arkhai payment field is used
 
@@ -66,6 +75,16 @@ The settlement DSL MUST reserve common fields for immutable option identity and 
 
 - **WHEN** a clause names a payment provider ID, credential, webhook value, or authority-administrator field
 - **THEN** validation rejects the field without contacting the payment service or exposing any provider data
+
+#### Scenario: An option omits the premature-stop penalty
+
+- **WHEN** a valid option has no premature_stop_penalty or explicitly sets zero
+- **THEN** the codec projects zero in that option asset's minor units, with comparisons correlated to that same asset and option
+
+#### Scenario: A buyer asks for buyer-stoppable options
+
+- **WHEN** a clause contains `early_termination.payer=true` and a listing has one option with a payer entitlement and one without
+- **THEN** only the option with the entitlement matches
 
 ### Requirement: Publication rates are asset-scoped human quantities
 

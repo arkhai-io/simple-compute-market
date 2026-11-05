@@ -7,14 +7,18 @@ requires-python = ">=3.12"
 dependencies = [
     "arkhai-compute-provisioning-contracts>=0.13.0",
     "arkhai-core>=0.4.0",
+    "arkhai-kit-config",
     "arkhai-kit-site>=0.10.0",
     "arkhai-kit-resource-pools>=0.3.0",
     # The pool declarations a resource view's pool context carries.
     "arkhai-kit-resource-pools-contracts>=0.3.0",
     "arkhai-kit-fulfillment>=0.6.0",
+    "cryptography>=42.0",
     "pydantic>=2",
-    # The host definitions document's YAML.
+    # The host and relay definitions documents' YAML.
     "pyyaml>=6.0",
+    # Imported to serialize a relay grant's header and claims.
+    "rfc8785>=0.1.4",
     "sqlalchemy>=2.0",
 ]
 

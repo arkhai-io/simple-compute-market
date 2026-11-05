@@ -5,13 +5,17 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 import uuid
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from functools import partial
 from typing import Any
 
+from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
+from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
+from market_core.schemas import settlement_option_schema
 from arkhai_vms import VmProvisionTerms, normalize_vm_provision_terms
 from core_storefront.domain_lifecycle import (
     StorefrontFulfillmentContext,
@@ -24,7 +28,8 @@ from market_alkahest import (
     ALKAHEST_CONFIG_KEY,
     ALKAHEST_MECHANISM_ID,
     AlkahestChainProbe,
-    configured_release_model,
+    RELEASE_MODELS,
+    require_deliverable_release_models,
 )
 from market_arkhai_payments import (
     PaymentSellerStage,
@@ -50,12 +55,11 @@ from market_settlement_runtime import (
     derive_obligation_ref,
 )
 
+from market_storefront.deal_lifecycle import VmDealLifecycle
+from market_storefront.delivery_lifecycle import request_delivery_end, VmPhysicalEnd
+from market_deal_servicing.end import EndService
 from market_storefront.payment_settlement import VmPaymentsCoordinator
 from market_storefront.settlement_registry import build_storefront_settlement_registry
-from market_storefront.services.capacity_client import (
-    build_capacity_runtime,
-    capacity_binding_for_listing,
-)
 from market_storefront.settlement_stages import resolve_proposal_stage
 from market_storefront.utils import config as storefront_config
 from market_storefront.utils import escrow_verification
@@ -91,6 +95,8 @@ class VmSettlementComposition:
     mechanism_resources: Mapping[str, Any] = field(repr=False)
     arkhai_payments_stage: PaymentSellerStage | None = None
     payments_coordinator: VmPaymentsCoordinator | None = None
+    lifecycle: VmDealLifecycle | None = None
+    disputes: RegistryDisputePolicy = field(default_factory=lambda: RegistryDisputePolicy.from_document({}), repr=False)
 
     @property
     def seller_stages(self):
@@ -146,7 +152,11 @@ class VmSettlementComposition:
     ) -> tuple[
         list[dict[str, Any]], list[dict[str, Any]], tuple[MechanismReadiness, ...]
     ]:
-        merged_resources = {**self.mechanism_resources, **resources}
+        merged_resources = {
+            **self.mechanism_resources, **resources,
+            "dispute_authorities": self.disputes.for_publication(),
+            "dispute_interfaces": frozenset({MEDIATION_INTERFACE}), "compute": True,
+        }
         compiled = (
             [
                 compile_settlement_publication_clause(
@@ -474,7 +484,7 @@ async def fulfill_vm_settlement(
         negotiation_id=evidence.negotiation_id
     )
     agreement = json.loads(thread["agreement_bytes"])
-    stage = domain.settlement.seller_stages[agreement["settlement"]["mechanism"]]
+    stage = domain.settlement.seller_stages[settlement_option_schema(agreement["settlement"])]
     lifecycle = await fulfill_domain(
         domain,
         StorefrontFulfillmentContext(
@@ -695,84 +705,18 @@ def _terminal_requires_lease_truncation(record: Any, outcome: str) -> bool:
 async def truncate_lease_for_terminal_settlement(
     *, agreement_ref: str | None, reason: str | None = None, sqlite_client: Any
 ) -> dict[str, Any] | None:
-    """End capacity service through the agreement's durable reservation binding.
-
-    Asks the site to release the reservation first: an uncommitted hold, or a
-    lease nothing was delivered against, is released at once. The site's
-    release guard refuses a lease fulfillment delivered, which is then
-    truncated to now so its lifecycle tears it down at expiry. A reservation
-    neither releasable nor leased (already releasing, say) is left to the
-    lifecycle that holds it.
-    """
+    """Journal terminal settlement before driving the VM's physical end."""
     if not agreement_ref:
         return None
-
-    try:
-        escrow = await sqlite_client.load_primary_escrow_for_negotiation(
-            negotiation_id=agreement_ref
-        )
-        reservation_id = (
-            str(escrow.get("capacity_reservation_id") or "") if escrow else ""
-        )
-        if not reservation_id:
-            logger.info(
-                "[SETTLEMENT] Agreement %s has no bound capacity reservation",
-                agreement_ref,
-            )
-            return None
-        thread = await sqlite_client.load_negotiation_thread_row(
-            negotiation_id=agreement_ref
-        )
-        listing_id = str((thread or {}).get("our_listing_id") or "")
-        if not listing_id:
-            raise RuntimeError("terminal settlement has no durable listing binding")
-        binding = await capacity_binding_for_listing(sqlite_client, listing_id)
-        capacity = build_capacity_runtime(lambda: sqlite_client)
-        released = await capacity.release(
-            binding,
-            capacity_reservation_id=reservation_id,
-            failure_reason=reason or "settlement_terminal",
-        )
-        if released is not None:
-            stage_event(
-                "claims",
-                "capacity_released_after_abandonment",
-                agreement_ref=agreement_ref,
-                capacity_reservation_id=reservation_id,
-                reason=reason,
-                site=released.get("site"),
-            )
-            return released
-        lease_end = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
-        truncated = await capacity.truncate_lease(
-            binding,
-            capacity_reservation_id=reservation_id,
-            lease_end_utc=lease_end,
-        )
-        if truncated is None:
-            logger.info(
-                "[SETTLEMENT] Bound reservation %s for agreement %s "
-                "has no live lease to truncate",
-                reservation_id,
-                agreement_ref,
-            )
-            return None
-        stage_event(
-            "claims",
-            "lease_truncated_after_abandonment",
-            agreement_ref=agreement_ref,
-            capacity_reservation_id=reservation_id,
-            lease_end_utc=lease_end,
-            reason=reason,
-            site=truncated.get("site"),
-        )
-        return truncated
-    except Exception:
-        logger.exception(
-            "[SETTLEMENT] Could not end capacity service for agreement %s",
-            agreement_ref,
-        )
-        raise
+    await request_delivery_end(
+        sqlite_client, agreement_ref, source_ref="terminal:" + agreement_ref,
+        cause=reason or "settlement_terminal",
+    )
+    end = EndService(
+        sqlite_client.db_path, VmPhysicalEnd(sqlite_client), clock=lambda: int(time.time()),
+    )
+    results = await end.drive_physical(agreement_ref)
+    return results[-1].model_dump(mode="json") if results else None
 
 
 def _plain_mapping(value: Any) -> dict[str, Any]:
@@ -809,19 +753,14 @@ async def preflight_settlement_mechanisms(
 def require_coherent_release_model(
     settlement_config: SettlementConfig | None = None,
 ) -> None:
-    """Refuse a configured Alkahest section that selects contradictory models.
-
-    A section stating both the oracle-gated and the interruptible model names
-    two arbiters for one escrow, which is incoherent configuration rather than
-    an unusable mechanism, so it stops startup, enabled or not. A coherent model
-    the domain cannot deliver is a readiness blocker instead. With no
-    ``settlement_config``, the storefront's own configuration is resolved.
-    """
+    """Validate Alkahest release models before constructing runtime services."""
     if settlement_config is None:
         settlement_config = build_storefront_settlement_registry().resolve(
             storefront_config.settlement_config_mapping(), role="seller"
         )
-    configured_release_model(settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY))
+    require_deliverable_release_models(
+        settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY), RELEASE_MODELS
+    )
 
 
 def _alkahest_release_models(domain: MarketDomainContract) -> frozenset[str]:
@@ -860,9 +799,14 @@ def build_vm_settlement_composition(
         storefront_config.settlement_config_mapping(),
         role="seller",
     )
-    require_coherent_release_model(settlement_config)
+    require_deliverable_release_models(
+        settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY),
+        _alkahest_release_models(domain),
+    )
     alkahest_section = settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY)
+    disputes = RegistryDisputePolicy.from_document(storefront_config.settings.as_dict())
     mechanism_resources: dict[str, Any] = {
+        "disputes": disputes,
         "marketplace_signer": marketplace_signer,
         "clients": alkahest_clients,
         "get_client": lambda chain: alkahest_clients.get(chain or ""),
@@ -1014,6 +958,7 @@ def build_vm_settlement_composition(
         settlement_config=settlement_config,
         configuration_registry=registry,
         mechanism_resources=mechanism_resources,
+        disputes=disputes,
         arkhai_payments_stage=payments_stage,
         payments_coordinator=VmPaymentsCoordinator(
             domain=domain, db=sqlite_client, stage=payments_stage
@@ -1021,4 +966,7 @@ def build_vm_settlement_composition(
         if payments_stage is not None
         else None,
     )
-    return composition
+    lifecycle = VmDealLifecycle(sqlite_client, marketplace_signer, composition.payments_coordinator, disputes)
+    if composition.payments_coordinator is not None:
+        composition.payments_coordinator.lifecycle = lifecycle
+    return replace(composition, lifecycle=lifecycle)

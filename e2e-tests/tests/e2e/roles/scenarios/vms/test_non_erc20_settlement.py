@@ -33,7 +33,7 @@ from tests.e2e.roles.helpers.compute_deal import (
 from tests.e2e.roles.helpers.escrow import ensure_ws_rpc_url
 from tests.e2e.roles.scenarios.vms.compute_deal_driver import vm_job_evaluation
 from tests.e2e.roles.scenarios.vms.conftest import (
-    _signer,
+    _buyer_signer,
     capacity_source_for,
     one_site,
 )
@@ -367,11 +367,7 @@ def test_scalar_non_erc20_settlement_reaches_ready(
                 "ssh_public_key": buyer_config["ssh_public_key"],
             },
         },
-        buyer_principal=_signer(
-            "eip191",
-            settings.BUYER.MARKETPLACE_CREDENTIAL,
-            "BUYER.MARKETPLACE_CREDENTIAL",
-        ).identity,
+        buyer_principal=_buyer_signer().identity,
     )
     assert eval_result.would_negotiate, (
         f"{case.name} evaluate-negotiate exited: {eval_result}"
@@ -387,14 +383,14 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     (alkahest_option,) = [
         dict(option)
         for option in registry_client.get_listing(listing_id).settlement_options
-        if dict(option)["mechanism"] == "alkahest.v1"
+        if dict(option)["settlement"]["schema"] == "alkahest.v1"
     ]
     negotiate_resp = storefront_client.negotiate_new(
         listing_id=listing_id,
         initial_amount=_BUYER_INITIAL_AMOUNT,
         settlement_selection={
-            "mechanism": "alkahest.v1",
             "option_id": alkahest_option["option_id"],
+            "settlement": {"schema": "alkahest.v1"},
             "expiration_unix": expiration_unix,
         },
         escrow_expiration_unix=expiration_unix,

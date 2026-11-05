@@ -34,6 +34,8 @@ from market_capacity_publication import (
     SiteProjectionState,
 )
 from market_core import MarketDomainContract
+from market_deal_servicing import create_lifecycle_router
+from market_identity import TrustedIdentitySet
 from market_capability_admissibility import Declaration
 from market_negotiation_runtime import NegotiationRuntime
 from market_pool_overrides import PoolOverrideService, SQLitePoolOverrideStore
@@ -59,10 +61,12 @@ from market_storefront.contact_exchange import (
     build_vm_contact_exchange,
     build_vm_introduction_delivery,
 )
+from market_storefront.controllers.lease_reports import router as lease_reports_router
 from market_storefront.domain_runtime import validate_vm_storefront_domain
 from market_storefront.middleware.admin_identity import (
     administrator_identity_middleware,
     initialize_administrator_identities,
+    _active_administrators,
 )
 from market_storefront.middleware.seller_auth import listing_lifecycle_middleware
 from market_storefront.middleware.service_peer_auth import (
@@ -88,6 +92,7 @@ from market_storefront.services.vm_pool_override_contribution import (
     VmPoolOverrideContribution,
 )
 from market_storefront.services.publication_loop import wake_publication_loop
+from market_storefront.services.publication_service import _make_registry_client
 from market_storefront.services.publication_terms import (
     compile_publication_clauses,
     parse_configured_admissibility_default,
@@ -348,7 +353,7 @@ def _build_vm_services(
             "VM service composition must use the exact registry-owned domain contract"
         )
     # Before anything is constructed: a configured default the storefront
-    # cannot read, a contradictory Alkahest release model, or a configuration
+    # cannot read, an unsupported Alkahest release model, or a configuration
     # under which it could never publish stops startup rather than running
     # without it. An Alkahest section that is coherent but cannot settle makes
     # Alkahest unready instead. A retired address-book key is refused before
@@ -500,6 +505,7 @@ async def _start_vm_services(services: VmStorefrontServices) -> None:
         _container.resolved_settlement_composition = services.settlement_composition
         _container.resolved_contact_exchange = services.contact_exchange
         _container.resolved_introduction_delivery = services.introduction_delivery
+        await services.settlement_composition.disputes.refresh(_make_registry_client)
         logger.info("[STARTUP] Singletons initialized")
         await _run_startup_tasks(
             registry=services.registry,
@@ -512,6 +518,8 @@ async def _start_vm_services(services: VmStorefrontServices) -> None:
 
 
 async def _stop_vm_services(services: VmStorefrontServices) -> None:
+    if getattr(services.settlement_composition, "lifecycle", None) is not None:
+        await services.settlement_composition.lifecycle.close()
     if services.settlement_composition.payments_coordinator is not None:
         await services.settlement_composition.payments_coordinator.stop()
     _container.clear_lifespan_state(registry=services.registry)
@@ -629,6 +637,13 @@ def build_vm_storefront_app(
                     deals_router,
                     admin_settle_router,
                     introductions_router,
+                    lease_reports_router,
+                    create_lifecycle_router(lambda _: _container.resolved_settlement_composition.lifecycle.routes(
+                        TrustedIdentitySet(identities=tuple(_active_administrators(
+                            _container.resolved_sqlite_client.db_path,
+                            now=_container.resolved_settlement_composition.lifecycle.clock(),
+                        )))
+                    )),
                 ),
                 middleware=(
                     listing_lifecycle_middleware,

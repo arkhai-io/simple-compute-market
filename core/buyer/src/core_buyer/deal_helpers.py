@@ -72,9 +72,9 @@ def accepted_settlement_mechanism(deal: DealContext) -> str:
         agreement = Agreement.model_validate(deal.agreement)
         if agreement.settlement is None:
             raise ValueError("accepted Agreement has no settlement option")
-        selected = agreement.settlement.mechanism
+        selected = agreement.settlement.settlement_schema
     if deal.settlement_selection is not None:
-        value = deal.settlement_selection.get("mechanism")
+        value = deal.settlement_selection.get("settlement", {}).get("schema")
         if not isinstance(value, str) or not value:
             raise ValueError("accepted settlement selection has no mechanism")
         if selected is not None and value != selected:
@@ -135,7 +135,10 @@ def settlement_acceptance_fields(
         }
 
     mechanisms = {obligation.mechanism for obligation in decoded_plan.obligations}
-    if decoded_selection is not None and decoded_selection.mechanism not in mechanisms:
+    if (
+        decoded_selection is not None
+        and decoded_selection.settlement_schema not in mechanisms
+    ):
         raise ValueError(
             "accepted settlement selection conflicts with the settlement plan"
         )

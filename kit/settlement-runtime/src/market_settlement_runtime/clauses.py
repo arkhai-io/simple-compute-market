@@ -18,7 +18,8 @@ from market_core.query_dsl import (
     ValidatedQuery,
     compile_query,
 )
-from market_core.schemas import SettlementOption
+from market_core.schemas import SettlementOption, settlement_option_lifecycle
+from market_deal_lifecycle.projections import LIFECYCLE_QUERY_FIELDS, project_terms
 
 from .configuration import (
     MechanismRegistration,
@@ -56,6 +57,16 @@ _COMMON_FIELDS = (
         operators=_COMMON_OPERATORS,
         description="immutable settlement option ID",
     ),
+)
+_LIFECYCLE_FIELDS = tuple(
+    FieldDescriptor(
+        name=name,
+        value_type=QueryValueType(value_type),
+        operators=(frozenset(ComparisonOperator) if value_type == "integer" else _COMMON_OPERATORS),
+        requires=("asset",) if name == "early_termination.premature_stop_penalty" else (),
+        description="common lifecycle term projection",
+    )
+    for name, value_type in LIFECYCLE_QUERY_FIELDS.items()
 )
 _MISSING = object()
 
@@ -96,7 +107,7 @@ def settlement_clause_descriptors(
     contributed = tuple(
         item.field.descriptor for item in registry.clause_fields(role=role)
     )
-    return (*_COMMON_FIELDS, *contributed)
+    return (*_COMMON_FIELDS, *_LIFECYCLE_FIELDS, *contributed)
 
 
 def compile_settlement_clause(
@@ -157,14 +168,16 @@ def settlement_clause_matches(
         descriptor = descriptors[comparison.field]
         actual: Any
         if comparison.field == "mechanism":
-            actual = option.mechanism
+            actual = option.settlement_schema
         elif comparison.field == "asset":
-            actual = option.asset
+            actual = option.price_asset
         elif comparison.field == "option_id":
             actual = option.option_id
+        elif comparison.field in LIFECYCLE_QUERY_FIELDS:
+            actual = project_terms(settlement_option_lifecycle(option)).get(comparison.field, _MISSING)
         else:
             binding = contributed[comparison.field]
-            if option.mechanism != binding.mechanism_id:
+            if option.settlement_schema != binding.mechanism_id:
                 return False
             actual = binding.field.projector(option)
             if actual is None or (
@@ -197,7 +210,7 @@ def select_settlement_candidates(
     decoded = tuple(SettlementOption.model_validate(option) for option in advertised)
     by_mechanism: dict[str, list[SettlementOption]] = {}
     for option in decoded:
-        by_mechanism.setdefault(option.mechanism, []).append(option)
+        by_mechanism.setdefault(option.settlement_schema, []).append(option)
 
     candidates: list[SettlementCandidate] = []
     for registration in registry.ordered_registrations(config, role="buyer"):

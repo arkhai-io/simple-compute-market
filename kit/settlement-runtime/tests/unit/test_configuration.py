@@ -119,7 +119,10 @@ def _registration(
         config: BaseModel, option: Any, public_context: Mapping[str, Any]
     ) -> bool:
         observed.append("compatibility")
-        return isinstance(option, Mapping) and option.get("mechanism") == mechanism_id
+        return (
+            isinstance(option, Mapping)
+            and option.get("settlement", {}).get("schema") == mechanism_id
+        )
 
     return MechanismRegistration(
         mechanism_id=mechanism_id,
@@ -138,7 +141,7 @@ def _registration(
                     operators=frozenset({ComparisonOperator.EQUAL}),
                 ),
                 roles=cast(Any, roles),
-                projector=lambda option: option.params.get("profile"),
+                projector=lambda option: option.settlement_params.get("profile"),
             ),
         ),
         publication_input_model=PublicationSettings,
@@ -207,7 +210,7 @@ def test_registration_rejects_unqualified_duplicate_and_sensitive_fields() -> No
                 operators=frozenset({ComparisonOperator.EQUAL}),
             ),
             roles=frozenset({"buyer"}),
-            projector=lambda option: option.asset,
+            projector=lambda option: option.price_asset,
         )
 
     with pytest.raises(SettlementConfigurationError, match="must use"):

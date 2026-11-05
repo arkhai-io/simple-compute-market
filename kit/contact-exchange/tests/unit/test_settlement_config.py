@@ -87,9 +87,9 @@ async def test_option_builder_produces_one_canonical_rateless_option() -> None:
     )
     assert built["accepted_escrows"] == []
     option = SettlementOption.model_validate(built["settlement_options"][0])
-    assert option.rates == []
-    assert option.params["channel"] == "telegram"
-    assert option.params["claimant_principal"] == _CLAIMANT
+    assert option.price_rates == []
+    assert option.settlement_params["channel"] == "telegram"
+    assert option.settlement_params["claimant_principal"] == _CLAIMANT
     assert "@capacity_broker" not in str(built)
 
 
@@ -172,16 +172,17 @@ def test_publication_input_rejects_unoffered_profiles() -> None:
 
 def test_buyer_compatibility_requires_a_rateless_introduction_option() -> None:
     section = ContactSettlementConfig.model_validate({"enabled": True})
-    option = {
-        "mechanism": "contact-exchange.v1",
-        "asset": "introduction",
-        "rates": [],
-        "params": {},
-    }
+    option = {"settlement": {"schema": "contact-exchange.v1", **({} or {})}}
     assert contact_buyer_compatibility(section, option, {})
     assert not contact_buyer_compatibility(
         section,
-        {**option, "rates": [{"field": "amount", "per": "hour", "value": "1"}]},
+        {
+            **option,
+            "price": {
+                "asset": "USD/2",
+                "rates": [{"field": "amount", "per": "hour", "value": "1"}],
+            },
+        },
         {},
     )
     disabled = ContactSettlementConfig.model_validate({"enabled": False})

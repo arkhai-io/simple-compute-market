@@ -6,7 +6,7 @@ a readable one is the single value the lifespan publishes to its consumers.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -41,6 +41,7 @@ def test_an_unreadable_default_stops_composition_before_anything_is_built():
 async def test_the_lifespan_publishes_the_composed_default_to_the_container():
     declaration = object()
     services = MagicMock(name="services", admissibility_default=declaration)
+    services.settlement_composition.disputes.refresh = AsyncMock()
     seen: list[object] = []
 
     async def startup_tasks(**_kwargs):

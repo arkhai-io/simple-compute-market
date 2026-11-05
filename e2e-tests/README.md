@@ -63,10 +63,13 @@ The API-credit payment scenario reads the `PAYMENTS` section (environment
 prefix `ARKHAI_PAYMENTS__`) through `tests/e2e/roles/helpers/payments.py`, which
 other payment scenarios may reuse. SERVICE_URL names the payments target; leave
 it blank and the scenario reports `blocked` and skips. With it set, supply the
-other five: SERVICE_IDENTITY (public Ed25519 receipt signer), DISPUTE_AUTHORITY,
-BUYER_ACCOUNT, BUYER_MARKETPLACE_CREDENTIAL and SELLER_MARKETPLACE_CREDENTIAL;
+other four: SERVICE_IDENTITY (public Ed25519 receipt signer), BUYER_ACCOUNT,
+BUYER_MARKETPLACE_CREDENTIAL and SELLER_MARKETPLACE_CREDENTIAL;
 a missing one fails the scenario, naming it. Marketplace credentials are
-independent of payment account IDs.
+independent of payment account IDs. Dispute authorities are role preferences
+or signed registry recommendations, not a payments-helper setting; configure the
+seller and the buyer's registry accordingly. The shared buyer profile writer
+explicitly opts into registry recommendations.
 
 FEE_BPS defaults to 250. LIVEMODE and DEVELOPMENT_AUTH default to false and
 must be `true` or `false`; generated buyer tables explicitly pin the receipt
@@ -183,7 +186,96 @@ running; `make e2e-<lane>-down` takes it down. `make test-e2e` runs all three in
 turn, taking each stack down before the next. The compute lanes' provisioning
 services run the mock profile unless `PROVISIONING_MODE=real`.
 
-### Real VM provisioning
+### Hosted VM servicing
+
+`e2e_vm_payment_deal` runs in the VM lane, gated by the shared `PAYMENTS`
+configuration. It publishes a hosted-only one-hour VM option, approves the exact
+accepted mandate, commits through `LifecycleClient`, replays commitment and
+steps servicing. An administrator then ends delivery without payee stop rights;
+the seller files one mediation case while teardown is gated. Finally, a seller
+refund reverses the held payment, separately from callback-proven capacity return.
+The mock executor proves the service wiring, not a real guest or SSH access.
+
+Supply healthy payment and mediation authorities, exact signed-registry
+recommendations, seller recommendation consent and an identity-bound
+`[[DisputeCredential]]` for the accepted mediation authority. Its `api_key_env`
+names the seller bearer credential variable; forward that variable into the
+storefront. A running authority without a usable party credential is not enough.
+Development-auth adapters belong to the disposable authority setup, not SCM.
+Before pytest, check Compose health, payment health from host/seller/buyer,
+mediation health and an authenticated publication using
+`option["settlement"]["schema"]`, not the retired option-level mechanism key.
+The [VM readiness gate](../docs/attachments/vm-end-classification/readiness.py)
+and [hosted qualification packet](../docs/attachments/aeet-vm-hosted/index.md)
+provide the direct entry point and observed stages. Without a configured payment
+target all four stages report blocked skips; no Alkahest fallback is used.
+
+### Real bare-metal provisioning
+
+`e2e_bare_metal_real_provisioning` runs the canonical complete deal against a
+real bare-metal provisioning service and an operator-prepared relay-backed host.
+It is in no default lane. Configure the existing `BARE_METAL_LANE` client settings
+for that release and its pinned principals, and select the ignored
+`real-provisioning-target` profile with a `domain: bare_metal` host. The target
+must contain the operator-verified OpenSSH host public key and relay identifier;
+it contains no private key, token or signing key.
+
+```bash
+make test-module MODULE=e2e_bare_metal_real_provisioning ACTIVE_PROFILES=local,real-provisioning-target
+```
+
+Before any hold or supply write, the target, real executor and enabled relay with
+a configured token and active grant key are checked. The run reconciles its own
+pool, executor and whole-machine declaration, adopts exactly one open listing
+for its verified machine/shape, and refuses another declaration on that host.
+Reconcile older declarations under paused admission before running it; the
+scenario does not delete or reassign unrelated supply.
+
+The buyer uses a generated key and the pinned machine key at the delivered relay
+port; an unrelated key must be refused. Grant and reclaim jobs must succeed on
+the target, management connectivity must survive, and lease expiry must release
+capacity and close the delivered access while retaining relay quarantine.
+Failure recovery truncates only the run's lease and names unconfirmed cleanup.
+Without a bare-metal target the module skips before mutation. These checks are
+source capabilities; a passing mock pipeline does not qualify real hardware.
+Use the [operator runbook](../docs/development/VALIDATION_RUNBOOK.md#28-prepare-and-operate-buyer-relays)
+to prove deployed grant admission before either real lane. Container admission
+proof and native installer component tests have different scopes; neither
+substitutes for a completed real purchase, SSH access and reclaim observation.
+
+The installed buyer scenario `e2e_bare_metal_deal` keeps its separate
+`BARE_METAL` configuration and operator-supplied buyer key and known-hosts file.
+It uses the same SSH helper in strict pinned mode, with one fresh attempt per
+access observation. Only public-key authentication refusal proves revocation; a
+transport or host-key failure fails the observation. It remains outside default
+lanes and skips when its configuration is absent.
+
+### Marketplace signing and controlled EVM settlement
+
+Real provisioning modules use the existing controlled Anvil/Alkahest settlement.
+Marketplace signing is independent of that wallet. In an external
+`CONFIG_DIRECTORY` profile, VM settings accept `buyer.marketplace_scheme`
+(default `eip191`) and the existing `buyer.marketplace_credential`;
+`seller.marketplace_scheme` (default `eip191`) and
+`seller.marketplace_credential` (fallback `seller.private_key`); and
+`registry.authority_scheme` (default `eip191`). The second registry uses the same
+`authority_scheme` field. Publisher pins use the seller marketplace principal,
+while administrator and service credentials keep their separate roles.
+`buyer.private_key`, `buyer.wallet_address` and `buyer.chain_rpc_url` remain EVM
+wallet/chain inputs.
+
+Bare-metal lane marketplace signing retains `buyer_scheme` and
+`buyer_credential`. Set `bare_metal_lane.buyer_wallet_private_key` for its separate
+EVM key; existing local profiles fall back to `buyer_credential`. Its
+`buyer_wallet_address` and `buyer_rpc_url` are unchanged. Ed25519 credentials use
+the identity kit's canonical unpadded base64url encoding. Keep secret values in
+private external configuration, never in `REAL_PROVISIONING_TARGET` or committed
+profiles. Existing local/mock profiles retain their current defaults. These are
+test fixture inputs, not changes to the public buyer CLI or service trust.
+
+<a id="real-vm-provisioning"></a>
+
+### Real provisioning target and VM lane
 
 `e2e_vm_real_provisioning` runs the canonical compute deal against a real KVM
 host: the create and teardown jobs run the real playbooks, the scenario
@@ -199,31 +291,40 @@ virtualization; it needs no GPU.
    host, or render that file from your environment's own records:
 
    ```bash
-   cp config/config-real-vm-target.yml.example config/config-real-vm-target.yml
+   cp config/config-real-provisioning-target.yml.example config/config-real-provisioning-target.yml
    ```
 
-   `config-real-vm-target.yml` is ignored and never committed. Its
-   `REAL_VM_TARGET` section names the host's identifier, the address, user,
-   and port the provisioning service connects to, where the service reads its
-   key, the address buyers reach the host's guests at, and the capacity the host
-   sells (`vcpu_count`, `ram_gb`, `disk_gb`): its hardware less what is kept for
-   the host itself. The scenario registers the host and deals on all of that
-   capacity in one VM. A missing or misspelled field fails the run naming it.
-2. Forward the stack's services to the ports the `local` profile names
+   `config-real-provisioning-target.yml` is ignored and never committed. Its
+   `REAL_PROVISIONING_TARGET` version 2 section holds at most one host per
+   domain. A VM host names its identifier, `connection` (service address, user,
+   port and key path), `access`, sellable `capacity`, and a `listing_shape` that
+   fits twice within capacity. Direct access states `public_host`; relay access
+   states only `relay_id`. Bare-metal hosts additionally state `physical_host_id`
+   and their verified `ssh_host_public_key`, and have no VM listing shape.
+   The lane reads a relay before any mutation and requires it enabled, with
+   a configured token and active grant key; it never creates the relay. The
+   target carries no private key or relay credential. Version 1 is refused
+   with conversion instructions; a missing or misspelled field fails by name.
+2. Configure marketplace identities and the separate controlled Anvil wallet as
+   described above. External deployments must trust the configured scheme-tagged
+   principals; do not copy local development secrets onto an exposed service.
+   Forward the stack's services to the ports the `local` profile names
    (`config/config-local.yml`): the storefront, the registry, the provisioning
    service, and the chain. The stack must trust the `local` profile's
    principals.
 3. Run the module with both profiles:
 
    ```bash
-   make test-module MODULE=e2e_vm_real_provisioning ACTIVE_PROFILES=local,real-vm-target
+   make test-module MODULE=e2e_vm_real_provisioning ACTIVE_PROFILES=local,real-provisioning-target
    ```
 
-Without the `real-vm-target` profile, or with its file missing, every stage
+Without the `real-provisioning-target` profile, or with its file missing, every stage
 skips naming the profile and file, and nothing is written to the stack. A run
-that fails after settlement expires its own deal's lease so the provisioning
-service tears the VM down, and fails naming the fulfillment, jobs, VM, and host
-where it cannot confirm the VM is gone.
+that fails after settlement tries cleanup for both guests through their leases,
+and reports each unconfirmed removal. The first SSH session stays open across the
+second guest's create and teardown, with a maximum five-second observed gap;
+management connectivity is checked around each operation. The two smaller guests
+prove tunnel coexistence and require no GPU.
 
 ---
 
@@ -246,14 +347,21 @@ the purchase buyer is a separate wallet-free Ed25519 profile. An unconfigured
 public CI run reports a named blocked payments prerequisite, not success.
 
 The fixture declares a distinct backed whole host and publishes only a USD
-1.00/hour option for a one-hour term. The installed `market bare-metal buy`
-emits `run_started → agreement_accepted → payment_approved →
-run_ended(status=agreed)`. Delivery reads use that purchase's signer and
-fulfillment transport. Re-drive recovers the original run's retained profile
-and calls the shared `settle_agreement` client, keeping both transaction and
-fulfillment unchanged; there is no bare-metal settle command. Seller refund
-reverses the held once payment, then a separate buyer teardown converges mock
-reclaim and site capacity release. Unless the refund stage completed the deal's
+1.00/hour option for a one-hour term. The registry must recommend the ready
+mediation authority; the option includes a 300-second delivery deadline,
+a 15-day dispute window and an unbounded case hold. The dispute window covers
+the delivery deadline plus the authority's minimum filing window; the payment
+`window=P7D` is a separate input.
+
+The installed `market bare-metal buy` emits
+`run_started → negotiation_completed(status=agreed) → payment_approved →
+run_ended(status=agreed)`. It commits through `BuyerLifecycle` after approval.
+Delivery reads use that purchase's signer and fulfillment transport. Re-drive
+recovers the original run's retained profile and repeats canonical lifecycle
+`commit`, keeping both transaction and fulfillment unchanged; there is no
+bare-metal settle command. Seller refund reverses the held once payment;
+idempotent canonical buyer surrender and convergence establish mock reclaim
+and proven site capacity release separately. Unless the refund stage completed the deal's
 teardown, the module's cleanup finds the purchase in the buyer's run log; when
 the log records the payment approved, it refunds the payment (a repeat refund
 returns the same result), then reads the purchase's fulfillment and releases a

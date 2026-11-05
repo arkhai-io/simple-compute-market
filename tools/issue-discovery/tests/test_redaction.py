@@ -37,17 +37,18 @@ def test_redacts_bearer_tokens() -> None:
     assert redacted == "Authorization: Bearer <redacted-token>"
 
 
+# Synthetic fixture username; it identifies no operator account.
 def test_redacts_home_path_usernames() -> None:
-    redacted = tracked_redactor().redact("/home/levi/project/.ssh/id_ed25519")
+    redacted = tracked_redactor().redact("/home/example-user/project/.ssh/id_ed25519")
 
-    assert "levi" not in redacted
+    assert "example-user" not in redacted
     assert redacted == "/home/<user>/project/.ssh/id_ed25519"
 
 
 def test_redacts_macos_home_path_usernames() -> None:
-    redacted = tracked_redactor().redact("/Users/levi/project/.ssh/id_ed25519")
+    redacted = tracked_redactor().redact("/Users/example-user/project/.ssh/id_ed25519")
 
-    assert "levi" not in redacted
+    assert "example-user" not in redacted
     assert redacted == "/Users/<user>/project/.ssh/id_ed25519"
 
 
@@ -57,7 +58,7 @@ def test_redacts_nested_mapping_values() -> None:
         {
             "outer": {
                 "secret": f"private-key={private_key}",
-                "paths": ["/home/alice/work", "safe"],
+                "paths": ["/home/example-user/work", "safe"],
             }
         }
     )

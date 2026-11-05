@@ -288,6 +288,22 @@ MUST refuse either.
 - **WHEN** the guarded push runs with `dev` checked out
 - **THEN** its check refuses, naming the branch, and nothing is pushed
 
+### Requirement: MCW-q8vd The guarded push refuses recognizable private content
+
+Before sending commits, this repository's guarded push MUST reject recognizable
+personal home paths, private assistant planning and session paths, and identifiers
+in a configured local denylist, from added content, filenames, and commit
+messages. It MUST inspect intermediate commits, not only the final tree, and MUST
+omit matched values from its diagnostics. An unreadable configured denylist or
+unavailable comparison refs MUST fail closed. This mechanical check does not
+replace review.
+
+#### Scenario: Private content is removed in a later commit
+
+- **WHEN** an outgoing commit adds recognizable private content and a later commit
+  removes it
+- **THEN** the guarded push refuses the history without printing the matched value
+
 ### Requirement: MCW-ca51 The merge brings in `dev` unless the owner names another branch
 
 The branch a change lands on, which the merge before closeout brings in where the

@@ -39,6 +39,7 @@ from market_policy.scalar_policies import (  # noqa: F401 — re-exports
     _peer_proposal,
     _proposal_requires_exact_amount,
     _set_proposal_amount,
+    _settlement_option_for_selection,
     format_wire_amount,
     parse_wire_amount,
     accept_exact_listing_middleware,
@@ -109,16 +110,16 @@ def round_zero_opening_guard(
     if isinstance(proposal, dict) and proposal.get("settlement_selection") is not None:
         try:
             selection = proposal["settlement_selection"]
-            # A selection names its option exactly; `params` carries the buyer's
-            # inputs to the mechanism (a payer account, say) and is optional.
             if (
                 not isinstance(selection, dict)
-                or not {"mechanism", "option_id", "expiration_unix"}.issubset(selection)
-                or set(selection) - {"mechanism", "option_id", "expiration_unix", "params"}
-                or (selection.get("params") is not None and not isinstance(selection["params"], dict))
+                or not {"settlement", "option_id", "expiration_unix"}.issubset(
+                    selection
+                )
+                or set(selection) - {"settlement", "option_id", "expiration_unix"}
+                or not isinstance(selection.get("settlement"), dict)
             ):
                 raise ValueError("selection has invalid fields")
-            mechanism = selection["mechanism"]
+            mechanism = selection["settlement"].get("schema")
             option_id = selection["option_id"]
             expiration_unix = selection["expiration_unix"]
             if not isinstance(mechanism, str) or not mechanism:
@@ -134,17 +135,7 @@ def round_zero_opening_guard(
                 or expiration_unix <= 0
             ):
                 raise ValueError("selection expiration is invalid")
-            options = _loads_json_list(listing.get("settlement_options"))
-            matched = next(
-                (
-                    option
-                    for option in options
-                    if isinstance(option, dict)
-                    and option.get("option_id") == option_id
-                    and option.get("mechanism") == mechanism
-                ),
-                None,
-            )
+            matched = _settlement_option_for_selection(listing, proposal)
             if matched is None:
                 raise ValueError("selection does not exact-match a listing option")
             context.intermediate["accepted_settlement_selection"] = dict(selection)

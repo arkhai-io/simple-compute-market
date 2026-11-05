@@ -178,6 +178,8 @@ async def authenticate_buyer_contract(
         resource=resource,
         body=body,
         expected_role="buyer",
+        raw_body=await request.body(),
+        capture=getattr(request.app.state, "envelope_capture", None),
         expected_principal=principal,
         replay_store=db,
     )
@@ -434,6 +436,13 @@ async def _signed_buyer_response(
         )
     )
     headers.pop("content-length", None)
+    composition = _container.resolved_settlement_composition
+    if operation in {"negotiate_new", "negotiate_continue"} and response.status_code < 400:
+        if composition is not None and getattr(composition, "lifecycle", None) is not None:
+            await composition.lifecycle.capture_negotiation(
+                request, raw, headers, operation=operation, resource=resource,
+                status=response.status_code,
+            )
     return Response(
         content=raw,
         status_code=response.status_code,

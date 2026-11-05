@@ -1,0 +1,20 @@
+---
+- name: Create the root-owned teardown helper directory
+  ansible.builtin.file:
+    path: "{{ relay_proxy_library_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Install the shared authenticated proxy teardown helper
+  ansible.builtin.copy:
+    src: remove_proxy.sh
+    dest: "{{ relay_proxy_library_path }}"
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Expose the installed teardown library path to generated cleanup scripts
+  ansible.builtin.set_fact:
+    relay_proxy_teardown_library: "{{ relay_proxy_library_path }}"

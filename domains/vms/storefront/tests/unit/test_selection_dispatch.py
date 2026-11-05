@@ -19,22 +19,21 @@ def _option() -> dict:
     params = {"claimant_principal": _SELLER.model_dump(mode="json")}
     return {
         "option_id": derive_settlement_option_id(
-            mechanism="demo.intro.v1",
-            asset="usd",
-            rates=rates,
-            params=params,
+            price={"asset": "usd", "rates": rates},
+            settlement={"schema": "demo.intro.v1", **(params or {})},
         ),
-        "mechanism": "demo.intro.v1",
-        "asset": "usd",
-        "rates": [rate.model_dump(mode="json") for rate in rates],
-        "params": params,
+        "price": {
+            "asset": "usd",
+            "rates": [rate.model_dump(mode="json") for rate in rates],
+        },
+        "settlement": {"schema": "demo.intro.v1", **(params or {})},
     }
 
 
 def _selection(option: dict) -> dict:
     return {
-        "mechanism": option["mechanism"],
         "option_id": option["option_id"],
+        "settlement": {"schema": option["settlement"]["schema"]},
         "expiration_unix": 1_900_000_000,
     }
 
@@ -57,12 +56,18 @@ def _provision() -> dict:
 
 def test_uncomposed_mechanism_selection_is_refused() -> None:
     option = _option()
-    option = {**option, "mechanism": "demo.intro.v1"}
     option["option_id"] = derive_settlement_option_id(
-        mechanism=option["mechanism"],
-        asset=option["asset"],
-        rates=[RateValue.model_validate(rate) for rate in option["rates"]],
-        params=option["params"],
+        price={
+            "asset": option["price"]["asset"],
+            "rates": [
+                RateValue.model_validate(rate)
+                for rate in option.get("price", {}).get("rates", [])
+            ],
+        },
+        settlement={
+            "schema": option["settlement"]["schema"],
+            **(option["settlement"] or {}),
+        },
     )
     with pytest.raises(OfferUnfulfillableError, match="mechanism_unsupported"):
         _accepted_selection_artifacts(
@@ -104,4 +109,4 @@ def test_a_selection_settling_from_the_agreement_is_accepted_without_a_plan() ->
     artifacts = _select_without_a_builder(settles_from_agreement=True)
 
     assert "settlement_plan" not in artifacts
-    assert artifacts["settlement_selection"]["mechanism"] == "demo.intro.v1"
+    assert artifacts["settlement_selection"]["settlement"]["schema"] == "demo.intro.v1"

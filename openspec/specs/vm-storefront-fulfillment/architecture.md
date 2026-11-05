@@ -28,6 +28,36 @@ runs common physical convergence under the existing reservation/fulfillment
 identity. The selected continuation owns attestation, claim binding and failure
 policy. Private credentials are delivery state, never settlement evidence.
 
+## Delivery end and post-release history
+
+Verified payment evidence fixes the authority's approval instant as commitment
+once in the same transaction; accepted delivery metadata alone is not commitment.
+Recovery keeps earlier ends and runs bounded physical pages independently of
+current payment publication. End/admission revision/CAS protects reserve,
+dispatch, activation/billing intent and disclosure against an earlier final end.
+An in-flight create is adopted and terminated, not left running after surrender.
+
+Both buyer surrender and administrator interruption use shared lifecycle/end
+service. Administrator dispatch follows accepted payee rights; an exceptional end
+retains administrator/reason/cause and journals seller filing independently of
+physical teardown. Site reports preserve the original signature and attribution;
+physical termination is immediate for due ends and second-precision truncation
+for future ones. End reports never imply proven capacity return.
+
+After proven release, VM recovery performs a complete lease-history read to recover
+reports whose push was lost. Only a nonempty read whose reports were all ingested,
+and that was made after release was proven, writes the durable
+`site-history:<reservation>` marker. A partial push cannot certify completeness;
+an empty read keeps polling. Recovery checks that marker after restart to retire
+polling without dropping an unseen report or polling every released deal forever.
+
+VM caches respondent pollers by accepted authority/account; bare metal constructs
+them per cycle, both retaining database cursors/answers. Bare metal explicitly
+records term-end requests; VM observes missed availability deadlines and otherwise
+relies on site expiry/report recovery. These are current composition differences,
+not separate domain requirements. See
+[lifecycle limits](../deal-lifecycle/architecture.md#current-limits).
+
 ## Explicit database reset
 
 Incompatible disposable databases must be reset explicitly while negotiation,

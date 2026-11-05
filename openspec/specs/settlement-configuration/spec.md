@@ -8,7 +8,12 @@ Define one typed operator and consumer contract for configuring, validating, ins
 
 ### Requirement: Payments configuration separates accounts and credentials
 
-Shared Arkhai payments registration, typed configuration, and owner-scoped client provision MUST live in `kit/arkhai-payments`'s `settlement_config.py`. `[Settlement.arkhai_payments]` MUST contain the trusted service origin, Ed25519 receipt identity, fee policy, dispute authority, the expected service mode `livemode`, and an API-key environment-variable reference, not the resolved credential. `livemode` MUST default to `false`, so a role that does not declare a live service accepts only test-mode receipts. Payment credentials MUST NOT appear in public options, Agreement bytes, run logs, or status.
+Arkhai payments registration, typed configuration and owner-scoped client provision MUST live in `kit/arkhai-payments`'s `settlement_config.py`. `[Settlement.arkhai_payments]` MUST hold the trusted service origin, Ed25519 receipt identity, fee policy and an API-key environment-variable reference, never the credential, which MUST NOT appear in public options, Agreement bytes, run logs or status. A `dispute_authority` setting MUST be rejected naming `[[Dispute]]`.
+
+#### Scenario: The retired dispute authority key is set
+
+- **WHEN** a role's configuration sets `[Settlement.arkhai_payments].dispute_authority`
+- **THEN** validation fails with a diagnostic naming `[[Dispute]]`
 
 #### Scenario: Credentials stay out of public surfaces
 
@@ -22,12 +27,12 @@ Shared Arkhai payments registration, typed configuration, and owner-scoped clien
 
 ### Requirement: Payment accounts come from domain input and the accepted option
 
-Buyer domain input MUST supply `payer_account` independently of marketplace identity and service policy: VM uses `[vms].payer_account` and API credits `[apicredits].payer_account`. Seller client ownership MUST come from the accepted option's `payee_account`, not a service-policy account field.
+Buyer domain input MUST supply `payer_account` independently of marketplace identity and service policy: VM uses `[vms].payer_account` and API credits `[apicredits].payer_account`. Seller client ownership MUST come from the accepted option's `settlement.payee_account`, not service policy.
 
 #### Scenario: Buyer chooses a payer account
 
 - **WHEN** an Ed25519 buyer selects `arkhai.payments.v1`
-- **THEN** its account travels in `SettlementSelection.params.payer_account` and Agreement `settlement_params`, while its marketplace signer and owner-scoped API credential remain separate
+- **THEN** its account travels in `SettlementSelection.settlement.payer_account` and Agreement `settlement_params`, separately from its signer and API credential
 
 ### Requirement: Agreement attachment is a policy each side owns
 
@@ -113,9 +118,18 @@ Resolution MUST apply declared CLI overrides, then environment/Secret overlay, t
 - **WHEN** an environment overlay supplies a valid priority list over TOML
 - **THEN** the entire ordered list is replaced and the resolved source is reportable without revealing any secret value
 
+### Requirement: Migration is repeatable and maps only supported settings
+
+Repeating migration MUST be a no-op. Legacy `fiat.stripe.v1` or `[Settlement.stripe]` settings MUST be rejected with an actionable removal diagnostic and MUST NOT be converted to `arkhai.payments.v1`. `[Settlement.alkahest].oracle_gated = true` MUST map to `release_models = ["oracle_gated"]`, `interruptible = true` to `["interruptible"]`, and neither to `["recipient"]`.
+
+#### Scenario: Neither legacy release flag is set
+
+- **WHEN** migration encounters an Alkahest section setting neither `oracle_gated` nor `interruptible`
+- **THEN** it writes `release_models = ["recipient"]`
+
 ### Requirement: Explicit atomic configuration migration
 
-Each affected role MUST provide dry-run and write modes that map still-supported legacy Alkahest settlement settings to the typed hierarchy, derive canonical priority, leave identity/wallet/chains in their owning namespaces, preserve unrelated configuration, redact secrets, refuse conflicting old/new values, validate the complete result, write and back up with restrictive permissions, and replace atomically. Repeating migration MUST be a no-op. Legacy `fiat.stripe.v1` or `[Settlement.stripe]` settings MUST be rejected with an actionable removal diagnostic and MUST NOT be converted to `arkhai.payments.v1`.
+Each affected role MUST provide dry-run and write modes that map still-supported legacy Alkahest settlement settings to the typed hierarchy, derive canonical priority, leave identity/wallet/chains in their owning namespaces, preserve unrelated configuration, redact secrets, refuse conflicting old/new values, validate the complete result, write and back up with restrictive permissions, and replace atomically.
 
 #### Scenario: Migration preview is requested
 
@@ -136,6 +150,11 @@ Each affected role MUST provide dry-run and write modes that map still-supported
 
 - **WHEN** migration encounters `fiat.stripe.v1` or `[Settlement.stripe]`
 - **THEN** it refuses to map those values to Arkhai payments and reports that the obsolete settings must be removed
+
+#### Scenario: The interruptible flag is migrated
+
+- **WHEN** migration encounters `[Settlement.alkahest].interruptible = true`
+- **THEN** it writes `release_models = ["interruptible"]` and removes the flag
 
 ### Requirement: Settlement configuration selects explicit peer mechanisms
 
@@ -176,12 +195,17 @@ Each installed mechanism MUST register its canonical ID, configuration key and s
 
 ### Requirement: Mechanism clause fields stay in their namespace
 
-Mechanism-contributed clause fields MUST live under the mechanism's configuration-key namespace and declare their applicable roles, operators, and value types. The shared foundation MUST own registration, grammar integration, ordering, common status, exact option correlation, and composition, and MUST NOT interpret chain-, arbiter-, condition-, or financial-authority fields.
+Mechanism-contributed clause fields MUST live under their mechanism's configuration key and declare their roles, operators and value types; the lifecycle codec's common fields (`adjudication.*`, `early_termination.*`) are the one exception, which the codec owns for every mechanism. The shared foundation MUST own registration, grammar integration, ordering, common status, exact option correlation and composition; it MUST NOT interpret chain-, arbiter-, condition- or financial-authority fields.
 
 #### Scenario: A mechanism contributes a clause field
 
 - **WHEN** a mechanism adds a publication clause field
 - **THEN** the field lives under the mechanism's configuration key with its declared roles, operators, and value types, and the shared grammar composes it without interpreting its value
+
+#### Scenario: A lifecycle term is filtered
+
+- **WHEN** a clause names `early_termination.payer`
+- **THEN** the lifecycle codec's projection evaluates it for every mechanism whose options carry the term
 
 ### Requirement: Mechanism-specific commands stay registration-owned
 
@@ -227,21 +251,21 @@ Run logs MAY record configuration-schema version, the public resolved mechanism 
 
 ### Requirement: Settlement options keep mechanism-owned parameters opaque
 
-A listing MUST advertise settlement choices through `settlement_options` with the shared fields `{option_id, mechanism, asset, rates, params}`. The accepted Agreement MUST select one exact option, and the core MUST NOT interpret mechanism-specific values in `params`.
+A listing MUST advertise choices as `{option_id, price?, settlement, lifecycle?}`. `price`, when present, contains the asset and rates. `settlement` contains a nonempty `schema` naming the mechanism, with its parameters flat beside it; a mechanism MUST NOT define a parameter named `schema`. Core MUST keep mechanism parameters opaque. Lifecycle terms MUST have their own key, owned by the lifecycle codec, not a mechanism model. Rateless introductions MUST omit price; hosted parameters MUST NOT repeat its asset.
 
 #### Scenario: Alkahest option is published
 
-- **WHEN** a seller publishes an Alkahest settlement choice
-- **THEN** its escrow policy is interpreted by the Alkahest kit, not by Arkhai payments
+- **WHEN** a seller publishes an Alkahest choice
+- **THEN** its escrow policy is interpreted by the Alkahest kit under `settlement`, with no lifecycle terms
 
 ### Requirement: Each mechanism's option carries its own parameters
 
-Alkahest options MUST carry their escrow policy in mechanism-owned parameters; legacy Alkahest listing fields remain supported by the escrow path and MUST NOT become requirements of Arkhai payments. An `arkhai.payments.v1` option MUST carry the mechanism-owned payee account, hold window, and agreement-deposit setting needed to derive and disclose its payment policy.
+Alkahest options MUST carry their escrow policy in mechanism-owned parameters; legacy Alkahest listing fields remain supported by the escrow path and MUST NOT become requirements of Arkhai payments. An `arkhai.payments.v1` option MUST carry the mechanism-owned payee account, approval window, and agreement-deposit setting needed to derive and disclose its payment policy, and its hold follows the option's `adjudication.dispute_window_seconds`.
 
 #### Scenario: Arkhai payment option is published
 
 - **WHEN** a seller publishes an `arkhai.payments.v1` option
-- **THEN** the option identifies its payee account, declared hold window, and agreement-deposit setting while core exposes only the shared option envelope
+- **THEN** the option identifies its payee account, approval window, dispute window, and agreement-deposit setting while core exposes only the shared option envelope
 
 ### Requirement: Registration and settlement execution are distinct
 
@@ -275,8 +299,9 @@ covers an oracle-gated section with no trusted oracle; a trusted or interruptibl
 equal to the seller wallet's address or to the account its key signs as; an interruptible
 section with no interruptible oracle; a seller wallet with neither an address nor a key,
 whatever clients the storefront composes; a missing wallet key or no configured chain
-where the storefront needs them to settle; and a release model the storefront's domain
-cannot deliver. A release condition MUST NOT fall back to the seller wallet as its oracle.
+where the storefront needs them to settle. A release model the storefront's domain cannot
+deliver is not such an input: it refuses startup (see "Alkahest release models are listed
+per option"). A release condition MUST NOT fall back to the seller wallet as its oracle.
 A section that does not parse MUST stop startup, as any configuration does.
 
 #### Scenario: An oracle-gated section names no oracle
@@ -335,8 +360,7 @@ configuration blockers its mechanism's preflight reports for it.
 
 #### Scenario: A disabled section could not settle
 
-- **WHEN** a seller's Alkahest section is disabled and lacks its wallet key, or names a
-  release model its domain cannot deliver
+- **WHEN** a seller's Alkahest section is disabled and lacks its wallet key
 - **THEN** its readiness reports `disabled` followed by the configuration blocker naming
   the problem, and no reachability blocker
 
@@ -476,3 +500,44 @@ table, and migration MUST move either into it.
 - **THEN** migration names each other configured chain, whose claims will be serviced
   against its entry in `[Settlement.alkahest.address_books]` or, where it has none, the
   SDK's built-in addresses, before anything is written
+
+### Requirement: Registry-recommended dispute authorities follow configured entries
+
+`use_registry_dispute_authorities` MUST append the registry descriptor's recommended authorities after the `[[Dispute]]` entries when true. It MUST default to true for a storefront and false for a buyer; a buyer with no entries and the setting false MUST refuse every hosted option with a diagnostic naming both remedies. Shipped buyer profiles and development fixtures MUST set it explicitly.
+
+#### Scenario: A buyer accepts no authority
+
+- **WHEN** a buyer has no `[[Dispute]]` entries and `use_registry_dispute_authorities` is false
+- **THEN** it refuses every hosted option with a diagnostic naming both remedies
+
+### Requirement: Dispute authorities are configured as preferences
+
+`[[Dispute]]` entries MUST be ordered by preference, each naming one authority by `interface`, `origin`, `account` and `record_key`, with interface-owned `params` and a copy of its advertisement (payment mechanisms, minimum dispute window and case hold); an entry MAY be marked not offered or not accepted.
+
+#### Scenario: A buyer prefers one authority
+
+- **WHEN** a buyer lists two accepted authorities and a listing offers equal options naming each
+- **THEN** the buyer selects the option naming its first entry
+
+### Requirement: Dispute credentials are bound by identity and no template ships an authority
+
+`[[DisputeCredential]]` entries MUST bind a credential's environment-variable reference to an authority identity. No configuration template MAY ship an authority. Resolved credentials MUST NOT appear in any option, Agreement or status.
+
+#### Scenario: A template is written
+
+- **WHEN** a role CLI writes a fresh configuration template
+- **THEN** it contains no `[[Dispute]]` entry and no operator's authority account, origin or key
+
+### Requirement: Alkahest release models are listed per option
+
+`[Settlement.alkahest].release_models` MUST list the release models a storefront offers, drawn from `recipient`, `oracle_gated` and `interruptible`, and the storefront MUST publish one Alkahest option per model. Oracle-address settings MUST be validated against list membership, and a storefront whose section, enabled or not, lists a model its domain cannot deliver MUST refuse to start. A listing MUST NOT carry a listing-level interruptible marker.
+
+#### Scenario: A storefront offers two Alkahest release models
+
+- **WHEN** a VM storefront configures `release_models = ["recipient", "interruptible"]`
+- **THEN** each listing carries two Alkahest options, only the interruptible one's release condition describes interruption, and the listing resource has no interruptible field
+
+#### Scenario: A domain is configured for a release model it cannot deliver
+
+- **WHEN** a bare-metal storefront's Alkahest section, enabled or disabled, lists `interruptible` with an interruptible oracle
+- **THEN** startup is refused naming the undeliverable model, before any loop starts, rather than Alkahest being reported unready

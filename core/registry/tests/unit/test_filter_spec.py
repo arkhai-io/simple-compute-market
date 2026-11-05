@@ -237,9 +237,12 @@ def test_the_compute_listing_resource_requires_only_its_region() -> None:
     listing vocabulary, which is unchanged."""
     spec = load_filter_spec()
 
-    assert spec.version == 7
+    assert spec.version == 8
     assert spec.schema_identity is not None
-    assert (spec.schema_identity.id, spec.schema_identity.version) == ("compute.market", 2)
+    assert (spec.schema_identity.id, spec.schema_identity.version) == (
+        "compute.market",
+        3,
+    )
     listing_resource = spec.listing_shape["properties"]["listing_resource"]
     assert listing_resource["required"] == ["region"]
     by_name = {declaration.name: declaration for declaration in spec.filters}

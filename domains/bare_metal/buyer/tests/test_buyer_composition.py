@@ -78,7 +78,6 @@ enabled = true
 service_url = "http://127.0.0.1:9"
 service_identity = {{scheme = "ed25519", identifier = "{PRINCIPAL}"}}
 fee_bps = 250
-dispute_authority = "33333333-3333-4333-8333-333333333333"
 development_auth = true
 {line}""".strip(),
         encoding="utf-8",
@@ -135,6 +134,22 @@ def test_physical_transport_uses_signed_buyer_routes(monkeypatch) -> None:
         resolve_seller_principals=lambda: trust,
     )
 
+    class Peer:
+        def __init__(self, url, signer, publishers, **kwargs):
+            assert url == "https://seller.example/"
+            assert signer is transport.signer and publishers == trust
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        async def end_delivery(self, negotiation_id):
+            assert negotiation_id == "neg-1"
+            return SimpleNamespace(model_dump=lambda **_: {"ok": True})
+
+    monkeypatch.setattr("arkhai_bare_metal_buyer.fulfillment.LifecycleClient", Peer)
     assert transport.result("neg-1") == {"ok": True}
     assert transport.access("neg-1") == {"ok": True}
     assert transport.teardown("neg-1") == {"ok": True}
@@ -153,12 +168,6 @@ def test_physical_transport_uses_signed_buyer_routes(monkeypatch) -> None:
             "https://seller.example/api/v1/fulfillments/neg-1/access",
             "GET",
             "bare_metal_fulfillment_access",
-            "neg-1",
-        ),
-        (
-            "https://seller.example/api/v1/fulfillments/neg-1/teardown",
-            "POST",
-            "bare_metal_fulfillment_teardown",
             "neg-1",
         ),
     ]

@@ -44,11 +44,11 @@ MERGE_FROM = $(or $(strip $(FROM)),$(CHANGE_WORKFLOW_MERGE_FROM))
 .PHONY: change-watch change-cost change-history check-change-index check-tasks
 .PHONY: check-agent-skills check-push-ready push-branch change-graph
 
-design: ## Open a Claude Code design session for an OpenSpec change (CHANGE=<change> [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
-	@$(CHANGE_WORKFLOW) start design "$(CHANGE)"$(CHANGE_WORKFLOW_RUN)
+design: ## Open a Claude Code design session for an OpenSpec change; unattended, ARGUMENTS follows the change in the skill's invocation, as the owner's direction to the design (CHANGE=<change> [UNATTENDED=1 [ARGUMENTS=<text>] [ALLOW='<rule>;<rule>']])
+	@$(CHANGE_WORKFLOW) start design "$(CHANGE)"$(if $(CHANGE_WORKFLOW_UNATTENDED),$(CHANGE_WORKFLOW_ARGUMENTS))$(CHANGE_WORKFLOW_RUN)
 
-plan: ## Open a Claude Code planning session for an OpenSpec change; unattended, it resumes the design session (CHANGE=<change> [UNATTENDED=1 [FRESH=1] [ALLOW='<rule>;<rule>']])
-	@$(CHANGE_WORKFLOW) start plan "$(CHANGE)"$(if $(CHANGE_WORKFLOW_UNATTENDED),$(if $(filter 1,$(FRESH)), --fresh))$(CHANGE_WORKFLOW_RUN)
+plan: ## Open a Claude Code planning session for an OpenSpec change; unattended, it resumes the design session, and ARGUMENTS follows the change in the skill's invocation, as the owner's direction to the plan (CHANGE=<change> [UNATTENDED=1 [FRESH=1] [ARGUMENTS=<text>] [ALLOW='<rule>;<rule>']])
+	@$(CHANGE_WORKFLOW) start plan "$(CHANGE)"$(if $(CHANGE_WORKFLOW_UNATTENDED),$(if $(filter 1,$(FRESH)), --fresh)$(CHANGE_WORKFLOW_ARGUMENTS))$(CHANGE_WORKFLOW_RUN)
 
 implement: ## Open a fresh Claude Code session implementing an OpenSpec change; unattended, ARGUMENTS follows the change in the skill's invocation, as a merge's conflicts to resolve, and SESSION_ID continues that implementation session instead (CHANGE=<change> [SECTION=<n>] [SECTIONS=<n-m>] [UNATTENDED=1 [ARGUMENTS=<text>] [SESSION_ID=<id>] [ALLOW='<rule>;<rule>']])
 	@$(CHANGE_WORKFLOW) start implement "$(CHANGE)"$(if $(strip $(SECTIONS)$(SECTION)), --sections "$(or $(strip $(SECTIONS)),$(strip $(SECTION)))")$(if $(CHANGE_WORKFLOW_UNATTENDED),$(CHANGE_WORKFLOW_ARGUMENTS)$(if $(strip $(SESSION_ID)), --session '$(subst ','\'',$(strip $(SESSION_ID)))'))$(CHANGE_WORKFLOW_RUN)

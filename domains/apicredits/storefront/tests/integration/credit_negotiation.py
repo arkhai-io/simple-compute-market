@@ -23,6 +23,8 @@ from market_core.schemas import (
     derive_settlement_option_id,
 )
 from market_identity import Ed25519Signer
+from market_arkhai_payments.fixtures import dispute_lifecycle as _dispute_lifecycle
+from market_arkhai_mediation.contract import INTERFACE
 from tests._settings_overrides import replaced_setting
 from tests.listing_bindings import upsert_bound_listing
 
@@ -63,28 +65,48 @@ PAYER_ACCOUNT = "11111111-1111-4111-8111-111111111111"
 PAYEE_ACCOUNT = "22222222-2222-4222-8222-222222222222"
 
 
+def dispute_lifecycle(account):
+    value = _dispute_lifecycle(account)
+    value["adjudication"]["dispute"]["interface"] = INTERFACE
+    return value
+
+
+def payment_authority():
+    return {
+        **dispute_lifecycle(DISPUTE_ACCOUNT)["adjudication"]["dispute"],
+        "advertisement": {"mechanisms": ["arkhai.payments.v1"],
+                          "minimum_dispute_window_seconds": 0,
+                          "minimum_case_hold_seconds": None},
+    }
+
+
 def payment_option(rate: int = 100) -> SettlementOption:
     """An Arkhai payments option priced per credit, as a seller publishes one."""
     rates = [RateValue(field="amount", per="credit", value=rate)]
-    params = {"payee_account": PAYEE_ACCOUNT, "asset": "USD/2"}
+    params = {"payee_account": PAYEE_ACCOUNT}
+    lifecycle = dispute_lifecycle(DISPUTE_ACCOUNT)
+    lifecycle["adjudication"]["dispute"]["interface"] = "arkhai.mediation.v1"
     return SettlementOption(
         option_id=derive_settlement_option_id(
-            mechanism="arkhai.payments.v1", asset="USD/2", rates=rates, params=params
+            price={"asset": "USD/2", "rates": rates},
+            settlement={"schema": "arkhai.payments.v1", **(params or {})},
+            lifecycle=lifecycle,
         ),
-        mechanism="arkhai.payments.v1",
-        asset="USD/2",
-        rates=rates,
-        params=params,
+        price={"asset": "USD/2", "rates": rates},
+        settlement={"schema": "arkhai.payments.v1", **(params or {})},
+        lifecycle=lifecycle,
     )
 
 
 def payment_selection(*, expiration_unix: int = 1_900_000_000) -> SettlementSelection:
     option = payment_option()
     return SettlementSelection(
-        mechanism=option.mechanism,
         option_id=option.option_id,
+        settlement={
+            "schema": option.settlement_schema,
+            **({"payer_account": PAYER_ACCOUNT} or {}),
+        },
         expiration_unix=expiration_unix,
-        params={"payer_account": PAYER_ACCOUNT},
     )
 
 

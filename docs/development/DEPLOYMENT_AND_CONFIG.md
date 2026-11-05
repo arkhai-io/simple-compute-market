@@ -384,8 +384,9 @@ render tests run the storefront's own refusal over a rendered `storefront.json`.
 A service refuses to start when its own configuration contradicts itself or its
 stored state cannot be served as it stands, since waiting repairs neither; a
 dependency it cannot reach is reported, not refused (see "Kubernetes: ConfigMap and
-Secret mounting"). Every storefront refuses an Alkahest section selecting both the
-oracle-gated and the interruptible release model, and the bare-metal storefront
+Secret mounting"). Every storefront refuses an Alkahest section, enabled or not,
+listing a release model its domain cannot deliver (see "Alkahest release models"),
+and the bare-metal storefront
 refuses Alkahest inputs — `[Wallet].address`, `[Chains]`, `[Wallet].private_key` —
 stated with no Alkahest section. The provisioning service refuses to start while a
 stored resource pool lacks valid advertisement and backing declarations, or names a
@@ -565,6 +566,17 @@ derives its schema identity from the loaded filter specification. Helm keeps
 the descriptor values in ordinary values while mounting the signer credential
 from a Secret. Compose wrappers likewise carry public descriptor values beside
 public identity pins and keep signer credentials in role-owned file mounts.
+
+An operator may also supply `REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES`
+(a JSON array), or Helm `descriptor.recommendedDisputeAuthorities`. Each item has
+an authority's full identity, interface-owned `params`, and an `advertisement`
+copy as described under [Dispute authority preferences](#dispute-authority-preferences).
+The signed descriptor exposes them in preference order as
+`recommendedDisputeAuthorities`; an empty or unconfigured list is omitted.
+No registry code or chart ships an authority. Recommendations are public
+operator assertions, not credentials and not an instruction to override a role's
+local policy. Roles verify the descriptor under that registry URL's configured
+identity pins before using it.
 
 The umbrella chart enables the compute registry by default and keeps the
 `api-credits-registry` alias disabled. Enabling the alias instantiates the same
@@ -1051,6 +1063,30 @@ failure to the point of use, where it appears as a remote service refusing a
 connection rather than as a configuration error where the configuration is
 wrong.
 
+A relay entry's `grant_key_secret_key` names the profile value containing the
+Ed25519 private key as one-line standard base64 PKCS#8 DER. The importer strips
+surrounding whitespace and refuses a missing, malformed or non-Ed25519 value
+without echoing it. The profile key is resolved at relay creation; after API
+rotation the API-held key remains authoritative during document reconciliation.
+Keep the supplied profile key current when an empty-database reinstall must
+recreate the plugin's trust. A service-generated key is recoverable only from
+the service database.
+
+Relay grant signing keys have the same create-time profile resolution rule. An
+API key rotation is authoritative; a later relay-definition import does not
+replace it from the named profile key. The provisioning service's
+`relay_grant_expiry_grace_seconds` (default 3600 seconds) extends the lease end
+for the signed grant, while `relay_port_reuse_margin_seconds` (default 300
+seconds) delays reuse after that grant expiry. The allocator applies a raised
+reuse margin to already released ports. Keep the grace at least the lease
+watchdog's grace period plus a teardown job's retries and their backoff, so a
+grant never expires while the teardown that revokes it is still due; the default
+covers the default watchdog and retry settings. The service refuses to start
+with a negative grace or a reuse margin that is not positive. Keep the relay
+and provisioning clocks synchronized with skew well below the reuse margin; the
+relay plugin checks expiry against its own clock with no leeway. These values
+are service settings, not pool fields or buyer inputs.
+
 ## Migrations at startup
 
 A deployed service applies its pending migrations before serving
@@ -1141,6 +1177,14 @@ one: the chart deploys the service with `strategy: Recreate` over one
 ReadWriteOnce volume, and one operator upgrades sites and storefronts together
 ([`ARCHITECTURE.md`, "Operators"](ARCHITECTURE.md#operators)). Rollback is what
 remains, and the pre-upgrade backup answers it.
+
+Upgrading the compute provisioning service past the migration that moves pool
+relay references from `ansible_pool_configs.relay_id` to `pool_relays` is also
+fail-forward. The migration copies each reference and drops the old column; an
+older provisioner still reads that column and cannot serve the new schema. Take
+a database backup before upgrading. Rolling back past this migration requires
+restoring that pre-upgrade backup or rolling forward; do not run old and new
+provisioner versions against the same database.
 
 Identity-bearing database migrations validate the complete service-owned
 population and commit canonical principals, replay state, and ownership
@@ -1388,7 +1432,7 @@ error's type.
 Marketplace roles resolve one strict `[Settlement]` root. `schema_version`
 selects the configuration contract, `priority` orders mechanism IDs, and peer
 `[Settlement.alkahest]`, `[Settlement.arkhai_payments]`, and `[Settlement.contact]` tables contain only
-mechanism-owned consumer settings. Arkhai payments resolves trusted service origin, Ed25519 receipt identity, fee/dispute policy, and an `api_key_env` reference through the shared kit's `settlement_config.py`. The owner-scoped WorkOS credential reaches only its consuming process; HTTPS is required outside loopback. Buyer `payer_account` is separate domain input (`[vms].payer_account` or `[apicredits].payer_account`), carried in selection params and the accepted Agreement, not inferred from marketplace identity. API-credit sellers supply `payee_account` and `asset` in each payment publication clause; the accepted option determines the seller client's owner. Local development uses `development_auth = true` with a loopback service origin instead of `api_key_env`; the two modes are mutually exclusive. Buyer marketplace identity comes only from
+mechanism-owned consumer settings. Arkhai payments resolves trusted service origin, Ed25519 receipt identity, fee policy, and an `api_key_env` reference through the shared kit's `settlement_config.py`. The owner-scoped WorkOS credential reaches only its consuming process; HTTPS is required outside loopback. Buyer `payer_account` is separate domain input (`[vms].payer_account` or `[apicredits].payer_account`), carried in selection params and the accepted Agreement, not inferred from marketplace identity. API-credit sellers supply `payee_account` and `asset` in each payment publication clause; the accepted option determines the seller client's owner. Local development uses `development_auth = true` with a loopback service origin instead of `api_key_env`; the two modes are mutually exclusive. Buyer marketplace identity comes only from
 the selected durable profile referenced by `[BuyerProfile]`; storefront and
 service-role principals retain their role-owned public identity configuration.
 EVM credentials and networks remain in `[Wallet]` and `[Chains]`.
@@ -1407,6 +1451,18 @@ check, including the revalidation of a stored receipt at restart, compares with 
 current setting, so a payment deal accepted under the old mode never reaches
 delivery or issuance afterwards. Drain open payment deals, or refund them, before
 the change.
+
+For signing-key rotation, `receipt_identities` in `[Settlement.arkhai_payments]`
+may list current and retiring identity pins. Each entry has `identity`,
+`valid_from` (inclusive Unix seconds, default zero), optional `valid_until`
+(exclusive), and `retiring` (default false). A nonempty list must include the
+current `service_identity` as a non-retiring entry. With no list, that identity
+alone remains trusted. Receipt signatures are checked at `approvedAt`; snapshot
+signatures at `observedAt`. A valid current-key snapshot may attest an embedded
+receipt from a configured retiring identity valid at its approval, without
+rewriting the receipt or its proof. Callers pass their durable minimum event
+sequence to the shared snapshot verifier; wrong mode, deal or regressing state
+is refused before authority state is consumed.
 
 Agreement attachment is set on each side. A buyer's `attach_agreement` (default `false`)
 attaches the exact Agreement when it approves a payment; setting it in a seller
@@ -1430,9 +1486,10 @@ servicing alike. The two retired keys, `[Chains.<name>].alkahest_address_config_
 and `[Settlement.alkahest].address_config_path`, are refused before the settlement
 section is resolved, with a diagnostic naming the table. The settlement migration
 commands, `market-storefront config migrate --scope settlement` and the buyer's
-`market config migrate --scope settlement`, move them into it; the bare-metal and
-API-credit storefronts have no such command, and their operators move the key by
-hand. A chain's own key moves to that chain's entry, and the
+`market config migrate --scope settlement`, move them into it. Bare-metal sellers use
+`bare-metal-storefront config migrate --config /path/storefront.toml --scope settlement`
+with the same `--check` or `--write --backup` modes. The API-credit storefront has no
+migration command; its operators move the key by hand. A chain's own key moves to that chain's entry, and the
 section key to the one configured chain, or else to the chains whose own keys name
 the same book. Where it cannot tell which chains the section key served, or a chain
 would be given two different books, it refuses and names the keys; an empty key is
@@ -1448,6 +1505,44 @@ The address is optional: absent, it is derived from the key. An address that nam
 another account than the key's makes Alkahest unready
 (`alkahest.wallet_address_mismatch`) and leaves the storefront running. A buyer's
 address names nothing an escrow pays, and is not compared with its key.
+
+### Alkahest release models
+
+`[Settlement.alkahest].release_models` is the ordered, nonempty, duplicate-free list
+of release models offered by the seller: `recipient` (the default), `oracle_gated`,
+and `interruptible`. Every published escrow shape gets one option per model.
+Each option's `settlement.accepted_escrow.demand` pins its own chain, arbiter and
+demand data; it has no `lifecycle` terms, since Alkahest has no lifecycle adapter.
+Interruptibility is not a listing-resource attribute: choosing the splitter option
+chooses that release condition, without changing the other options on the listing.
+
+```toml
+[Settlement.alkahest]
+enabled = true
+release_models = ["recipient", "interruptible"]
+# Configure interruptible_oracle_addresses with a trusted third-party oracle.
+```
+
+`trusted_oracle_addresses` is valid only when `oracle_gated` is listed, and
+`interruptible_oracle_addresses` only when `interruptible` is listed. Those models
+need their respective oracle list before Alkahest is ready; the first address is
+the release oracle, and it must not be the seller's wallet or signing account.
+Wallet, address-book and chain readiness still apply to every offered model.
+A domain refuses startup if any listed model is not one it can deliver, whether or not
+the section is enabled: bare metal
+accepts recipient and oracle-gated release, never interruptible; the API-credit
+storefront accepts recipient release only. VM supports all three models.
+
+The old `oracle_gated` and `interruptible` boolean settings are rejected. The
+settlement migration maps `oracle_gated = true` to `["oracle_gated"]`,
+`interruptible = true` to `["interruptible"]`, and neither true (including both
+absent) to `["recipient"]`, removing the flags. Both true is contradictory and
+refused. A conflicting existing `release_models` list is refused without modifying
+the file or backup. Dry-run lists redacted key changes; write validates the whole
+candidate and preserves the existing atomic replacement and restrictive backup
+contract. Repeating it is a no-op. Legacy boolean environment overrides must be
+replaced with the corresponding `SETTLEMENT__ALKAHEST__RELEASE_MODELS` list override,
+not copied as boolean values.
 
 Publication config migrates separately from the `[Settlement]` hierarchy. The migration converts an unambiguous single-mechanism legacy price into one complete typed clause. It refuses a dual-mechanism source whose one scalar price has no authoritative asset scale, and refuses per-model legacy pricing, which needs manual clauses.
 
@@ -1515,6 +1610,118 @@ sequence:
    artifacts together. After effects resume, recover forward from accepted
    settlement plans and operation identities; never change mechanism priority
    to redirect an accepted deal.
+
+### Seller servicing budget diagnostics
+
+`kit/deal-servicing` exposes `ServicingBudget` and `SellerBudgetDiagnostics` for
+seller-side loop composition. All polling/watchdog/teardown inputs are finite,
+nonnegative seconds. The diagnostic compares reserve-ahead and priced payer
+notice, when supplied, with polling + max(configured watchdog, observed cycle)
++ teardown. A shortfall logs a recommendation and possible unpaid-delivery
+exposure; it neither stops a loop nor changes an accepted term. The wrapper
+measures the injected step, not a second timer or a buyer watchdog.
+
+These are library composition inputs, not new `[Settlement]` configuration keys
+or a buyer guarantee. Current compute role roots do not expose a budget table.
+Use [the deterministic budget example](../../kit/deal-servicing/examples/budget_first_use.py)
+for a runnable warning-and-continue check. During storefront downtime, physical
+service can continue until the lease maximum. A rate buyer's protection requires
+its own authority stop/case, not a seller-advertised processing budget; rate
+execution remains outside the once-only adapter. See
+[lifecycle authority limits](../../openspec/specs/deal-lifecycle/architecture.md#current-limits).
+
+### Dispute authority preferences
+
+Dispute preferences are role-owned root configuration, independent of
+`[Settlement.arkhai_payments]`. VM and API-credit buyers and storefronts read
+these entries from their normal public TOML overlays. The bare-metal buyer reads
+them at the root of its file selected by `BARE_METAL_BUYER_CONFIG`, beside
+`[bare_metal]`; its storefront reads them through the normal storefront loader.
+
+`use_registry_dispute_authorities` defaults to `true` for a storefront and
+`false` for a buyer. Shipped buyer profiles and development fixtures state their
+consent explicitly. Put this scalar before any TOML table header:
+
+```toml
+use_registry_dispute_authorities = true
+```
+
+With the setting enabled, each role resolves its ordered local `[[Dispute]]`
+entries first, followed by the recommendations from the registry it works
+through. Descriptors are fetched through the signed, pinned registry client at
+buyer bootstrap and storefront startup. Multiple registries keep independent
+lists: a recommendation from one is not a default for another, and work with no
+source registry uses local entries only. A failed descriptor read contributes
+no recommendations; local preferences remain usable. Disabling recommendations
+does not disable local entries or resolve any authority credential.
+
+A local entry names one authority by all four of `interface`, `origin`,
+`account`, and `record_key`. `params` belongs to that interface. The
+`advertisement` copy states the supported payment mechanisms and minimum
+dispute/case-hold windows; extra interface-owned advertisement fields are
+retained. For example, this uses reserved example data, not a live authority or
+a shipped role template:
+
+```toml
+[[Dispute]]
+interface = "example.dispute.v1"
+origin = "https://dispute.example"
+account = "example-authority-account"
+record_key = "example-public-record-key"
+params = {}
+not_offered = false
+not_accepted = false
+
+[Dispute.advertisement]
+mechanisms = ["example.payment.v1"]
+minimum_dispute_window_seconds = 60
+minimum_case_hold_seconds = 3600
+```
+
+An omitted `minimum_case_hold_seconds` means the authority requires an unbounded
+case hold; JSON descriptors may express that as `null`. TOML has no null literal.
+An entry marked `not_offered` is excluded from the seller's offered list; one
+marked `not_accepted` is excluded from the buyer's accepted list. Deduplication
+uses full identity **before** those marks: a local veto cannot be undone by the
+registry repeating that authority, and a registry copy cannot replace locally
+accepted parameters. A different origin or record key is a different authority,
+even when its payment account matches.
+
+A role with an empty resolved list logs **No dispute authority is available**,
+naming both remedies: configure `[[Dispute]]`, or enable
+`use_registry_dispute_authorities` and arrange a registry recommendation. Merely
+configuring a payments service chooses no dispute authority. The selected
+option names its authority under `lifecycle.adjudication.dispute`; mandate
+derivation reads that accepted authority, not a service-wide default.
+`[Settlement.arkhai_payments].dispute_authority` is rejected, including when its
+value is null in a JSON overlay. Remove it and configure preferences instead;
+the bare-metal buyer's `[bare_metal.arkhai_payments]` uses the same validation.
+No template supplies an authority's account, origin or record key.
+
+Credentials are separate, identity-bound references:
+
+```toml
+[[DisputeCredential]]
+interface = "example.dispute.v1"
+origin = "https://dispute.example"
+account = "example-authority-account"
+record_key = "example-public-record-key"
+api_key_env = "EXAMPLE_DISPUTE_API_KEY"
+```
+
+The binding must match all four identity fields. Credential resolution reads the
+named environment variable only when the authority is used; absence or an empty
+value fails with the variable's name, never its value. Duplicate bindings for an
+identity are refused at lookup. The Agreement pins origin/record key for the
+deal's potentially unbounded case life: preference edits affect only new deals,
+and credentials must still serve accepted identities. Dispute adapters follow no
+mid-deal origin redirect or record-key rotation. Payment receipt identity overlap
+does not solve that separate limitation. A resolved credential is a secret wrapper and
+is not stored in the preference model. Public authority projections contain
+neither credential references nor secret values; neither belongs in options,
+Agreements, status or run logs. See the runnable
+[configuration example](../../kit/deal-lifecycle/examples/dispute_configuration.py)
+for ordered resolution, local vetoes, per-registry isolation and secret handling.
 
 ### Contact-exchange contacts
 
@@ -1637,7 +1844,7 @@ A registry that gates writes behind a bearer token is given its token in the Sec
 
 `[capacity.sites]` maps each site to its authority URL, and each site is bound to exactly one `[Identity.service_peers.<peer>]`, seeded at the server's start and rotated through the identity routes (see "Storefront startup and site trust"). Health and status report each site by its ID, its service peer, and the peer's active principals, primary first, never its URL; a site's error text in status may name the URL, which is public configuration refused at startup when it carries credentials. `[capacity].poll_interval` (5 s), `[capacity].publication_interval_seconds` (30 s), and `[capacity].source_confirmation_seconds` (three poll intervals unless stated) time the projection poller, the publication loop, and the opening recheck's confirmation window. `[pricing].settlements` compile when the storefront starts, so a clause that cannot be read refuses startup naming the key; an empty list is not a refusal. `[negotiation].policies` names the seller chain.
 
-`[Settlement]` is the strict shared settlement root. A configured Alkahest section, enabled or disabled, settles with at least one chain (`[Chains.<name>]` and its `rpc_url`, with an optional address book under `[Settlement.alkahest.address_books]`) and the wallet key (`[Wallet].private_key`, in the Secret overlay only), whose account is the seller's address; `[Wallet].address` may state it, and one naming another account is a blocker (see "Settlement consumer configuration and cutover"). A section missing any input starts, and Alkahest readiness names each missing input as a blocker, since disabled sections still service accepted obligations. Those inputs supplied with no Alkahest section are refused at startup. Payments-only configuration supplies none of them and constructs no Alkahest wallet, chain, or RPC client; its payment credentials remain behind the secret boundary. The storefront delivers the `recipient` and `oracle_gated` release models; configured as `interruptible`, Alkahest is unready (see "Storefront startup and site trust"). Publication additionally requires authenticated registry trust, exact typed clauses, freshly confirmed site projections for its source checks, and a maximum lease duration per pool.
+`[Settlement]` is the strict shared settlement root. A configured Alkahest section, enabled or disabled, settles with at least one chain (`[Chains.<name>]` and its `rpc_url`, with an optional address book under `[Settlement.alkahest.address_books]`) and the wallet key (`[Wallet].private_key`, in the Secret overlay only), whose account is the seller's address; `[Wallet].address` may state it, and one naming another account is a blocker (see "Settlement consumer configuration and cutover"). A section missing any input starts, and Alkahest readiness names each missing input as a blocker, since disabled sections still service accepted obligations. Those inputs supplied with no Alkahest section are refused at startup. Payments-only configuration supplies none of them and constructs no Alkahest wallet, chain, or RPC client; its payment credentials remain behind the secret boundary. The storefront delivers the `recipient` and `oracle_gated` release models; a section listing `interruptible`, enabled or not, refuses startup (see "Alkahest release models"). Publication additionally requires authenticated registry trust, exact typed clauses, freshly confirmed site projections for its source checks, and a maximum lease duration per pool.
 
 The Compose wrapper mounts the operator's `storefront.toml` and the Secret overlay and reads the identity credential from its own environment file. The Helm chart, `helm/charts/bare-metal-storefront`, is the storefront chart's agent shape with one agent's keys at its top level: `config` rendered into `storefront.json` in a ConfigMap with null-valued keys removed (see "Storefront agents: pass-through configuration"); `secret` naming an existing Secret whose key is mounted as `storefront.secrets.toml`; `identity.credentialSecret`; `alkahestAddressBook` mounting an existing ConfigMap read-only; `port`, which the container, probes, and Service share; persistence; and scheduling. The pod's environment carries only `XDG_CONFIG_HOME` and the credential, and service links are off. The chart derives only what the release knows, and only where `config` states none: `port` always (a different stated value refused), `base_url` as the Service's URL, `db_path` under `persistence.mountPath`, and, in an umbrella release, the internal registry's URL with the chart-level `internalRegistryTrust` under it and `[capacity.sites]` as `{default: <provisioning URL>}`. A site bound to the release's provisioning service must have a role-`service` peer naming `global.provisioningIdentity`, which the chart checks and never adds. Installed alone, with no umbrella globals, it derives the first three only and refuses `internalRegistryTrust`. Its values schema is closed: the top level refuses every value it does not know, retired ones by name, and `config` is typed by a definition generated from the storefront's settings models, each section closed, so a misspelled or secret key is refused at render. A key stated in two spellings is refused at render too, since the loader would merge them silently. The chart validates no service semantics; the storefront's startup refusal does.
 

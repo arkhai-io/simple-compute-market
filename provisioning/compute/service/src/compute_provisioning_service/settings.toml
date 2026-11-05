@@ -38,12 +38,15 @@ vm_playbook_path = "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-t
 bare_metal_playbook_path = "/opt/domains/bare_metal/provisioning/iac/ansible/playbooks/node-access.yaml"
 management_vars_path = "/opt/domains/vms/provisioning/iac/ansible/inventory/management-vars.yaml"
 
-# Bare-metal reclaim policy for node_reclaim_access.
+# Bare-metal account policy, frozen at grant for bounded working data.
 # Options:
 #   remove_lease_key — remove only the SSH key recorded for the lease.
 #   lock_user        — remove the lease key and lock the account.
 #   delete_user      — delete the tenant account and home directory.
+#   bounded_working_data — use protected reservation identity and bounded cleanup.
 bare_metal_reclaim_policy = "remove_lease_key"
+# Required only for bounded_working_data; must match the protected host policy.
+bare_metal_working_data_policy_id = ""
 
 # Golden image credentials.
 # Used when image_setup_type=golden. Set via config-production.yml or env vars.
@@ -83,6 +86,24 @@ additional_non_retryable_errors = []
 # absent token is a valid state; what fails is a relay configured without one.
 relay_token = ""
 
+# How long a relay port lease's grants outlive the reservation's scheduled lease
+# end. A relay admits a proxy whose grant is unexpired, and teardown is what
+# revokes access, so the grace must cover the lease watchdog's grace period
+# (lease_watchdog_grace_period_seconds) and a teardown job's retries
+# (default_max_retries and the retry backoff) with their runs; the default
+# covers the defaults with room. The expiry is fixed when the port is leased.
+# The service refuses to start with a negative value.
+relay_grant_expiry_grace_seconds = 3600
+
+# How long a released relay port is held past its last grant's expiry before it
+# is leased again, so a grant copied from the host that held it cannot register
+# the port for another host. A relay checks a grant's expiry on its own clock
+# with no leeway, so the relays' and this service's clocks must be kept
+# synchronised with skew well under this margin. Read when a port is selected:
+# raising it holds back ports already released too. The service refuses to
+# start with a value that is not positive.
+relay_port_reuse_margin_seconds = 300
+
 # Rate limiting
 enable_rate_limiting = false
 rate_limit_requests_per_minute = 30
@@ -115,8 +136,12 @@ pool_seed_path = "seed/pools.yaml"
 # document differs from the one last reconciled: import treats a document as
 # authoritative, and re-applying one nobody submitted would revert relays
 # administered through the API on any pod restart. Each entry may name which
-# key of the secrets profile holds its admission token; that key is read once,
-# when the relay is created.
+# key of the secrets profile holds its admission token (token_secret_key), and
+# must name the key holding its grant-signing key (grant_key_secret_key): the
+# single-line standard base64 of an Ed25519 key's PKCS#8 DER, as
+# `openssl genpkey -algorithm ed25519 -outform DER | base64 -w0` prints it. Both
+# are read once, when the relay is created; a grant key that is missing or not
+# in that form fails the import, naming the relay and the profile key.
 relay_definitions_path = ""
 
 # Host definitions

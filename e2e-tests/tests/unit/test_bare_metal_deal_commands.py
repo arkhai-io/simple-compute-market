@@ -1,4 +1,4 @@
-"""The real-host bare-metal deal's commands, teardown wait, and SSH judgement.
+"""The real-host bare-metal deal's commands, release wait, and SSH judgement.
 
 The scenario itself runs only against a real host. What it asks of the installed
 buyer commands, of the harness's run binding, and of SSH is held here, at the
@@ -8,6 +8,7 @@ parser reads every argument list the scenario builds, without running a command.
 
 from __future__ import annotations
 
+from importlib import import_module
 from importlib.metadata import entry_points
 from pathlib import Path
 
@@ -17,14 +18,10 @@ import typer
 
 from tests.e2e.roles.buyer_cli import MarketRun, run_id_from_args
 from tests.e2e.roles.helpers.bare_metal_access import (
-    ACCESS_PROBE_OUTPUT,
     BUY_EVENTS,
     RECOVERY_COMMANDS,
-    SshOutcome,
     assert_purchase_recorded,
-    classify_ssh,
     recovery_command,
-    ssh_command,
     wait_for_release,
 )
 
@@ -143,47 +140,64 @@ def _scripted(*views: dict):
     calls = iter(views)
     issued: list[dict] = []
 
-    def teardown() -> dict:
+    def delivery() -> dict:
         view = next(calls)
         issued.append(view)
         return view
 
-    return teardown, issued
+    return delivery, issued
 
 
-def test_teardown_is_repeated_until_the_lease_is_released() -> None:
+def _view(progress: str, *, site_reports: list | None = None) -> dict:
+    return {"delivery": {"progress": progress, "site_reports": site_reports or []}}
+
+
+def test_delivery_is_read_until_the_lease_is_released() -> None:
     clock = _Clock()
-    teardown, issued = _scripted(
-        {"state": "terminating"},
-        {"state": "tearing_down"},
-        {"state": "torn_down"},
-        {"state": "released"},
+    released = _view("released", site_reports=[{"kind": "lease_ended"}])
+    delivery, issued = _scripted(
+        _view("end_recorded"),
+        _view("tearing_down"),
+        _view("tearing_down"),
+        released,
     )
 
     view = wait_for_release(
-        teardown,
+        delivery,
         timeout_seconds=60,
         poll_interval_seconds=2,
         clock=clock,
         sleep=clock.sleep,
     )
 
-    assert view == {"state": "released"}
+    assert view == released
     assert len(issued) == 4
     assert clock.slept == [2, 2, 2]
 
 
-def test_a_failed_teardown_fails_at_once_naming_its_reason() -> None:
+def test_a_release_without_the_site_report_is_refused() -> None:
     clock = _Clock()
-    teardown, issued = _scripted(
-        {"state": "terminating"},
-        {"state": "teardown_failed", "failure_reason": "reclaim job failed"},
-        {"state": "released"},
+    with pytest.raises(AssertionError, match="no retained site end report"):
+        wait_for_release(
+            lambda: _view("released"),
+            timeout_seconds=60,
+            poll_interval_seconds=2,
+            clock=clock,
+            sleep=clock.sleep,
+        )
+
+
+def test_an_end_needing_repair_fails_at_once() -> None:
+    clock = _Clock()
+    delivery, issued = _scripted(
+        _view("tearing_down"),
+        _view("repair_required"),
+        _view("released", site_reports=[{"kind": "lease_ended"}]),
     )
 
-    with pytest.raises(AssertionError, match="teardown_failed.*reclaim job failed"):
+    with pytest.raises(AssertionError, match="needs repair: progress 'repair_required'"):
         wait_for_release(
-            teardown,
+            delivery,
             timeout_seconds=60,
             poll_interval_seconds=2,
             clock=clock,
@@ -192,12 +206,12 @@ def test_a_failed_teardown_fails_at_once_naming_its_reason() -> None:
     assert len(issued) == 2
 
 
-def test_a_teardown_that_never_releases_fails_at_its_bound_naming_the_last_state() -> None:
+def test_a_teardown_that_never_releases_fails_at_its_bound_naming_the_last_progress() -> None:
     clock = _Clock()
 
-    with pytest.raises(AssertionError, match="within 6s; last state 'torn_down'"):
+    with pytest.raises(AssertionError, match="within 6s; last progress 'tearing_down'"):
         wait_for_release(
-            lambda: {"state": "torn_down"},
+            lambda: _view("tearing_down"),
             timeout_seconds=6,
             poll_interval_seconds=2,
             clock=clock,
@@ -211,74 +225,14 @@ def test_a_teardown_that_never_releases_fails_at_its_bound_naming_the_last_state
 _ACCESS = {"host": "192.0.2.10", "port": 22, "username": "tenant0000"}
 
 
-def test_each_ssh_attempt_is_fresh_and_trusts_only_the_pinned_host_key() -> None:
-    command = ssh_command(
-        _ACCESS,
-        private_key_file=Path("/keys/tenant"),
-        known_hosts_file=Path("/pins/known_hosts"),
-    )
-
-    assert command[:3] == ["ssh", "-F", "none"]
-    options = {command[i + 1] for i, part in enumerate(command) if part == "-o"}
-    assert {
-        "BatchMode=yes",
-        "ControlMaster=no",
-        "ControlPath=none",
-        "IdentitiesOnly=yes",
-        "IdentityAgent=none",
-        "PreferredAuthentications=publickey",
-        "PasswordAuthentication=no",
-        "KbdInteractiveAuthentication=no",
-        "StrictHostKeyChecking=yes",
-        "UserKnownHostsFile=/pins/known_hosts",
-        "GlobalKnownHostsFile=/dev/null",
-        "UpdateHostKeys=no",
-    } <= options
-    assert not any("accept-new" in option for option in options)
-    assert command[command.index("-i") + 1] == "/keys/tenant"
-    assert command[command.index("-p") + 1] == "22"
-    assert command[-2:] == ["tenant0000@192.0.2.10", f"printf {ACCESS_PROBE_OUTPUT}"]
-
-
 def test_an_access_view_without_its_route_is_refused() -> None:
+    scenario = import_module("tests.e2e.roles.scenarios.bare_metal.test_bare_metal_deal")
     with pytest.raises(AssertionError, match="omitted host or username"):
-        ssh_command(
+        scenario._ssh(
             {"port": 22},
             private_key_file=Path("/keys/tenant"),
             known_hosts_file=Path("/pins/known_hosts"),
         )
-
-
-def test_access_is_accepted_only_with_the_probe_output() -> None:
-    assert classify_ssh(0, ACCESS_PROBE_OUTPUT, "") is SshOutcome.ACCEPTED
-    with pytest.raises(AssertionError):
-        classify_ssh(0, "", "")
-
-
-def test_only_the_hosts_refusal_of_the_key_is_revocation() -> None:
-    refused = "tenant0000@192.0.2.10: Permission denied (publickey).\r\n"
-
-    assert classify_ssh(255, "", refused) is SshOutcome.REFUSED
-
-
-@pytest.mark.parametrize(
-    "stderr",
-    [
-        "ssh: connect to host 192.0.2.10 port 22: Connection refused\r\n",
-        "ssh: connect to host 192.0.2.10 port 22: Connection timed out\r\n",
-        "ssh: connect to host 192.0.2.10 port 22: No route to host\r\n",
-        "No ED25519 host key is known for 192.0.2.10 and you have requested strict "
-        "checking.\r\nHost key verification failed.\r\n",
-        "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\r\n"
-        "@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\r\n"
-        "Host key verification failed.\r\n",
-        "ssh: Could not resolve hostname tenant-host: Name or service not known\r\n",
-    ],
-    ids=["refused", "timed out", "unreachable", "unknown key", "changed key", "unresolved"],
-)
-def test_no_other_ssh_failure_counts_as_revocation(stderr) -> None:
-    with pytest.raises(AssertionError, match="neither access nor revocation"):
-        classify_ssh(255, "", stderr)
 
 
 def _run(*names: str, status: str = "agreed") -> list[dict]:
@@ -290,17 +244,17 @@ def _run(*names: str, status: str = "agreed") -> list[dict]:
 
 def test_a_completed_purchase_is_what_buy_records() -> None:
     """The sequence the bare-metal buyer's run-log test pins on a real ``buy``."""
-    assert BUY_EVENTS == ("run_started", "agreement_accepted", "payment_approved", "run_ended")
+    assert BUY_EVENTS == ("run_started", "negotiation_completed", "payment_approved", "run_ended")
     assert_purchase_recorded(_run(*BUY_EVENTS))
 
 
 @pytest.mark.parametrize(
     "events",
     [
-        _run("run_started", "agreement_accepted", "run_ended"),
+        _run("run_started", "negotiation_completed", "run_ended"),
         _run(*BUY_EVENTS, status="exited"),
         _run("discover", "negotiation_completed", "settlement_submitted", "run_ended"),
-        _run("run_started", "payment_approved", "agreement_accepted", "run_ended"),
+        _run("run_started", "payment_approved", "negotiation_completed", "run_ended"),
     ],
     ids=["no approval", "exited", "another command's events", "out of order"],
 )

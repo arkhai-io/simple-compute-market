@@ -22,6 +22,7 @@ import httpx
 import pytest
 from core_storefront.identity_authority import SERVICE_PEER_AUTHORITY
 from market_identity import Eip191Signer, RotationIntent, TrustedIdentitySet, sign_rotation
+from market_deal_servicing import DeliveryRecord, EndSession
 from market_pool_overrides import PoolOverrideClient
 from storefront_client import StorefrontClient
 from storefront_client.client import StorefrontClientError
@@ -116,6 +117,12 @@ def _a_deal_holding_the_reservation(db_path: str) -> None:
     """Service-internal setup: a deal whose fulfillment holds the site's
     reservation, which only a settled deal reaches through the API."""
     with sqlite3.connect(db_path) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        now = int(time.time())
+        EndSession(conn).register(DeliveryRecord(
+            negotiation_id="negotiation-1", commitment_ref="escrow-1",
+            seller=SELLER.identity, start_at=now, term_end=now + 3600,
+        ))
         conn.execute(
             "INSERT INTO bare_metal_fulfillment_lifecycle("
             "negotiation_id, settlement_ref, site_id, physical_resource_id, "

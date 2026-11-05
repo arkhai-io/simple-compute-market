@@ -11,23 +11,25 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import inspect
 
 import pytest
 
-from arkhai_bare_metal import CanonicalPrincipal
+from arkhai_bare_metal import CanonicalPrincipal, build_bare_metal_lease_ready_evidence
+from arkhai_bare_metal.evidence import bare_metal_digest
 from arkhai_bare_metal.evidence_routes import (
     EVIDENCE_OPERATION,
     BareMetalEvidenceClient,
     BareMetalEvidenceContractError,
     BareMetalEvidenceRouteError,
     BareMetalEvidenceRouteService,
+    BareMetalSignedLeaseReadyEvidence,
     SyncBareMetalEvidenceClient,
     evidence_path,
     evidence_resource,
 )
 
 from test_evidence import alkahest_binding, lease_ready_result
-from arkhai_bare_metal import build_bare_metal_lease_ready_evidence
 
 SELLER = CanonicalPrincipal(scheme="ed25519", identifier="seller")
 ADMIN = CanonicalPrincipal(scheme="ed25519", identifier="admin")
@@ -37,7 +39,9 @@ DIGEST = "sha256:" + "ab" * 32
 def _alkahest():
     binding = alkahest_binding()
     return build_bare_metal_lease_ready_evidence(
-        binding=binding, condition_anchor=binding.escrow_uid, result=lease_ready_result()
+        binding=binding,
+        condition_anchor=binding.escrow_uid,
+        result=lease_ready_result(),
     )
 
 
@@ -119,9 +123,9 @@ def test_both_clients_sign_the_contracts_operation_and_resource():
     sync_transport = _Recording(payload)
     async_transport = _AsyncRecording(payload)
 
-    from_sync = SyncBareMetalEvidenceClient(sync_transport, role="seller").lease_ready_evidence(
-        evidence.evidence_digest
-    )
+    from_sync = SyncBareMetalEvidenceClient(
+        sync_transport, role="seller"
+    ).lease_ready_evidence(evidence.evidence_digest)
     from_async = asyncio.run(
         BareMetalEvidenceClient(async_transport, role="seller").lease_ready_evidence(
             evidence.evidence_digest, request_id="request-1"
@@ -147,6 +151,104 @@ def test_both_clients_sign_the_contracts_operation_and_resource():
 
 def test_a_client_refuses_a_role_no_reader_signs_as():
     with pytest.raises(BareMetalEvidenceContractError):
-        SyncBareMetalEvidenceClient(_Recording({}), role="service").lease_ready_evidence(
-            DIGEST
+        SyncBareMetalEvidenceClient(
+            _Recording({}), role="service"
+        ).lease_ready_evidence(DIGEST)
+
+
+@pytest.mark.parametrize("client_kind", ["sync", "async"])
+def test_clients_refuse_a_valid_document_with_the_wrong_requested_digest(client_kind):
+    payload = _service(_alkahest()).respond(_alkahest()).model_dump(mode="json")
+    with pytest.raises(ValueError, match="expected digest"):
+        if client_kind == "sync":
+            SyncBareMetalEvidenceClient(
+                _Recording(payload), role="buyer"
+            ).lease_ready_evidence(DIGEST)
+        else:
+            asyncio.run(
+                BareMetalEvidenceClient(
+                    _AsyncRecording(payload), role="buyer"
+                ).lease_ready_evidence(DIGEST)
+            )
+
+
+@pytest.mark.parametrize("client_kind", ["sync", "async"])
+def test_clients_refuse_malformed_content(client_kind):
+    payload = _service(_alkahest()).respond(_alkahest()).model_dump(mode="json")
+    payload["evidence"]["result"].pop("expires_at")
+    payload["evidence"]["result_digest"] = bare_metal_digest(
+        payload["evidence"]["result"]
+    )
+    digest = bare_metal_digest(payload["evidence"])
+    with pytest.raises(ValueError):
+        if client_kind == "sync":
+            SyncBareMetalEvidenceClient(
+                _Recording(payload), role="buyer"
+            ).lease_ready_evidence(digest)
+        else:
+            asyncio.run(
+                BareMetalEvidenceClient(
+                    _AsyncRecording(payload), role="buyer"
+                ).lease_ready_evidence(digest)
+            )
+
+
+def test_signed_carrier_has_original_envelope_and_all_field_reads():
+    evidence = _alkahest()
+    signed = _service(evidence).respond(evidence)
+    assert set(signed.model_dump(mode="json")) == {
+        "protocol",
+        "seller_principal",
+        "evidence",
+        "proof",
+    }
+    assert signed.model_dump(mode="json")["evidence"] == evidence.to_wire()
+    for name in type(evidence.value).model_fields:
+        if name == "result":
+            continue
+        assert getattr(signed.evidence, name) == getattr(evidence.value, name)
+    for name in type(evidence.result.value).model_fields:
+        assert getattr(signed.evidence.result, name) == getattr(
+            evidence.result.value, name
         )
+    assert inspect.signature(
+        BareMetalEvidenceClient.lease_ready_evidence
+    ) == inspect.signature(SyncBareMetalEvidenceClient.lease_ready_evidence)
+
+
+def test_signed_carrier_schema_describes_existing_wire_in_both_modes():
+    for mode in ("validation", "serialization"):
+        schema = BareMetalSignedLeaseReadyEvidence.model_json_schema(mode=mode)
+        assert set(schema["properties"]) == {
+            "protocol",
+            "seller_principal",
+            "evidence",
+            "proof",
+        }
+        assert schema["properties"]["evidence"]["properties"]["result"][
+            "$ref"
+        ].endswith("BareMetalLeaseReadyResult")
+
+
+@pytest.mark.parametrize("client_kind", ["sync", "async"])
+@pytest.mark.parametrize("access_ready", [1, 1.0])
+def test_clients_refuse_numeric_readiness_with_matching_requested_digest(
+    client_kind, access_ready
+):
+    payload = _service(_alkahest()).respond(_alkahest()).model_dump(mode="json")
+    payload["evidence"]["result"]["access_ready"] = access_ready
+    payload["evidence"]["result_digest"] = bare_metal_digest(
+        payload["evidence"]["result"]
+    )
+    digest = bare_metal_digest(payload["evidence"])
+    with pytest.raises(ValueError, match="access_ready must be JSON true"):
+        if client_kind == "sync":
+            SyncBareMetalEvidenceClient(
+                _Recording(payload), role="buyer"
+            ).lease_ready_evidence(digest)
+        else:
+            asyncio.run(
+                BareMetalEvidenceClient(
+                    _AsyncRecording(payload), role="buyer"
+                ).lease_ready_evidence(digest)
+            )

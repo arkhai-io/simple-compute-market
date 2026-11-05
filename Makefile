@@ -217,6 +217,7 @@ test-provisioning:
 	cd provisioning/compute/service && make test
 
 test-provisioning-iac:
+	$(MAKE) -C provisioning/compute/iac test
 	$(MAKE) -C domains test-provisioning-iac
 
 test-registry:
@@ -520,19 +521,23 @@ build-bare-metal-storefront:
 build-provisioning:
 	cd provisioning/compute/service && make build IMAGE_SUFFIX=$(IMAGE_SUFFIX)
 
-# The VM IaC's native Ansible gate, with the Ansible, collections, and PyYAML the
-# provisioning image installs: the image `build-provisioning` built, running the
-# checkout's VM IaC tree, mounted read-only, with no network but loopback. It
-# syntax-checks every playbook and runs the tests that drive a shipped task through
-# ansible-playbook, and fails where the default IaC suite would skip them.
+# Native gates run the Ansible, collections, playbooks and tests packaged in the
+# candidate image, with loopback networking only. A separate parse pass uses the
+# shared service configuration and image role path, as service jobs do.
 PROVISIONING_IMAGE ?= arkhai:compute-provisioning$(IMAGE_SUFFIX)
-test-provisioning-iac-native: ## Run the VM IaC's syntax checks and native Ansible tests in the built provisioning image
+test-provisioning-iac-native: ## Run family and VM IaC native Ansible tests in the built provisioning image
 	@docker image inspect $(PROVISIONING_IMAGE) >/dev/null 2>&1 || { \
 		echo "no $(PROVISIONING_IMAGE) image: build it first, with make build-provisioning" >&2; exit 1; }
 	docker run --rm --network none \
-		-v "$(CURDIR)/domains/vms/provisioning/iac:/iac:ro" -w /iac \
+		-w /opt/domains/vms/provisioning/iac \
 		-e PYTHON=/home/appuser/ansible-venv/bin/python \
 		$(PROVISIONING_IMAGE) bash scripts/native_ansible_gate.sh
+	docker run --rm --network none \
+		-w /opt/provisioning/compute/iac \
+		-e PYTHON=/home/appuser/ansible-venv/bin/python \
+		$(PROVISIONING_IMAGE) bash scripts/native_ansible_gate.sh
+	docker run --rm --network none -e ANSIBLE_LOG_PATH=/dev/null \
+		$(PROVISIONING_IMAGE) bash /opt/provisioning/compute/iac/scripts/image_syntax_gate.sh
 
 # API-credits domain images (item 6). Built from the repo root so each
 # Dockerfile's `COPY .dist/` + `COPY domains/` resolve. The api-credits
@@ -1029,3 +1034,23 @@ fetch-e2e-logs: ## Wait for an E2E run, fetch its logs, and zip the resulting di
 
 prune-tombstones: ## Delete every file whose contents are a tombstone comment
 	@python3 scripts/prune_tombstones.py
+
+.PHONY: test-bare-metal-iac
+test-bare-metal-iac:
+	$(MAKE) -C domains test-bare-metal-iac
+
+.PHONY: test-bare-metal-iac-native
+test-bare-metal-iac-native: ## Native helper account/IPC/mount checks in a disposable private container
+	@docker image inspect $(PROVISIONING_IMAGE) >/dev/null 2>&1 || { \
+		echo "no $(PROVISIONING_IMAGE) image: build it first, with make build-provisioning" >&2; exit 1; }
+	docker run --rm --user 0 --network none --pid="" --ipc private \
+		--cap-add SYS_ADMIN --security-opt apparmor=unconfined \
+		--tmpfs /work:rw,nosuid,nodev,mode=0755 \
+		-v "$(CURDIR)/domains/bare_metal/provisioning/iac:/iac:ro" -w /iac \
+		-e BARE_METAL_DISPOSABLE_NATIVE=private-container-v1 \
+		-e PYTHON=/home/appuser/ansible-venv/bin/python \
+		$(PROVISIONING_IMAGE) bash scripts/native_cleanup_gate.sh
+
+.PHONY: check-public-content
+check-public-content: ## Scan staged changes for recognizable private content
+	@python3 scripts/check_public_content.py --staged

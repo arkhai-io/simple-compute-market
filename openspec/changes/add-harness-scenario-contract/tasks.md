@@ -17,7 +17,8 @@ review rather than adding one.
 
 ## 1. Scenario schema
 
-- [ ] 1.1 Add `tools/issue-discovery/schemas/capacity-scenario.schema.json`
+- [ ] 1.1 Add the planned file `capacity-scenario.schema.json` under
+      `tools/issue-discovery/schemas/`,
   declaring: scenario identity, deal type, GPU topology, actor counts by role,
   arrival mode, pinned buyer and seller quickstart references, expected
   successes, expected refusals, retry prohibition, and cleanup expectations.
@@ -106,7 +107,8 @@ review rather than adding one.
 
 ## 4. Tests
 
-- [ ] 4.1 Add `tools/issue-discovery/tests/test_capacity_scenarios.py`: every
+- [ ] 4.1 Add the planned file `test_capacity_scenarios.py` under
+      `tools/issue-discovery/tests/`: every
   shipped fixture validates; a missing `capacity_hold` is refused; `exact`
   against an interpolated reason is refused; counts that do not reconcile are
   refused; a multi-buyer scenario without discovery receipts is refused; a

@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.10, <3.14"
 
 [[package]]
@@ -47,10 +47,12 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-arkhai-payments"
-version = "0.4.0"
+version = "0.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-core" },
+    { name = "arkhai-kit-deal-lifecycle" },
+    { name = "arkhai-kit-deal-lifecycle-contracts" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-settlement-runtime" },
     { name = "httpx" },
@@ -68,6 +70,8 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "arkhai-core", specifier = "==0.5.0" },
+    { name = "arkhai-kit-deal-lifecycle", specifier = ">=0.1.0" },
+    { name = "arkhai-kit-deal-lifecycle-contracts", specifier = ">=0.1.0" },
     { name = "arkhai-kit-identity", specifier = ">=0.4.0" },
     { name = "arkhai-kit-settlement-runtime", specifier = "==0.6.0" },
     { name = "httpx", specifier = ">=0.27,<1" },
@@ -80,6 +84,31 @@ dev = [
     { name = "datamodel-code-generator", specifier = "==0.83.0" },
     { name = "mypy", specifier = ">=1.15.0,<2.0.0" },
     { name = "pytest", specifier = ">=8.3.4,<9" },
+]
+
+[[package]]
+name = "arkhai-kit-deal-lifecycle"
+version = "0.1.0"
+source = { registry = "../../.dist" }
+dependencies = [
+    { name = "arkhai-kit-deal-lifecycle-contracts" },
+    { name = "arkhai-kit-identity" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_kit_deal_lifecycle-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-kit-deal-lifecycle-contracts"
+version = "0.1.0"
+source = { registry = "../../.dist" }
+dependencies = [
+    { name = "arkhai-kit-identity" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_kit_deal_lifecycle_contracts-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -103,6 +132,7 @@ version = "0.6.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
+    { name = "arkhai-kit-deal-lifecycle" },
     { name = "arkhai-kit-identity" },
     { name = "pydantic" },
 ]

@@ -227,8 +227,11 @@ commit under validation (CW-zkhs).
 
 ## Guarded push of a change branch
 
-Destination: split. Moves: the protected branches, `main` and `dev`. Seam: the push
-refuses the repository's protected branches.
+Destination: split. Moves: the protected branches, `main` and `dev`, and the refusal
+of recognizable private content, which `dev` added to this requirement after the
+rewrite began and the merge before closeout brought in. Seam: the push refuses the
+repository's protected branches; this repository's push also refuses private
+content.
 
 | Clause or scenario | Held by |
 |---|---|
@@ -236,7 +239,11 @@ refuses the repository's protected branches.
 | The push MUST send exactly `HEAD` and MUST NOT be forced | CW-59c7 |
 | A branch with no upstream MAY be pushed to the same name, setting it | CW-59c7 |
 | The check MUST report a refused state and MUST NOT repair it | CW-59c7 |
+| Before sending commits, the check MUST reject personal home paths, private assistant planning/session paths, and denylisted identifiers from added content, filenames, and commit messages | MCW-q8vd |
+| It MUST inspect intermediate commits, not only the final tree, and MUST omit matched values from diagnostics | MCW-q8vd |
+| An unreadable configured denylist or unavailable comparison refs MUST fail closed | MCW-q8vd |
 | Scenario: The worktree is dirty | CW-59c7 |
+| Scenario: Private content is removed in a later commit | MCW-q8vd |
 
 ## Triage of an implementation round
 

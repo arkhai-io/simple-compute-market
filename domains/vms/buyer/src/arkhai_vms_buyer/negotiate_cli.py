@@ -10,6 +10,8 @@ exists to exercise /negotiate/new + /negotiate/{id} directly.
 
 from __future__ import annotations
 
+from .evidence import evidence_store
+
 import json
 import time
 from typing import Any
@@ -238,6 +240,7 @@ def register(app: typer.Typer) -> None:
                 settlement_policy = resolve_buyer_settlement_policy(
                     identity=identity,
                     action_capable=True,
+                    registry_urls=registry_urls,
                 )
             except ValueError as exc:
                 raise typer.BadParameter(str(exc)) from exc
@@ -375,7 +378,9 @@ def register(app: typer.Typer) -> None:
                     "settlement option"
                 )
 
-            selected_stage = buyer_stage(selected_settlement.selection.mechanism)
+            selected_stage = buyer_stage(
+                selected_settlement.selection.settlement_schema
+            )
             try:
                 selected_settlement = selected_stage.prepare_selection(selected_settlement)
                 picked_entry = selected_stage.accepted_entry(selected_settlement)
@@ -571,6 +576,7 @@ def register(app: typer.Typer) -> None:
                 resume=resume_state,
                 chain=chain,
                 resolve_seller_principals=resolve_seller_principals,
+                capture=evidence_store().capture,
                 policy_params=negotiation_policy_params,
                 validate_advertised_plan=(
                     selected_stage.plan_validator(listing_dict or {}, selected_settlement)

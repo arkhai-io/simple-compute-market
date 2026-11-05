@@ -16,10 +16,19 @@ provisioning boundary authenticates its exact configured storefront principal
 and seller role centrally with the body-bound version 2 marketplace contract.
 This mirrors ``/api/v1/hosts/``, the other fully operator-owned resource in
 this service.
+
+A write that would change a pool's relay while its hosts hold leases is
+refused by the relays' rebinding rule as it is written, and answers 409 with
+the rule's message, which names the leases and the drain sequence: the request
+is well-formed and would be accepted once the pool is drained. A write pointing
+a pool at a relay one of its hosts is managed through is refused by the
+management-route rule, and answers 409 likewise: it would be accepted once that
+host is reached another way.
 """
 
 from __future__ import annotations
 
+from compute_provisioning.relays import ManagementRouteRefused, RelayRebindingRefused
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi_utils.cbv import cbv
 
@@ -126,6 +135,8 @@ class PoolController:
             raise HTTPException(status_code=404, detail=str(exc))
         except PoolValidationError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+        except (RelayRebindingRefused, ManagementRouteRefused) as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
         return PoolResponse.model_validate(pool)
 
     @router.patch(
@@ -140,6 +151,8 @@ class PoolController:
             raise HTTPException(status_code=404, detail=str(exc))
         except PoolValidationError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+        except (RelayRebindingRefused, ManagementRouteRefused) as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
         return PoolResponse.model_validate(pool)
 
     @router.delete(
@@ -183,6 +196,8 @@ class PoolController:
             diff = self._pools.import_pools(body.yaml_text, validate_only=False)
         except PoolValidationError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+        except (RelayRebindingRefused, ManagementRouteRefused) as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
         return PoolImportResponse(diff=diff, applied=True)
 
     @router.post(

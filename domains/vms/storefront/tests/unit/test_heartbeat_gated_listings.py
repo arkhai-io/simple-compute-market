@@ -21,10 +21,12 @@ SPLITTER = "0x" + "44" * 20
 
 
 def _settings(*, interruptible: bool = False):
-    return {"settlement": {"alkahest": {"interruptible": interruptible}}}
+    return {"settlement": {"alkahest": {
+        "release_models": ["recipient", "interruptible"] if interruptible else ["recipient"]
+    }}}
 
 
-def test_interruptible_listing_resource_is_marked():
+def test_interruptibility_belongs_to_options_not_the_listing_resource():
     from market_storefront.services.publication_terms import (
         listing_resource_for_candidate,
     )
@@ -43,8 +45,8 @@ def test_interruptible_listing_resource_is_marked():
         _settings(interruptible=True),
     ):
         listing_resource = listing_resource_for_candidate(resource)
-    assert listing_resource["interruptible"] is True
-    assert listing_resource["settlement_model"] == "splitter_refund"
+    assert "interruptible" not in listing_resource
+    assert "settlement_model" not in listing_resource
 
 
 def _artifacts(demands, heartbeat_interval=60, chain_config_paths=None):

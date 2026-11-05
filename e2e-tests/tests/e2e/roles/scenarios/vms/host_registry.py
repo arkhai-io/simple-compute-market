@@ -118,6 +118,7 @@ def register_e2e_pool(
     listing_shapes: dict[str, list[dict[str, Any]]] | None = None,
     pricing: dict[str, Any] | None = None,
     region: str | None = None,
+    provider_config: dict[str, Any] | None = None,
 ) -> Any:
     """Create the resource pool, idempotently, and return the pool row.
 
@@ -135,8 +136,8 @@ def register_e2e_pool(
     `specific_resource` at exactly one member — is only accidentally right for a
     pool about to gain a second member.
 
-    The pool states no provider configuration. Its playbook is the provisioning
-    service's configured `vm_playbook_path`, frozen into each job when the job is
+    Explicit `provider_config` selects provider-owned routing such as a relay.
+    Its playbook remains the provisioning service's configured `vm_playbook_path`, frozen into each job when the job is
     prepared, and its correct value is deployment-specific — `/dev/null` under the
     mock profile, a container path under docker, another under Helm — so a
     scenario never encodes a path belonging to one profile, and reads no other
@@ -163,9 +164,11 @@ def register_e2e_pool(
             **({"pricing": pricing} if pricing is not None else {}),
             **({"region": region} if region is not None else {}),
         }
-        if any(tags.get(k) != v for k, v in wanted.items()):
+        config_changed = provider_config is not None and existing.provider_config != provider_config
+        if config_changed or any(tags.get(k) != v for k, v in wanted.items()):
             _pools(provisioning_client).patch_pool(pool_id, PoolUpdate(
                 policy_tags={**tags, **wanted},
+                **({"provider_config": provider_config} if provider_config is not None else {}),
             ))
             return _pools(provisioning_client).get_pool(pool_id)
         return existing
@@ -186,7 +189,7 @@ def register_e2e_pool(
             **({"pricing": pricing} if pricing is not None else {}),
             **({"region": region} if region is not None else {}),
         },
-        provider_config={},
+        provider_config=provider_config or {},
     ))
     return _pools(provisioning_client).get_pool(pool_id)
 
@@ -358,6 +361,7 @@ def provision_e2e_executor(
     pricing: dict[str, Any] | None = None,
     region: str | None = None,
     connection: ConnectionSubmission | None = None,
+    provider_config: dict[str, Any] | None = None,
 ) -> Any:
     """Pool, executor host, and its one capacity declaration, in dependency order.
 
@@ -382,6 +386,7 @@ def provision_e2e_executor(
         listing_shapes=listing_shapes,
         pricing=pricing,
         region=region,
+        provider_config=provider_config,
     )
     host_row = register_e2e_host(
         provisioning_client, name=host, pool_id=pool_id, connection=connection

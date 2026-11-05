@@ -16,6 +16,7 @@ from market_alkahest import (
     wallet_account_address,
 )
 from market_alkahest.dev_chain import anvil_address_book_path
+from market_alkahest.alkahest import get_recipient_arbiter
 from market_alkahest.settlement_config import alkahest_preflight
 from market_core.schemas import SettlementOption
 from market_settlement_runtime import (
@@ -33,9 +34,14 @@ from pydantic import ValidationError
     "payload",
     [
         {"enabled": False, "wallet": {"private_key": "secret"}},
+        {"release_models": []},
+        {"release_models": ["unknown"]},
+        {"release_models": ["recipient", "recipient"]},
+        {"oracle_gated": False},
+        {"interruptible": False},
         {"enabled": False, "chains": {}},
         {"enabled": False, "trusted_oracle_addresses": ["0x" + "11" * 20]},
-        {"enabled": False, "oracle_gated": True, "trusted_oracle_addresses": ["bad"]},
+        {"enabled": False, "release_models": ["oracle_gated"], "trusted_oracle_addresses": ["bad"]},
     ],
 )
 def test_alkahest_config_rejects_foreign_or_invalid_fields(payload: dict) -> None:
@@ -132,27 +138,27 @@ async def test_a_complete_seller_section_is_ready() -> None:
     ("policy", "resources", "expected"),
     [
         (
-            {"oracle_gated": True},
+            {"release_models": ["oracle_gated"]},
             {},
             ("alkahest.oracle_policy_invalid", "configuration"),
         ),
         (
-            {"oracle_gated": True, "trusted_oracle_addresses": [WALLET]},
+            {"release_models": ["oracle_gated"], "trusted_oracle_addresses": [WALLET]},
             {},
             ("alkahest.oracle_is_seller_wallet", "configuration"),
         ),
         (
-            {"interruptible": True},
+            {"release_models": ["interruptible"]},
             {"deliverable_release_models": frozenset({"interruptible"})},
             ("alkahest.interruptible_policy_invalid", "configuration"),
         ),
         (
-            {"interruptible": True, "interruptible_oracle_addresses": [WALLET]},
+            {"release_models": ["interruptible"], "interruptible_oracle_addresses": [WALLET]},
             {"deliverable_release_models": frozenset({"interruptible"})},
             ("alkahest.oracle_is_seller_wallet", "configuration"),
         ),
         (
-            {"interruptible": True, "interruptible_oracle_addresses": [ORACLE]},
+            {"release_models": ["interruptible"], "interruptible_oracle_addresses": [ORACLE]},
             {},
             ("alkahest.release_model_undeliverable", "configuration"),
         ),
@@ -510,8 +516,8 @@ async def test_the_address_is_omitted() -> None:
 @pytest.mark.parametrize(
     "policy",
     [
-        {"oracle_gated": True, "trusted_oracle_addresses": [WALLET]},
-        {"interruptible": True, "interruptible_oracle_addresses": [WALLET]},
+        {"release_models": ["oracle_gated"], "trusted_oracle_addresses": [WALLET]},
+        {"release_models": ["interruptible"], "interruptible_oracle_addresses": [WALLET]},
     ],
     ids=["trusted-oracle", "interruptible-oracle"],
 )
@@ -574,7 +580,7 @@ async def test_a_buyer_is_never_compared_with_the_release_oracle() -> None:
     # own wallet is the configured oracle is not refused for it.
     status = await alkahest_preflight(
         AlkahestSettlementConfig(
-            enabled=True, oracle_gated=True, trusted_oracle_addresses=(WALLET,)
+            enabled=True, release_models=["oracle_gated"], trusted_oracle_addresses=(WALLET,)
         ),
         {
             "wallet": {"address": WALLET},
@@ -618,8 +624,7 @@ async def test_ready_alkahest_preflight_is_observational_and_public_only() -> No
     assert "never-report" not in projection
     assert "private-rpc" not in projection
     assert status.public_details == {
-        "oracle_gated": False,
-        "interruptible": False,
+        "release_models": ["recipient"],
         "chain": "ethereum_sepolia",
     }
 
@@ -683,7 +688,7 @@ async def test_a_disabled_section_names_what_would_stop_its_servicing(
 ) -> None:
     config = AlkahestSettlementConfig(
         enabled=False,
-        oracle_gated=True,
+        release_models=["oracle_gated"],
         trusted_oracle_addresses=["0x" + "cd" * 20],
     )
 
@@ -739,15 +744,21 @@ async def test_alkahest_option_builder_emits_canonical_buyer_choice() -> None:
     publication = registration.option_builder(
         config,
         readiness,
-        {"accepted_escrows": [escrow]},
+        {**resources, "accepted_escrows": [escrow]},
         "seller",
     )
 
     assert publication["accepted_escrows"] == [escrow]
     option = publication["settlement_options"][0]
-    assert option["mechanism"] == ALKAHEST_MECHANISM_ID
+    assert option["settlement"]["schema"] == ALKAHEST_MECHANISM_ID
     assert len(option["option_id"]) == 64
-    assert option["params"]["accepted_escrow"] == escrow
+    assert option["settlement"]["accepted_escrow"] == {
+        **escrow, "demand": {
+            "chain_name": "ethereum_sepolia",
+            "arbiter": get_recipient_arbiter("ethereum_sepolia").lower(),
+            "demand_data": {"recipient": resources["wallet"]["address"]},
+        },
+    }
     assert registration.buyer_compatibility(
         config,
         option,
@@ -771,6 +782,7 @@ async def test_alkahest_clause_projection_is_public_pure_and_identity_preserving
         config,
         readiness,
         {
+            **resources,
             "accepted_escrows": [
                 {
                     "chain_name": "base_sepolia",
@@ -868,6 +880,7 @@ def test_alkahest_publication_clause_builds_exact_scaled_option(monkeypatch) -> 
         readiness,
         {
             "publication_clause": clause,
+            "wallet": {"address": WALLET},
             "chains": {
                 "base_sepolia": {
                     "rpc_url": "https://rpc.example",
@@ -886,10 +899,20 @@ def test_alkahest_publication_clause_builds_exact_scaled_option(monkeypatch) -> 
         "literal_fields": {"token": clause.asset},
         "rates": [{"field": "amount", "per": "hour", "value": "1250000"}],
     }
-    assert option["mechanism"] == ALKAHEST_MECHANISM_ID
-    assert option["asset"] == clause.asset
-    assert option["rates"] == escrow["rates"]
-    assert option["params"] == {"accepted_escrow": escrow}
+    assert option["settlement"]["schema"] == ALKAHEST_MECHANISM_ID
+    assert option["price"]["asset"] == clause.asset
+    assert option.get("price", {}).get("rates", []) == escrow["rates"]
+    assert option["settlement"] == {
+        "schema": ALKAHEST_MECHANISM_ID,
+        "accepted_escrow": {
+            **escrow,
+            "demand": {
+                "chain_name": "base_sepolia",
+                "arbiter": get_recipient_arbiter("base_sepolia").lower(),
+                "demand_data": {"recipient": WALLET},
+            },
+        },
+    }
 
 
 def _build_alkahest_option(monkeypatch, rate: str, decimals: int) -> dict:
@@ -926,6 +949,7 @@ def _build_alkahest_option(monkeypatch, rate: str, decimals: int) -> dict:
         readiness,
         {
             "publication_clause": clause,
+            "wallet": {"address": WALLET},
             "chains": {
                 "base_sepolia": {
                     "rpc_url": "https://rpc.example",
@@ -941,7 +965,7 @@ def test_alkahest_rate_longer_than_a_decimal_context_scales_exactly(monkeypatch)
     # 40 significant digits: a 28-digit Decimal context would round the product.
     rate = "1234567890123456789012.123456789012345678"
     artifacts = _build_alkahest_option(monkeypatch, rate, 18)
-    assert artifacts["settlement_options"][0]["rates"] == [
+    assert artifacts["settlement_options"][0]["price"]["rates"] == [
         {
             "field": "amount",
             "per": "hour",

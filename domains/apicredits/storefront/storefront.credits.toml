@@ -47,7 +47,7 @@ enabled = true
 # Each chain's Alkahest address book: the same anvil book the VM storefront
 # uses (one anvil deployment), bind-mounted into this container.
 address_books = { anvil = "/app/alkahest_anvil_addresses.json" }
-oracle_gated = false
+release_models = ["recipient"]
 trusted_oracle_addresses = []
 # `interruptible`/`interruptible_oracle_addresses` are deliberately absent.
 # They configure VM spot interruption, which this domain does not sell, and
@@ -57,7 +57,8 @@ trusted_oracle_addresses = []
 enabled = false
 api_key_env = "ARKHAI_PAYMENTS_API_KEY"
 # Enabling payments also requires service_url, Ed25519 service_identity,
-# fee_bps, dispute_authority, the mechanism in `priority`, and an explicit
+# fee_bps, root [[Dispute]] preferences (or registry recommendations), the
+# mechanism in `priority`, and an explicit
 # payment publication clause containing payee_account and asset. Never store
 # the WorkOS key here.
 

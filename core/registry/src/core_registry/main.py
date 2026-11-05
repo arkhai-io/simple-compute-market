@@ -68,6 +68,9 @@ async def lifespan(app: FastAPI):
         filter_spec=get_loaded_spec(),
         require_read_api_key=settings.require_read_api_key,
         acquisition_pointer=(settings.registry_descriptor_access_acquisition_pointer),
+        recommended_dispute_authorities=(
+            settings.registry_descriptor_recommended_dispute_authorities
+        ),
     )
     logger.info("Database initialized")
 

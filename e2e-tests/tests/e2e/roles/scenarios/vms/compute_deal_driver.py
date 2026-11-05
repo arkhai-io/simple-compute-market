@@ -77,6 +77,10 @@ class VmDealDriverBase:
     #: The site VM's capacity-released callback names.
     site_id: str
 
+    @property
+    def listing_status_after_first_fulfillment(self) -> str:
+        return "closed"
+
     def check_evaluate_settle(self, result: dict[str, Any]) -> str:
         # The preview names no guest: provisioning names it from the
         # reservation settle commits.
@@ -151,8 +155,8 @@ class VmDealDriverBase:
         # The VM seller accepts nothing it would have to infer from an escrow's
         # shape, so a fresh negotiation names its settlement option explicitly.
         return {
-            "mechanism": "alkahest.v1",
             "option_id": alkahest_option["option_id"],
+            "settlement": {"schema": "alkahest.v1"},
             "expiration_unix": expiration_unix,
         }
 

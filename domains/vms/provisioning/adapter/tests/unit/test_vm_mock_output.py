@@ -87,7 +87,7 @@ def test_a_create_prints_the_shipped_form_for_the_jobs_own_guest() -> None:
     )
     assert fact["external_ssh_port"] == MOCK_FORWARDED_PORT
     assert fact["authentication"]["tenant"]["key_type"] == "provided"
-    assert fact["frp"]["enabled"] is False
+    assert fact["relay"]["enabled"] is False
 
 
 def test_a_create_without_the_buyers_key_prints_the_generated_key_fact() -> None:

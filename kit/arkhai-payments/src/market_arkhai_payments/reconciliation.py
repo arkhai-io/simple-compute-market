@@ -6,9 +6,11 @@ nothing delivered. A reconciliation pass advances each such deal through the
 domain's own settle path, exactly as a buyer's settle call would, so the deal
 converges without the buyer.
 
-The domain supplies the candidates (accepted payment deals it has not settled)
-and the settle function; this module only runs the pass and keeps one deal's
-failure from stopping the others.
+The domain supplies every accepted payment candidate it has not settled,
+including buyers that never sent a commitment peer message. Its settle function
+reads the payment authority and either serves the verified commitment or refunds
+through the same voluntary lifecycle reverse path. This module only runs the
+pass and keeps one deal's failure from stopping the others.
 """
 
 from __future__ import annotations

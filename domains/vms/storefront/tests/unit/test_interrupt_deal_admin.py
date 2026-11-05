@@ -112,7 +112,7 @@ async def test_interrupt_deal_dry_run_does_not_truncate(
     assert out.status == "dry_run"
     assert out.lease_truncated is False
     assert out.capacity_reservation_id == "alloc-1"
-    assert out.interrupted_at_utc == "2026-06-24 10:11"
+    assert out.interrupted_at_utc == "2026-06-24 10:11:12"
     assert capacity.truncated is None
     escrow = await lifecycle.db.load_escrow(escrow_uid="escrow-1")
     assert escrow is not None
@@ -150,7 +150,7 @@ async def test_interrupt_deal_truncates_capacity_lease(
     assert capacity.truncated == (
         lifecycle.capacity_binding,
         "alloc-1",
-        "2026-06-24 10:11",
+        "2026-06-24 10:11:12",
     )
     escrow = await lifecycle.db.load_escrow(escrow_uid="escrow-1")
     assert escrow is not None

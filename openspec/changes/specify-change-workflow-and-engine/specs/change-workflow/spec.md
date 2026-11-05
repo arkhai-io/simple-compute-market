@@ -2540,9 +2540,11 @@ end-to-end run, MCW-8h0r.
 
 ### Requirement: Guarded push of a change branch
 
-**Reason**: Rewritten with an id; the protected branches are the repository's.
+**Reason**: Rewritten with an id; the protected branches and the refusal of private
+content are the repository's.
 **Migration**: CW-59c7; `main` and `dev` as the protected branches move to
-`market-change-workflow` as MCW-farr.
+`market-change-workflow` as MCW-farr, and the refusal of recognizable private
+content as MCW-q8vd.
 
 ### Requirement: Triage of an implementation round
 

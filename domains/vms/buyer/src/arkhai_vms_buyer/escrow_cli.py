@@ -8,6 +8,8 @@ obligation identity from accepted state.
 
 from __future__ import annotations
 
+from .evidence import evidence_store
+
 import asyncio
 from types import SimpleNamespace
 from typing import Optional
@@ -538,6 +540,7 @@ def create_cmd(
         raise typer.Exit(4)
     escrow_uid = escrow_uids[0]
 
+    evidence_store().remember_commitment(deal.negotiation_id, escrow_uid)
     log.event("escrow_created", escrow_uid=escrow_uid, chain_name=chain.chain_name)
     result = Table.grid(padding=(0, 2))
     result.add_column(style="bold")

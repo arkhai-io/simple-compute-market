@@ -1,10 +1,13 @@
 """The mandate the kit sends, held to the payments service's current published wire.
 
-``CURRENT_REQUEST`` is written from the published schema and the service's documented
-normalization of mandate-level authorities, not from the kit's derivation, so the
-derivation is checked against the contract rather than against itself. It is SCM's
-own synthetic fixture: current-wire producer vectors were not supplied with this
-schema snapshot.
+``_current_request`` is written from the published schema and the accepted lifecycle
+terms of the fixture Agreement, not from the kit's derivation, so the derivation is
+checked against the contract rather than against itself: a once part owed from
+approval and maturing at the Agreement's end, returned if stopped, held for the
+dispute window after a stop, reversible by the payee and the dispute authority,
+extendable only by the dispute authority, and stoppable by nobody; an uncapped case
+hold is the required null. It is an independent synthetic fixture checked alongside
+the published producer vectors.
 """
 
 from __future__ import annotations
@@ -31,15 +34,19 @@ from market_arkhai_payments import (
     transaction_id,
     verify_receipt,
 )
+from market_arkhai_payments.canonical import wire_json
+from market_arkhai_payments.models import Balance, HttpUrl, PartEnd, PartSnapshot
 from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt
 
 from payment_terms import BUYER, DISPUTE, PAYEE, SERVICE, agreement, config
 
 VECTORS = json.loads(
-    (Path(__file__).resolve().parents[1] / "test-vectors" / "payments.json").read_text()
+    (Path(__file__).resolve().parents[1] / "test-vectors" / "historical-payments.json").read_text()
 )
-# payment_terms.agreement() is accepted at 2026-10-07T12:00:00.25Z.
+# payment_terms.agreement() is accepted at 2026-10-07T12:00:00.25Z and starts at
+# 12:00:10.5Z for one hour; whole-second part ends round up.
 ACCEPTED = 1_791_374_400
+TERM_END = 1_791_378_011
 
 
 def _immediate_stop(account: str) -> dict[str, str]:
@@ -56,13 +63,14 @@ def _current_request(terms: dict) -> dict:
                     "kind": "once",
                     "asset": "USD/2",
                     "amount": "10000",
-                    "hold": {"for": "P7DT1H11S"},
+                    "hold": {"afterStop": "P7D"},
                     "authorities": {
-                        "stop": [_immediate_stop(BUYER), _immediate_stop(PAYEE)],
+                        "stop": [],
                         "reverse": [PAYEE, DISPUTE],
-                        "extend": [],
+                        "extend": [DISPUTE],
                     },
-                    "maxHoldExtension": "P0D",
+                    "maxHoldExtension": None,
+                    "end": {"at": TERM_END, "partialPeriod": "returned"},
                 }
             ],
             "deal": agreement_hash(terms),
@@ -87,7 +95,7 @@ def test_the_derived_mandate_is_the_current_published_approval_request():
     terms, _, mandate = _derived()
     expected = _current_request(terms)
     assert ApprovalRequest.model_validate(expected)
-    assert _wire(ApprovalRequest(mandate=mandate)) == expected
+    assert wire_json(ApprovalRequest(mandate=mandate)) == expected
     assert "authorities" not in _wire(mandate)
 
 
@@ -126,10 +134,13 @@ def test_seller_and_buyer_agree_on_one_transaction():
         lambda part: part["authorities"]["extend"].append(BUYER),
         lambda part: part["authorities"]["extend"].append(PAYEE),
         lambda part: part.update(maxHoldExtension="P1D"),
-        lambda part: part["authorities"]["stop"][1].update(notice="PT1H"),
-        lambda part: part["authorities"]["stop"][0].update(partialPeriod="prorated"),
-        lambda part: part["authorities"]["stop"].pop(),
+        lambda part: part["authorities"]["stop"].append(_immediate_stop(PAYEE)),
+        lambda part: part["authorities"]["stop"].append(_immediate_stop(BUYER)),
+        lambda part: part["authorities"]["extend"].clear(),
+        lambda part: part["authorities"]["reverse"].remove(DISPUTE),
         lambda part: part["authorities"]["reverse"].append(BUYER),
+        lambda part: part["hold"].update(afterStop="P1D"),
+        lambda part: part["end"].update(partialPeriod="charged"),
     ],
 )
 def test_the_buyer_refuses_any_other_lifecycle_right(change):
@@ -172,3 +183,66 @@ def test_a_receipt_snapshot_and_reversal_for_the_derived_mandate_hold():
     assert SignedTransactionSnapshot.model_validate(_wire(snapshot)) == snapshot
     assert [part.extensions for part in snapshot.snapshot.parts] == [[]]
     assert StoredEvent.model_validate(_wire(payments.reverse(txid))).event.kind.value == "reverse"
+
+
+CURRENT_VECTORS = json.loads(
+    (Path(__file__).resolve().parents[1] / "test-vectors" / "payments.json").read_text()
+)
+
+
+@pytest.mark.parametrize("vector", CURRENT_VECTORS["snapshots"], ids=lambda v: v["name"])
+def test_current_producer_snapshots_round_trip(vector):
+    parsed = SignedTransactionSnapshot.model_validate(vector["signed"])
+    assert wire_json(parsed) == vector["signed"]
+    assert transaction_id(vector["mandate"]) == parsed.snapshot.transaction.root
+
+
+@pytest.mark.parametrize("gross", ["0", "1", "9" * 38])
+def test_snapshot_gross_accepts_nonnegative_minor_units(gross):
+    part = copy.deepcopy(CURRENT_VECTORS["snapshots"][0]["signed"]["snapshot"]["parts"][0])
+    part["gross"] = gross
+    assert PartSnapshot.model_validate(part).gross.root == gross
+
+
+@pytest.mark.parametrize("gross", ["-1", "00", "01", "9" * 39])
+def test_snapshot_gross_refuses_invalid_minor_units(gross):
+    part = copy.deepcopy(CURRENT_VECTORS["snapshots"][0]["signed"]["snapshot"]["parts"][0])
+    part["gross"] = gross
+    with pytest.raises(ValidationError):
+        PartSnapshot.model_validate(part)
+
+
+def test_effective_end_is_optional_and_unknown_snapshot_fields_are_refused():
+    part = copy.deepcopy(CURRENT_VECTORS["snapshots"][0]["signed"]["snapshot"]["parts"][0])
+    part["end"] = {"at": 1_800_000_000, "partialPeriod": "charged"}
+    assert wire_json(PartSnapshot.model_validate(part)) == part
+    del part["end"]
+    assert "end" not in wire_json(PartSnapshot.model_validate(part))
+    part["unknown"] = True
+    with pytest.raises(ValidationError):
+        PartSnapshot.model_validate(part)
+
+
+@pytest.mark.parametrize("at", [-1, 9_007_199_254_740_992])
+def test_effective_end_refuses_timestamps_outside_safe_integer_bounds(at):
+    with pytest.raises(ValidationError):
+        PartEnd.model_validate({"at": at, "partialPeriod": "charged"})
+
+
+def test_http_url_publication_accepts_http_and_https_and_refuses_other_schemes():
+    for url in ("http://example.com/", "https://example.com/return"):
+        assert HttpUrl.model_validate(url).root == url
+    for url in ("ftp://example.com/", "https://example.com/with space", "example.com"):
+        with pytest.raises(ValidationError):
+            HttpUrl.model_validate(url)
+
+
+def test_balance_asset_keys_remain_hashable_and_round_trip():
+    body = {"available": {"USD/2": "100", "EUR/6": "-25"}, "held": []}
+    assert wire_json(Balance.model_validate(body)) == body
+
+
+@pytest.mark.parametrize("asset", ["usd/2", "INVALID SPACE", "USD/1234567"])
+def test_balance_refuses_invalid_asset_keys(asset):
+    with pytest.raises(ValidationError):
+        Balance.model_validate({"available": {asset: "100"}, "held": []})

@@ -1,10 +1,8 @@
 """A part's `maxHoldExtension` is required and may be null, and null survives the wire.
 
-The published schema states the property as an intersection that admits no null,
-while the service accepts null; ``scripts/generate_models.py`` generates the union the
-service validates, and ``schema/SOURCE.md`` records the discrepancy. Every mandate here
-is SCM's own synthetic fixture, with obviously synthetic accounts, not a producer
-vector. The kit's own derivation never produces null.
+The standalone publication represents the duration as a required union with null.
+Every mandate here is a synthetic fixture with deterministic development accounts.
+The kit derives null exactly when the accepted terms leave the case hold uncapped.
 """
 
 from __future__ import annotations
@@ -39,7 +37,7 @@ from market_arkhai_payments.models import OncePart, Part, RatePart
 from payment_terms import BUYER, PAYEE, SERVICE, agreement, config
 
 KIT = Path(__file__).resolve().parents[1]
-VENDORED_SCHEMA_SHA256 = "5cf22707c0e5c1c1c3ffd398d0a1710e136e719eee841c39323eba837e0ea848"
+VENDORED_SCHEMA_SHA256 = "b7be9fb05b306de5469903ed70c6a821e5129ce757c4d20c9b6cef4e77b32e3a"
 
 
 def _stop(account: str) -> dict[str, str]:
@@ -195,19 +193,20 @@ def test_a_receipt_and_snapshot_for_a_null_mandate_verify():
     assert verify_receipt(embedded, SERVICE.identity, mandate=raw, agreement_json=terms, livemode=False)
 
 
-def test_the_kit_never_derives_null_and_refuses_it():
+def test_the_case_hold_cap_is_null_only_when_the_terms_leave_it_unbounded():
     terms = agreement()
     policy = mandate_policy_for_agreement(terms, config())
     derived = derive_mandate(terms, policy)
-    assert [part.root.maxHoldExtension.root for part in derived.parts] == ["P0D"]
+    assert [part.root.maxHoldExtension for part in derived.parts] == [None]
+    assert wire_json(derived)["parts"][0]["maxHoldExtension"] is None
 
-    unbounded = wire_json(derived)
-    unbounded["parts"][0]["maxHoldExtension"] = None
-    Mandate.model_validate(unbounded)
+    capped = wire_json(derived)
+    capped["parts"][0]["maxHoldExtension"] = "P1D"
+    Mandate.model_validate(capped)
     with pytest.raises(MandatePolicyError):
-        check(unbounded, terms, policy)
+        check(capped, terms, policy)
     stored = PaymentSettlementData.parse(
-        {"mandate": unbounded, "transaction_id": transaction_id(unbounded)}
+        {"mandate": capped, "transaction_id": transaction_id(capped)}
     )
     with pytest.raises(MandatePolicyError):
         stored.require_bound_to(terms)
@@ -227,40 +226,31 @@ def _vendored() -> dict:
     return json.loads(data)
 
 
-def test_generation_changes_exactly_the_two_published_properties():
-    generator = _generator()
+def test_generation_only_inlines_identical_asset_constraints_for_map_keys():
     published = _vendored()
     before = copy.deepcopy(published)
-    normalized = generator.normalized(published)
+    checked = _generator().normalized(published)
     assert published == before
+    expected = copy.deepcopy(published)
+    expected["$defs"]["Balance"]["properties"]["available"]["propertyNames"] = expected["$defs"]["Asset"]
+    assert checked == expected
+    for kind in ("OncePart", "RatePart"):
+        assert checked["$defs"][kind] == published["$defs"][kind]
 
-    changed = []
-    for name, definition in published["$defs"].items():
-        if definition != normalized["$defs"][name]:
-            changed.append(name)
-            for prop, value in definition["properties"].items():
-                if normalized["$defs"][name]["properties"][prop] != value:
-                    assert value == generator.PUBLISHED_FORM
-                    assert normalized["$defs"][name]["properties"][prop] == generator.VALIDATED_FORM
-                    assert prop in definition["required"]
-    assert sorted(changed) == ["OncePart", "RatePart"]
-    assert {k: v for k, v in published.items() if k != "$defs"} == {
-        k: v for k, v in normalized.items() if k != "$defs"
-    }
 
 
 @pytest.mark.parametrize(
     "change",
     [
         lambda schema: schema["$defs"]["OncePart"]["properties"].update(
-            maxHoldExtension={"anyOf": [{"$ref": "#/$defs/Duration"}, {"type": "null"}]}
+            maxHoldExtension={"allOf": [{"$ref": "#/$defs/Duration"}, {"type": ["string", "null"]}]}
         ),
         lambda schema: schema["$defs"]["RatePart"]["properties"].update(
             maxHoldExtension={"$ref": "#/$defs/Duration"}
         ),
         lambda schema: schema["$defs"]["OncePart"]["required"].remove("maxHoldExtension"),
     ],
-    ids=["corrected", "not-nullable", "optional"],
+    ids=["intersection", "not-nullable", "optional"],
 )
 def test_generation_refuses_a_publication_that_moved_on(change):
     schema = _vendored()

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import copy
 import json
 from pathlib import Path
@@ -16,37 +17,36 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = ROOT / "schema" / "payments.schema.json"
 OUTPUT = ROOT / "src" / "market_arkhai_payments" / "models.py"
+RESOURCE_INPUTS = (SCHEMA, ROOT / "test-vectors" / "payments.json")
+RESOURCE_ROOT = OUTPUT.parent / "contract_data"
 HEADER = (
-    "# Generated from schema/payments.schema.json, normalized by\n"
+    "# Generated from schema/payments.schema.json, checked by\n"
     "# scripts/generate_models.py; do not edit.\n"
     "# Contract identity and update procedure: schema/SOURCE.md.\n\n"
 )
 
-# The service requires these properties and accepts null for them, but the published
-# document states each as the intersection of `Duration` and a string-or-null type,
-# which admits no null. Generation reads each as the union the service validates. The
-# vendored schema stays as published; schema/SOURCE.md records the discrepancy.
+# Required nullable durations affect canonical mandate identity. Refuse a publication
+# that changes their presence or union shape rather than silently dropping nulls.
 REQUIRED_NULLABLE = (("OncePart", "maxHoldExtension"), ("RatePart", "maxHoldExtension"))
-PUBLISHED_FORM = {"allOf": [{"$ref": "#/$defs/Duration"}, {"type": ["string", "null"]}]}
-VALIDATED_FORM = {"anyOf": [{"$ref": "#/$defs/Duration"}, {"type": "null"}]}
+PUBLISHED_FORM = {"anyOf": [{"$ref": "#/$defs/Duration"}, {"type": "null"}]}
 
 
 def normalized(schema: dict[str, Any]) -> dict[str, Any]:
-    """Return the schema generation reads, refusing a publication that has moved on.
+    """Check required nulls and inline string constraints for hashable map keys."""
 
-    Only the properties in ``REQUIRED_NULLABLE`` change, and only while each is still
-    required and still in its published form, so a corrected or reshaped publication
-    stops generation rather than being reinterpreted.
-    """
-
-    result = copy.deepcopy(schema)
     for definition, field in REQUIRED_NULLABLE:
-        target = result["$defs"][definition]
+        target = schema["$defs"][definition]
         if field not in target.get("required", []):
-            raise SystemExit(f"{definition}.{field} is no longer required; review the normalization")
+            raise SystemExit(f"{definition}.{field} is no longer required; review the publication")
         if target["properties"][field] != PUBLISHED_FORM:
-            raise SystemExit(f"{definition}.{field} changed its published form; review the normalization")
-        target["properties"][field] = copy.deepcopy(VALIDATED_FORM)
+            raise SystemExit(f"{definition}.{field} changed its published form; review the publication")
+    result = copy.deepcopy(schema)
+    available = result["$defs"]["Balance"]["properties"]["available"]
+    if available.get("propertyNames") != {"$ref": "#/$defs/Asset"}:
+        raise SystemExit("Balance.available propertyNames changed; review map-key generation")
+    # Pydantic RootModel keys are unhashable. Inline the identical string schema so
+    # code generation constrains plain string keys instead of constructing Asset.
+    available["propertyNames"] = copy.deepcopy(result["$defs"]["Asset"])
     return result
 
 
@@ -62,7 +62,32 @@ def render(destination: Path) -> None:
         source.write_text(json.dumps(schema, indent=2, ensure_ascii=False), encoding="utf-8")
         _generate(executable, source, destination)
     generated = destination.read_text(encoding="utf-8")
-    destination.write_text(HEADER + generated, encoding="utf-8")
+    destination.write_text(HEADER + annotated_keys(generated, schema), encoding="utf-8")
+
+
+def annotated_keys(generated: str, schema: dict[str, Any]) -> str:
+    """Express the generator's constrained dictionary key in typing-valid syntax."""
+
+    calls = [
+        node for node in ast.walk(ast.parse(generated))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "constr"
+    ]
+    if len(calls) != 1:
+        raise SystemExit("expected one constrained balance key; review generator output")
+    call = calls[0]
+    pattern = schema["$defs"]["Asset"]["pattern"]
+    if call.args or len(call.keywords) != 1 or call.keywords[0].arg != "pattern":
+        raise SystemExit("balance key constraints changed; review generator output")
+    if ast.literal_eval(call.keywords[0].value) != pattern:
+        raise SystemExit("balance key pattern changed; review generator output")
+    lines = generated.splitlines(keepends=True)
+    assert call.end_lineno is not None and call.end_col_offset is not None
+    start = sum(map(len, lines[:call.lineno - 1])) + call.col_offset
+    end = sum(map(len, lines[:call.end_lineno - 1])) + call.end_col_offset
+    replacement = f"Annotated[str, Field(pattern={pattern!r})]"
+    return (generated[:start] + replacement + generated[end:]).replace(
+        "RootModel, constr", "RootModel"
+    )
 
 
 def _generate(executable: str, source: Path, destination: Path) -> None:
@@ -75,6 +100,8 @@ def _generate(executable: str, source: Path, destination: Path) -> None:
             "jsonschema",
             "--output-model-type",
             "pydantic_v2.BaseModel",
+            "--base-class",
+            "market_arkhai_payments.wire.WireModel",
             "--use-annotated",
             "--field-constraints",
             "--target-python-version",
@@ -82,7 +109,7 @@ def _generate(executable: str, source: Path, destination: Path) -> None:
             "--formatters",
             "builtin",
             "--disable-timestamp",
-            # The published OpenAPI document states a constant as a one-value enum,
+            # A publication may state a constant as a one-value enum,
             # which constrains exactly what `const` does; typing it as a literal keeps
             # comparisons with plain wire values, such as an identity's scheme, exact.
             "--enum-field-as-literal",
@@ -106,9 +133,19 @@ def main() -> int:
             if candidate.read_bytes() != OUTPUT.read_bytes():
                 print("models.py is stale; run `python scripts/generate_models.py`", file=sys.stderr)
                 return 1
-        print("generated payments models are current")
+        for source in RESOURCE_INPUTS:
+            resource = RESOURCE_ROOT / source.relative_to(ROOT)
+            if not resource.is_file() or resource.read_bytes() != source.read_bytes():
+                print(f"{resource.relative_to(ROOT)} is stale; run `make generate-models`",
+                      file=sys.stderr)
+                return 1
+        print("generated payments models and resources are current")
         return 0
     render(OUTPUT)
+    for source in RESOURCE_INPUTS:
+        resource = RESOURCE_ROOT / source.relative_to(ROOT)
+        resource.parent.mkdir(parents=True, exist_ok=True)
+        resource.write_bytes(source.read_bytes())
     return 0
 
 

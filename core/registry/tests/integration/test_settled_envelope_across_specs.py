@@ -34,10 +34,11 @@ _ESCROW = {
 }
 _OPTION = {
     "option_id": "a" * 64,
-    "mechanism": "introduction.contact.v1",
-    "asset": "usd",
-    "rates": [{"field": "flat", "per": "deal", "value": "100"}],
-    "params": {"channel": "email"},
+    "price": {
+        "asset": "usd",
+        "rates": [{"field": "flat", "per": "deal", "value": "100"}],
+    },
+    "settlement": {"schema": "introduction.contact.v1", **({"channel": "email"} or {})},
 }
 
 

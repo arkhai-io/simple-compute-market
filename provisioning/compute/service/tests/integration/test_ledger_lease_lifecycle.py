@@ -303,7 +303,7 @@ async def test_an_expired_lease_is_torn_down_then_released_and_notified(session_
 
     _set_fulfillment_state(session_factory, capacity_reservation_id, _State.torn_down.value)
     sf = _storefront()
-    with patch("storefront_client.StorefrontClient", return_value=sf) as client_cls:
+    with patch("compute_provisioning_service.services.deal_event_sink.StorefrontClient", return_value=sf) as client_cls:
         summary = await svc.force_check_leases()
 
     assert summary["released"] == 1
@@ -358,7 +358,7 @@ async def test_release_survives_an_unreachable_storefront(session_factory, ledge
     await svc.force_check_leases()
     _set_fulfillment_state(session_factory, capacity_reservation_id, _State.torn_down.value)
 
-    with patch("storefront_client.StorefrontClient", side_effect=ConnectionError("down")):
+    with patch("compute_provisioning_service.services.deal_event_sink.StorefrontClient", side_effect=ConnectionError("down")):
         summary = await svc.force_check_leases()
 
     assert summary["released"] == 1
@@ -371,7 +371,7 @@ async def test_a_lease_nothing_was_dispatched_for_is_released_directly(session_f
     svc = _lifecycle(session_factory, ledger)
 
     sf = _storefront()
-    with patch("storefront_client.StorefrontClient", return_value=sf):
+    with patch("compute_provisioning_service.services.deal_event_sink.StorefrontClient", return_value=sf):
         summary = await svc.force_check_leases()
 
     assert summary["released"] == 1
@@ -392,7 +392,7 @@ async def test_an_assigned_aggregate_is_abandoned_and_its_lease_released(session
     )
     svc = _lifecycle(session_factory, ledger)
 
-    with patch("storefront_client.StorefrontClient", return_value=_storefront()):
+    with patch("compute_provisioning_service.services.deal_event_sink.StorefrontClient", return_value=_storefront()):
         await svc.force_check_leases()
 
     assert ledger.get_reservation(capacity_reservation_id)["state"] == "released"
@@ -528,7 +528,7 @@ async def test_a_failed_teardown_waits_for_retry_which_adopts_the_finished_one(
         failure_message="host unreachable",
     )
 
-    with patch("storefront_client.StorefrontClient", return_value=_storefront()):
+    with patch("compute_provisioning_service.services.deal_event_sink.StorefrontClient", return_value=_storefront()):
         await svc.force_check_leases()
         assert ledger.get_reservation(capacity_reservation_id)["failure_reason"] == (
             "teardown_failed"
@@ -570,7 +570,7 @@ async def test_an_operator_force_release_frees_an_unmanaged_lease_and_notifies(
     svc = _lifecycle(session_factory, ledger)
     sf = _storefront()
 
-    with patch("storefront_client.StorefrontClient", return_value=sf):
+    with patch("compute_provisioning_service.services.deal_event_sink.StorefrontClient", return_value=sf):
         released = await svc.force_release(
             capacity_reservation_id,
             LeaseForceRelease(reason="host inspected", evidence="VM absent"),

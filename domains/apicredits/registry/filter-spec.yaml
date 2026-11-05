@@ -12,11 +12,11 @@
 # Bump `version` on backwards-incompatible changes; add filters freely
 # (etag changes, clients re-fetch).
 
-version: 3
+version: 4
 
 schema:
   id: api_credits
-  version: 1
+  version: 2
 
 listing_shape:
   $schema: "https://json-schema.org/draft/2020-12/schema"
@@ -99,5 +99,5 @@ filters:
   - {name: token_exclude, path: "$.accepted_escrows[*].literal_fields.token", op: not_in, value_type: string, on_missing: pass}
 
   # Mechanism-neutral option projections are independent of escrow entries.
-  - {name: settlement_mechanism, path: "$.settlement_options[*].mechanism", op: in, value_type: string, on_missing: pass}
-  - {name: settlement_asset, path: "$.settlement_options[*].asset", op: in, value_type: string, on_missing: pass}
+  - {name: settlement_mechanism, path: "$.settlement_options[*].settlement.schema", op: in, value_type: string, on_missing: pass}
+  - {name: settlement_asset, path: "$.settlement_options[*].price.asset", op: in, value_type: string, on_missing: pass}

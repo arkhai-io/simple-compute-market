@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Mapping
+from datetime import timedelta
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
@@ -23,6 +26,17 @@ from compute_provisioning_ansible import (
 )
 from compute_provisioning_ansible.runner import AnsibleRunner
 from compute_provisioning.leases import LeaseRouteService
+from compute_provisioning.relays import (
+    DEFAULT_GRANT_EXPIRY_GRACE,
+    DEFAULT_PORT_REUSE_MARGIN,
+    RelayExecutionResolver,
+    RelayPortAllocator,
+    RelayReconciliationSchedule,
+    RelayService,
+    relay_contribution,
+    relay_host_connection_change_hooks,
+    relay_host_pool_change_hooks,
+)
 from compute_provisioning.release import (
     FulfillmentReleaseExecutor,
     FulfillmentReleaseGuard,
@@ -38,7 +52,6 @@ from bare_metal_provisioning_adapter.runtime import (
     build_bare_metal_runtime,
 )
 from vm_provisioning_adapter.runtime import (
-    HOST_POOL_CHANGE_HOOKS as VM_HOST_POOL_CHANGE_HOOKS,
     HOST_REQUIREMENT as VM_HOST_REQUIREMENT,
     build_vm_runtime,
 )
@@ -64,6 +77,7 @@ from compute_provisioning_service.services.system_status import (
     SystemStatusService,
 )
 from compute_provisioning_service.services.lease_watchdog import LeaseWatchdog
+from compute_provisioning_service.services.lease_end_reports import LeaseEndReports
 from compute_provisioning_service.services.principal_authority import (
     SqlAlchemyProvisioningPrincipalAuthority,
 )
@@ -75,6 +89,9 @@ from market_fulfillment import (
     SqlAlchemyFulfillmentUnitOfWork,
 )
 
+
+
+logger = logging.getLogger(__name__)
 
 
 def _resolved_job_queue():
@@ -166,18 +183,61 @@ def _merge_host_requirements(*requirements: Mapping[str, bool]) -> Mapping[str, 
     return MappingProxyType(merged)
 
 
-def _make_host_authority(session_factory, cfg, pool_change_hooks):
-    """The one host authority: every connection kind's codec and every hook.
+def _make_connection_codecs(cfg) -> ConnectionCodecs:
+    """Every connection kind this service reaches hosts by.
 
     The ``ssh`` codec is the Ansible implementation's, protecting a submitted
-    key with the service's decryption key; pool-change hooks are the adapters'
-    static declarations, merged here because the authority exists before any
-    runtime does.
+    key with the service's decryption key.
     """
+    return ConnectionCodecs([SshConnectionCodec(cfg.ssh_decryption_key)])
+
+
+def host_pool_change_hooks(codecs: ConnectionCodecs) -> tuple:
+    """Every check a host's pool change runs, over the host authority's codecs.
+
+    The relays' checks are the only ones; they read a host's connection
+    address through the same codecs the authority stores connections with.
+    """
+    return relay_host_pool_change_hooks(codecs)
+
+
+def host_connection_change_hooks(codecs: ConnectionCodecs) -> tuple:
+    """Every check a placed host's new connection runs, over the same codecs."""
+    return relay_host_connection_change_hooks(codecs)
+
+
+def _make_host_authority(session_factory, codecs):
+    """The one host authority, built before any runtime is."""
     return HostAuthority(
         session_factory,
-        codecs=ConnectionCodecs([SshConnectionCodec(cfg.ssh_decryption_key)]),
-        pool_change_hooks=tuple(pool_change_hooks),
+        codecs=codecs,
+        pool_change_hooks=host_pool_change_hooks(codecs),
+        connection_change_hooks=host_connection_change_hooks(codecs),
+    )
+
+
+def _make_relay_port_allocator(session_factory, cfg) -> RelayPortAllocator:
+    """The one allocator, with the grant expiry grace and the port reuse margin."""
+    return RelayPortAllocator(
+        session_factory,
+        grant_expiry_grace=timedelta(
+            seconds=float(
+                getattr(
+                    cfg,
+                    "relay_grant_expiry_grace_seconds",
+                    DEFAULT_GRANT_EXPIRY_GRACE.total_seconds(),
+                )
+            )
+        ),
+        reuse_margin=timedelta(
+            seconds=float(
+                getattr(
+                    cfg,
+                    "relay_port_reuse_margin_seconds",
+                    DEFAULT_PORT_REUSE_MARGIN.total_seconds(),
+                )
+            )
+        ),
     )
 
 
@@ -229,11 +289,47 @@ def _make_release_effects():
     return ReleaseEffects()
 
 
+def _relay_bundle(session_factory, cfg, relay_service, port_allocator):
+    """The relays' release effect, definitions document, and reconciliation,
+    registered once for every domain a relay carries.
+
+    The document is read from ``relay_definitions_path`` when one is mounted;
+    the reconciliation runs unless ``relay_port_reconciliation_enabled`` turns
+    it off.
+    """
+    raw_path = str(getattr(cfg, "relay_definitions_path", "") or "").strip()
+    if bool(getattr(cfg, "relay_port_reconciliation_enabled", True)):
+        reconciliation = RelayReconciliationSchedule(
+            poll_interval_seconds=float(
+                getattr(cfg, "relay_port_reconciliation_poll_interval_seconds", 300)
+            ),
+            grace_seconds=float(getattr(cfg, "relay_port_reconciliation_grace_seconds", 3600)),
+        )
+    else:
+        logger.info(
+            "Relay port reconciliation disabled (relay_port_reconciliation_enabled=false)"
+        )
+        reconciliation = None
+    return relay_contribution(
+        session_factory=session_factory,
+        settings=cfg,
+        relay_service=relay_service,
+        port_allocator=port_allocator,
+        definitions_path=Path(raw_path).resolve() if raw_path else None,
+        reconciliation=reconciliation,
+    )
+
+
 def _compose_adapters(
-    vm_bundle, bare_metal_bundle, host_requirement, job_executors, release_effects
+    relay_bundle,
+    vm_bundle,
+    bare_metal_bundle,
+    host_requirement,
+    job_executors,
+    release_effects,
 ):
     return compose_adapter_bundles(
-        [vm_bundle, bare_metal_bundle],
+        [relay_bundle, vm_bundle, bare_metal_bundle],
         host_requirement=host_requirement,
         job_executors=job_executors,
         release_effects=release_effects,
@@ -255,6 +351,7 @@ def _make_lease_lifecycle(
     release_status,
     lifecycle_event_sink,
     capacity_release_outbox,
+    lease_end_reports,
 ):
     return LeaseLifecycleService(
         cfg,
@@ -267,6 +364,7 @@ def _make_lease_lifecycle(
             )
         ),
         capacity_release_outbox=capacity_release_outbox,
+        lease_end_report_drain=lambda: lease_end_reports.drain(lifecycle_event_sink.deliver_lease_end),
     )
 
 
@@ -325,6 +423,12 @@ class Container(containers.DeclarativeContainer):
         _merge_host_requirements(VM_HOST_REQUIREMENT, BARE_METAL_HOST_REQUIREMENT)
     )
 
+    lease_end_reports = providers.Singleton(
+        LeaseEndReports, session_factory=session_factory,
+        signer=identity_context.provided.signer,
+        peer=providers.Callable(lambda cfg: str(getattr(cfg, "storefront_url", "") or "").rstrip("/"), config),
+    )
+
     capacity_ledger_service = providers.Singleton(
         CapacityLedgerService,
         session_factory=session_factory,
@@ -341,19 +445,20 @@ class Container(containers.DeclarativeContainer):
             settlement_repository=settlement_repository,
         ),
         release_effect=release_effects,
+        site_id=identity_context.provided.storefront_site_id,
+        lease_end_effect=lease_end_reports.provided.record,
     )
 
     # Filled and frozen by adapter composition; the job engine resolves each
     # job's executor through it.
     job_executor_table = providers.Singleton(JobExecutorTable)
 
-    host_pool_change_hooks = providers.Object(VM_HOST_POOL_CHANGE_HOOKS)
+    connection_codecs = providers.Singleton(_make_connection_codecs, cfg=config)
 
     host_authority = providers.Singleton(
         _make_host_authority,
         session_factory=session_factory,
-        cfg=config,
-        pool_change_hooks=host_pool_change_hooks,
+        codecs=connection_codecs,
     )
 
     probe_runner = providers.Singleton(_make_probe_runner, cfg=config)
@@ -378,6 +483,22 @@ class Container(containers.DeclarativeContainer):
         job_queue_provider=providers.Object(_resolved_job_queue),
     )
 
+    # The family's relays: one allocator every domain leases relay ports
+    # through, the administration the relay routes serve, and the resolver
+    # that fills a relay's address and token into a job as it runs.
+    relay_port_allocator = providers.Singleton(
+        _make_relay_port_allocator, session_factory=session_factory, cfg=config
+    )
+    relay_service = providers.Singleton(
+        RelayService,
+        session_factory=session_factory,
+        settings=config,
+        connection_codecs=connection_codecs,
+    )
+    relay_execution_resolver = providers.Singleton(
+        RelayExecutionResolver, session_factory=session_factory, settings=config
+    )
+
     vm_runtime = providers.Singleton(
         build_vm_runtime,
         config=config,
@@ -386,6 +507,9 @@ class Container(containers.DeclarativeContainer):
         host_authority=host_authority,
         job_engine=job_engine,
         job_submission=job_submission,
+        relay_port_allocator=relay_port_allocator,
+        relay_resolver=relay_execution_resolver,
+        connection_codecs=connection_codecs,
     )
 
     ansible_service = providers.Callable(
@@ -408,11 +532,6 @@ class Container(containers.DeclarativeContainer):
         runtime=vm_runtime,
         name=providers.Object("host_operations_service"),
     )
-    relay_service = providers.Callable(
-        _runtime_value,
-        runtime=vm_runtime,
-        name=providers.Object("relay_service"),
-    )
 
     site_authority = providers.Singleton(
         LedgerSiteAuthority,
@@ -421,6 +540,9 @@ class Container(containers.DeclarativeContainer):
 
     bare_metal_runtime = providers.Singleton(
         build_bare_metal_runtime,
+        relay_port_allocator=relay_port_allocator,
+        relay_resolver=relay_execution_resolver,
+        connection_codecs=connection_codecs,
         job_engine=job_engine,
         job_submission=job_submission,
         config=config,
@@ -437,8 +559,17 @@ class Container(containers.DeclarativeContainer):
         _adapter_bundle, runtime=bare_metal_runtime
     )
 
+    relay_adapter_bundle = providers.Singleton(
+        _relay_bundle,
+        session_factory=session_factory,
+        cfg=config,
+        relay_service=relay_service,
+        port_allocator=relay_port_allocator,
+    )
+
     composed_adapters = providers.Singleton(
         _compose_adapters,
+        relay_bundle=relay_adapter_bundle,
         vm_bundle=vm_adapter_bundle,
         bare_metal_bundle=bare_metal_adapter_bundle,
         host_requirement=host_requirement,
@@ -562,12 +693,14 @@ class Container(containers.DeclarativeContainer):
         release_status=release_status,
         lifecycle_event_sink=lifecycle_event_sink,
         capacity_release_outbox=capacity_release_outbox,
+        lease_end_reports=lease_end_reports,
     )
 
     lease_route_service = providers.Singleton(
         LeaseRouteService,
         leases=executor_lease_service,
         lifecycle=lease_lifecycle_service,
+        reports=lease_end_reports.provided.read,
     )
 
     lease_watchdog = providers.Singleton(

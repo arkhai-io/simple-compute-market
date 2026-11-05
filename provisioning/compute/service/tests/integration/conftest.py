@@ -57,10 +57,8 @@ from market_identity import (
 from compute_provisioning_service import container as _container_module
 from vm_provisioning_adapter.db import Base as VmBase
 from vm_provisioning_adapter.bundle import VM_JOB_ACTIONS, build_vm_adapter_bundle
-from vm_provisioning_adapter.services.relay_port_allocator import (
-    RelayPortAllocator,
-)
-from vm_provisioning_adapter.services.relay_service import RelayService
+from compute_provisioning.relays import RelayExecutionResolver, RelayService
+from compute_provisioning.relays.db import Base as RelaysBase
 from compute_provisioning import JobExecutorTable, compose_adapter_bundles
 from vm_provisioning_adapter.services.vm_fulfillment_plan import VmFulfillmentPlan
 from vm_provisioning_adapter.services.vm_operations_service import VmOperationsService
@@ -127,6 +125,7 @@ from compute_provisioning_service.identity import ProvisioningIdentityContext
 from compute_provisioning_service.middleware.auth import (
     SqlAlchemyProvisioningReplayStore,
 )
+from compute_provisioning_service.services.lease_end_reports import LeaseEndReports
 from compute_provisioning_service.services.capacity_reservation_watchdog import (
     CapacityReservationWatchdog,
 )
@@ -470,9 +469,12 @@ FAKE_CREATE_STDOUT = fake_create_stdout("agent-vm-01")
 
 
 def _initialize_test_database(engine, *, default_pool: bool = True):
-    # resource_pools must exist before VM's ansible_pool_configs FK resolves.
+    # resource_pools and relays must exist before VM's ansible_pool_configs
+    # foreign keys resolve.
     PoolsBase.metadata.create_all(bind=engine)
-    # VM's relay and pool-configuration tables ride VM's own metadata.
+    # The relay tables ride the family's relay metadata.
+    RelaysBase.metadata.create_all(bind=engine)
+    # VM's pool-configuration table rides VM's own metadata.
     VmBase.metadata.create_all(bind=engine)
     # The host registry rides the host authority's own metadata.
     HostsBase.metadata.create_all(bind=engine)
@@ -544,20 +546,22 @@ def job_executor_table_for():
     return _job_executor_table
 
 
-def _ansible_executors(runner, settings, bare_metal_runner=None):
+def _ansible_executors(runner, settings, bare_metal_runner=None, relay_resolver=None):
     """VM's and bare metal's Ansible executors, each with its mode's playbook,
     as their runtimes build them: VM's over ``runner``, bare metal's over
-    ``bare_metal_runner`` (``runner`` when absent)."""
+    ``bare_metal_runner`` (``runner`` when absent). ``relay_resolver`` fills a
+    relayed job's token and signed grant as it runs, as the service's
+    composition gives each codec one."""
     vm = AnsibleJobExecutor(
         runner,
-        VmAnsibleCodec(),
+        VmAnsibleCodec(relay_resolver=relay_resolver),
         settings.resolved_vm_playbook_path,
         timeout_seconds=settings.ansible_timeout_seconds,
         additional_non_retryable_errors=settings.additional_non_retryable_errors,
     )
     bare_metal = AnsibleJobExecutor(
         bare_metal_runner if bare_metal_runner is not None else runner,
-        BareMetalAnsibleCodec(),
+        BareMetalAnsibleCodec(relay_resolver=relay_resolver),
         settings.resolved_bare_metal_playbook_path,
         timeout_seconds=settings.ansible_timeout_seconds,
         additional_non_retryable_errors=settings.additional_non_retryable_errors,
@@ -616,21 +620,31 @@ def fake_ansible() -> MagicMock:
 # ---------------------------------------------------------------------------
 # App fixture — wires all overrides and starts the job processing loop
 # ---------------------------------------------------------------------------
+@pytest.fixture
+def job_retry_options():
+    return {"default_max_retries": 3, "retry_backoff_initial_seconds": 60,
+            "retry_backoff_multiplier": 2.0, "retry_backoff_max_seconds": 3600}
+
+
+@pytest.fixture
+def bare_metal_plan_options():
+    return {"reclaim_policy": "remove_lease_key", "working_data_policy_id": None}
+
+
 @pytest_asyncio.fixture
 async def client_and_queue(
     session_factory,
     fake_ansible,
     bare_metal_runner,
+    bare_metal_plan_options,
+    job_retry_options,
     monkeypatch,
 ) -> AsyncIterator[tuple[ProvisioningClients, AsyncJobQueue]]:
     """Yield an authenticated provisioning client and fresh async job queue."""
 
     _install_signed_asgi_transport(monkeypatch)
     mock_settings = MagicMock(
-        default_max_retries=3,
-        retry_backoff_initial_seconds=60,
-        retry_backoff_multiplier=2.0,
-        retry_backoff_max_seconds=3600,
+        **job_retry_options,
         ansible_timeout_seconds=30,
         additional_non_retryable_errors=["UNREACHABLE", "Domain not found"],
         frp_server_addr="",
@@ -645,7 +659,10 @@ async def client_and_queue(
         database_url=str(session_factory.kw["bind"].url),
         lease_watchdog_grace_period_seconds=300,
         lease_watchdog_enabled=False,
-        storefront_url="http://test-storefront:8001",
+        relay_grant_expiry_grace_seconds=3600,
+        relay_port_reuse_margin_seconds=300,
+        # A closed loopback port keeps this refusal boundary off ambient proxies.
+        storefront_url="http://127.0.0.1:0",
         storefront_site_id="default",
         resolved_bare_metal_playbook_path=Path(
             "/fake/bare-metal-node-access.yml"
@@ -672,8 +689,13 @@ async def client_and_queue(
     # it, filled and frozen by composing the bundles below and run by the
     # ledger whenever it releases capacity.
     release_effects = _container_module._make_release_effects()
+    lease_end_reports = LeaseEndReports(
+        session_factory, signer=identity_context.signer, peer=str(mock_settings.storefront_url),
+    )
     capacity_ledger_service = CapacityLedgerService(
         session_factory=session_factory,
+        site_id=identity_context.storefront_site_id,
+        lease_end_effect=lease_end_reports.record,
         unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count",
         host_requirement=host_requirement,
         # The release guard exactly as the production container composes it,
@@ -682,19 +704,28 @@ async def client_and_queue(
         release_effect=release_effects,
     )
 
+    connection_codecs = ConnectionCodecs([SshConnectionCodec(TEST_CONNECTION_KEY)])
     host_authority = HostAuthority(
         session_factory,
-        codecs=ConnectionCodecs([SshConnectionCodec(TEST_CONNECTION_KEY)]),
-        # The pool-change hooks exactly as the production container merges them,
-        # so a move refused there is refused here, by every host route.
-        pool_change_hooks=_container_module.Container.host_pool_change_hooks(),
+        codecs=connection_codecs,
+        # The pool- and connection-change hooks exactly as the production
+        # container composes them, so a write refused there is refused here,
+        # by every host route.
+        pool_change_hooks=_container_module.host_pool_change_hooks(connection_codecs),
+        connection_change_hooks=_container_module.host_connection_change_hooks(
+            connection_codecs
+        ),
     )
 
     from market_resource_pools import ResourcePoolService
     from vm_provisioning_adapter.services.ansible_pool_config_handler import AnsiblePoolConfigHandler
     resource_pool_service_handlers = {
-        "vm.ansible": AnsiblePoolConfigHandler(settings=mock_settings),
-        "bare_metal.ansible": BareMetalPoolConfigHandler(),
+        "vm.ansible": AnsiblePoolConfigHandler(
+            settings=mock_settings, connection_codecs=connection_codecs
+        ),
+        "bare_metal.ansible": BareMetalPoolConfigHandler(
+            settings=mock_settings, connection_codecs=connection_codecs
+        ),
     }
     resource_pool_service = ResourcePoolService(
         session_factory=session_factory,
@@ -747,12 +778,18 @@ async def client_and_queue(
     # Fresh queue per test — caller can inject on_job_started via fixture params
     job_queue = AsyncJobQueue(max_concurrent=2)
 
-    # VM's relay administration and its one port allocator, as VM's runtime
-    # builds them: the relay table is the thing under test in the relay suite,
-    # and the allocator is what fulfillment leases through and the terminal
-    # effect releases through.
-    relay_port_allocator = RelayPortAllocator(session_factory)
-    relay_service = RelayService(session_factory=session_factory, settings=mock_settings)
+    # The family's relay administration and its one port allocator, as the
+    # container builds them: the relay table is the thing under test in the
+    # relay suite, and the allocator is what fulfillment leases through and the
+    # release effect releases through.
+    relay_port_allocator = _container_module._make_relay_port_allocator(
+        session_factory, mock_settings
+    )
+    relay_service = RelayService(
+        session_factory=session_factory,
+        settings=mock_settings,
+        connection_codecs=connection_codecs,
+    )
 
     ansible_fulfillment_provider = JobFulfillmentProvider(
         plan=VmFulfillmentPlan(
@@ -778,11 +815,20 @@ async def client_and_queue(
     # Both adapter bundles composed as the container composes them: their
     # executors fill the job table, and their providers, pool handlers, and
     # inventory views are what the routes and the status read.
+    relay_resolver = RelayExecutionResolver(
+        session_factory=session_factory, settings=mock_settings
+    )
     vm_executor, bare_metal_executor = _ansible_executors(
-        fake_ansible, mock_settings, bare_metal_runner=bare_metal_runner
+        fake_ansible,
+        mock_settings,
+        bare_metal_runner=bare_metal_runner,
+        relay_resolver=relay_resolver,
     )
     composed_adapters = compose_adapter_bundles(
         [
+            _container_module._relay_bundle(
+                session_factory, mock_settings, relay_service, relay_port_allocator
+            ),
             build_vm_adapter_bundle(
                 fulfillment_provider=ansible_fulfillment_provider,
                 pool_config_handler=resource_pool_service_handlers["vm.ansible"],
@@ -792,7 +838,8 @@ async def client_and_queue(
                 fulfillment_provider=JobFulfillmentProvider(
                     plan=BareMetalFulfillmentPlan(
                         playbook_path=mock_settings.resolved_bare_metal_playbook_path,
-                        reclaim_policy=mock_settings.bare_metal_reclaim_policy,
+                        **bare_metal_plan_options,
+                        port_allocator=relay_port_allocator,
                     ),
                     submission=job_submission,
                     jobs=job_engine,
@@ -839,15 +886,16 @@ async def client_and_queue(
         session_factory=session_factory,
         job_queue_provider=lambda: job_queue,
         ansible_service=fake_ansible,
-        codec=VmAnsibleCodec(),
+        # The relay resolver as production composes it, so a relayed job's
+        # token and grant are filled in, and its grant signed, as it runs.
+        codec=VmAnsibleCodec(relay_resolver=relay_resolver),
         host_authority=host_authority,
-        pool_config_handler=AnsiblePoolConfigHandler(settings=mock_settings),
+        pool_config_handler=resource_pool_service_handlers["vm.ansible"],
         job_engine=job_engine,
         job_submission=job_submission,
         vm_operations_service=VmOperationsService(submission=job_submission),
         host_operations_service=HostOperationsService(submission=job_submission),
         relay_port_allocator=relay_port_allocator,
-        relay_service=relay_service,
     )
 
     fulfillment_convergence_watchdog = FulfillmentConvergenceWatchdog(
@@ -927,7 +975,7 @@ async def client_and_queue(
     executor_lease_service = ExecutorLeaseService(site_authority)
     _container_module.resolved_executor_lease_service = executor_lease_service
     _container_module.resolved_lease_route_service = LeaseRouteService(
-        executor_lease_service, lease_lifecycle_service
+        executor_lease_service, lease_lifecycle_service, reports=lease_end_reports.read
     )
     _container_module.resolved_host_operations_service = app.container.host_operations_service()
 

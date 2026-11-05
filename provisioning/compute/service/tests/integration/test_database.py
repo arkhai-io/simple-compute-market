@@ -503,6 +503,10 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "20261027_001_vm_fulfillment_request_carries_no_connectivity",
         "20261028_001_retired_reservation_states",
         "20261028_002_hosts_drop_gpu_columns",
+        "20261101_001_pool_relays",
+        "20261101_002_relay_grant_keys",
+        "20261101_003_relay_lease_grants",
+        "20261102_001_lease_end_reports",
     }
 
 

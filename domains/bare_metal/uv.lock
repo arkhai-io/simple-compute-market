@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 
 [[package]]
@@ -35,7 +35,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal"
-version = "0.14.0"
+version = "0.15.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-compute" },
@@ -43,6 +43,7 @@ dependencies = [
     { name = "arkhai-kit-capability-shape" },
     { name = "arkhai-kit-resource-pools-contracts" },
     { name = "pydantic" },
+    { name = "pydantic-core" },
 ]
 
 [package.optional-dependencies]
@@ -63,7 +64,8 @@ requires-dist = [
     { name = "arkhai-core-storefront", marker = "extra == 'storefront'", specifier = ">=0.16.0" },
     { name = "arkhai-kit-capability-shape", specifier = ">=0.3.0" },
     { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.3.0" },
-    { name = "pydantic", specifier = ">=2.7" },
+    { name = "pydantic", specifier = ">=2.11" },
+    { name = "pydantic-core", specifier = ">=2.33" },
 ]
 provides-extras = ["storefront"]
 
@@ -162,6 +164,31 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-kit-deal-lifecycle"
+version = "0.1.0"
+source = { registry = "../../.dist" }
+dependencies = [
+    { name = "arkhai-kit-deal-lifecycle-contracts" },
+    { name = "arkhai-kit-identity" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_kit_deal_lifecycle-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-kit-deal-lifecycle-contracts"
+version = "0.1.0"
+source = { registry = "../../.dist" }
+dependencies = [
+    { name = "arkhai-kit-identity" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_kit_deal_lifecycle_contracts-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-kit-identity"
 version = "0.4.0"
 source = { registry = "../../.dist" }
@@ -195,6 +222,7 @@ version = "0.6.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
+    { name = "arkhai-kit-deal-lifecycle" },
     { name = "arkhai-kit-identity" },
     { name = "pydantic" },
 ]

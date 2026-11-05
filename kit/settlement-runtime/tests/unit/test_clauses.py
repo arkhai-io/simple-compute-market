@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from types import SimpleNamespace
 
 import pytest
 from market_core.query_dsl import QuerySyntaxError, QueryValidationError
@@ -80,7 +81,7 @@ def _registration(
         client_factory=lambda section, resources, role: object(),
         option_builder=lambda section, readiness, resources, role: (),
         buyer_compatibility=lambda section, option, context: (
-            compatible and option.mechanism == mechanism
+            compatible and option.settlement_schema == mechanism
         ),
         clause_fields=fields,
         publication_input_model=_PublicationInput,
@@ -97,11 +98,11 @@ def _registry(*, example_compatible: bool = True) -> SettlementConfigurationRegi
                 (
                     _field(
                         "example.method",
-                        lambda option: option.params.get("methods"),
+                        lambda option: option.settlement_params.get("methods"),
                     ),
                     _field(
                         "example.optional",
-                        lambda option: option.params.get("optional"),
+                        lambda option: option.settlement_params.get("optional"),
                         on_missing=MissingValueRule.PASS,
                     ),
                 ),
@@ -113,7 +114,7 @@ def _registry(*, example_compatible: bool = True) -> SettlementConfigurationRegi
                 (
                     _field(
                         "alkahest.chain",
-                        lambda option: option.params.get("chain"),
+                        lambda option: option.settlement_params.get("chain"),
                     ),
                 ),
             ),
@@ -140,16 +141,13 @@ def _option(
     **params: Any,
 ) -> SettlementOption:
     option_id = derive_settlement_option_id(
-        mechanism=mechanism,
-        asset=asset,
-        rates=[],
-        params=params,
+        price={"asset": asset, "rates": []},
+        settlement={"schema": mechanism, **(params or {})},
     )
     return SettlementOption(
         option_id=option_id,
-        mechanism=mechanism,
-        asset=asset,
-        params=params,
+        price={"asset": asset, "rates": []},
+        settlement={"schema": mechanism, **(params or {})},
     )
 
 
@@ -186,6 +184,36 @@ def test_one_clause_never_combines_values_from_different_options() -> None:
     assert result.candidates == ()
     assert settlement_clause_matches(clause, usd_bank, registry) is False
     assert settlement_clause_matches(clause, eur_card, registry) is False
+
+    lifecycle = {
+        "adjudication": {
+            "version": 1,
+            "dispute": {
+                "interface": "example.dispute.v1", "origin": "https://dispute.example",
+                "account": "acct_example", "record_key": "example-public-key", "params": {},
+            },
+            "dispute_window_seconds": 60, "case_hold_max_seconds": None,
+        },
+        "early_termination": {
+            "version": 1,
+            "entitlements": {"payer": {"notice_seconds": 0, "settles_through": "started_period"}},
+            "settles_through": "last_boundary",
+        },
+    }
+    # Exercise the codec at its accessor seam, independently of wire admission.
+    stoppable = SimpleNamespace(
+        settlement_schema="example.payment.v1", price_asset="usd", lifecycle=lifecycle
+    )
+    query = compile_settlement_clause(
+        "asset=usd early_termination.payer=true early_termination.premature_stop_penalty<=0",
+        registry,
+    )
+    assert settlement_clause_matches(query, stoppable, registry)
+    assert not settlement_clause_matches(query, usd_bank, registry)
+    stoppable.price_asset = "eur"
+    assert not settlement_clause_matches(query, stoppable, registry)
+    with pytest.raises(QueryValidationError, match="asset"):
+        compile_settlement_clause("early_termination.premature_stop_penalty>0", registry)
 
 
 def test_first_surviving_clause_precedes_mechanism_priority() -> None:

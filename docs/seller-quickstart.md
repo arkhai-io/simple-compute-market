@@ -146,7 +146,6 @@ enabled = true
 service_url = "https://<PAYMENTS_SERVICE>"
 service_identity = { scheme = "ed25519", identifier = "<RECEIPT_SIGNING_KEY>" }
 fee_bps = 250
-dispute_authority = "<DISPUTE_AUTHORITY_ACCOUNT>"
 api_key_env = "ARKHAI_PAYMENTS_API_KEY"   # names the variable; the key stays in the environment
 livemode = true                          # false against the public test-mode service
 
@@ -161,9 +160,13 @@ at its site, and the storefront's per-pool overrides, take precedence over them;
 there is no command-level override, because the storefront republishes on its
 own and must reach the same terms every cycle.
 
-The receipt-signing identity, fee policy, and dispute authority are trusted
-configuration that both settlement and refunds check against; the API key is
-read from the named environment variable and is never written to
+The receipt-signing identity and fee policy are trusted service configuration.
+Dispute authorities are root `[[Dispute]]` preferences followed by the registry's
+recommendations (enabled by default for a storefront), not a payments-service
+setting; an empty resolved list is reported at startup. See
+[dispute authority preferences](development/DEPLOYMENT_AND_CONFIG.md#dispute-authority-preferences).
+The accepted option fixes its dispute authority for settlement and refunds.
+The API key is read from the named environment variable and is never written to
 configuration.
 
 The full schema is at

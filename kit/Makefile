@@ -2,7 +2,55 @@
 
 DIST_DIR ?= ../.dist
 
-test: dist test-alkahest test-capability-shape test-capability-pricing test-capability-admissibility test-capacity-publication test-pool-overrides test-config test-contact-exchange test-delivery test-delivery-apprise test-identity test-policy test-site test-site-client test-resource-pools-contracts test-resource-pools test-resource-pools-client test-fulfillment test-settlement-runtime test-negotiation-runtime test-storefront test-arkhai-payments
+test: dist test-deal-servicing test-deal-lifecycle-client test-deal-lifecycle-buyer test-arkhai-mediation test-deal-lifecycle test-deal-lifecycle-contracts test-alkahest test-capability-shape test-capability-pricing test-capability-admissibility test-capacity-publication test-pool-overrides test-config test-contact-exchange test-delivery test-delivery-apprise test-identity test-policy test-site test-site-client test-resource-pools-contracts test-resource-pools test-resource-pools-client test-fulfillment test-settlement-runtime test-negotiation-runtime test-storefront test-arkhai-payments
+
+.PHONY: test-deal-servicing test-deal-lifecycle-client test-deal-lifecycle-buyer dist-deal-lifecycle-buyer
+
+test-deal-servicing:
+	cd deal-servicing && $(MAKE) test
+
+test-deal-lifecycle-client:
+	cd deal-lifecycle-client && $(MAKE) test
+
+dist-deal-lifecycle-client: dist-deal-lifecycle-contracts
+	cd deal-lifecycle-client && $(MAKE) build DIST_DIR=$(abspath $(DIST_DIR))
+
+test-deal-lifecycle-buyer:
+	cd deal-lifecycle-buyer && $(MAKE) test
+
+dist-deal-lifecycle-buyer: dist-deal-lifecycle
+	cd deal-lifecycle-buyer && $(MAKE) build
+
+.PHONY: test-deal-lifecycle test-deal-lifecycle-contracts dist-deal-lifecycle dist-deal-lifecycle-contracts test-arkhai-mediation dist-arkhai-mediation
+
+dist-deal-servicing: dist-deal-lifecycle
+	cd deal-servicing && $(MAKE) build
+
+.PHONY: dist-deal-servicing
+
+test-arkhai-mediation:
+	cd arkhai-mediation && $(MAKE) test
+
+dist-arkhai-mediation: dist-deal-lifecycle
+	cd arkhai-mediation && $(MAKE) build
+
+test-deal-lifecycle:
+	cd deal-lifecycle && $(MAKE) test
+
+dist-deal-lifecycle: dist-deal-lifecycle-contracts
+	-mkdir -p $(DIST_DIR)
+	cd deal-lifecycle && $(MAKE) build
+	@ls $(DIST_DIR)/arkhai_kit_deal_lifecycle-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: lifecycle produced a platform-specific wheel" && exit 1)
+
+test-deal-lifecycle-contracts:
+	cd deal-lifecycle-contracts && $(MAKE) test
+
+dist-deal-lifecycle-contracts:
+	-mkdir -p $(DIST_DIR)
+	cd deal-lifecycle-contracts && $(MAKE) build
+	@ls $(DIST_DIR)/arkhai_kit_deal_lifecycle_contracts-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: lifecycle contracts produced a platform-specific wheel" && exit 1)
 
 test-alkahest:
 	cd alkahest && $(MAKE) test
@@ -69,7 +117,7 @@ test-storefront:
 
 dist: dist-ci
 
-dist-ci: dist-capability-shape dist-capability-pricing dist-capability-admissibility dist-capacity-publication dist-pool-overrides dist-contact-exchange dist-delivery dist-delivery-apprise dist-site dist-site-client dist-resource-pools-contracts dist-resource-pools dist-resource-pools-client dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-storefront dist-arkhai-payments
+dist-ci: dist-deal-lifecycle-client dist-deal-lifecycle-buyer dist-deal-servicing dist-arkhai-mediation dist-deal-lifecycle dist-deal-lifecycle-contracts dist-capability-shape dist-capability-pricing dist-capability-admissibility dist-capacity-publication dist-pool-overrides dist-contact-exchange dist-delivery dist-delivery-apprise dist-site dist-site-client dist-resource-pools-contracts dist-resource-pools dist-resource-pools-client dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-storefront dist-arkhai-payments
 
 dist-contact-exchange: dist-settlement-runtime
 	-mkdir -p $(DIST_DIR)

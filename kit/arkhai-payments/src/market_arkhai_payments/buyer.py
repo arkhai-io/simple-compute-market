@@ -26,7 +26,7 @@ from market_arkhai_payments.errors import (
 )
 from market_arkhai_payments.mandates import check
 from market_arkhai_payments.models import AccountId, Mandate
-from market_arkhai_payments.receipts import verify_receipt
+from market_arkhai_payments.receipts import verify_receipt, verify_snapshot
 from market_arkhai_payments.seller import ClientForOwner
 from market_arkhai_payments.settlement_config import (
     ArkhaiPaymentsConfig,
@@ -49,11 +49,10 @@ class PaymentApproval:
     ) -> None:
         if (
             config.fee_bps is None
-            or config.dispute_authority is None
             or config.service_identity is None
         ):
             raise ArkhaiPaymentsConfigurationError(
-                "payments fee policy, dispute authority, and service identity are required"
+                "payments fee policy and service identity are required"
             )
         self.config = config
         self.payer_account = AccountId.model_validate(payer_account).root
@@ -106,7 +105,11 @@ class PaymentApproval:
             approved = client.approve(data.mandate, agreement=attachment)
             self._require_proof(approved, agreement, data, "approval")
             snapshot = client.poll(data.transaction_id, timeout=timeout, interval=interval)
-        self._require_proof(snapshot.snapshot.receipt, agreement, data, "transaction")
+        if not verify_snapshot(
+            snapshot, self.config.receipt_trust, mandate=data.mandate,
+            agreement_json=agreement, livemode=self.config.livemode,
+        ):
+            raise ReceiptVerificationError("payments transaction receipt/snapshot does not prove the accepted Agreement")
         return data.transaction_id
 
     def _require_proof(
@@ -119,7 +122,7 @@ class PaymentApproval:
         assert self.config.service_identity is not None
         if not verify_receipt(
             receipt,
-            self.config.service_identity,
+            self.config.receipt_trust,
             mandate=data.mandate,
             agreement_json=dict(agreement),
             livemode=self.config.livemode,

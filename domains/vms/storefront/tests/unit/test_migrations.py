@@ -26,7 +26,7 @@ from market_storefront.domain_runtime import build_vm_storefront_domain, build_v
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.utils import sqlite_client as sqlite_module
 
-from tests.fulfillment_fixtures import vm_delivery_evidence
+from tests.fulfillment_fixtures import vm_delivery_evidence, seed_delivery_admission
 
 from market_storefront.utils.migrations import (
     _migrate_derived_compute_listing_pool_ids,
@@ -326,6 +326,7 @@ async def test_evidence_and_delivery_bindings_survive_restart_without_payment_es
         mechanism=pending.mechanism,
     )
     await db.save_vm_settlement_evidence(verified)
+    seed_delivery_admission(db, negotiation_id="payment-1", commitment_ref="transaction-1")
     assert await db.insert_vm_delivery(negotiation_id="payment-1")
     await db.update_vm_delivery(negotiation_id="payment-1", fulfillment_id="physical-1")
     db = SQLiteClient(path, registry=registry)

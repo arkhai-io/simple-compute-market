@@ -1,0 +1,20 @@
+[Unit]
+Description=frps server plugin admitting proxies by signed grant
+After=network.target
+Before=frps.service
+
+[Service]
+Type=simple
+User={{ frp_grant_admission_user }}
+Group={{ frp_grant_admission_user }}
+ExecStart={{ frp_grant_admission_root }}/current/bin/frp-grant-admission serve --config {{ frp_grant_admission_config_directory }}/config.toml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

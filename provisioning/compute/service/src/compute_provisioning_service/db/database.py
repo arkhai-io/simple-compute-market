@@ -9,6 +9,7 @@ from vm_provisioning_adapter.db import Base as VmBase
 
 from compute_provisioning.hosts.db import Base as HostsBase
 from compute_provisioning.jobs.db import Base as JobsBase
+from compute_provisioning.relays.db import Base as RelaysBase
 from compute_provisioning_service.db.migrations import apply_schema_migrations
 from compute_provisioning_service.db.models import Base
 
@@ -57,10 +58,12 @@ def run_migrations(engine: Engine) -> None:
     :func:`compute_provisioning_service.db.migrations.check_schema_version` instead and fails fast if
     migrations haven't been applied.
     """
-    # Resource-pool tables must be created before VM's: ansible_pool_configs
-    # has a ForeignKey to resource_pools, and SQLAlchemy's cross-metadata FK
-    # resolution during create_all needs the referenced table to exist.
+    # Resource-pool tables must be created before the relays' and VM's:
+    # pool_relays and ansible_pool_configs have foreign keys to resource_pools,
+    # and SQLAlchemy's cross-metadata FK resolution during create_all needs the
+    # referenced table to exist.
     PoolsBase.metadata.create_all(bind=engine)
+    RelaysBase.metadata.create_all(bind=engine)
     VmBase.metadata.create_all(bind=engine)
     HostsBase.metadata.create_all(bind=engine)
     JobsBase.metadata.create_all(bind=engine)

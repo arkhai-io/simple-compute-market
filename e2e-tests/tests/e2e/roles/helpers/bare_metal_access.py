@@ -1,40 +1,35 @@
-"""What the real-host bare-metal deal asks of the installed buyer commands and SSH.
+"""What the real-host bare-metal deal asks of installed buyer commands.
 
 The scenario recovers a purchase through ``market bare-metal result``, ``access``,
-and ``teardown``, each bound to the run ``buy`` recorded by ``--run-id``, and each
-printing its JSON view with no flag. Teardown is one idempotent command: its first
-call asks the site to end the lease, and each later call answers the lifecycle's
-``state`` as provisioning reports it, until the storefront records ``released`` on
-the site's capacity-released callback.
-
-Access is judged by fresh SSH processes against a host key the operator pinned, so
-an attempt cannot ride a shared connection or a host it does not know, and only an
-authentication refusal from that host proves access was revoked.
+``teardown`` and ``delivery``, each bound to the run ``buy`` recorded by ``--run-id``,
+and each printing its JSON view with no flag. Teardown is the buyer's end of
+delivery through the lifecycle client: one idempotent surrender the storefront
+acknowledges with a signed receipt. Delivery is the buyer's read of the deal: its
+``delivery.progress`` is what the storefront records, ``tearing_down`` from the
+acknowledged end until the site's capacity-released callback records ``released``,
+and its ``site_reports`` are the site-signed intended-end reports the storefront
+retained, which a proven release must carry.
 """
 
 from __future__ import annotations
 
-import enum
 import time
 from collections.abc import Callable, Mapping, Sequence
-from pathlib import Path
 from typing import Any
 
 #: The commands that recover a recorded bare-metal purchase by its run.
-RECOVERY_COMMANDS = ("result", "access", "teardown")
+RECOVERY_COMMANDS = ("result", "access", "teardown", "delivery")
 
-#: The lifecycle state the storefront records once the site has released the lease.
+#: The delivery progress the storefront records once the site has released the lease.
 RELEASED = "released"
-#: The lifecycle state of a teardown that failed; its capacity stays held.
-TEARDOWN_FAILED = "teardown_failed"
-
-#: What the access probe prints on the delivered host.
-ACCESS_PROBE_OUTPUT = "arkhai-bare-metal-access-ok"
+#: The delivery progress of an end the storefront cannot converge; its capacity stays
+#: held until an operator repairs it.
+REPAIR_REQUIRED = "repair_required"
 
 #: The events a completed ``buy`` records in its run log, in order. ``buy`` settles
 #: through Arkhai payments alone, so its one settlement event is the approval; the
 #: bare-metal buyer's run-log test pins the same sequence on the producer's side.
-BUY_EVENTS = ("run_started", "agreement_accepted", "payment_approved", "run_ended")
+BUY_EVENTS = ("run_started", "negotiation_completed", "payment_approved", "run_ended")
 #: The status a completed purchase's ``run_ended`` records.
 BUY_AGREED = "agreed"
 
@@ -62,100 +57,40 @@ def recovery_command(command: str, run_id: str) -> tuple[str, ...]:
 
 
 def wait_for_release(
-    teardown: Callable[[], Mapping[str, Any]],
+    delivery: Callable[[], Mapping[str, Any]],
     *,
     timeout_seconds: float,
     poll_interval_seconds: float,
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
 ) -> Mapping[str, Any]:
-    """Run ``teardown`` until its lifecycle is ``released``, and return that view.
+    """Read ``delivery`` until its progress is ``released``, and return that view.
 
-    Each call is the same idempotent command, so the first requests the teardown
-    and the rest observe it. A failed teardown stops the wait at once rather than
+    The end was already surrendered; each call is the same read. A released
+    delivery must carry the site's retained end report, since the storefront
+    proves the release by the site's callback and keeps the site's signed intended
+    end beside it. An end that needs repair stops the wait at once rather than
     waiting out the bound, since nothing will release its capacity.
     """
     deadline = clock() + timeout_seconds
     while True:
-        view = teardown()
-        state = view.get("state")
-        if state == RELEASED:
+        view = delivery()
+        record = view.get("delivery") or {}
+        progress = record.get("progress")
+        if progress == RELEASED:
+            if not record.get("site_reports"):
+                raise AssertionError("proven release has no retained site end report")
             return view
-        if state == TEARDOWN_FAILED:
+        if progress == REPAIR_REQUIRED:
             raise AssertionError(
-                "bare-metal teardown failed: state "
-                f"{state!r}, failure_reason {view.get('failure_reason')!r}"
+                f"bare-metal teardown needs repair: progress {progress!r}, view {view!r}"
             )
         if clock() >= deadline:
             raise AssertionError(
                 f"bare-metal teardown did not reach {RELEASED!r} within "
-                f"{timeout_seconds}s; last state {state!r}"
+                f"{timeout_seconds}s; last progress {progress!r}"
             )
         sleep(poll_interval_seconds)
-
-
-def ssh_command(
-    access: Mapping[str, Any],
-    *,
-    private_key_file: Path,
-    known_hosts_file: Path,
-) -> list[str]:
-    """One fresh, non-interactive SSH attempt with only the role's key.
-
-    It reads no configuration file and shares no connection, so a master socket
-    left by an earlier attempt cannot answer for it, and it trusts only the host
-    key the operator pinned.
-    """
-    host = str(access.get("host") or "")
-    username = str(access.get("username") or "")
-    if not host or not username:
-        raise AssertionError("authenticated access view omitted host or username")
-    port = int(access.get("port") or 22)
-    options = (
-        "BatchMode=yes",
-        "ConnectTimeout=10",
-        "ControlMaster=no",
-        "ControlPath=none",
-        "IdentitiesOnly=yes",
-        "IdentityAgent=none",
-        "PreferredAuthentications=publickey",
-        "PasswordAuthentication=no",
-        "KbdInteractiveAuthentication=no",
-        "StrictHostKeyChecking=yes",
-        f"UserKnownHostsFile={known_hosts_file}",
-        "GlobalKnownHostsFile=/dev/null",
-        "UpdateHostKeys=no",
-    )
-    command = ["ssh", "-F", "none", "-i", str(private_key_file), "-p", str(port)]
-    for option in options:
-        command += ["-o", option]
-    return [*command, f"{username}@{host}", f"printf {ACCESS_PROBE_OUTPUT}"]
-
-
-class SshOutcome(enum.Enum):
-    """What one SSH attempt proved about the tenant's access."""
-
-    ACCEPTED = "accepted"
-    REFUSED = "refused"
-
-
-def classify_ssh(returncode: int, stdout: str, stderr: str) -> SshOutcome:
-    """Read one attempt as access accepted or refused by authentication.
-
-    SSH exits 255 for its own failures, a refused connection, a timeout, and a
-    host-key mismatch among them, so the exit status alone cannot tell a revoked
-    key from a host that could not be reached. Only the server's refusal of the
-    public key proves revocation; every other failure is raised, never counted
-    as revoked.
-    """
-    if returncode == 0 and stdout == ACCESS_PROBE_OUTPUT:
-        return SshOutcome.ACCEPTED
-    if returncode == 255 and "Permission denied" in stderr and "publickey" in stderr:
-        return SshOutcome.REFUSED
-    raise AssertionError(
-        f"SSH attempt proved neither access nor revocation: exit {returncode}, "
-        f"stderr {stderr.strip()[-300:]!r}"
-    )
 
 
 def forbidden_flags(arguments: Sequence[str], flags: Sequence[str]) -> list[str]:
@@ -169,17 +104,13 @@ def forbidden_flags(arguments: Sequence[str], flags: Sequence[str]) -> list[str]
 
 
 __all__ = [
-    "ACCESS_PROBE_OUTPUT",
     "BUY_AGREED",
     "BUY_EVENTS",
     "RECOVERY_COMMANDS",
     "RELEASED",
-    "TEARDOWN_FAILED",
-    "SshOutcome",
+    "REPAIR_REQUIRED",
     "assert_purchase_recorded",
-    "classify_ssh",
     "forbidden_flags",
     "recovery_command",
-    "ssh_command",
     "wait_for_release",
 ]

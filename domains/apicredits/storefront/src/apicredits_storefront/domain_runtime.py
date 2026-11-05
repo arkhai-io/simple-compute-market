@@ -84,7 +84,7 @@ async def prepare_api_credit_settlement(**context: Any) -> Any:
         raise ValueError("accepted negotiation is unavailable")
     agreement, _raw = accepted_agreement(thread)
     try:
-        stage = SELLER_STAGES[agreement.settlement.mechanism]
+        stage = SELLER_STAGES[agreement.settlement.settlement_schema]
     except KeyError as exc:
         raise ValueError("unsupported accepted settlement mechanism") from exc
     return await stage.prepare(**context)
@@ -145,7 +145,7 @@ async def fulfill_api_credit_settlement(prepared: Any, *, mechanism_client: Any)
     db = prepared.fulfillment_input.sqlite_client
     thread = await db.load_negotiation_thread_row(negotiation_id=prepared.agreement_ref)
     agreement, _raw = accepted_agreement(thread)
-    return await SELLER_STAGES[agreement.settlement.mechanism].deliver_prepared(
+    return await SELLER_STAGES[agreement.settlement.settlement_schema].deliver_prepared(
         prepared, mechanism_client=mechanism_client,
     )
 

@@ -66,6 +66,8 @@ class HostRouteService:
                 f"Host '{body.host_id}' already exists. Use PUT /hosts/{body.host_id} to "
                 f"update or POST /hosts/{body.host_id}/enable to re-enable.",
             ) from exc
+        except PoolChangeRefusedError as exc:
+            raise ProvisioningRouteError(409, str(exc)) from exc
         except ValueError as exc:
             raise ProvisioningRouteError(400, str(exc)) from exc
 
@@ -109,24 +111,27 @@ class HostRouteService:
         would make without making them, problems included. An applying request
         with any problem is refused with 422, its detail the same response, so a
         caller reads every problem whichever way it asked. A host the document
-        creates that another request registered first fails the commit, and is
+        creates that another request registered first fails the write, and is
         refused as a conflict: the document can be submitted again.
         """
         with self._hosts.session() as db:
-            outcome = reconcile_host_definitions_in_session(db, self._hosts, body.yaml_text)
-            applied = outcome.valid and not body.validate_only
-            if applied:
-                try:
+            # A new host placed in a pool is flushed during reconciliation, so
+            # its pool-change hooks can read it; that flush, like the commit,
+            # can meet a host another request registered first.
+            try:
+                outcome = reconcile_host_definitions_in_session(db, self._hosts, body.yaml_text)
+                applied = outcome.valid and not body.validate_only
+                if applied:
                     db.commit()
-                except IntegrityError as exc:
+                else:
                     db.rollback()
-                    raise ProvisioningRouteError(
-                        409,
-                        "a host this document creates was registered by another request "
-                        "while it was applied; submit the document again",
-                    ) from exc
-            else:
+            except IntegrityError as exc:
                 db.rollback()
+                raise ProvisioningRouteError(
+                    409,
+                    "a host this document creates was registered by another request "
+                    "while it was applied; submit the document again",
+                ) from exc
         response = HostDefinitionsImportResponse(
             applied=applied,
             diff=outcome.diff,

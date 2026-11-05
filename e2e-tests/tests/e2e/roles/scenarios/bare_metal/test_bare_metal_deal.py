@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import os
 import shlex
-import subprocess
 from importlib.metadata import entry_points
 from pathlib import Path
 from typing import Any
@@ -21,12 +20,9 @@ from market_identity import Identity, IdentityScheme
 from e2e_harness.settings import settings
 from tests.e2e.roles.buyer_cli import BuyerCli, create_profiled_buyer_cli
 from tests.e2e.roles.helpers.bare_metal_access import (
-    SshOutcome,
     assert_purchase_recorded,
-    classify_ssh,
     forbidden_flags,
     recovery_command,
-    ssh_command,
     wait_for_release,
 )
 from tests.e2e.roles.helpers.domain_deal import (
@@ -34,6 +30,7 @@ from tests.e2e.roles.helpers.domain_deal import (
     DomainDealState,
     assert_market_run_succeeded,
 )
+from tests.e2e.roles.helpers.ssh_access import SshEndpoint, SshKey, SshOutcome, ssh_session
 
 pytestmark = pytest.mark.e2e_bare_metal_deal
 
@@ -79,17 +76,13 @@ def _ssh(
     private_key_file: Path,
     known_hosts_file: Path,
 ) -> SshOutcome:
-    attempt = subprocess.run(
-        ssh_command(
-            access,
-            private_key_file=private_key_file,
-            known_hosts_file=known_hosts_file,
-        ),
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    return classify_ssh(attempt.returncode, attempt.stdout, attempt.stderr)
+    host = str(access.get("host") or "")
+    username = str(access.get("username") or "")
+    if not host or not username:
+        raise AssertionError("authenticated access view omitted host or username")
+    endpoint = SshEndpoint(host, int(access.get("port") or 22), username)
+    with ssh_session(known_hosts_file=known_hosts_file) as session:
+        return session.access_outcome(endpoint, SshKey(private_key_file, public_line=""))
 
 
 @pytest.fixture(scope="module")
@@ -225,8 +218,11 @@ def test_bare_metal_complete_deal(
     )
     assert first_access is SshOutcome.ACCEPTED
 
+    surrendered = recover("teardown")
+    assert surrendered["delivery"]["status"] == "accepted", surrendered
+    assert surrendered["acknowledgement"]["receipt_at"] is not None, surrendered
     teardown = wait_for_release(
-        lambda: recover("teardown"),
+        lambda: recover("delivery"),
         timeout_seconds=float(_setting("TEARDOWN_TIMEOUT_SECONDS", 300)),
         poll_interval_seconds=float(_setting("POLL_INTERVAL_SECONDS", 2)),
     )

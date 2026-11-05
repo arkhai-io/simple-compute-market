@@ -6,7 +6,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import Column, MetaData, String, Table, create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool, StaticPool
 from market_resource_pools.db import (
@@ -93,6 +93,48 @@ def seeded(ledger: CapacityLedgerService) -> CapacityLedgerService:
         pool_id="default",
     )
     return ledger
+
+
+@pytest.mark.parametrize("transition", ["release", "begin_releasing", "release_failure", "force_release"])
+def test_lease_end_and_borrowed_outbox_are_atomic_and_deduplicated(transition):
+    outbox = Table("fixture_end_outbox", MetaData(), Column("event_id", String, primary_key=True))
+    fail = [True]
+
+    def reserve_report(db, payload):
+        db.execute(outbox.insert().values(event_id=payload["event_id"]))
+        if fail[0]:
+            raise RuntimeError("report reservation failed")
+
+    ledger = _make_ledger(site_id="fixture-site", lease_end_effect=reserve_report)
+    with ledger._session_factory() as db, db.begin():
+        outbox.create(db.connection())
+        db.add(CapacityReservation(
+            capacity_reservation_id="fixture-end", state="leased", offering_mode="vm",
+        ))
+
+    def end():
+        if transition == "release":
+            return ledger.release(capacity_reservation_id="fixture-end")
+        if transition == "force_release":
+            return ledger.release(capacity_reservation_id="fixture-end", forced=True)
+        if transition == "release_failure":
+            return ledger.record_release_failed("fixture-end", reason="fixture failure")
+        return ledger.begin_releasing("fixture-end", release_job_id="fixture-release")
+
+    with pytest.raises(RuntimeError, match="report reservation failed"):
+        end()
+    assert ledger.get_reservation("fixture-end")["state"] == "leased"
+    assert ledger.lease_end_events("fixture-end") == []
+    with ledger._session_factory() as db:
+        assert db.execute(select(outbox)).all() == []
+    fail[0] = False
+    assert end() is not None
+    original = ledger.lease_end_events("fixture-end")
+    assert len(original) == 1
+    end()
+    assert ledger.lease_end_events("fixture-end") == original
+    with ledger._session_factory() as db:
+        assert db.execute(select(outbox.c.event_id)).scalars().all() == [original[0]["event_id"]]
 
 
 def test_snapshot_reports_availability(seeded: CapacityLedgerService):

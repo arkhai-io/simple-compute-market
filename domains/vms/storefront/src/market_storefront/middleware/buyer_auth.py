@@ -44,6 +44,8 @@ async def _verify(
             resource=resource_id,
             body=body,
             expected_role="buyer",
+            raw_body=await request.body(),
+            capture=getattr(request.app.state, "envelope_capture", None),
             replay_store=replay_store,
             expected_principal=claimed_principal,
         )

@@ -143,3 +143,21 @@ def test_every_refusal_is_reported_at_once(repo: Path) -> None:
     _, problems = guard.check(repo)
 
     assert len(problems) == 2
+
+
+@pytest.mark.parametrize("removed_later", [False, True])
+def test_private_content_refuses_publication(
+    repo: Path, capsys: pytest.CaptureFixture[str], removed_later: bool
+) -> None:
+    # Synthetic prohibited account assembled so this test remains publishable.
+    private = "/home/" + "fixture-person" + "/work"
+    (repo / "notes.md").write_text(private, "utf-8")
+    _git(repo, "add", "notes.md")
+    _git(repo, "commit", "-qm", "notes")
+    if removed_later:
+        _git(repo, "rm", "-q", "notes.md")
+        _git(repo, "commit", "-qm", "remove notes")
+
+    assert guard.main(["push"], root=repo) == 1
+    assert _remote_head(repo, "feat/change") == ""
+    assert private not in capsys.readouterr().err

@@ -11,7 +11,7 @@ from typing import Any, TypeVar
 
 from arkhai_bare_metal import (
     BARE_METAL_OFFERING_MODE,
-    BareMetalLeaseReadyEvidence,
+    BareMetalLeaseReadyEvidenceDocument,
     BareMetalListing,
     BareMetalMaterialization,
     BareMetalMessage,
@@ -37,8 +37,10 @@ from market_core import (
     SettlementEvidence,
     validate_domain_contract,
 )
-from market_core.schemas import Agreement
+from market_core.schemas import AGREEMENT_SETTLEMENT_SCHEMA_PATH, Agreement
 from market_identity import Identity
+from market_deal_lifecycle.evidence import CommitmentAttempt
+from market_deal_servicing import EndSession, EvidenceSession
 from market_pool_overrides import pool_override_migrations
 from market_settlement_runtime import settlement_migrations
 from pydantic import BaseModel
@@ -46,6 +48,7 @@ from pydantic import BaseModel
 from .domain_runtime import get_market_domain_contract
 from .migrations import BARE_METAL_STOREFRONT_MIGRATIONS
 from .settlement_evidence import EvidencePayload
+from .lifecycle_records import register_agreement
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -123,13 +126,13 @@ class SQLiteClient(CoreSQLiteClient):
                     WHERE t.terminal_state = 'success'
                       AND t.agreement_bytes IS NOT NULL
                       AND CASE WHEN json_valid(CAST(t.agreement_bytes AS TEXT))
-                          THEN json_extract(CAST(t.agreement_bytes AS TEXT), '$.settlement.mechanism')
+                          THEN json_extract(CAST(t.agreement_bytes AS TEXT), ?)
                           END = ?
                       AND (r.status IN ('accepted', 'refunding') OR (r.status = 'settlement_verified' AND l.negotiation_id IS NULL))
                     ORDER BY t.created_at ASC, t.negotiation_id ASC
                     LIMIT ?
                     """,
-                    (mechanism, limit),
+                    (AGREEMENT_SETTLEMENT_SCHEMA_PATH, mechanism, limit),
                 ).fetchall()
             return [str(row[0]) for row in rows]
 
@@ -839,7 +842,7 @@ class SQLiteClient(CoreSQLiteClient):
         return await asyncio.to_thread(_load)
 
     async def record_bare_metal_settlement_acceptance(
-        self, *, negotiation_id: str, agreement_bytes: bytes
+        self, *, negotiation_id: str, agreement_bytes: bytes, settlement_data: Any = None
     ) -> None:
         """Record an accepted deal's settlement identity and unverified evidence, once.
 
@@ -848,10 +851,13 @@ class SQLiteClient(CoreSQLiteClient):
         different mechanism or Agreement is a conflict, not an update.
         """
 
+        if settlement_data is None:
+            thread = await self.load_negotiation_thread_row(negotiation_id=negotiation_id)
+            settlement_data = (thread or {}).get("settlement_data")
         agreement = Agreement.model_validate_json(agreement_bytes)
         if agreement.settlement is None:
             raise ValueError("accepted Agreement has no selected settlement")
-        mechanism = agreement.settlement.mechanism
+        mechanism = agreement.settlement.settlement_schema
         agreement_sha256 = hashlib.sha256(agreement_bytes).hexdigest()
         evidence_json = EvidencePayload(
             agreement_sha256=agreement_sha256
@@ -861,6 +867,8 @@ class SQLiteClient(CoreSQLiteClient):
             conn = sqlite3.connect(self.db_path)
             try:
                 with conn:
+                    conn.execute("BEGIN IMMEDIATE")
+                    register_agreement(conn, agreement_bytes, settlement_data, capture=True)
                     conn.execute(
                         "INSERT OR IGNORE INTO bare_metal_settlement_records("
                         "negotiation_id, mechanism, agreement_sha256, status, "
@@ -975,6 +983,17 @@ class SQLiteClient(CoreSQLiteClient):
                     raise RuntimeError(
                         "settlement evidence is bound to another Agreement"
                     )
+                session = EndSession(conn)
+                delivery = session.read(evidence.negotiation_id)
+                committed_at = (
+                    payload.source["receipt"]["receipt"]["approvedAt"]
+                    if evidence.mechanism == "arkhai.payments.v1"
+                    else delivery.committed_at or int(conn.execute("SELECT unixepoch()").fetchone()[0])
+                )
+                session.confirm_commitment(evidence.negotiation_id, committed_at=committed_at)
+                EvidenceSession(conn).record_commitment(
+                    evidence.negotiation_id, CommitmentAttempt(commitment_ref=delivery.commitment_ref),
+                )
                 conn.execute(
                     "UPDATE bare_metal_settlement_records SET settlement_ref = ?, status = ?, "
                     "evidence_json = ?, updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') "
@@ -1000,10 +1019,10 @@ class SQLiteClient(CoreSQLiteClient):
         self,
         *,
         evidence_digest: str,
-    ) -> BareMetalLeaseReadyEvidence | None:
+    ) -> BareMetalLeaseReadyEvidenceDocument | None:
         """Resolve one content-addressed lease-ready document, for an Alkahest deal."""
 
-        def _load() -> BareMetalLeaseReadyEvidence | None:
+        def _load() -> BareMetalLeaseReadyEvidenceDocument | None:
             conn = sqlite3.connect(self.db_path)
             try:
                 row = conn.execute(
@@ -1011,9 +1030,13 @@ class SQLiteClient(CoreSQLiteClient):
                     "WHERE lease_ready_evidence_digest = ?",
                     (evidence_digest,),
                 ).fetchone()
-                if row is None or row[0] is None:
+                if row is None:
                     return None
-                return BareMetalLeaseReadyEvidence.model_validate_json(str(row[0]))
+                if not isinstance(row[0], str):
+                    raise ValueError("stored lease-ready evidence is not canonical TEXT")
+                return BareMetalLeaseReadyEvidenceDocument(
+                    row[0].encode("utf-8"), evidence_digest
+                )
             finally:
                 conn.close()
 
@@ -1050,15 +1073,15 @@ class SQLiteClient(CoreSQLiteClient):
         self,
         *,
         negotiation_id: str,
-        evidence: BareMetalLeaseReadyEvidence,
-    ) -> BareMetalLeaseReadyEvidence:
+        evidence: BareMetalLeaseReadyEvidenceDocument,
+    ) -> BareMetalLeaseReadyEvidenceDocument:
         """Record an Alkahest fulfillment's evidence once; a retry finds it.
 
         The first evidence recorded is the one whose digest may already be on
         chain, so a later attempt reuses it rather than writing a different one.
         """
 
-        def _save() -> BareMetalLeaseReadyEvidence:
+        def _save() -> BareMetalLeaseReadyEvidenceDocument:
             conn = sqlite3.connect(self.db_path)
             try:
                 with conn:
@@ -1067,17 +1090,23 @@ class SQLiteClient(CoreSQLiteClient):
                         "lease_ready_evidence_json = ?, "
                         "lease_ready_evidence_digest = ?, "
                         "updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') "
-                        "WHERE negotiation_id = ? AND lease_ready_evidence_json IS NULL",
+                        "WHERE negotiation_id = ? AND lease_ready_evidence_json IS NULL "
+                        "AND lease_ready_evidence_digest IS NULL",
                         (evidence.canonical_json(), evidence.evidence_digest, negotiation_id),
                     )
-                row = conn.execute(
-                    "SELECT lease_ready_evidence_json FROM bare_metal_fulfillment_lifecycle "
-                    "WHERE negotiation_id = ?",
-                    (negotiation_id,),
-                ).fetchone()
-                if row is None:
-                    raise RuntimeError("bare-metal fulfillment lifecycle is missing")
-                return BareMetalLeaseReadyEvidence.model_validate_json(str(row[0]))
+                    row = conn.execute(
+                        "SELECT lease_ready_evidence_json, lease_ready_evidence_digest "
+                        "FROM bare_metal_fulfillment_lifecycle WHERE negotiation_id = ?",
+                        (negotiation_id,),
+                    ).fetchone()
+                    if row is None:
+                        raise RuntimeError("bare-metal fulfillment lifecycle is missing")
+                    if not isinstance(row[0], str):
+                        raise ValueError("stored lease-ready evidence is not canonical TEXT")
+                    stored = BareMetalLeaseReadyEvidenceDocument(
+                        row[0].encode("utf-8"), row[1]
+                    )
+                return stored
             finally:
                 conn.close()
 

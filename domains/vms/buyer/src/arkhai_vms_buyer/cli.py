@@ -22,6 +22,7 @@ from . import buy_cli as buy_module
 from . import negotiate_cli as negotiate_module
 from . import service_cli as service_module
 from . import settle_cli as settle_module
+from . import end_cli as end_module
 from .config_cli import config_app
 from .introduction_cli import request_introduction
 from .listing_cli import listing_app
@@ -106,6 +107,7 @@ def register(app: typer.Typer) -> None:
     buy_module.register(app)
     negotiate_module.register(app)
     settle_module.register(app)
+    end_module.register(app)
     service_module.register(app)
 
 

@@ -5,12 +5,15 @@ from __future__ import annotations
 import dataclasses
 import re
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pydantic
 import pytest
 from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTION
+from compute_provisioning_ansible import AnsibleJobExecutor, MockAnsibleRunner, render_extra_vars
 from compute_provisioning_ansible.runner import AnsibleResult, inventory_target
 from compute_provisioning_contracts import CREATE_JOB_RESULT_KIND
+from compute_provisioning.relays import RELAY_SECRET_VARIABLES
 
 from bare_metal_provisioning_adapter.codec import (
     BARE_METAL_INVENTORY_GROUP,
@@ -20,7 +23,7 @@ from bare_metal_provisioning_adapter.codec import (
     reclaim_policy_from,
 )
 
-from execution import HOST, host_with, job_run, json_output, shipped_output
+from execution import HOST, executor, host_with, job_run, json_output, shipped_output
 
 _ANSIBLE_ROOT = Path(__file__).resolve().parents[2] / "iac" / "ansible"
 
@@ -51,6 +54,7 @@ def test_a_grant_renders_the_access_playbooks_variables() -> None:
         "offering_mode": "bare_metal",
         "executor_action": NODE_GRANT_ACCESS_ACTION,
         "executor_target": "bm-node-1",
+        "bare_metal_reclaim_policy": "remove_lease_key",
         "executor_ref": {"physical_host_id": "physical-1"},
         "escrow_uid": "escrow-1",
         "physical_host_id": "physical-1",
@@ -266,7 +270,10 @@ def _reclaim(**changes) -> BareMetalJobParams:
 
 @pytest.mark.parametrize("render", [shipped_output, json_output], ids=["shipped yaml", "json"])
 def test_a_reclaim_reports_its_fact(render) -> None:
-    fact = _fact(NODE_RECLAIM_ACCESS_ACTION, reclaim_policy="remove_lease_key", host="bm-node-1")
+    fact = _fact(NODE_RECLAIM_ACCESS_ACTION, reclaim_policy="remove_lease_key", host="bm-node-1",
+                 activity={"tenant_uid": 41000, "sessions_ended": 1, "linger_disabled": True,
+                           "processes_killed": 2, "crontab_removed": True,
+                           "at_jobs_removed": 1, "activity_terminated": True})
 
     outcome = _interpret(_reclaim(), render(_RECLAIM_FACT, fact))
 
@@ -448,3 +455,106 @@ class TestReclaimOfAnAbsentAccount:
         body = dict(self.tasks)["Create JSON data structure for node_reclaim_access action"]
 
         assert 'account_present: "{{ bare_metal_account_present | bool }}"' in body
+
+
+# Documentation endpoints and synthetic credentials below are development fixtures
+# and must never be used on a public network.
+@pytest.mark.parametrize("render", [shipped_output, json_output])
+def test_relay_delivery_uses_the_held_port_and_reported_relay(render):
+    params = _grant(relay_id="buyer-relay", remote_port=6100)
+    fact = _fact(relay={"enabled": True, "relay_addr": "203.0.113.9", "remote_port": "6100"})
+    outcome = _interpret(params, render(_GRANT_FACT, fact))
+    endpoint = outcome.result.value["evidence"]["endpoints"][0]
+    assert (endpoint["host"], endpoint["port"], endpoint["user"]) == ("203.0.113.9", 6100, "tenant-a")
+
+
+@pytest.mark.parametrize("relay", [None, {}, {"enabled": False}, {"enabled": True, "relay_addr": "203.0.113.9", "remote_port": 6101}])
+def test_a_relay_fact_without_the_jobs_leased_port_yields_no_delivery(relay):
+    outcome = _interpret(_grant(relay_id="buyer-relay", remote_port=6100), json_output(_GRANT_FACT, _fact(relay=relay)))
+    assert outcome.result.value["evidence"] is None
+
+
+@pytest.mark.parametrize("action", [NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTION])
+def test_the_codec_resolves_credentials_only_for_the_execution_copy(action):
+    params = _grant(action=action, relay_id="buyer-relay", remote_port=6100, capacity_reservation_id="reservation-1")
+    resolver = MagicMock()
+    resolver.resolve_into.return_value = params.model_copy(update={
+        "relay_addr": "203.0.113.9", "relay_port": 7000,
+        "relay_token": "fixture-token", "relay_grant": "fixture-grant",
+    })
+    codec = BareMetalAnsibleCodec(relay_resolver=resolver)
+    run = job_run(params)
+    plan = codec.prepare(run)
+    resolver.resolve_into.assert_called_once_with(
+        params, remote_port=6100 if action == NODE_GRANT_ACCESS_ACTION else None,
+        owner_id="reservation-1",
+    )
+    assert plan.variables["frp_auth_token"] == "fixture-token"
+    assert plan.variables["relay_grant"] == "fixture-grant"
+    assert codec.secret_fields == RELAY_SECRET_VARIABLES
+    assert run.parameters["relay_token"] is None and run.parameters["relay_grant"] is None
+
+
+@pytest.mark.asyncio
+async def test_the_executor_redacts_bare_metal_relay_secrets_from_logs():
+    params = _grant(relay_id="buyer-relay", capacity_reservation_id="reservation-1", remote_port=6100)
+    resolver = MagicMock()
+    resolver.resolve_into.return_value = params.model_copy(update={
+        "relay_token": "fixture-token", "relay_grant": "fixture-grant",
+    })
+    runner = MockAnsibleRunner(default_output=lambda _: (
+        'frp_auth_token: fixture-token\nrelay_grant: fixture-grant\nrelay_admin_password: fixture-password'
+    ))
+    executor = AnsibleJobExecutor(
+        runner, BareMetalAnsibleCodec(relay_resolver=resolver), Path("/playbooks/node-access.yaml"),
+        timeout_seconds=5,
+    )
+    outcome = await executor.execute(job_run(params))
+    assert "fixture-token" not in outcome.logs
+    assert "fixture-grant" not in outcome.logs
+    assert "fixture-password" not in outcome.logs
+    assert outcome.logs.count("[REDACTED]") == 3
+
+
+@pytest.mark.parametrize("key", [
+    "relay_proxy_action", "relay_proxy_name", "relay_proxy_local_ip",
+    "relay_proxy_local_port", "relay_proxy_remote_port", "relay_client_config",
+])
+@pytest.mark.parametrize("action", [NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTION])
+def test_stored_bare_metal_job_refuses_undeclared_role_controls(key, action):
+    run = job_run(_grant(action=action))
+    plan = BareMetalAnsibleCodec().prepare(run)
+    with pytest.raises(ValueError, match=key):
+        render_extra_vars(plan.variables, {key: "synthetic-other"})
+    for injected in ({key: "synthetic-other"}, {"provider_extra_vars": {key: "synthetic-other"}}):
+        with pytest.raises(pydantic.ValidationError):
+            BareMetalAnsibleCodec().prepare(dataclasses.replace(
+                run, parameters={**run.parameters, **injected}
+            ))
+
+
+def test_bounded_policy_renders_only_accepted_correlation_and_policy_identity():
+    params = _grant(capacity_reservation_id="fixture-reservation", reclaim_policy="bounded_working_data", working_data_policy_id="fixture-v1")
+    variables = BareMetalAnsibleCodec.variables(params)
+    assert variables["bare_metal_capacity_reservation_id"] == "fixture-reservation"
+    assert variables["bare_metal_working_data_policy_id"] == "fixture-v1"
+    assert variables["bare_metal_reclaim_policy"] == "bounded_working_data"
+    assert not any(key in variables for key in ("uid", "home", "cleanup_roots", "ledger"))
+
+
+@pytest.mark.parametrize("field", ["capacity_reservation_id", "working_data_policy_id"])
+def test_bounded_policy_refuses_missing_correlation_before_execution(field):
+    values = dict(capacity_reservation_id="fixture-reservation", reclaim_policy="bounded_working_data", working_data_policy_id="fixture-v1")
+    values[field] = None
+    with pytest.raises(pydantic.ValidationError, match=field):
+        _grant(**values)
+
+
+@pytest.mark.parametrize("message, expected", [("Playbook failed", True), ("UNREACHABLE", False), ("Permission denied", False)])
+def test_real_runner_failure_messages_preserve_bounded_retry_classification(message, expected):
+    assert executor(MockAnsibleRunner(default_output=lambda run: "")).is_retryable(message) is expected
+
+
+def test_legacy_grant_explicitly_prevents_inventory_from_enabling_bounded_cleanup():
+    variables = BareMetalAnsibleCodec.variables(_grant())
+    assert variables["bare_metal_reclaim_policy"] == "remove_lease_key"

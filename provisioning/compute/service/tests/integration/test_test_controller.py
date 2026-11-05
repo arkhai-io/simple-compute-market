@@ -69,8 +69,7 @@ from compute_provisioning_contracts import (
     MockRuleView,
 )
 from vm_provisioning_adapter.services.mock_output import vm_mock_output
-from vm_provisioning_adapter.services.relay_port_allocator import RelayPortAllocator
-from vm_provisioning_adapter.services.relay_service import RelayService
+from compute_provisioning.relays import RelayPortAllocator
 
 HOST = "kvm1"
 
@@ -198,7 +197,6 @@ async def client_and_queue(
         vm_operations_service=VmOperationsService(submission=job_submission),
         host_operations_service=HostOperationsService(submission=job_submission),
         relay_port_allocator=RelayPortAllocator(session_factory),
-        relay_service=RelayService(session_factory=session_factory, settings=mock_settings),
     )
 
     app.container.vm_runtime.override(vm_runtime)

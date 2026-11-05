@@ -369,7 +369,6 @@ enabled = true
 service_url = "https://payments.example.test"
 service_identity = { scheme = "ed25519", identifier = "6yzxO_euOl9hQWih-wknLTl3HsS4UjcngV5GbK-O4WM" }
 fee_bps = 250
-dispute_authority = "33333333-3333-4333-8333-333333333333"
 api_key_env = "ARKHAI_PAYMENTS_API_KEY"
 """
 

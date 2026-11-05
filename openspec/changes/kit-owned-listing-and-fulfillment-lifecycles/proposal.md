@@ -62,7 +62,8 @@ than register payments on the obligation worker.
 - Move the seller listing lifecycle into `kit/capacity-publication`, over the common
   binding it already owns: close, pause, reopen, and successor carry-over, with the
   domain supplying its payload codec and its successor-identity rule.
-- Move restart-safe fulfillment convergence into the compute family kit: obligation
+- Move restart-safe calling fulfillment convergence into `domains/compute/delivery`
+  or a higher compute-family composition, not the `compute_provisioning` base kit: obligation
   resumption after restart, terminal-state driving, executor-result reconciliation,
   and teardown independence, with the domain supplying the executor payload, result
   decoding, and effects. It is compute-family code — only the VM and bare-metal
@@ -71,8 +72,8 @@ than register payments on the obligation worker.
 - Proposed (see `design.md`): make the servicing worker's ready step the one way every
   domain starts fulfillment, composed from mechanism and domain contributions; one
   publisher port; a layered evidence envelope; a mechanism-neutral verification contract
-  registering the committed plan; one access rule, with VM's stored access material
-  retired; recovery resources required while a mechanism is configured, and startup
+  registering the committed plan; consume unify-compute-delivery-path's checkpoint
+  recovery and live-access/credential-retirement rule rather than reimplement them; recovery resources required while a mechanism is configured, and startup
   refused while a mechanism with no configured section has unfinished obligations.
 - Compose all three domains and remove every domain-local copy in this change.
 - Keep, in the unified delivery surface, the rule `unbacked-bare-metal-listings` gives both
@@ -101,9 +102,9 @@ None.
 
 - Do not extract the shell, authentication, or persistence residue — sibling changes.
 - Do not change fulfillment semantics for any domain; a divergence between copies is
-  recorded and one behavior chosen, not silently adopted. The proposed access rule is
-  such a choice: VM's buyers would read access material from an access route rather
-  than from settle status.
+  recorded and one behavior chosen, not silently adopted. Compute access consumes
+  unify's live guard and credential retirement; VM settle/status remains the access
+  surface. This change does not invent a second access route or clearing migration.
 
 ## Impact
 
@@ -111,7 +112,8 @@ None.
   `fulfillment_service.py`, `fulfillment_resume_runtime.py`;
   API-credit `listing_service.py`, `fulfillment_service.py`; bare-metal
   `fulfillment_service.py`, `hosted_lifecycle.py`, and the listing handlers in `api.py`.
-  `kit/capacity-publication` and a fulfillment convergence kit gain the mechanisms.
+  `kit/capacity-publication` gains listing lifecycle; `domains/compute/delivery` or a
+  higher family composition gains calling convergence above protected checkpoint recovery.
 - Tests: three domains' listing and fulfillment suites collapse into kit suites plus
   per-domain hook conformance.
 
@@ -131,7 +133,10 @@ None.
 ## Dependencies and Related Changes
 
 - Depends on `kit-owned-storefront-shell`, whose shared routes dispatch to these
-  lifecycles.
+  lifecycles, and has a design-level dependency on `unify-compute-delivery-path` for
+  protected checkpoint-effect recovery and credential retirement. Obligation discovery
+  and cross-mechanism terminal driving remain here; the broader worker delegates
+  protected effects to that path.
 - Builds on `kit-owned-capacity-and-publication` (the common binding) and
   `kit-owned-settlement-runtime` (archived; the obligation journal fulfillment
   convergence reads).

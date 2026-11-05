@@ -6,6 +6,7 @@ import json
 import logging
 from typing import Any
 
+from market_core.schemas import settlement_option_schema
 from core_storefront.models.settle_models import (
     EvaluateSettleRequest,
     EvaluateSettleResponse,
@@ -87,7 +88,7 @@ class SettleController:
         if composition is None:
             raise HTTPException(status_code=503, detail="settlement runtime is unavailable")
         try:
-            stage = composition.seller_stages[selected.get("mechanism")]
+            stage = composition.seller_stages[settlement_option_schema(selected)]
         except KeyError as exc:
             raise HTTPException(status_code=400, detail="accepted settlement mechanism is unsupported") from exc
         try:
@@ -299,7 +300,7 @@ async def refund_settlement(negotiation_id: str) -> Any:
     composition = _container.resolved_settlement_composition
     if composition is None:
         raise HTTPException(status_code=503, detail="settlement runtime is unavailable")
-    stage = composition.seller_stages.get((agreement.get("settlement") or {}).get("mechanism"))
+    stage = composition.seller_stages.get(settlement_option_schema(agreement.get("settlement") or {}))
     refund = getattr(stage, "refund", None)
     if refund is None:
         # A mechanism whose seller entry has no refund operation refunds

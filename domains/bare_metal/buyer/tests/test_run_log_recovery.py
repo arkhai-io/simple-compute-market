@@ -13,10 +13,10 @@ convention in ``docs/development/TESTING.md`` asks: ``fresh_identity``,
 ``recovery_identity`` for the recovery. Configuration is a real file read by the
 real loader. The seller is a fake served over loopback HTTP: it verifies each
 request's version 2 proof against the buyer's principal, derives the payment
-mandate through the payments kit's seller stage, and signs every response as the
-listing's publisher. Payment approval is the payments kit's real
-``PaymentApproval`` over its in-memory ``FakePaymentsClient``. Nothing here is a
-live purchase or a real storefront.
+mandate through the payments kit's seller stage, accepts the buyer's lifecycle
+commit, and signs every response as the listing's publisher. Payment approval is
+the payments kit's real ``PaymentApproval`` over its in-memory
+``FakePaymentsClient``. Nothing here is a live purchase or a real storefront.
 """
 
 from __future__ import annotations
@@ -86,28 +86,36 @@ _PAYMENTS = {
     # Never contacted: the approval's payments client is the in-memory fake.
     "service_url": "http://127.0.0.1:9",
     "fee_bps": 250,
-    "dispute_authority": _DISPUTE_AUTHORITY,
 }
 
-_OPTION_PARAMS = {
-    "payee_account": _PAYEE_ACCOUNT,
-    "asset": "USD/6",
-    "window": "P7D",
-    "deposit_agreement": False,
+# A development dispute authority the option names and the buyer's configuration
+# accepts; its origin is a documentation address and is never contacted here.
+_DISPUTE = {
+    "interface": "arkhai.mediation.v1",
+    "origin": "https://dispute.example",
+    "account": _DISPUTE_AUTHORITY,
+    "record_key": "example-record-key",
+    "params": {},
 }
-_RATES = [RateValue(field="amount", value="1000000", per="hour")]
-_OPTION = SettlementOption(
-    option_id=derive_settlement_option_id(
-        mechanism=ARKHAI_PAYMENTS_MECHANISM,
-        asset="USD/6",
-        rates=_RATES,
-        params=_OPTION_PARAMS,
-    ),
-    mechanism=ARKHAI_PAYMENTS_MECHANISM,
-    asset="USD/6",
-    rates=_RATES,
-    params=_OPTION_PARAMS,
-)
+_OPTION_BODY = {
+    "price": {"asset": "USD/6", "rates": [RateValue(field="amount", value="1000000", per="hour")]},
+    "settlement": {
+        "schema": ARKHAI_PAYMENTS_MECHANISM,
+        "payee_account": _PAYEE_ACCOUNT,
+        "window": "P7D",
+        "deposit_agreement": False,
+    },
+    "lifecycle": {
+        "adjudication": {
+            "version": 1,
+            "dispute": _DISPUTE,
+            "dispute_window_seconds": 120,
+            "case_hold_max_seconds": None,
+        },
+        "delivery_deadline_seconds": 60,
+    },
+}
+_OPTION = SettlementOption(option_id=derive_settlement_option_id(**_OPTION_BODY), **_OPTION_BODY)
 
 
 class _Seller:
@@ -131,17 +139,10 @@ class _Seller:
 
         if method == "POST" and path == "/api/v1/negotiate/new":
             return "negotiate_new", body["listing_id"], self._accept(body)
-        settle = f"/api/v1/settle/{_NEGOTIATION_ID}"
-        if method == "POST" and path == settle:
-            return "settle_escrow", _NEGOTIATION_ID, {
-                "negotiation_id": _NEGOTIATION_ID,
-                "escrow_uid": _NEGOTIATION_ID,
-                "settlement_ref": self.transaction_id,
-                "status": "settlement_verified",
-                "retryable": False,
-                "buyer_principal": _BUYER.identity.model_dump(mode="json"),
-                "seller_principal": _SELLER.identity.model_dump(mode="json"),
-            }
+        lifecycle = f"/api/v1/negotiations/{_NEGOTIATION_ID}/lifecycle"
+        if method == "POST" and path == lifecycle and body.get("kind") == "commit":
+            # The seller has observed the verified receipt: the commit is accepted.
+            return "lifecycle_peer", _NEGOTIATION_ID, {"outcome": {"status": "accepted"}}
         access = f"/api/v1/fulfillments/{_NEGOTIATION_ID}/access"
         if method == "GET" and path == access:
             return "bare_metal_fulfillment_access", _NEGOTIATION_ID, dict(_ACCESS)
@@ -158,9 +159,11 @@ class _Seller:
             buyer=body["buyer_principal"],
             seller=_SELLER.identity.model_dump(mode="json"),
             settlement=_OPTION,
-            settlement_params=selection["params"],
+            settlement_params={
+                key: value for key, value in selection["settlement"].items() if key != "schema"
+            },
             amount=proposal["fields"]["amount"],
-            asset=_OPTION.asset,
+            asset=_OPTION.price_asset,
             duration_seconds=body["provision_terms"]["payload"]["duration_seconds"],
             start_utc=now,
             provision_terms=body["provision_terms"],
@@ -289,8 +292,18 @@ enabled = true
 service_url = "{_PAYMENTS["service_url"]}"
 service_identity = {{scheme = "{service.scheme.value}", identifier = "{service.identifier}"}}
 fee_bps = {_PAYMENTS["fee_bps"]}
-dispute_authority = "{_DISPUTE_AUTHORITY}"
 development_auth = true
+
+[[Dispute]]
+interface = "{_DISPUTE["interface"]}"
+origin = "{_DISPUTE["origin"]}"
+account = "{_DISPUTE["account"]}"
+record_key = "{_DISPUTE["record_key"]}"
+params = {{}}
+
+[Dispute.advertisement]
+mechanisms = ["{ARKHAI_PAYMENTS_MECHANISM}"]
+minimum_dispute_window_seconds = 60
 """.strip(),
         encoding="utf-8",
     )
@@ -404,7 +417,7 @@ def test_a_deal_bought_is_recovered_from_the_run_log_buy_wrote(
         # real-host bare-metal deal reads exactly these from the log buy wrote.
         assert [event["event"] for event in events] == [
             "run_started",
-            "agreement_accepted",
+            "negotiation_completed",
             "payment_approved",
             "run_ended",
         ]
@@ -419,6 +432,6 @@ def test_a_deal_bought_is_recovered_from_the_run_log_buy_wrote(
     assert seller.refusals == []
     assert seller.requests == [
         ("POST", "/api/v1/negotiate/new"),
-        ("POST", f"/api/v1/settle/{_NEGOTIATION_ID}"),
+        ("POST", f"/api/v1/negotiations/{_NEGOTIATION_ID}/lifecycle"),
         ("GET", f"/api/v1/fulfillments/{_NEGOTIATION_ID}/access"),
     ]

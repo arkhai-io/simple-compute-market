@@ -1,0 +1,8 @@
+---
+- name: Prepare bare-metal buyer relay access
+  hosts: bare_metal_nodes
+  become: true
+  roles:
+    - relay-client
+    - role: ../../roles/bare-metal-working-data
+      when: bare_metal_working_data_policy is defined

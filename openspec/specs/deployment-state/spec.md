@@ -162,9 +162,18 @@ Deployment manifests and operator configuration MUST reference the destination p
 - **WHEN** package, image, command, and manifest references are scanned after migration
 - **THEN** all active deployments use the compute-owned service and no runtime path depends on the repository's parent-directory layout
 
+### Requirement: Payment credentials stay with their owning process
+
+The Arkhai payments API key MUST reach only its owning buyer or seller process. Outside loopback the payments service origin MUST use HTTPS. Public renderings MUST omit resolved credentials and contain no payment authority, provider, database or worker deployment.
+
+#### Scenario: A non-loopback origin is plain HTTP
+
+- **WHEN** a role's `[Settlement.arkhai_payments]` names an `http://` service origin on a non-loopback host
+- **THEN** its configuration is refused, naming the HTTPS requirement
+
 ### Requirement: Marketplace deployment config contains consumer data only
 
-Arkhai payment consumers MUST use `[Settlement.arkhai_payments]` for trusted service origin, Ed25519 receipt identity, fee and dispute policy, and an environment-variable name for the owner's API key. The API key MUST reach only its owning buyer or seller process. Outside loopback the service origin MUST use HTTPS. Public renderings MUST omit resolved credentials and contain no payment authority, provider, database, or worker deployment.
+Arkhai payment consumers MUST use `[Settlement.arkhai_payments]` for trusted service origin, Ed25519 receipt identity, fee policy, and an environment-variable name for the owner's API key, and `[[Dispute]]` and `[[DisputeCredential]]` entries for the dispute authorities they offer or accept; registry descriptors may recommend authorities.
 
 #### Scenario: Payments consumer is rendered
 
@@ -584,9 +593,18 @@ described as deployable.
 - **WHEN** a domain contribution moves between a standalone storefront and a shared multi-domain storefront process
 - **THEN** only the stack's contribution/config binding changes while public domain identity, selected-site routing, and scenario endpoints remain exact
 
+### Requirement: Payment, dispute and site authority state keep their owners
+
+The payments service owns transaction, ledger, hold-release, hold-extension and fee state, and the agreement's dispute authority owns case and outcome state. VM and bare metal MUST keep selected-site authority bindings independent of payment trust. API credits MUST keep its registry, credits authority, gated application, storefront and buyer roles separate.
+
+#### Scenario: A payments deal is accepted on a bare-metal site
+
+- **WHEN** a bare-metal storefront accepts an Arkhai payments deal on a selected site
+- **THEN** the deal's site binding rests on that site's own authority trust, not on the payments receipt identity, and the storefront keeps no ledger of the payment
+
 ### Requirement: Domain payment persistence is role-owned
 
-Storefront databases MUST persist exact Agreement bytes and opaque settlement data in `negotiation_threads`; domain receipt and fulfillment or grant progress MUST stay under that storefront's ordered migrations. The payments service owns transaction, ledger, hold-release, fee, and dispute state. VM and bare metal MUST keep selected-site authority bindings independent of payment trust. API credits MUST keep its registry, credits authority, gated application, storefront, and buyer roles separate.
+Storefront databases MUST persist exact Agreement bytes and opaque settlement data in `negotiation_threads`; domain receipt and fulfillment or grant progress MUST stay under that storefront's ordered migrations.
 
 #### Scenario: Seller restarts after payment approval
 
@@ -997,6 +1015,52 @@ carry `app.kubernetes.io/name`.
 - **WHEN** both local topology releases are rendered
 - **THEN** no Pod annotated `helm.sh/hook: test` carries all of any rendered Deployment's
   `matchLabels` or any rendered Service's selector
+
+### Requirement: Evolution preserves retained accepted representations
+
+A change evolving retained signed or content-addressed state MUST preserve the
+original accepted representation and identity. Proof verification MUST use the
+owning protocol's canonicalization and framing over that representation before
+conversion to an application view. A migration MUST NOT replace accepted content
+with a current-model dump. Derived unsigned state MAY migrate separately.
+
+#### Scenario: A decoded view gains a defaulted field
+
+- **WHEN** an upgrade adds a defaulted field to the application view of retained
+  bare-metal lease-ready evidence
+- **THEN** original evidence bytes, digest, signature input, and supported v1
+  decoding remain unchanged
+
+#### Scenario: A derived field is renamed
+
+- **WHEN** a migration renames derived state beside retained accepted content
+- **THEN** the original accepted representation and identity are not rewritten
+
+### Requirement: Preservation respects explicit support and retention boundaries
+
+Representation preservation MUST NOT extend authorized retention, reverse deletion
+or tombstoning, or reenable explicitly unsupported wire versions. A reader-removal
+change MUST identify supported reference and read obligations and establish that
+none still needs the reader. Zero nonterminal records alone MUST NOT establish
+that retained terminal evidence or supported recovery is unused.
+
+#### Scenario: Contact retention deletes an accepted payload
+
+- **WHEN** the contact capability deletes payloads under its authorized policy
+- **THEN** existing tombstone and refusal behavior remain authoritative, and the
+  deleted payload is not presented as replacement content under its old proof
+
+#### Scenario: A previous-wire payment mandate is loaded
+
+- **WHEN** settlement data carries a mandate the settlement contract explicitly refuses
+- **THEN** it remains refused and unchanged rather than converted or reenabled
+
+#### Scenario: Terminal evidence still has supported readers
+
+- **WHEN** no nonterminal contract needs a decoder but retained terminal evidence
+  still has a supported read obligation
+- **THEN** a removal change cannot declare that decoder unused from the
+  nonterminal count alone
 
 ### Requirement: The provisioning chart renders a host definitions document
 

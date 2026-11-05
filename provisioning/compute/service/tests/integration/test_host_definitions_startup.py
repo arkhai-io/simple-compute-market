@@ -10,7 +10,7 @@ start whole and records nothing, so the next start retries it.
 External boundary: SQLAlchemy against file-backed SQLite, with real pool and
 host documents in a temp directory, driven through the service's real startup
 entry points and importer. The host authority is composed as the service
-composes it, with the real ``ssh`` codec and VM's pool-change hook. All of it
+composes it, with the real ``ssh`` codec and the relays' host hooks. All of it
 is deterministic and does no network I/O.
 """
 
@@ -24,13 +24,13 @@ import yaml
 from bare_metal_provisioning_adapter.services.bare_metal_pool_config_handler import (
     BareMetalPoolConfigHandler,
 )
+from compute_provisioning.relays import Relay, RelayPortLease
 from compute_provisioning_ansible import ssh_connection
 from compute_provisioning_contracts import HostCreate
 from cryptography.fernet import Fernet
 from market_resource_pools import ResourcePoolService
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vm_provisioning_adapter.db import Relay, RelayPortLease
 from vm_provisioning_adapter.services.ansible_pool_config_handler import (
     AnsiblePoolConfigHandler,
 )
@@ -109,7 +109,7 @@ class _Site:
         self.session_factory = sessionmaker(bind=self.engine)
         with self.session_factory() as db, db.begin():
             # Service-internal state setup: the relay the relay pool dials. A
-            # relay row is the precondition VM's hook reads, and no host
+            # relay row is the precondition the relays' hook reads, and no host
             # document can create one.
             db.add(Relay(
                 id="site-a", relay_addr="203.0.113.9", relay_port=7000,
@@ -124,8 +124,7 @@ class _Site:
         )
         self.hosts = _container_module._make_host_authority(
             self.session_factory,
-            SimpleNamespace(ssh_decryption_key=_KEY),
-            _container_module.VM_HOST_POOL_CHANGE_HOOKS,
+            _container_module._make_connection_codecs(SimpleNamespace(ssh_decryption_key=_KEY)),
         )
         self.pool_path = tmp_path / "pools.yaml"
         self.host_path = tmp_path / "host-definitions.yaml"
@@ -316,7 +315,7 @@ def test_a_structurally_invalid_document_fails_startup_and_the_next_start_retrie
 
 
 def test_a_hook_refusing_a_move_fails_startup_naming_the_host(site):
-    """VM's hook refuses moving a host whose VM tunnel a buyer holds to a pool
+    """The relays' hook refuses moving a host whose VM tunnel a buyer holds to a pool
     dialling another relay. The new host the document names first was written
     before the refusal, and only the rollback takes it away."""
     first = _document(_entry("kvm1", pool_id=_RELAY_POOL))

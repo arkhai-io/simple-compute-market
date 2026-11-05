@@ -211,8 +211,14 @@ def test_a_failed_check_exits_1_with_its_reason_on_standard_error(
 def test_a_failed_push_exits_1_whatever_git_returned(
         tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root = _repository(tmp_path / "workspace", CHANGE)
+    # The push's public-content check compares with the remote's refs, so `origin`
+    # has one before its URL names a remote that does not exist.
+    _git(tmp_path, "init", "-q", "--bare", str(tmp_path / "remote.git"))
+    _git(root, "remote", "add", "origin", str(tmp_path / "remote.git"))
+    _git(root, "push", "-q", "origin", "main")
+    _git(root, "fetch", "-q", "origin")
+    _git(root, "remote", "set-url", "origin", str(tmp_path / "no-such-remote"))
     _git(root, "checkout", "-q", "-b", "feat/x")
-    _git(root, "remote", "add", "origin", str(tmp_path / "no-such-remote"))
 
     status, out, err = _printed(capsys, lambda: cli.main(["push"], root=root))
     assert status == 1
@@ -716,8 +722,13 @@ COMMAND = "scripts/change-workflow"
     ("design", ["UNATTENDED=1", "ALLOW=Bash(make lock);Bash(gh run *)"],
      [f"{COMMAND} start design \"X\" --unattended --allow 'Bash(make lock)' "
       "--allow 'Bash(gh run *)'"]),
-    ("plan", ["FRESH=1"], [f'{COMMAND} start plan "X"']),
+    ("design", ["ARGUMENTS=x"], [f'{COMMAND} start design "X"']),
+    ("design", ["UNATTENDED=1", "ARGUMENTS=it's"],
+     [f"{COMMAND} start design \"X\" --arguments 'it'\\''s' --unattended"]),
+    ("plan", ["FRESH=1", "ARGUMENTS=x"], [f'{COMMAND} start plan "X"']),
     ("plan", ["UNATTENDED=1", "FRESH=1"], [f'{COMMAND} start plan "X" --fresh --unattended']),
+    ("plan", ["UNATTENDED=1", "FRESH=1", "ARGUMENTS=go on"],
+     [f"{COMMAND} start plan \"X\" --fresh --arguments 'go on' --unattended"]),
     ("implement", ["SECTIONS=1-2", "ARGUMENTS=x", "SESSION_ID=s"],
      [f'{COMMAND} start implement "X" --sections "1-2"']),
     ("implement", ["SECTION=3", "UNATTENDED=1", "ARGUMENTS=it's", "SESSION_ID=s-1"],
