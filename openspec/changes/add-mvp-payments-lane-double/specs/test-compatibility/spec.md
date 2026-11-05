@@ -4,10 +4,20 @@
 
 The VM, bare-metal and API-credit lanes MUST each run a payments double that wraps the payments kit's `PaymentsAuthority` engine and mirrors the payments service's HTTP API: its routes, bearer authentication, approval admission, read authorization, idempotency and error codes. The double MUST always sign `livemode: false`, MUST be reached over HTTPS under a lane CA the lane's callers trust through `SSL_CERT_FILE`, and MUST hold only labelled public development fixtures. Its suite and documentation MUST claim only the once-only surface; passing against it MUST NOT be reported as hosted-ledger, funding or live evidence.
 
-#### Scenario: A lane's once-only payment scenarios run
+#### Scenario: A lane's once-only payment scenario runs
 
-- **WHEN** the bare-metal or API-credit lane runs its payment scenario, or the VM lane runs its payment scenario's once-only stages
+- **WHEN** the bare-metal or API-credit lane runs its payment scenario
 - **THEN** the scenario approves, receives a verified receipt and is refunded through the double, and does not skip
+
+#### Scenario: The VM payment scenario's once-only stages run
+
+- **WHEN** the VM lane runs its payment scenario's once-only stages
+- **THEN** they approve, receive a verified receipt, deliver, replay the commit and reach servicing through the double without skipping, and the held payment stays in the double until the lane ends
+
+#### Scenario: An approval is retried after its mandate expires
+
+- **WHEN** a payer repeats an approval the double has already made, after the mandate's expiry
+- **THEN** the double returns the original receipt rather than refusing the mandate as expired
 
 #### Scenario: The double mirrors a refusal
 
@@ -26,12 +36,12 @@ The VM, bare-metal and API-credit lanes MUST each run a payments double that wra
 
 ### Requirement: The VM payment scenario's case stages need a mediation target
 
-The VM payment scenario's stages that need a dispute authority to accept a filed case MUST report a blocked skip naming the missing mediation target when none is configured, while its once-only stages run against the configured payments target.
+The VM payment scenario's stages that need a dispute authority to accept a filed case MUST report a blocked skip naming the missing mediation target when none is configured, while its once-only stages run against the configured payments target. The VM lane's storefront MUST hold an identity-bound dispute credential for the pinned dispute authority, a labelled public development value, so that servicing reports the deal `running` while that authority cannot be reached.
 
 #### Scenario: The VM lane has no mediation target
 
 - **WHEN** the VM lane runs its payment scenario with the lane's payments double and no mediation target
-- **THEN** the commit, delivery, replay and servicing stages run, and the operator-end case and refund stages report a blocked skip naming the mediation target
+- **THEN** the commit, delivery, replay and servicing stages run, servicing reporting the deal `running`, and the operator-end case and refund stages report a blocked skip naming the mediation target
 
 ## MODIFIED Requirements
 

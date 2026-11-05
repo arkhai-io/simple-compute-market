@@ -54,7 +54,7 @@ The local Helm release MUST configure payments through the same values a deploym
 
 ### Requirement: A storefront checks its payments access from its own container
 
-Each storefront CLI MUST offer `check-payments --account <id>`, which loads the storefront's configuration as the running storefront does, reads the named account's balance through the payments kit with the storefront's own credential and trust, prints one JSON outcome containing no credential, and exits nonzero naming the failing step: configuration, credential, transport, or the service's refusal code. The storefront charts MUST offer a Helm test that runs it in the storefront's own container specification.
+Each storefront CLI MUST offer `check-payments --account <id>`, which loads the storefront's configuration as the running storefront does, reads the named account's balance through the payments kit with the storefront's own credential and trust, prints one JSON outcome containing no credential, and exits nonzero naming the failing step: configuration, credential, transport, or the service's refusal code. The storefront charts MUST offer a Helm test that runs it directly, not through the storefront's entrypoint, with the storefront's image, configuration and secrets mounts, identity credential, CA bundle mount and `SSL_CERT_FILE`, and payments-key variable, rendered from the same chart definitions as the storefront Deployment, and without the storefront's data volume, health probes, or network-overlay capabilities and device.
 
 #### Scenario: The storefront can reach its payments service
 
@@ -69,4 +69,4 @@ Each storefront CLI MUST offer `check-payments --account <id>`, which loads the 
 #### Scenario: A deployment reruns the check
 
 - **WHEN** a deployment runs the storefront chart's Helm test
-- **THEN** the check runs with the storefront's image, configuration, CA mount and key variable, with only the command replaced
+- **THEN** the check runs with the storefront's image, configuration, credential, CA mount and key variable, and mounts no storefront data volume, so it does not depend on where the storefront's volume is attached

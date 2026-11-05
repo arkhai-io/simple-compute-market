@@ -111,11 +111,21 @@ Stages 3–4 gain a mediation prerequisite, a separate setting from `PAYMENTS`, 
 mediation double supplies one. The VM module's existing resource release frees capacity;
 its unrefunded hold lives only in the double's memory and ends with the lane.
 
-Stage 2 asserts the authority view is `running` while the pinned authority cannot be
-reached. An unreachable read becomes a non-`Accepted` view and servicing continues; if
-the assertion does not hold against an unresolvable origin, stage 2 joins stages 3–4
-behind the mediation prerequisite and the VM wiring is proven by lane setup's payments
-check (D12) alone.
+Stage 2 runs, and asserts the authority view is `running` while the pinned authority
+cannot be reached. A transport failure at the pinned origin becomes a
+`MediationTransportError`, which the mediation adapter turns into a non-`Accepted` view;
+the seller takes `state` from the payments observation whatever the dispute outcome.
+The seller reports `repair_required` instead whenever it holds no usable credential for
+the deal's dispute authority, so the VM lane's storefront carries an identity-bound
+`[[DisputeCredential]]` for the pinned authority, its `api_key_env` naming a variable that
+holds a labelled public development value. A focused storefront-level test proves the
+case: with a resolvable credential and an unresolvable pinned origin, servicing reads
+`state == "running"` with a non-`Accepted` dispute outcome, and the respondent poll
+neither raises nor marks the deal for repair. If it shows otherwise, this decision and
+the test-compatibility delta are revised together before implementation goes on.
+
+The bare-metal and API-credit lanes' storefronts carry no such credential: no domain
+code branches on `repair_required`, and only the VM scenario asserts the authority state.
 
 **Rejected:**
 
@@ -170,6 +180,9 @@ one release per namespace.
 - Its record key has no usable private half: a nothing-up-my-sleeve point, or a key
   generated with its private half discarded. It is not derived from a seed.
 - Its account has no bearer token at the double.
+- The VM storefront's `[[DisputeCredential]]` for it (D2) is the seller's token toward
+  the mediation authority, not the authority's token at the double; nothing at
+  `.invalid` ever reads it.
 
 So a copied fixture is either refused by mode, unknown to a real service, or obviously
 inert. A guard in role configuration loaders is `add-arkhai-payments-lane-double`'s
@@ -186,15 +199,26 @@ decision, because its mediation double needs a usable public signing key.
 - `PaymentsClient.get_balance(account) -> Balance` calls `GET /balances/{account}`, with
   the account validated as an `AccountId`. The client needs no knowledge of its own
   account; the service decides who may read.
-- `PaymentsAuthority.balance(account)` returns `available` from the engine's balances,
-  released payee earnings included, and `held` as one entry per part where the account is
-  the payee and the part's held amount is above zero:
-  - `address` is `hold:<transaction>:<part>`;
-  - `balance` is the part's held amount;
-  - `releaseAt` is the part's effective maturity when it has one;
-  - otherwise `until` is `lift` when extensions are open, unless an until-stop hold is
-    still awaiting its stop, and `stop` in every other case.
+- `PaymentsAuthority.balance(account)` first advances every transaction the account is a
+  party to, to the injected clock, as a snapshot does (`advance(transaction,
+  refill=False)`), so matured lots are released into the payee's `available` and rate
+  trims are refunded to the payer's before anything is read. It then returns `available`
+  from the engine's balances, released payee earnings included, and `held` as one entry
+  per part and distinct maturity among that part's held lots, where the account is the
+  payee:
+  - a timed entry's `address` is `hold:<transaction>:<part>:<releaseAt in Unix seconds>`,
+    its `balance` the sum of the part's held lots maturing then, and its `releaseAt` that
+    maturity;
+  - the part's lots with no maturity yet form one entry, `hold:<transaction>:<part>:until`,
+    whose `until` is `lift` when extensions are open, unless an until-stop hold is still
+    awaiting its stop, and `stop` in every other case.
+
+  A once part has one lot, so it has one entry; a rate part's periods each mature on
+  their own, and a single entry would report later money as releasing at the earliest
+  date. The vendored `Balance` keys entries by `address`, so several may share a part.
 - An account the engine has never seen returns `{"available": {}, "held": []}`.
+- The engine's suite reads a payee's balance just before a once hold matures, finding it
+  held, and just after, finding nothing held and the earnings net of fee in `available`.
 - `FakePaymentsClient.get_balance` delegates to the same view.
 - The double answers only the caller's own account, refusing any other with 403
   `caller_not_authorized`.
@@ -240,12 +264,19 @@ A double mirrors its producer's API unless there is a compelling reason to devia
 - `Authorization: Bearer <token>` maps to an account through the fixture account file; a
   missing or unknown token gets 401 `authentication_required`. A malformed body gets 400
   `invalid_request`.
-- `POST /transactions` approves a mandate, with optional attachments. The caller must be
-  `mandate.from`, otherwise 403 `caller_not_authorized`. Admission refuses, in order:
-  `mandate_expired`; `unsupported_asset` for anything but `USD/6`; `fee_mismatch` against
-  the double's fee policy of 250 bps; `account_not_found` when `from` or `to` is outside
-  its account directory; then the engine's `insufficient_funds` and `deal_mismatch`. An
-  exact repeat returns the same receipt.
+- `POST /transactions` approves a mandate, with optional attachments, checking in order:
+  1. bearer authentication;
+  2. the caller is `mandate.from`, otherwise 403 `caller_not_authorized`;
+  3. an exact repeat of an approved mandate returns its original receipt, whatever the
+     clock or the payer's balance now says, so a lost response can be retried;
+  4. for a new approval only, admission refuses, in order: `mandate_expired`;
+     `unsupported_asset` for anything but `USD/6`; `fee_mismatch` against the double's
+     fee policy of 250 bps; `account_not_found` when `from` or `to` is outside its account
+     directory; then the engine's `insufficient_funds` and `deal_mismatch`.
+
+  The engine's own `approve` already looks up the transaction before checking expiry; the
+  double's admission must not run ahead of that lookup. Its suite includes a retry after
+  the mandate's `expires` that receives the original receipt.
 - `GET /transactions/{id}` and `GET /transactions/{id}/mandate` answer the parties and any
   account named in any part's authorities; anyone else gets 403.
 - `POST /transactions/{id}/attachments` stores an Agreement the engine checks against the
@@ -276,7 +307,9 @@ Each lane target passes `ARKHAI_PAYMENTS__…` overrides to the test runner: the
 and identity, the accounts, that lane's seller credential, `API_KEY_ENV`, `LANE_OWNED`,
 and the bare-metal fixture's `SELLER_ACCOUNT`, `COMPUTE_HOURLY_GROSS` and
 `DISPUTE_WINDOW`. It also passes the buyer token variable `API_KEY_ENV` names,
-`SSL_CERT_FILE` and the CA mount. The values come from committed fixture files under
+`SSL_CERT_FILE` and the CA mount. The VM lane's storefront also receives its
+`[[DisputeCredential]]` for the pinned authority and the variable it names (D2). The
+values come from committed fixture files under
 `tools/payments-lane-double/`, generated into each lane's environment the way the
 `e2e-*-dev-env` targets already are. The local release's e2e-tests chart values carry the
 same keys.
@@ -295,8 +328,9 @@ One round of four sessions, then its review:
    the app.
 3. **Compose wiring:** the double in the VM, bare-metal and API-credit stacks, storefront
    payments configuration and registry recommendations, per-lane settings, the helper's
-   `LANE_OWNED` rule and CA-trusting probe, the VM scenario's mediation prerequisite, and
-   both storefront CLIs' `check-payments`, run by each lane target.
+   `LANE_OWNED` rule and CA-trusting probe, the VM scenario's mediation prerequisite, the
+   VM storefront's dispute credential and its unreachable-mediation test (D2), and both
+   storefront CLIs' `check-payments`, run by each lane target.
 4. **Helm:** the `payments-lane-double` subchart, both storefront charts' CA and
    payments-key options, the local release's payments values and deploy-target defaults,
    the `helm test` payments check, and the render cases.
@@ -315,10 +349,11 @@ The local release is where the external round's deployment shape is rehearsed:
   key Secret and the CA ConfigMap from the committed fixtures.
 - **The double.** The `payments-lane-double` subchart is enabled by the local deploy
   target, never in release values, as `dev-env` is.
-- **A rerunnable check.** A `helm test` pod runs D12's `check-payments` in the storefront's
-  own container spec, reading the seller's own balance.
-- **Render cases.** The subchart, both options, and a payments-only storefront with
-  Wallet, Chains and Alkahest null and RPC off.
+- **A rerunnable check.** A `helm test` pod runs D12's `check-payments`, reading the
+  seller's own balance, with everything that decides the storefront's payments access
+  and nothing else (D12).
+- **Render cases.** The subchart, both options, a payments-only storefront with Wallet,
+  Chains and Alkahest null and RPC off, and the test pod mounting no data volume.
 
 Payment scenarios are not served on the local release. That is a roadmap gap, to be
 revisited when an external run fails in a way the charts shape.
@@ -345,11 +380,21 @@ $ bare-metal-storefront check-payments --account 00000000-0000-4000-8000-0000000
 ```
 
 It is run by Compose lane setup through `docker compose exec`; by the local release's
-`helm test` pod built from the storefront Deployment's container spec with only the
-command replaced; by a deployment through `helm test` or `kubectl exec`; and by
+`helm test` pod; by a deployment through `helm test`, or through `kubectl exec` into the
+running pod when its exact conditions matter; and by
 `qualify-real-provisioning-by-scenario`'s external round as its first check of the
 topology's payments interface. The account is explicit because the storefront's payments
 configuration does not name the seller's payee account.
+
+The chart's test pod runs the storefront CLI's `check-payments` directly, not through the
+entrypoint, with what decides payments access identical to the Deployment's — the image,
+the configuration and secrets mounts, the identity credential variable, the CA bundle
+mount with `SSL_CERT_FILE`, and the payments-key variable — rendered from the same chart
+helpers as the Deployment so the two cannot drift. It omits the data volume, whose
+ReadWriteOnce claim a pod on another node cannot attach; the `/health` probes, which
+target a server the command never starts; and the ZeroTier capabilities and device. A
+local release without persistence uses an `emptyDir` and would not reveal the volume
+problem, so a render case asserts the test pod mounts no data volume.
 
 **Rejected:**
 

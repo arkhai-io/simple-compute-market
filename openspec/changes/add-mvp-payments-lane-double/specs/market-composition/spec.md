@@ -2,7 +2,7 @@
 
 ### Requirement: The payments kit reads an account's own balance
 
-`PaymentsClient` MUST offer `get_balance(account)`, calling the payments service's `GET /balances/{account}` and returning the published `Balance` model, with the account validated as an account identifier. The kit's `PaymentsAuthority` engine MUST offer the same view — `available` by asset, and one `held` entry per part where the account is the payee with held money, timed by its effective maturity or held until stop or lift — and `FakePaymentsClient` MUST serve it from that engine.
+`PaymentsClient` MUST offer `get_balance(account)`, calling the payments service's `GET /balances/{account}` and returning the published `Balance` model, with the account validated as an account identifier. The kit's `PaymentsAuthority` engine MUST offer the same view, and `FakePaymentsClient` MUST serve it from that engine. Before projecting, the view MUST advance every transaction the account is a party to, to the engine's clock, as a transaction snapshot does. It MUST report `available` by asset, and one `held` entry per part and distinct maturity among that part's held lots where the account is the payee, timed by that maturity, with the part's lots that have no maturity yet in one entry held until stop or lift.
 
 #### Scenario: A payer reads its balance
 
@@ -18,3 +18,8 @@
 
 - **WHEN** the engine holds a once part's money for a payee until its hold matures
 - **THEN** the payee's balance lists that part once, with its held amount and its effective `releaseAt`
+
+#### Scenario: A payee's hold matures between reads
+
+- **WHEN** a payee reads its balance just before a once part's hold matures, and again just after, with no other operation on the transaction between
+- **THEN** the first read lists the part as held, and the second lists nothing held for it and includes the payee's earnings, net of fee, in `available`
