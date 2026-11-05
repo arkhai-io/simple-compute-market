@@ -356,6 +356,9 @@ before the other checks because the drift is happening now. Touches
   is evidence that 0.12.22 builds and runs the stack; no scenario exercises the checks.
   Owed by validation, beside the line above: in the same job, the four cases of
   `scripts/tests/test_check_locks_uv.py` run and pass rather than skip.
+  Correction, after the commit: the owner installed uv 0.12.22 on this machine, and
+  `make test-release-tooling` then ran those four cases and passed them, 2035 passed
+  and none skipped; `make test` ran too (see the section 5 note).
   Handoff: every machine running the workflow's steps now needs uv 0.12.22 or newer
   before `make lock`, `make init` or `make test`. `make lock` still passes no
   `--upgrade-package` for a lock naming no internal package, so a future rise of the
@@ -373,6 +376,60 @@ key is embedded as one escaped string". Touches a new `.gitleaks.toml`, a new
 `scripts/check_push_ready.py`, the `Makefile`'s `check-public-content`,
 `.github/workflows/public-content.yml`, `.github/workflows/tests.yml`, and
 `docs/development/ARCHITECTURE.md`, "Public repository content checks".
+
+Prepared before the section, on the owner's direction of 2026-11-05: installing
+gitleaks is one runnable step, a missing gitleaks names that step rather than leaving
+its user guessing, and CI installs it the same way. Done in the session that
+implemented sections 6 and 4, before this section's session starts:
+
+- `scripts/gitleaks-pins.toml` pins **gitleaks 8.30.1** with each common platform's
+  archive URL and sha256 (linux x64 and arm64, darwin x64 and arm64), in the shape
+  of `tools/frp-grant-admission/frp-pins.toml`. The owner installed 8.30.1 on this
+  machine (`/usr/local/bin/gitleaks`); its linux_x64 archive matched the release's
+  published sha256. The other three hashes are copied from that checksums file, and
+  nobody has downloaded and hashed those archives; the pins file says so. The
+  release is the candidate 5.1's gate tries; if the gate fails on it, the change
+  returns to design as 5.1 says, and a different release changes the pins file.
+- `scripts/install_gitleaks.py`, run as `make install-gitleaks
+  [GITLEAKS_INSTALL_DIR=<dir>]`: downloads the running platform's archive, refuses it
+  unless its sha256 is the pinned one, and installs the binary into `~/.local/bin`
+  by default, needing no root; it does nothing when the pinned release is already on
+  PATH, and fails, naming the cause, when what it installed is not the `gitleaks` on
+  PATH (the directory is missing from PATH, or another gitleaks comes first), so a
+  rerun is not left looping. Its `problem()` returns `None`
+  when the pinned gitleaks is on PATH, else a message naming the release required,
+  what was found, and `make install-gitleaks`. 5.2's `check_secrets.py` refuses a
+  missing or other release with that message, and imports nothing else for it.
+- `tests.yml`'s `test-deployment-packaging` job and `public-content.yml` put
+  `$HOME/.local/bin` first on PATH, run `make install-gitleaks
+  GITLEAKS_INSTALL_DIR="$HOME/.local/bin"`, and add that directory to `$GITHUB_PATH`
+  for the steps after; 5.3 adds the scan that uses it, and the checksum check 5.3
+  asks for is the installer's. Until then `public-content.yml` downloads gitleaks on
+  every push without using it, and fails if github.com is unreachable.
+- Tests, `scripts/tests/test_install_gitleaks.py` (unit, injected download, version
+  and PATH lookup, temporary directories; plus one integration case, a real `make
+  -n` over the Makefile): the repository's pins file; platform names; a matching
+  archive installs an executable binary and nothing else; another checksum refused
+  with nothing installed; an archive without the binary refused; an unpinned platform
+  refused before any download; a missing or other release reported naming `make
+  install-gitleaks`; the pinned release on PATH not reinstalled; an install
+  confirmed as the `gitleaks` on PATH, and one shadowed by another gitleaks or off
+  PATH failing; a refused archive failing the command; and the target passing
+  `GITLEAKS_INSTALL_DIR` as `--dir`. No real download is exercised here, since the
+  implement step may not run `make install-gitleaks`. `public-content.yml` runs the
+  real install on every push of the branch; `tests.yml` runs it only when dispatched
+  or on pushes and pull requests to `dev` and `staging`, hence the line owed below.
+  Checks: `test_install_gitleaks.py` 17 passed; `make test-release-tooling` 2035
+  passed; `make check-change` fails only on the citations sections 5 and 8 create; and
+  `make test`, its first full run in this session now that the machine has uv
+  0.12.22, passed and rewrote no lock.
+- For the section's session: run gitleaks only through make targets, as the owner
+  directs: `make check-secrets` (5.2, beside `check-public-content`) and `make
+  install-gitleaks`. `docs/development/ARCHITECTURE.md`'s install instructions (5.4)
+  name `make install-gitleaks`. Owed by validation once 5.3 lands, as 5.5 says:
+  `tests.yml`, job `test · test-deployment-packaging`, shows "Install the pinned
+  gitleaks" passing. `public-content.yml` runs on every push, and no dispatch is owed
+  for it.
 
 - [ ] 5.1 Decision gate (D24 item 4): choose the gitleaks release to pin, write
   `.gitleaks.toml` extending the default configuration, turning its `private-key` rule

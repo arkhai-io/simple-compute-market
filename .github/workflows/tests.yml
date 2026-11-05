@@ -81,6 +81,14 @@ jobs:
         uses: azure/setup-helm@v4
         with:
           version: "v4.3.0"
+      # The pinned gitleaks, verified against scripts/gitleaks-pins.toml and put on
+      # PATH for the steps after it.
+      - if: matrix.target == 'test-deployment-packaging'
+        name: Install the pinned gitleaks
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          make install-gitleaks GITLEAKS_INSTALL_DIR="$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Build the repository's wheels
         run: make dist-ci
       - name: make ${{ matrix.target }}

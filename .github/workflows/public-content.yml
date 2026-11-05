@@ -11,6 +11,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      # The pinned gitleaks, verified against scripts/gitleaks-pins.toml.
+      - name: Install the pinned gitleaks
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          make install-gitleaks GITLEAKS_INSTALL_DIR="$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Check every new commit for recognizable private content
         env:
           PR_BASE: ${{ github.event.pull_request.base.sha }}
