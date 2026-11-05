@@ -184,12 +184,17 @@ reservation's own backing, while an existing assignment keeps its host (D2, D4,
 D8; fulfillment "Scheduling applies the pool provider's host requirement").
 Touches `kit/fulfillment` only.
 
-- [ ] 3.1 `SchedulingTransaction` (`kit/fulfillment/src/market_fulfillment/scheduling_persistence.py`)
+- [x] 3.1 `SchedulingTransaction` (`kit/fulfillment/src/market_fulfillment/scheduling_persistence.py`)
   gains `deliverable_host_ids() -> frozenset[str] | None`;
   `SqlAlchemySchedulingUnitOfWork` accepts `deliverable_hosts:
   DeliverableHosts | None = None` and its transaction answers it in the
   transaction's session (`None` with none supplied). Verify with 3.3.
-- [ ] 3.2 `PhysicalSettlementScheduler._eligible_candidates_in_transaction`
+  *Done:* the unit of work passes the report to its transaction as the
+  keyword `deliverable_hosts`; every test subclass of
+  `SqlAlchemySchedulingTransaction` forwards `**kwargs`, so none needed
+  changing. *Beyond the plan:* `arkhai-kit-fulfillment` takes a minor bump to
+  0.7.0 and raises `arkhai-kit-resource-pools` to `>=0.9.0`; locks refreshed.
+- [x] 3.2 `PhysicalSettlementScheduler._eligible_candidates_in_transaction`
   (`kit/fulfillment/src/market_fulfillment/scheduler.py`) reads the deliverable
   set once and replaces its no-host check with `declaration_has_usable_host`,
   the candidate treated as backed (D8), before policy selection, rebind, cursor
@@ -197,7 +202,10 @@ Touches `kit/fulfillment` only.
   exception for the reservation's own backing (D4). The existing-assignment path
   is unchanged. Rewrite the comment at the check to state the generalised
   invariant. Verify with 3.3.
-- [ ] 3.3 Library integration (`kit/fulfillment/tests/integration/test_scheduler_host_requirement.py`):
+  *Done:* the existing-assignment path still uses `pool_needs_host` for its
+  refusal of an assignment recording no host, unchanged (D4, D8). With no
+  host requirement the report is not read, as in the ledger.
+- [x] 3.3 Library integration (`kit/fulfillment/tests/integration/test_scheduler_host_requirement.py`):
   automatic selection never picks a candidate naming a disabled host; a
   constrained request naming a disabled or unregistered host's declaration
   raises `NoEligibleSettlementResourceError` without advancing the cursor or
@@ -206,8 +214,34 @@ Touches `kit/fulfillment` only.
   with no other eligible candidate it is refused; an existing assignment whose
   host was disabled is returned unchanged; with no `deliverable_hosts`, placement
   behaves as today.
-- [ ] 3.4 Verification: `uv run pytest kit/fulfillment/tests` passes. No
+  *Done:* library integration — the real scheduler, unit of work, ledger, and
+  pool service on in-memory SQLite, with a fake report over a mutable set and
+  a ledger supplying neither requirement nor report, so only the scheduler's
+  own filter refuses — every case listed, plus: one report read per
+  scheduling transaction, in that transaction's own session (a recording
+  transaction subclass compares the sessions by identity); and no read at all
+  with no requirement. A "disabled" or "unregistered" host here is an id the
+  fake report leaves out — one case to the scheduler; that the host authority
+  leaves both out is 4.1's evidence. The hold re-placed elsewhere is checked
+  by its backing resource and both declarations' availability; the refusals
+  by no assignment, no cursor, and the backing unchanged.
+- [x] 3.4 Verification: `uv run pytest kit/fulfillment/tests` passes. No
   end-to-end scenario exercises this section on its own; section 5's do.
+  *Done:* run from `kit/fulfillment` after `make reinit`: unit and library
+  integration, 211 passed. `make check-packaging` passed after `make lock`;
+  `make test` passed. End-to-end: none on its own, confirmed; no section 5
+  stage schedules onto a disabled host (the publication stages stop at the
+  listing), so placement's refusal rests on 3.3 and, once written, 4.4, not
+  on the pipeline. Nothing is owed by validation.
+  *Handoff:* the unit of work's docstring says the composition supplies it
+  the report it gives the ledger; that holds once 4.2 wires the container.
+  When 4.2 passes `deliverable_hosts=` to `CapacityLedgerService` and
+  `SqlAlchemySchedulingUnitOfWork`, raise
+  `provisioning/compute/service/pyproject.toml`'s bounds to
+  `arkhai-kit-site>=0.13.0` and `arkhai-kit-fulfillment>=0.7.0` (and
+  `arkhai-kit-resource-pools>=0.9.0` where it imports `DeliverableHosts`), and
+  give `compute-provisioning` the same for the host authority, then
+  `make lock`.
 
 ## 4. The compute composition
 

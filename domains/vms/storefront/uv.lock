@@ -569,7 +569,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-fulfillment"
-version = "0.6.0"
+version = "0.7.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -581,7 +581,7 @@ dependencies = [
     { name = "uuid6" },
 ]
 wheels = [
-    { path = "arkhai_kit_fulfillment-0.6.0-py3-none-any.whl" },
+    { path = "arkhai_kit_fulfillment-0.7.0-py3-none-any.whl" },
 ]
 
 [[package]]
