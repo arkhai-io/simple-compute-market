@@ -108,8 +108,9 @@ between sessions, where no other agent or person sees them.
   fixtures and code (D26, D27), reasons for function-local imports, the capability index, whose missing `contact-exchange-settlement` row is
   added, and one lock revision across every `uv.lock`. Agents on different uv releases
   have been rewriting each other's locks. So the uv minimum rises to the release that
-  writes the repository's lock revision, every command that rewrites a lock checks it,
-  and the locks still at the older revision are relocked.
+  writes the repository's lock revision, the repository's relock and environment
+  refresh commands check it, the revision check catches a lock a plain `uv run`
+  rewrites, and the locks still at the older revision are relocked.
 - **A full-rule secret audit, run by hand** (D29). `make audit-secrets` reports what
   every gitleaks rule finds in the tracked tree, gating nothing, and is run before an
   official build ships. Its first run found a golden-image root password in the VM

@@ -11,14 +11,16 @@ D17's place in the cadence, D20 (a period ledger), and D24 (the key-block measur
 a seventh check for the lock revision). The triage of design review 31 made D15 record
 the window between its last lock check and the signal as an accepted risk, gave D24's
 private-key check to gitleaks, and put D24's uv-version guard in `uv_project.py` for
-every lock writer. The triage of design review 38 replaced gitleaks' default
+the repository's relock and refresh commands. The triage of design review 38 replaced gitleaks' default
 private-key rule with a repository rule that cannot join two blocks, and made its
 commit scans read merge patches. Implementation's gate on that rule (section 5) passed
 every key case and returned the change to design over gitleaks' other default rules,
 which fired 114 times on the tree; the design discussion of 2026-11-05 reviewed each
 finding and settled D25–D30: a credential the scan found is replaced, the gate runs
 the default rules minus the four that misfire, and a full-rule audit beside it is run
-by hand before an official build ships.
+by hand before an official build ships. The triage of design review 55 narrowed D24
+item 7's guard to the repository's relock and refresh commands, a plain `uv run` left
+to the revision check, and made D30 carry D25–D29 into the closeout task.
 
 ## Context
 
@@ -845,9 +847,15 @@ every step that commits already runs:
      `tests.yml` and `e2e.yml` and `docs/development/BUILD_AND_PACKAGING.md` move to
      it. The check stays a minimum, not an exact pin.
    - `scripts/uv_project.py` runs the uv-version check before its `lock` and `reinit`
-     commands run uv (31 F2). Every lock writer goes through it: `make lock`,
-     `make review-locks`, and every package's `make init` through `reinit`. `make lock`
-     keeps its `check-uv-version` prerequisite, so it refuses before building wheels.
+     commands run uv (31 F2). The repository's relock and environment refresh go
+     through it: `make lock`, `make review-locks`, and every package's `make reinit`
+     and `make init`. `make lock` keeps its `check-uv-version` prerequisite, so it
+     refuses before building wheels. A plain `uv run` that relocks a changed project
+     is not guarded; the revision check fails on what it writes before it lands
+     (55 F1). Making every repository `uv run` pass `--locked` was rejected: about 90
+     Makefile lines and a check to keep them, still leaving a hand-typed `uv run`
+     unguarded, while most package `test` targets already run the guarded `reinit`
+     first.
    - The locks still at revision 3 are relocked to 5.
 
    `BUILD_AND_PACKAGING.md`'s explanation and `check_uv_version.py`'s docstring cover
@@ -1052,7 +1060,9 @@ Section 5 finishes round 1's checks session in one session, from its gate notes:
 README placeholders (D25); the two configurations (D29) and the tree assertion (D28);
 5.1's record with the nested-extension check; then 5.2–5.5 with the audit target and
 its tests. Planning amends section 5's tasks once the design review advances, keeping
-its notes. No other section and no other round moves.
+its notes, and amends closeout's 11.3 to re-check D1–D30 and 11.9 to name the
+destinations of D25–D29, `docs/development/RELEASING.md` among them (55 F2). No other
+section and no other round moves.
 
 ### Not changed
 

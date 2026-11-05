@@ -148,8 +148,10 @@ that names a key. An audit run on demand MUST report, by rule, file and line wit
 content, what every rule of the pinned scanner but its default private-key rule finds
 in the tracked tree, and MUST gate nothing. The packaging
 checks MUST fail when a committed lock carries a lock revision other than the one the
-repository's minimum uv writes, and every command that may rewrite a lock MUST first
-refuse a uv older than that minimum.
+repository's minimum uv writes, and every command the repository provides to relock a
+project or refresh its environment MUST first refuse a uv older than that minimum; a
+plain `uv run` that relocks a changed project is not guarded, and the revision check
+fails on what it writes before it lands.
 
 #### Scenario: A decision names no destination
 
