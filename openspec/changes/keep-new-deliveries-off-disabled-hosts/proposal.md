@@ -4,62 +4,65 @@ A registered host has an `enabled` flag, and disabling a host is how an operator
 excludes it from new work: the host authority describes `disable_host` as
 excluding a host from new work while keeping it resolvable for job history.
 
-Only job submission reads the flag. A fulfillment's create refuses a disabled
-host, while a teardown or an operator's job does not
+On the delivery path only job submission reads the flag. A fulfillment's create
+refuses a disabled host, while a teardown or an operator's job does not
 (`openspec/specs/physical-provisioning/spec.md#requirement-jobs-are-submitted-against-a-registered-host`).
-Site admission and settlement scheduling never read it. So a disabled host's
-capacity declarations stay on sale: a claim is admitted and scheduled onto the
-disabled host, and its create's dispatch is then refused and retried until an
-operator re-enables the host. The operator who disabled a host to keep work off
-it has kept nothing off it; they have turned its sold capacity into deliveries
-that cannot happen.
+Site admission (probe, reserve, and resize), the site's rebind recheck, and
+settlement scheduling never read it. So a disabled host's capacity declarations
+stay on sale: a claim is admitted and scheduled onto the disabled host, and its
+create's dispatch is then refused and retried until an operator re-enables the
+host. The operator who disabled a host to keep work off it has kept nothing off
+it; they have turned its sold capacity into deliveries that cannot happen.
 
-Two rules explain why the flag has no reader before dispatch, and neither is a
-reason for this behaviour:
+A declaration naming a host that was never registered fails the same way: it is
+admitted, because admission does not require the named host's registration
+(`openspec/specs/site-capacity/spec.md#requirement-admission-applies-the-pool-providers-host-requirement`),
+and its create then retries at dispatch. And a backed declaration naming no host,
+in a pool whose provider needs one, is refused at admission but still projected
+enabled, so its listing is published.
 
-- Site admission does not read host records. It references a host only by
-  `host_id`, and checks a named host's registration at dispatch, not at
-  admission
-  (`openspec/specs/site-capacity/spec.md#requirement-admission-applies-the-pool-providers-host-requirement`).
-- The site's resource-pool projection is built from capacity declarations alone,
-  and a declaration naming a disabled host projects enabled
-  (`openspec/specs/site-capacity/spec.md#requirement-the-resource-pool-projection-is-built-from-capacity-declarations`).
-  This keeps the site from owning provisioning connection information.
+The projection does not help a storefront avoid any of these: it is built from
+capacity declarations alone, and a declaration naming a disabled or unregistered
+host projects enabled
+(`openspec/specs/site-capacity/spec.md#requirement-the-resource-pool-projection-is-built-from-capacity-declarations`).
 
-Those rules separate authorities. They do not require that disabling a host
-leave its capacity sellable, and the behaviour was recorded as a defect when it
-was found: disabling a host should keep new deliveries off it at admission.
+Those rules separate authorities. They do not require that a listing whose
+delivery has no usable host be sold or published: such a listing is the same as a
+listing with no host, and neither should appear.
 
 ## What Changes
 
-- Disabling a registered host keeps new deliveries off it: site admission (probe
-  and reserve) and settlement scheduling treat a capacity declaration naming a
-  disabled host as an ineligible candidate, refused in the ordinary
-  capacity-refusal way. Re-enabling the host makes it eligible again.
-- The site learns which hosts are disabled without owning host records or
-  connection information. The provisioning composition already supplies the
-  site and the scheduler a per-provider host requirement as plain data; how host
-  eligibility reaches them is decided in design.
-- Work already admitted or running on a host is unchanged by disabling it: its
-  teardown proceeds, as job submission already allows.
-- Decide in design what publication does with a declaration naming a disabled
-  host. While the projection keeps it enabled, a storefront keeps advertising a
-  listing admission now refuses, which is the storefront's ordinary
-  stale-projection case but a visible one. The alternatives include the
-  projection carrying host eligibility, which amends the requirement that it
-  reads no host records, and leaving publication as it is with the refusal
-  reported.
+- A declaration in a backed pool whose provider needs a host is offered only when
+  it names a registered, enabled host. Offered means site admission (probe,
+  reserve, resize), the site's rebind recheck, and settlement scheduling treat it
+  as eligible, and both site projections show it enabled. A declaration without
+  one is refused in the ordinary capacity-refusal way and projects as not
+  enabled, so storefronts close its listings through their existing
+  disabled-source rules and reopen them under their original identities when its
+  host is enabled or registered.
+- The rule does not apply in an unbacked pool, nor where the pool's provider needs
+  no host.
+- Admission no longer admits against a declaration naming a host with no
+  registration.
+- The site learns which hosts take new delivery through a seam the provisioning
+  composition supplies and the ledger and the scheduler read in their own
+  transaction. The site owns no host records or connection information.
+- New placement never uses a host that cannot take delivery, including a
+  reservation's own backing, so a pool-scoped hold is re-placed at scheduling or
+  refused. An assignment already made keeps its host, and its create waits at
+  dispatch; teardown and operator jobs are unchanged.
+- This change takes the disabled-host rule over from
+  `pools-6-fair-scheduling-policy`, whose proposal, design, and index row drop
+  their claim to it at this change's closeout.
 
 ## Capabilities
 
 ### Modified Capabilities
 
-- `site-capacity`: admission eligibility of a declaration naming a disabled
-  host, and possibly the resource-pool projection.
+- `site-capacity`: admission eligibility of a declaration with no usable host, and
+  the resource-pool projection's `enabled` for it.
 - `fulfillment`: scheduling eligibility of the same declaration.
-- `physical-provisioning`: what disabling a host means, stated where the host
-  authority is specified.
-- `storefront-publication`, if design changes what publication does.
+- `physical-provisioning`: what disabling a host means.
 
 ### New Capabilities
 
@@ -68,40 +71,49 @@ None.
 ## Non-Goals
 
 - Do not change job submission: a fulfillment's create keeps refusing a disabled
-  host, and teardown and operator jobs keep running against one.
+  or unregistered host, and teardown and operator jobs keep running against a
+  disabled one.
 - Do not make the site authority own host records or connection information.
 - Do not change what a capacity declaration's own `enabled` field means, and do
   not disable declarations when their host is disabled: a declaration is the
   operator's statement of what sells, and the host's state is the host
   authority's.
-- Do not change how host inventory enters the registry; that is
-  `bring-host-inventory-under-definition-documents`.
+- Do not change storefronts, the projection's wire shape, or the capacity event
+  feed.
+- Do not change how host inventory enters the registry, or the retention of hosts
+  a host definitions document stops naming.
+- Do not change scheduling policy beyond eligibility; fairness stays with
+  `pools-6-fair-scheduling-policy`.
 
 ## Impact
 
-- `kit/site` admission (probe and reserve) and `kit/fulfillment` scheduling, and
-  the provisioning service's composition that supplies them their host
-  requirement.
-- Possibly the site's resource-pool projection and storefront publication,
-  depending on design.
+- `kit/resource-pools`: the deliverable-host seam and the usable-host rule beside
+  the host requirement.
+- `kit/site`: admission, the rebind recheck, the capacity-bucket projection, and
+  the advisory snapshot.
+- `kit/fulfillment`: the scheduler's candidate filter and one read on its
+  scheduling unit of work.
+- `provisioning/compute`: the seam's implementation over the host registry, the
+  resource-pool projection builder, and container wiring.
 - Operator documentation of what disabling a host does.
+- No wire, persistence, or deployment change.
 
 ## Dependencies and Related Changes
 
 - Independent: nothing must land first.
-- Related to `bring-host-inventory-under-definition-documents`, which brings host
-  inventory under the definition-document mechanism and retains a host the
-  document stops naming rather than disabling it. That retention rests partly on
-  this defect: while disabling a host leaves it sellable, a document that
-  disabled the hosts it stops naming would turn a removed line into capacity
-  that cannot be delivered. Once this change lands, that change's treatment is
-  open to revisiting.
+- Takes over the disabled-host rule from `pools-6-fair-scheduling-policy`, which
+  received it from `project-capacity-resources-without-hosts`.
+- Answers `bring-host-inventory-under-definition-documents`'s revisit question:
+  a host definitions document keeps retaining the hosts it stops naming, on the
+  reason that hosts registered through the API must coexist with it.
 
 ## Permanent documentation impact
 
-- [ ] `docs/development/ARCHITECTURE.md`
+- [x] `docs/development/ARCHITECTURE.md` (the resource-pools paragraph on the
+      host requirement, restated; the listing principle itself stays in
+      `site-capacity`'s architecture)
 - [x] Existing subsystem specification: `site-capacity`, `fulfillment`,
-      `physical-provisioning`, and possibly `storefront-publication`
+      `physical-provisioning`
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
@@ -110,4 +122,14 @@ read a host record's enabled flag" is owned by this change and closes with it.
 
 ### Knowledge to promote
 
-To be determined at design completion.
+| Decision | Provisional permanent destination |
+|---|---|
+| A backed declaration whose provider needs a host is offered only with a registered, enabled host, applied at admission, rebind, scheduling, and both projections (D3/D12, D8) | `openspec/specs/site-capacity/spec.md` (admission and projection requirements), `openspec/specs/fulfillment/spec.md` (scheduling requirement), via the delta specs |
+| A listing whose delivery has no usable host is the same as a listing with no host, and neither appears; why projected `enabled` follows admission (D5, D12) | `openspec/specs/site-capacity/architecture.md`, "Declared capacity and connection identity" |
+| Host eligibility reaches the kit layers through a composition-supplied seam read in the caller's session, beside the host requirement (D2, D6, D7) | `openspec/specs/site-capacity/architecture.md`; `docs/development/ARCHITECTURE.md`'s resource-pools paragraph on the host requirement, restated to name the usable-host rule |
+| New placement never uses an unusable host; an existing assignment keeps its host (D4) | `openspec/specs/fulfillment/spec.md`, via the delta spec |
+| What disabling a host means (D11) | `openspec/specs/physical-provisioning/spec.md`, via the delta spec; `docs/operator-handbook.md` |
+| A change of host state emits no capacity event (D9) | `openspec/specs/site-capacity/architecture.md` |
+| Host definitions documents keep retaining unnamed hosts, on the remaining reason (D10) | `openspec/specs/physical-provisioning/architecture.md`, its retention paragraph restated |
+| The gap closes; "Host records are used only where a connection is made" restated | `docs/development/ROADMAP.md` Goal 1 |
+| pools-6 drops its claim to the rule (D1) | `openspec/changes/pools-6-fair-scheduling-policy/` proposal and design, and its row in `openspec/changes/README.md` |
