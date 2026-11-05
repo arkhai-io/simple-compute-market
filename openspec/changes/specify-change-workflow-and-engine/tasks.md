@@ -50,7 +50,11 @@ scripts become entry points calling the moved modules.
 - [x] 1.2 Break the cycle: `convert` imports what it needs of the computation from
       `next_step` inside the package, and the package imports no script (D4;
       design Context). Done: `convert`, `log`, `review`, and `cli` import `.find`,
-      `.next_step`, and `.clone`.
+      `.next_step`, and `.clone`. The merge before closeout brought in `push`'s
+      import of `check_public_content` from beside the package; review 71's
+      triage (71 F1) replaced it with the repository's pre-push check run as a
+      command (CW-p7kq), and a test loads `change_workflow.cli` with only the
+      package on the path.
 - [x] 1.3 `index.py` exposes the change index's reading — its rows, each row's
       status and dependencies — as public names the computation uses; the
       computation no longer imports `_DEPENDENCY` (D4). `Row.dependencies` yields
@@ -1252,6 +1256,37 @@ nothing of its own on standard error, `review`'s duplicate of the stopped-run
 helper, and a test comment and name worded as history. Declined: tests of
 `resume`'s and `start orchestrate`'s failure paths alone, which run the helpers the
 new tests prove.
+
+Pre-closeout review 71's triage fixed two findings against the merged `7bb70aff4`
+(validation 70 passed the scripts suite, everything else waived). 71 F1: `push` no
+longer imports `check_public_content` from beside the package, which loaded only
+because the command puts `scripts/` on the path; it runs the repository's pre-push
+check, `push.PRE_PUSH_CHECK`, where the file exists, with the engine's interpreter,
+as Git runs a pre-push hook — the remote as its argument, one line naming the branch,
+`HEAD`, and an all-zero remote object on its input — and refuses with the reasons the
+check gives on either stream, or its status when it gives none (CW-p7kq, added to
+the `change-workflow` delta; MCW-q8vd reworded as this repository's provision,
+`scripts/check_public_content.py --pre-push`). D4 records the decision; both
+READMEs gained the role and the engine assumption. 71 F2: D10's guarded-push row and
+the trace's destination paragraph and first private-content row name the seam.
+Evidence: `test_check_push_ready.py` (unit, real repositories with a bare remote)
+gained the check's Git-hook protocol and its refusal stopping both `check` and
+`push`, a silently failing check named by its status, and this repository's real
+check passing a clean push, its private-content refusal now asserting the rule's
+reason; `test_change_workflow_cli.py` (unit) gained a test loading
+`change_workflow.cli` from a copy of the package alone under `python -I`, and its
+failed-push test no longer arranges remote refs for a check its repository does not
+provide; the scripts suite, as `make test-release-tooling` runs it, 2162 passed on
+the final diff; `make test` passed; `make check-packaging` and `make
+check-comment-hygiene` passed; `make check-change` failed only on
+`check-doc-citations`, its misses the files closeout creates (the two `index.md`,
+`market-change-workflow`'s `spec.md`). The fresh-context check found nothing
+blocking; fixed: a failing check's reasons on standard output were dropped, the
+private-content test passed for any refusal, no test pushed through the real check,
+the check's being a Python script run with the engine's interpreter was unstated,
+and CW-p7kq did not say the line is as for a new branch. Declined: a timeout on the
+check, which the in-process scan never had, and a test named for the no-check case,
+which every other push test in the file is.
 
 ## 11. Closeout
 

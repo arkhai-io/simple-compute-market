@@ -288,14 +288,14 @@ MUST refuse either.
 - **WHEN** the guarded push runs with `dev` checked out
 - **THEN** its check refuses, naming the branch, and nothing is pushed
 
-### Requirement: MCW-q8vd The guarded push refuses recognizable private content
+### Requirement: MCW-q8vd The pre-push check refuses recognizable private content
 
-Before sending commits, this repository's guarded push MUST reject recognizable
-personal home paths, private assistant planning and session paths, and identifiers
-in a configured local denylist, from added content, filenames, and commit
-messages. It MUST inspect intermediate commits, not only the final tree, and MUST
-omit matched values from its diagnostics. An unreadable configured denylist or
-unavailable comparison refs MUST fail closed. This mechanical check does not
+This repository's pre-push check, which the guarded push runs, MUST reject
+recognizable personal home paths, private assistant planning and session paths, and
+identifiers in a configured local denylist, from ref names, added content,
+filenames, and commit messages. It MUST inspect intermediate commits, not only the
+final tree, and MUST omit matched values from its diagnostics. An unreadable
+configured denylist or unavailable comparison refs MUST fail closed. It does not
 replace review.
 
 #### Scenario: Private content is removed in a later commit

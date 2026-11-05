@@ -29,6 +29,7 @@ documents' roles differ.
 | The guidance documents every step reads | `AGENTS.md`, `docs/development/ARCHITECTURE.md`, `docs/development/TESTING.md`, `docs/development/DEPLOYMENT_AND_CONFIG.md`, `openspec/README.md`, `docs/development/ROADMAP.md`, `openspec/config.yaml`, and the workflow's guide `docs/agents/change-workflow.md` |
 | Where specifications and documentation live | `openspec/` (`openspec/**`): the capabilities under `openspec/specs/`, indexed by `openspec/specs/README.md`, each `openspec/specs/<capability>/spec.md`; and `docs/` (`docs/**`), its development documents under `docs/development/` |
 | Protected branches the guarded push refuses | `main` and `dev` |
+| A pre-push check the guarded push runs over what it would send, where the repository provides one | `scripts/check_public_content.py --pre-push`, the public-content scan of the branch's name and every outgoing commit (MCW-q8vd), its local denylist named by Git's `scm.publicContentDenyFile`; the same check `scripts/hooks/pre-push` runs |
 | The `origin` remote the guarded push and the pipeline use | `origin`, this repository on GitHub |
 | The branch a change lands on, merged before closeout and reviewed against | `dev`, set before the fragment's include by `Makefile` as `CHANGE_WORKFLOW_MERGE_FROM` and `CHANGE_WORKFLOW_REVIEW_BASE` |
 | The clone's bootstrap: one command that readies a fresh clone | `make init` |
@@ -43,7 +44,7 @@ review.
 | Assumption | Here |
 |---|---|
 | The protected branches the guarded push refuses, and the remote it pushes to | `main` and `dev`; `origin` |
-| The public-content check the guarded push runs over the branch's name and its outgoing commits, imported from beside the engine's package | `scripts/check_public_content.py`, its local denylist named by Git's `scm.publicContentDenyFile` |
+| The pre-push check's path, a Python script run as a command with the engine's interpreter, never imported | `scripts/check_public_content.py` |
 | The branch a review reads the change against | `dev` |
 | The change index's path | `openspec/changes/README.md` |
 | The guidance documents a session re-reads after its context is compacted | `docs/development/ARCHITECTURE.md`, `docs/development/TESTING.md`, `docs/development/DEPLOYMENT_AND_CONFIG.md`, `openspec/README.md` |

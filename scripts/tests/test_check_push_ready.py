@@ -145,10 +145,61 @@ def test_every_refusal_is_reported_at_once(repo: Path) -> None:
     assert len(problems) == 2
 
 
+def _provide_check(repo: Path, source: str) -> None:
+    """Give the repository a pre-push check, ignored so the worktree stays clean."""
+    script = repo / guard.PRE_PUSH_CHECK[0]
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text(source, "utf-8")
+    with (repo / ".git/info/exclude").open("a", encoding="utf-8") as exclude:
+        exclude.write(f"/{guard.PRE_PUSH_CHECK[0]}\n")
+
+
+def test_the_pre_push_check_is_run_as_a_git_hook_and_its_refusal_stops_both_actions(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _provide_check(repo, "import sys\n"
+                         "print('REFUSED: ' + ' '.join(sys.argv[1:]) + ' | '"
+                         " + sys.stdin.read().strip(), file=sys.stderr)\n"
+                         "sys.exit(1)\n")
+    head = _git(repo, "rev-parse", "HEAD")
+    ref = "refs/heads/feat/change"
+
+    for action in ("check", "push"):
+        assert guard.main([action], root=repo) == 1
+        err = capsys.readouterr().err
+        assert f"REFUSED: --pre-push origin | {ref} {head} {ref} {'0' * 40}" in err
+    assert _remote_head(repo, "feat/change") == ""
+
+
+def test_a_pre_push_check_failing_silently_is_named(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _provide_check(repo, "import sys\nsys.exit(3)\n")
+
+    assert guard.main(["push"], root=repo) == 1
+    assert "exited with status 3" in capsys.readouterr().err
+    assert _remote_head(repo, "feat/change") == ""
+
+
+def _provide_this_repositorys_check(repo: Path) -> None:
+    """This repository's own pre-push check, the public-content scan, where the
+    engine looks for it."""
+    provided = Path(__file__).resolve().parents[2] / guard.PRE_PUSH_CHECK[0]
+    _provide_check(repo, provided.read_text("utf-8"))
+
+
+def test_this_repositorys_check_passes_a_clean_push(repo: Path) -> None:
+    _provide_this_repositorys_check(repo)
+
+    assert guard.main(["push"], root=repo) == 0
+    assert _remote_head(repo, "feat/change") == _git(repo, "rev-parse", "HEAD")
+
+
 @pytest.mark.parametrize("removed_later", [False, True])
 def test_private_content_refuses_publication(
     repo: Path, capsys: pytest.CaptureFixture[str], removed_later: bool
 ) -> None:
+    _provide_this_repositorys_check(repo)
     # Synthetic prohibited account assembled so this test remains publishable.
     private = "/home/" + "fixture-person" + "/work"
     (repo / "notes.md").write_text(private, "utf-8")
@@ -160,4 +211,6 @@ def test_private_content_refuses_publication(
 
     assert guard.main(["push"], root=repo) == 1
     assert _remote_head(repo, "feat/change") == ""
-    assert private not in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "personal home path" in err
+    assert private not in err

@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
+import sys
 from dataclasses import asdict
 from pathlib import Path
 from typing import Callable, Sequence
@@ -181,6 +183,18 @@ def test_a_usage_error_exits_2(tmp_path: Path, arguments: list[str]) -> None:
     assert cli.main(arguments, root=root) == 2
 
 
+def test_the_engine_loads_with_only_its_package_on_the_path(tmp_path: Path) -> None:
+    # A repository runs the engine without its own scripts beside the package, so
+    # the package imports nothing from beside itself.
+    shutil.copytree(FRAGMENT.parent, tmp_path / "change_workflow",
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    loaded = subprocess.run(
+        [sys.executable, "-I", "-c",
+         f"import sys; sys.path.insert(0, {str(tmp_path)!r}); import change_workflow.cli"],
+        cwd=tmp_path, capture_output=True, text=True)
+    assert loaded.returncode == 0, loaded.stderr
+
+
 def test_success_exits_0_and_a_refusal_exits_1_with_its_reason_on_standard_error(
         tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root = _repository(tmp_path / "workspace", CHANGE)
@@ -211,13 +225,8 @@ def test_a_failed_check_exits_1_with_its_reason_on_standard_error(
 def test_a_failed_push_exits_1_whatever_git_returned(
         tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root = _repository(tmp_path / "workspace", CHANGE)
-    # The push's public-content check compares with the remote's refs, so `origin`
-    # has one before its URL names a remote that does not exist.
-    _git(tmp_path, "init", "-q", "--bare", str(tmp_path / "remote.git"))
-    _git(root, "remote", "add", "origin", str(tmp_path / "remote.git"))
-    _git(root, "push", "-q", "origin", "main")
-    _git(root, "fetch", "-q", "origin")
-    _git(root, "remote", "set-url", "origin", str(tmp_path / "no-such-remote"))
+    # The repository provides no pre-push check, so `git push` itself is what fails.
+    _git(root, "remote", "add", "origin", str(tmp_path / "no-such-remote"))
     _git(root, "checkout", "-q", "-b", "feat/x")
 
     status, out, err = _printed(capsys, lambda: cli.main(["push"], root=root))

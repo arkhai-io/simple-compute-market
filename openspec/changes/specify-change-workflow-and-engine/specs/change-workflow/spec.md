@@ -2123,6 +2123,25 @@ state and MUST NOT repair it.
 - **THEN** the push check fails, nothing is pushed, and nothing is committed or
   discarded to make it pass
 
+### Requirement: CW-p7kq The guarded push runs the repository's pre-push check
+
+Where the repository provides a pre-push check, the guarded push MUST run it before
+it pushes and before its check reports success, as Git runs a pre-push hook: the
+remote as its argument and one line naming the branch and `HEAD`, as for a new
+branch, on its input. A
+failing check MUST refuse the push with the check's reasons. The engine MUST reach
+the check as a command, never by importing it.
+
+#### Scenario: The pre-push check refuses
+
+- **WHEN** the guarded push runs and the repository's pre-push check fails
+- **THEN** nothing is pushed, and the check's reasons are on standard error
+
+#### Scenario: The repository provides no pre-push check
+
+- **WHEN** the guarded push runs in a repository with no pre-push check
+- **THEN** it pushes once its own check passes
+
 ### Requirement: CW-ebmo Each step runs on its ordered models
 
 Each step's row in the step table MUST name the models its unattended runs use, in
@@ -2542,9 +2561,10 @@ end-to-end run, MCW-8h0r.
 
 **Reason**: Rewritten with an id; the protected branches and the refusal of private
 content are the repository's.
-**Migration**: CW-59c7; `main` and `dev` as the protected branches move to
-`market-change-workflow` as MCW-farr, and the refusal of recognizable private
-content as MCW-q8vd.
+**Migration**: CW-59c7; the repository's pre-push check it runs, CW-p7kq; `main`
+and `dev` as the protected branches move to `market-change-workflow` as MCW-farr,
+and the refusal of recognizable private content, this repository's pre-push check,
+as MCW-q8vd.
 
 ### Requirement: Triage of an implementation round
 

@@ -946,6 +946,7 @@ statement, or when a role here has no provision there, or one there no role here
 | The guidance documents every step reads | every step | `add-workflow-capability-contract` |
 | Where specifications and documentation live | every step | `add-workflow-capability-contract` |
 | Protected branches the guarded push refuses | every step that pushes | `add-workflow-capability-contract` |
+| A pre-push check the guarded push runs over what it would send, where the repository provides one | every step that pushes | `add-workflow-capability-contract` |
 | The `origin` remote the guarded push and the pipeline use | every step that pushes, `change-validate` | `add-workflow-capability-contract` |
 | The branch a change lands on, merged before closeout and reviewed against | `change-design`, `change-implement`, `change-merge`, `change-review`, `change-validate`, `change-orchestrate` | `add-workflow-capability-contract` |
 | The clone's bootstrap: one command that readies a fresh clone | `change-orchestrate` | `add-workflow-capability-contract` |
@@ -962,6 +963,7 @@ review: a module's constant or a tool it invokes is not collected.
 | Assumption | Where the engine holds it |
 |---|---|
 | The protected branches the guarded push refuses, and the remote it pushes to | `push.PROTECTED`, `push.DEFAULT_REMOTE` |
+| The pre-push check's path, a Python script run as a command with the engine's interpreter, never imported | `push.PRE_PUSH_CHECK` |
 | The branch a review reads the change against | `review.DEFAULT_BASE` |
 | The change index's path | `index.INDEX` |
 | The guidance documents a session re-reads after its context is compacted | `hook.REQUIRED` |

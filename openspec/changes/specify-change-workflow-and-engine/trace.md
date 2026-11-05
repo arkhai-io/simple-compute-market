@@ -229,9 +229,11 @@ commit under validation (CW-zkhs).
 
 Destination: split. Moves: the protected branches, `main` and `dev`, and the refusal
 of recognizable private content, which `dev` added to this requirement after the
-rewrite began and the merge before closeout brought in. Seam: the push refuses the
-repository's protected branches; this repository's push also refuses private
-content.
+rewrite began and the merge before closeout brought in; it is this repository's
+pre-push check. Seam: the push refuses the repository's protected branches (CW-59c7),
+and runs the repository's pre-push check, where it provides one, before it pushes
+or reports success, refusing when it fails (CW-p7kq, settled at review 71's
+triage, 71 F1 and F2).
 
 | Clause or scenario | Held by |
 |---|---|
@@ -239,7 +241,7 @@ content.
 | The push MUST send exactly `HEAD` and MUST NOT be forced | CW-59c7 |
 | A branch with no upstream MAY be pushed to the same name, setting it | CW-59c7 |
 | The check MUST report a refused state and MUST NOT repair it | CW-59c7 |
-| Before sending commits, the check MUST reject personal home paths, private assistant planning/session paths, and denylisted identifiers from added content, filenames, and commit messages | MCW-q8vd |
+| Before sending commits, the check MUST reject personal home paths, private assistant planning/session paths, and denylisted identifiers from added content, filenames, and commit messages | CW-p7kq (the push runs the repository's pre-push check, and refuses when it fails); the rules: MCW-q8vd |
 | It MUST inspect intermediate commits, not only the final tree, and MUST omit matched values from diagnostics | MCW-q8vd |
 | An unreadable configured denylist or unavailable comparison refs MUST fail closed | MCW-q8vd |
 | Scenario: The worktree is dirty | CW-59c7 |

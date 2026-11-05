@@ -1,7 +1,7 @@
 # Design: specify the change workflow and its engine
 
 Status: design settled, revised by the triages of design reviews 18 (F1–F4) and
-25 (F1–F3); ready for planning. The decisions below are the owner's, reached in
+25 (F1–F3), and of pre-closeout review 71 (F1, F2); ready for planning. The decisions below are the owner's, reached in
 the design discussion and those triages. The ledger (`interventions.jsonl`) records
 where the owner decided otherwise than the agent recommended.
 
@@ -185,6 +185,20 @@ subcommand not classified otherwise by name in D6 is public (CW-5qne):
 view is open (`validate-local`, `run-ci`, `code-snapshot`, …) and the skills call;
 `start`, `review`, and `push` run the same check themselves, as their make targets'
 `round-view-closed` prerequisite did.
+
+Settled at review 71's triage (71 F1): the engine reaches a repository's own check
+only as a command. The merge before closeout brought `dev`'s refusal of private
+content into the guarded push as an import of `scripts/check_public_content.py`,
+which loaded only because the command puts `scripts/` on the path. The push now
+runs the repository's pre-push check, where one exists, as Git runs a pre-push hook
+— the remote as its argument, one line naming the branch and `HEAD` on its input —
+and refuses with its reasons when it fails (CW-p7kq). The check's path is an
+inventory entry (D5, 6; D13), `push.PRE_PUSH_CHECK`; this repository provides
+`scripts/check_public_content.py --pre-push`, the check its Git hook already runs
+(MCW-q8vd). Rejected there: keeping the import and recording it, which leaves the
+engine unable to load outside this repository; leaving the scan to Git's pre-push
+hook, which each checkout enables by hand, so a clone without it would push
+unchecked.
 
 Rejected: classifying only, which would make the surface eight script paths
 extraction breaks; fixing the defects and leaving the scripts in place, for the
@@ -416,7 +430,7 @@ does returns the change to design.
 | Intervention ledger | general | — | — |
 | Implementation sections and sessions | general | — | the evidence a section may owe validation is named by validation's parts; CI is this repository's example |
 | Validation observes a committed slice | split | building the tested packages from the commit, never from the shared wheelhouse; end-to-end evidence from a pipeline run whose head is the commit; dispatching the owed CI workflows from a fixed list holding none that publishes, a tracked change by the owner to extend; judging named jobs, and comparing every other failing job with `dev`'s latest completed ancestor run; building the service images, the Helm render checks with the chart-to-loader check, a skipped one failing; the Helm end-to-end run of a listed set of scenarios from no persistent state, every unlisted scenario reported as not run against Helm; the scenarios on leftover volumes, an earlier pipeline run, a scenario the charts do not serve, and the four comparisons with `dev` | validation describes one commit and modifies nothing — a clean worktree and an unmoved `HEAD` after every part, else no further evidence; no regenerated tracked file; a condition it could repair fails it; it fixes nothing; results `passed`, `failed`, `inconclusive`; an environmental failure put to the owner with its remedy and rerun on their word, every attempt's evidence kept; the record names the end-to-end scenarios exercising the change with each one's basis; the stale-lock scenario; and the seam: validation's parts are the repository's, and each part's evidence comes from the commit under validation |
-| Guarded push of a change branch | split | the protected branches, `main` and `dev` | the push refuses the repository's protected branches |
+| Guarded push of a change branch | split | the protected branches, `main` and `dev`; and the pre-push check this repository provides, which refuses recognizable private content in the branch's name and in every outgoing commit (MCW-q8vd; 71 F2) | the push refuses the repository's protected branches, and runs the repository's pre-push check, where it provides one, before it pushes or reports success, refusing when it fails (CW-p7kq; 71 F1) |
 | Triage of an implementation round | general | — | — |
 | Harness-neutral agent skills | general | — | the skills' and harnesses' paths are inventory entries (D13) |
 | An orchestrating session advances one change | general | — | merges of `dev` become merges of the branch the change lands on; the default is row 1's |
