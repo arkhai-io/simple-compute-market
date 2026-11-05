@@ -42,10 +42,11 @@ def _wheel(root: Path, name: str, version: str, requires: list[str]) -> None:
         archive.writestr(f"{stem}-{version}.dist-info/METADATA", "\n".join(lines) + "\n")
 
 
-def _consumer(root: Path, packages: str) -> Path:
+def _consumer(root: Path, packages: str, revision: int | None = 5) -> Path:
     project = _declare(root, "domains/consumer", "arkhai-consumer", "0.1.0")
+    header = "version = 1\n" + (f"revision = {revision}\n" if revision is not None else "")
     (project / "uv.lock").write_text(
-        'version = 1\n\n[[package]]\nname = "arkhai-consumer"\nversion = "0.1.0"\n'
+        header + '\n[[package]]\nname = "arkhai-consumer"\nversion = "0.1.0"\n'
         'source = { editable = "." }\n\n' + packages, "utf-8"
     )
     return project
@@ -76,6 +77,26 @@ def test_a_current_lock_passes(tmp_path):
     _consumer(root, CORE)
 
     assert _problems(root) == []
+
+
+@pytest.mark.parametrize("revision", [3, 6, None])
+def test_a_lock_at_another_revision_fails_naming_it_and_both_revisions(tmp_path, revision):
+    root = _repository(tmp_path)
+    _wheel(root, "arkhai-core", "0.3.0", ["pydantic>=2"])
+    _consumer(root, CORE, revision=revision)
+
+    found = f"lock revision {revision}" if revision is not None else "no lock revision"
+    assert _problems(root) == [
+        f"domains/consumer/uv.lock: {found}, but the repository's locks carry "
+        "revision 5, which its minimum uv writes; relock it with that uv or newer"]
+
+
+def test_every_committed_lock_carries_the_repositorys_revision():
+    root = Path(__file__).resolve().parents[2]
+    found = [problem for problem in checker.problems(root, lock_check=_current)
+             if "lock revision" in problem]
+
+    assert found == []
 
 
 def test_a_lock_that_no_longer_matches_its_project_fails(tmp_path):

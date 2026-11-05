@@ -11,8 +11,11 @@ round view (`ROUND_VIEW_CLOSED`); then it opens the change's workflow log with a
 carrying the record set's format, refusing records of another format
 (`log.open_log`). `start orchestrate` opens the orchestrating session on the step
 table's `[orchestrator]` row. `resume` resumes a waiting run with the owner's answer;
-`review` runs a review; `log` and `note` read and write the workflow log; `watch`
-follows the steps as they run, and `denials` reports a run's denials. `record` is a
+`review` runs a review; `stop` sends SIGTERM to the change's run in progress — in its
+clone when it has one, else in this checkout — on the owner's word, which the run
+logs as `stopped`; `log` and `note` read and write the workflow log, `note --resumes`
+recording the owner's direction to revisit a finished triage; `watch` follows the
+steps as they run, and `denials` reports a run's denials. `record` is a
 step's own last act when the owner runs it interactively: it records the step's
 outcome, which the wrapper records for an unattended run. `convert` brings a
 change's records into the log's format, shown first and written on the owner's
@@ -58,6 +61,7 @@ from .log import (branch_decisions, direction, history_log_path, last_entries, l
                   note_orchestrator, note_round, open_log, read_log, record_interactive)
 from .records import git_head
 from .review import DEFAULT_BASE, review_and_log
+from .running import stop
 from .steps import STEP_TABLE, load_orchestrator
 from .watch import denial_report, watch
 from .wrapper import Wrapper
@@ -213,6 +217,13 @@ def _parser() -> argparse.ArgumentParser:
                         help="start a new reviewer session instead of continuing the last one")
     review.add_argument("--unvalidated", action="store_true",
                         help="run a pre-closeout review without a passing validation of HEAD")
+    stop_ = commands.add_parser(
+        "stop", help="stop the change's run in progress, in its clone when it has one, which "
+                     "is logged `stopped`")
+    stop_.add_argument("change")
+    stop_.add_argument("--step", default=None,
+                       help="the step whose run to stop, when two runs of the change are in "
+                            "progress")
     record = commands.add_parser(
         "record", help="record the outcome of a step run interactively, as its last act")
     record.add_argument("change")
@@ -294,6 +305,9 @@ def _parser() -> argparse.ArgumentParser:
     decision.add_argument("--change", dest="decided_change", default=None,
                           help="the change the branch decision is for; the log's own by "
                                "default")
+    decision.add_argument("--resumes", type=int, default=None,
+                          help="the owner's direction to revisit the finished triage run at "
+                               "this seq, which `resume` then continues with their words")
     next_ = commands.add_parser("next", help="compute the change's next step")
     next_.add_argument("change")
     next_.add_argument("--plain", action="store_true",
@@ -458,7 +472,7 @@ class _Usage(Exception):
 
 def main(argv: Sequence[str] | None = None, root: Path | None = None,
          wrapper: Wrapper | None = None, environ: Mapping[str, str] = os.environ,
-         launch: Launch = _launch) -> int:
+         launch: Launch = _launch, send: Callable[[int, int], None] = os.kill) -> int:
     parser = _parser()
     try:
         args = parser.parse_args(argv)
@@ -466,7 +480,7 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None,
         return exc.code if isinstance(exc.code, int) else 2
     try:
         root = repository_root() if root is None else root
-        return _dispatch(args, root, wrapper or Wrapper(root=root), environ, launch)
+        return _dispatch(args, root, wrapper or Wrapper(root=root), environ, launch, send)
     except _Usage as exc:
         parser.print_usage(sys.stderr)
         print(f"change-workflow: error: {exc}", file=sys.stderr)
@@ -526,7 +540,8 @@ def _graph(root: Path) -> int:
 
 
 def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
-              environ: Mapping[str, str], launch: Launch) -> int:
+              environ: Mapping[str, str], launch: Launch,
+              send: Callable[[int, int], None] = os.kill) -> int:
     if args.command == "start":
         return start(args, root, wrapper, launch)
     if args.command == "clone" and args.change == "where":
@@ -547,6 +562,13 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
                   echo=lambda line: print(line, flush=True))
         except KeyboardInterrupt:
             pass
+        return 0
+    if args.command == "stop":
+        # A change worked in its own clone runs its steps there, and each run is
+        # recorded in the checkout it runs in.
+        checkout = clone_of(wrapper.root, args.change) or wrapper.root
+        stopped = stop(wrapper.runs(checkout), args.change, args.step, send)
+        print(f"Sent SIGTERM to {stopped.describe()}; the run logs itself `stopped`.")
         return 0
     path = (history_log_path if args.command == "log" else log_path)(wrapper.root, args.change)
     if args.command == "record":
@@ -605,6 +627,7 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
                                            if args.sections is not None else None),
                                  target=args.target,
                                  branch=args.branch,
+                                 resumes=args.resumes,
                                  # A branch decision is about the change whose log
                                  # holds it, which is where steps look.
                                  change=args.decided_change

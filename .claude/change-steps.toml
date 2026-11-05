@@ -48,6 +48,12 @@ allow = [
   # The running session's id, and only that variable: the rest of the
   # environment may hold credentials.
   "Bash(printenv CLAUDE_CODE_SESSION_ID)",
+  # The installed uv's version, which decides the lock revision it writes.
+  "Bash(uv --version)", "Bash(uv self version)",
+  # The secret scan and the full-rule audit read the tree and history;
+  # installing their scanner is the operator's, through make install-gitleaks.
+  "Bash(make check-secrets)", "Bash(make check-secrets *)",
+  "Bash(make audit-secrets)", "Bash(python3 scripts/check_secrets.py *)",
 ]
 deny = [
   "Bash(git push*)", "Bash(git reset*)", "Bash(git checkout*)", "Bash(git switch*)",

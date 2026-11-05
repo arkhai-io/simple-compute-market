@@ -149,10 +149,18 @@ release:
 
 ## Cutting a release
 
-1. Bump the package's `version` field in its `pyproject.toml`.
-2. Commit and push to `main` (or merge a PR that touches the package).
-3. The workflow detects the path change, rebuilds, and publishes via OIDC
+1. Run `make audit-secrets` on the commit to be released, and remove — and
+   rotate wherever it was used — any credential it lists that is not a
+   development fixture.
+2. Bump the package's `version` field in its `pyproject.toml`.
+3. Commit and push to `main` (or merge a PR that touches the package).
+4. The workflow detects the path change, rebuilds, and publishes via OIDC
    trusted publishing.
+
+`make audit-secrets` reports what gitleaks' rules find in the tracked tree,
+including the rules the public-content checks turn off, and refuses
+nothing; most of what it lists is the repository's development fixtures
+([`ARCHITECTURE.md`, "Public repository content checks"](ARCHITECTURE.md#public-repository-content-checks)).
 
 `workflow_dispatch` forces a publish attempt for every package whose
 current version is not yet on PyPI — useful for bringing up the whole set

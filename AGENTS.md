@@ -42,6 +42,12 @@ recommendation written out. Do not use a multiple-choice selector, even where a
 skill names one: a list of buttons invites picking an option over thinking the
 problem through and writing the answer that fits it.
 
+### Amend a rule or comply
+
+When work conflicts with a written rule, amend the rule first or make the work
+comply; never record a private exception to it. The testing levels, for instance,
+change only by changing `docs/development/TESTING.md`.
+
 ## Documentation ownership
 
 - `docs/development/ARCHITECTURE.md` is the repository-wide architecture reference: system shape, dependency layers, authority boundaries, shared vocabulary, major flows, deployment topology, packaging rules, and testing philosophy.
@@ -220,17 +226,17 @@ cleaned-up change. A change's records are untracked: find them with
 `scripts/change-workflow find --records <change>`, which looks in the current
 checkout, then in the owner's workspace.
 
-### Issue tracker
+### Deferred work
 
-GitHub Issues handle intake and triage through the `gh` CLI. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-Use the five default triage labels. See `docs/agents/triage-labels.md`.
+Deferred work is recorded in the open change that owns its area, in a new change,
+or as an unowned gap in `openspec/changes/README.md` or
+`docs/development/ROADMAP.md`. This repository does not use GitHub Issues for its
+own work; the issue-discovery harness files its own issues
+(`docs/development/ISSUE_DISCOVERY.md`).
 
 ### Domain docs
 
-Multi-context: one platform context over `core/`, `kit/`, and `provisioning/`, plus a
-subcontext per market domain under `domains/`. ADRs are dated decision records and live in
-`docs/adr/`, separate from the current-state contracts in `openspec/specs/`. See
-`docs/agents/domain.md`.
+Terms have named homes: the market's cross-subsystem terms in
+`docs/development/ARCHITECTURE.md`, a subsystem's in its specification, and the
+change workflow's in its specification's "Terms". See `docs/agents/domain.md` for
+the homes and the rule for terms.

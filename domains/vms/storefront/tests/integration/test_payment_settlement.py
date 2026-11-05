@@ -242,24 +242,6 @@ class Harness(SimpleNamespace):
         self.payments.serve(build_signed_receipt(signer=signer, mandate=mandate))
 
 
-@pytest.mark.asyncio
-async def test_commit_reaches_available_without_buyer_settlement_status_poll(make):
-    h = await make()
-    h.serve()
-    async with LifecycleClient(
-        "http://test", BUYER, TrustedIdentitySet(identities=(SELLER.identity,)),
-        transport=h.transport,
-    ) as buyer:
-        committed = await buyer.commit(CommitMessage(
-            negotiation_id=NEGOTIATION, commitment_ref=h.data.transaction_id,
-            operation_key="commit",
-        ))
-        assert committed.outcome.status == "accepted"
-        await h.delivered()
-        assert (await buyer.read(NEGOTIATION)).delivery.progress == "active"
-    assert h.delivery.starts == [NEGOTIATION]
-
-
 async def _harness(tmp_path, *, deposit=False, actions=("emit_event",)):
     delivery = Delivery()
     domain = replace(
@@ -759,4 +741,22 @@ async def test_a_malformed_agreement_never_stops_reconciliation(make):
 
     assert (done.attempted, done.failed) == (1, 0)
     await h.delivered()
+    assert h.delivery.starts == [NEGOTIATION]
+
+
+@pytest.mark.asyncio
+async def test_commit_reaches_available_without_buyer_settlement_status_poll(make):
+    h = await make()
+    h.serve()
+    async with LifecycleClient(
+        "http://test", BUYER, TrustedIdentitySet(identities=(SELLER.identity,)),
+        transport=h.transport,
+    ) as buyer:
+        committed = await buyer.commit(CommitMessage(
+            negotiation_id=NEGOTIATION, commitment_ref=h.data.transaction_id,
+            operation_key="commit",
+        ))
+        assert committed.outcome.status == "accepted"
+        await h.delivered()
+        assert (await buyer.read(NEGOTIATION)).delivery.progress == "active"
     assert h.delivery.starts == [NEGOTIATION]

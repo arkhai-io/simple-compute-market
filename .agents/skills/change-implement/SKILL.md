@@ -205,7 +205,13 @@ When this is the change's first section, set its status to `in implementation`.
 Work through the section's tasks in order. For each:
 
 - Make the change the task and its cited decision call for, and no more. Work that
-  belongs to a later section stays there.
+  belongs to a later section stays there. A defect you find on the way is fixed
+  here when its fix is understood and small beside the change, even outside the
+  change's stated scope, and recorded in the section's notes as outside the plan,
+  so the round's review and the owner's reading see it; one that is large, or not
+  understood well enough to fix without a design of its own, is recorded where
+  `AGENTS.md`'s "Deferred work" says
+  (`openspec/README.md#defects-found-during-a-change`).
 - A task the plan gives the orchestrator — an edit under `.claude/`, which every
   step is denied — is never attempted: check that its edit is in the worktree and
   commit it with the section. When it is missing, stop and name the edit.

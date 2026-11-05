@@ -207,8 +207,8 @@ EOF
 
 # If an existing SSH key for the root user exists already within the Host environment and is intended to be reused, add its password and filename.
 cat >> ../../ansible/build-vars.yaml <<EOF
-root_password: ePPAxdHovplT75hYasOSS2KN2NmMWMAHu6v5BzRV
-root_filename: root_ssh_8c05a2_ed25519
+root_password: <the existing key's password>
+root_filename: <its filename>
 EOF
 
 # Also, define if new cloud-init and packer variables file are to be generated from templates. Declare the Packer generated image's version. Follow the format:

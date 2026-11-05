@@ -3,17 +3,24 @@ run it."""
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
+import signal
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
 
 from change_workflow.cli import expand_sections, main, parse_sections, split_rules
+from change_workflow.common import StepError
 from change_workflow.log import log_path, read_log, record_outcome
+from change_workflow.running import live_runs, recorded_run, select_run, signal_run, stop
 from change_workflow_fixtures import (CHANGE, COMMIT, DENIALS, VALID, FakeClaude, event_lines,
-                                      log_file, make_wrapper, option, option_rules, repository)
+                                      log_file, make_wrapper, option, option_rules, repository,
+                                      review_text)
 
 
 def _checkout(path: Path) -> Path:
@@ -294,6 +301,64 @@ def test_the_command_resumes_by_seq(tmp_path: Path) -> None:
     assert claude.commands[1][2] == "The owner's answer: Yes."
 
 
+def test_the_owners_revisit_resumes_the_finished_triage_with_their_words(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    triaged = {**VALID["finished"], "triaged": ["04-implementation"]}
+    claude = FakeClaude((event_lines(triaged, session="t-1"), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    log = log_path(tmp_path, CHANGE)
+    _triaged(log, "04-implementation")
+    triage = record_outcome(log, "triage", triaged, session="t-1", commit=COMMIT)
+
+    assert main(["note", CHANGE, "orchestrator", "--by", "owner", "--resumes",
+                 str(triage["seq"]), "--decision", "revisits 04 F5",
+                 "--reason", "cite the stable row"], root=tmp_path) == 0
+    assert main(["resume", CHANGE, "--seq", str(triage["seq"]), "--answer",
+                 "Cite the stable row."], root=tmp_path, wrapper=wrapper) == 0
+
+    assert option(claude.commands[0], "--resume") == "t-1"
+    assert claude.commands[0][2] == "The owner's answer: Cite the stable row."
+    assert (read_log(log)[-1]["outcome"], read_log(log)[-1]["resumes"]) == (
+        "finished", triage["seq"])
+
+
+def test_a_revisit_direction_from_the_orchestrator_is_refused(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    log = log_file(tmp_path)
+    _triaged(log, "04-implementation")
+    triage = record_outcome(log, "triage", {**VALID["finished"],
+                                            "triaged": ["04-implementation"]},
+                            session="t-1", commit=COMMIT)
+
+    assert main(["note", CHANGE, "orchestrator", "--resumes", str(triage["seq"]),
+                 "--decision", "revisits", "--reason", "r"], root=tmp_path) == 1
+
+    assert "a direction to revisit a triage is the owner's" in capsys.readouterr().err
+    assert read_log(log) == [triage]
+
+
+@pytest.mark.parametrize("later,refused", [
+    ({**VALID["finished"], "triaged": ["04-implementation"]}, "triaging 04-implementation again"),
+    (None, "not a finished triage"),
+])
+def test_the_command_line_refuses_a_revisit_the_log_refuses(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str], later: dict | None,
+        refused: str) -> None:
+    """A later triage has run; or the run named is not a finished triage."""
+    log = log_file(tmp_path)
+    _triaged(log, "04-implementation")
+    first = record_outcome(log, "triage", later or VALID["question"], session="t-1",
+                           commit=COMMIT)
+    if later is not None:
+        record_outcome(log, "triage", later, session="t-2", commit=COMMIT)
+
+    assert main(["note", CHANGE, "orchestrator", "--by", "owner", "--resumes",
+                 str(first["seq"]), "--decision", "revisits", "--reason", "r"],
+                root=tmp_path) == 1
+
+    assert refused in capsys.readouterr().err
+
+
 def test_a_fresh_run_is_granted_each_rule_its_allow_values_hold(tmp_path: Path) -> None:
     claude = FakeClaude((event_lines(VALID["finished"]), 0))
     _checkout(tmp_path)
@@ -363,6 +428,240 @@ def test_the_review_command_exits_non_zero_when_it_stops(
     assert json.loads(captured.out)["outcome"] == "stopped"
 
 
+# `stop`: the owner interrupts a running step.
+
+class Sent:
+    """Stands in for `os.kill`, recording each signal sent."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[int, int]] = []
+
+    def __call__(self, pid: int, signum: int) -> None:
+        self.calls.append((pid, signum))
+
+
+def _stop(tmp_path: Path, runs: Path, *flags: str, send: Sent) -> int:
+    wrapper = make_wrapper(tmp_path, FakeClaude())
+    wrapper.runs = lambda _: runs
+    return main(["stop", CHANGE, *flags], root=tmp_path, wrapper=wrapper, send=send)
+
+
+def test_stop_signals_the_one_run_in_progress(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    runs, sent = tmp_path / "change-runs", Sent()
+
+    with recorded_run(runs, "validate", CHANGE):
+        assert _stop(tmp_path, runs, send=sent) == 0
+
+    assert sent.calls == [(os.getpid(), signal.SIGTERM)]
+    assert f"Sent SIGTERM to validate of {CHANGE}" in capsys.readouterr().out
+
+
+def test_stop_with_nothing_running_refuses_and_signals_nothing(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Nothing is running."""
+    runs, sent = tmp_path / "change-runs", Sent()
+
+    with recorded_run(runs, "validate", "another-change"):
+        assert _stop(tmp_path, runs, send=sent) == 1
+
+    assert sent.calls == []
+    assert f"no run of {CHANGE} is in progress" in capsys.readouterr().err
+
+
+def test_stop_refuses_a_stale_record_naming_it(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """A run record outlives its run: its process (this one) is alive, but nothing
+    holds the record."""
+    runs, sent = tmp_path / "change-runs", Sent()
+    runs.mkdir()
+    (runs / "1-stale.json").write_text(json.dumps(
+        {"pid": os.getpid(), "step": "validate", "change": CHANGE,
+         "started": "2026-10-21T09:15:40Z"}), "utf-8")
+
+    assert _stop(tmp_path, runs, send=sent) == 1
+
+    assert sent.calls == []
+    err = capsys.readouterr().err
+    assert "1-stale.json is stale" in err and "nothing was signalled" in err
+
+
+def test_stop_with_two_runs_needs_the_step(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    runs, sent = tmp_path / "change-runs", Sent()
+
+    with recorded_run(runs, "validate", CHANGE), recorded_run(runs, "review", CHANGE):
+        assert _stop(tmp_path, runs, send=sent) == 1
+        assert sent.calls == []
+        err = capsys.readouterr().err
+        assert f"2 runs of {CHANGE} are in progress" in err and "--step" in err
+        assert _stop(tmp_path, runs, "--step", "review", send=sent) == 0
+
+    assert sent.calls == [(os.getpid(), signal.SIGTERM)]
+    assert "Sent SIGTERM to review of" in capsys.readouterr().out
+
+
+def test_a_run_that_ends_before_the_second_check_is_not_signalled(tmp_path: Path) -> None:
+    """A run ends while it is being stopped."""
+    runs, sent = tmp_path / "change-runs", Sent()
+    with recorded_run(runs, "validate", CHANGE):
+        selected = select_run(runs, CHANGE)
+
+    with pytest.raises(StepError, match="ended before it could be stopped"):
+        signal_run(selected, sent)
+    assert sent.calls == []
+
+
+def test_a_run_killed_between_the_checks_is_not_signalled(tmp_path: Path) -> None:
+    """Its record stays, but the kernel has released its lock."""
+    runs, sent = tmp_path / "change-runs", Sent()
+    runs.mkdir()
+    record = runs / "1-killed.json"
+    record.write_text(json.dumps({"pid": os.getpid(), "step": "validate", "change": CHANGE,
+                                  "started": "2026-10-21T09:15:40Z"}), "utf-8")
+    with record.open("r") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        selected = select_run(runs, CHANGE)
+
+    with pytest.raises(StepError, match="ended before it could be stopped"):
+        signal_run(selected, sent)
+    assert sent.calls == [] and record.is_file()
+
+
+def test_a_run_gone_as_the_signal_is_sent_is_reported_ended(tmp_path: Path) -> None:
+    runs = tmp_path / "change-runs"
+
+    def gone(pid: int, signum: int) -> None:
+        raise ProcessLookupError(pid)
+
+    with recorded_run(runs, "validate", CHANGE):
+        with pytest.raises(StepError, match="ended before it could be stopped"):
+            stop(runs, CHANGE, send=gone)
+
+
+# A stand-in for the agent or reviewer a run starts: it says it started, gives its
+# process id, and runs until it is ended.
+_STAND_IN = """
+import os, sys, time
+from pathlib import Path
+print('{"type": "system", "subtype": "init", "session_id": "s-stop"}', flush=True)
+Path(sys.argv[1] + ".partial").write_text(str(os.getpid()))
+Path(sys.argv[1] + ".partial").replace(sys.argv[1])
+time.sleep(120)
+"""
+
+# A step run through the real wrapper, which starts the stand-in through
+# `run_claude`.
+_STEP = """
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+root, runs, started = Path(sys.argv[2]), Path(sys.argv[3]), sys.argv[4]
+from change_workflow.harness import run_claude
+from change_workflow.wrapper import Wrapper
+def runner(command, cwd, feed):
+    return run_claude([sys.executable, "-c", sys.argv[5], started], cwd, feed)
+Wrapper(root=root, runner=runner, head=lambda _: "c0ffee", echo=None,
+        conversation=lambda _, session: root / "conversations" / f"{session}.jsonl",
+        runs=lambda _: runs).run("validate", sys.argv[6])
+"""
+
+# A review run through the real review runner, which starts the stand-in through
+# `run_codex`; the reviewer's finished review is written as it starts, so only the
+# stop keeps it from being published.
+_REVIEW = """
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+root, runs, started = Path(sys.argv[2]), Path(sys.argv[3]), sys.argv[4]
+from change_workflow.harness import run_codex
+from change_workflow.review import review_and_log
+def runner(command, log):
+    Path(command[command.index("--output-last-message") + 1]).write_text(sys.argv[7])
+    return run_codex([sys.executable, "-c", sys.argv[5], started], log)
+review_and_log(sys.argv[6], "design", root=root, runner=runner,
+               head=lambda _: "c0ffee", runs=lambda _: runs)
+"""
+
+SCRIPTS = Path(__file__).resolve().parents[1]
+
+
+def _started(kind: str, tmp_path: Path, runs: Path) -> tuple[subprocess.Popen, int]:
+    """A real run of `kind` in a child process, once the process it started runs:
+    the run, and that process's id."""
+    started = tmp_path / f"{kind}.pid"
+    run = subprocess.Popen([sys.executable, "-c", {"step": _STEP, "review": _REVIEW}[kind],
+                            str(SCRIPTS), str(tmp_path), str(runs), str(started), _STAND_IN,
+                            CHANGE, review_text()],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    deadline = time.monotonic() + 30
+    while not started.is_file():
+        assert run.poll() is None and time.monotonic() < deadline, f"the {kind} never started"
+        time.sleep(0.05)
+    return run, int(started.read_text())
+
+
+def _gone(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    return False
+
+
+def test_a_stopped_step_is_logged_stopped_and_its_agent_ended(tmp_path: Path) -> None:
+    """Library integration: a real wrapper process and the process it started."""
+    repository(tmp_path)
+    runs = tmp_path / "change-runs"
+    run, agent = _started("step", tmp_path, runs)
+    try:
+        wrapper = make_wrapper(tmp_path, FakeClaude())
+        wrapper.runs = lambda _: runs
+        assert main(["stop", CHANGE], root=tmp_path, wrapper=wrapper) == 0
+        run.wait(timeout=30)
+    finally:
+        run.kill()
+
+    line = read_log(log_path(tmp_path, CHANGE))[-1]
+    assert (line["step"], line["outcome"]) == ("validate", "stopped")
+    assert "received SIGTERM" in line["reason"]
+    assert _gone(agent)
+    assert list(runs.iterdir()) == []
+
+
+def test_stopping_the_review_leaves_the_validation_running(tmp_path: Path) -> None:
+    """Two runs are in progress. Library integration: a real review runner and its
+    reviewer's process, beside a real wrapper's validation."""
+    repository(tmp_path)
+    runs = tmp_path / "change-runs"
+    validation, agent = _started("step", tmp_path, runs)
+    review, reviewer = _started("review", tmp_path, runs)
+    try:
+        wrapper = make_wrapper(tmp_path, FakeClaude())
+        wrapper.runs = lambda _: runs
+        assert main(["stop", CHANGE, "--step", "review"], root=tmp_path, wrapper=wrapper) == 0
+        review.wait(timeout=30)
+
+        line = read_log(log_path(tmp_path, CHANGE))[-1]
+        assert (line["step"], line["outcome"]) == ("review", "stopped")
+        assert "received SIGTERM" in line["reason"]
+        assert _gone(reviewer)
+        # The review published nothing, though its reviewer had written a review;
+        # the output is kept beside the transcript.
+        reviews = tmp_path / "openspec/changes" / CHANGE / "reviews"
+        assert not [p for p in reviews.glob("[0-9]*.md") if not p.name.endswith(".rejected.md")]
+        assert list((reviews / "transcripts").glob("*.rejected.md"))
+        # The validation runs on, untouched.
+        assert validation.poll() is None and not _gone(agent)
+        assert [(r.step, r.pid) for r in live_runs(runs)] == [("validate", validation.pid)]
+    finally:
+        for process in (review, validation):
+            process.kill()
+            process.wait()
+        if not _gone(agent):
+            os.kill(agent, signal.SIGKILL)
+
+
 # This repository's Makefile: the engine's fragment included, set to this
 # repository's branches, beside the repository's own targets.
 
@@ -406,6 +705,9 @@ def _make_n(*arguments: str) -> list[str]:
     ("push-branch", [], [f"{COMMAND} push"]),
     ("change-graph", [], [f"{COMMAND} check graph"]),
     ("check-change", [], ['python3 scripts/check_change.py "X"']),
+    # The diff checks read from the branch the change lands on, dev unless named.
+    ("check-change", ["CHANGE_BASE=release"],
+     ['python3 scripts/check_change.py "X" --base "release"']),
 ])
 def test_the_root_makefile_runs_the_command_through_the_fragment(
         target: str, variables: list[str], commands: list[str]) -> None:
