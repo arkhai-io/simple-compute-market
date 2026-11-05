@@ -33,7 +33,7 @@ from market_settlement_runtime import (
     SettlementPublicationClause,
     SettlementRole,
 )
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 from market_arkhai_payments.client import PaymentsClient
 from market_arkhai_payments.mandates import PaymentsOptionParams
@@ -69,7 +69,15 @@ class ArkhaiPaymentsConfig(BaseModel):
     service_identity: Identity | None = None
     receipt_identities: list[ReceiptIdentity] = Field(default_factory=list)
     fee_bps: int | None = Field(default=None, ge=0, le=10_000)
+    # The key itself, stated in a service's secret overlay. Marked secret so a
+    # values schema generated from this model refuses it in a chart's public
+    # configuration.
+    api_key: SecretStr | None = Field(default=None, json_schema_extra={"secret": True})
+    # The environment variable a buyer's credential provider reads the key from.
     api_key_env: str | None = None
+    # A PEM bundle the payments client alone verifies the service against; the
+    # process's trust store, and every other client's, is left as it is.
+    ca_bundle_path: str | None = None
     development_auth: bool = False
     # The service mode whose receipts this role accepts. Live payments services
     # sign livemode=true; test and development services sign false.
@@ -142,15 +150,40 @@ class ArkhaiPaymentsConfig(BaseModel):
             )
         return value
 
+    @field_validator("ca_bundle_path")
+    @classmethod
+    def validate_ca_bundle_path(cls, value: str | None) -> str | None:
+        # An empty path would load no bundle, and the client would then fall
+        # back to the default trust store rather than trust the bundle alone.
+        if value is not None and not value.strip():
+            raise ValueError("ca_bundle_path must name a file")
+        return value
+
+    @field_validator("api_key")
+    @classmethod
+    def validate_api_key(cls, value: SecretStr | None) -> SecretStr | None:
+        # The message never quotes the value: it is a credential.
+        if value is not None and not _usable_key(value.get_secret_value()):
+            raise ValueError("api_key must be a nonempty single-line key")
+        return value
+
+    @model_validator(mode="after")
+    def validate_key_forms(self) -> ArkhaiPaymentsConfig:
+        # One key resolution serves every caller, so a configuration may state
+        # only one way of authenticating, whether or not it publishes new deals.
+        if self.api_key is not None and self.api_key_env is not None:
+            raise ValueError("api_key and api_key_env are mutually exclusive")
+        if self.development_auth:
+            for form, value in (("api_key", self.api_key), ("api_key_env", self.api_key_env)):
+                if value is not None:
+                    raise ValueError(f"development_auth and {form} are mutually exclusive")
+        return self
+
     @model_validator(mode="after")
     def validate_development_auth(self) -> ArkhaiPaymentsConfig:
         if not self.enabled:
             return self
         if self.development_auth:
-            if self.api_key_env is not None:
-                raise ValueError(
-                    "development_auth and api_key_env are mutually exclusive"
-                )
             if self.service_url is not None and not _loopback_origin(self.service_url):
                 raise ValueError("development_auth requires a loopback service_url")
         return self
@@ -183,6 +216,35 @@ class ArkhaiPaymentsPublicationInput(PaymentsOptionParams):
         return value
 
 
+def resolve_payments_api_key(
+    config: ArkhaiPaymentsConfig,
+    *,
+    environment: Mapping[str, str] | None = None,
+) -> SecretStr:
+    """The payments key a role authenticates with, from whichever form it states.
+
+    ``api_key`` when the configuration states it, otherwise the value of the
+    variable ``api_key_env`` names in ``environment`` (the process environment
+    by default). Client construction, readiness and the access check all resolve
+    the key here, so they cannot disagree about which key a role holds. Raises
+    ``ArkhaiPaymentsConfigurationError`` naming the form that is missing or
+    unavailable, never the key.
+    """
+    if config.api_key is not None:
+        return config.api_key
+    if config.api_key_env is None:
+        raise ArkhaiPaymentsConfigurationError(
+            "payments api_key or api_key_env is not configured"
+        )
+    source = os.environ if environment is None else environment
+    value = source.get(config.api_key_env)
+    if not isinstance(value, str) or not _usable_key(value):
+        raise ArkhaiPaymentsConfigurationError(
+            f"payments API key environment variable {config.api_key_env!r} is unavailable"
+        )
+    return SecretStr(value)
+
+
 def payments_client_for_owner(
     config: ArkhaiPaymentsConfig,
     owner_account: str,
@@ -194,27 +256,33 @@ def payments_client_for_owner(
     """Build an authenticated service client without persisting credentials.
 
     Works whether or not the mechanism is enabled for new deals: accepted deals
-    keep being serviced after operators stop publishing payment options.
+    keep being serviced after operators stop publishing payment options. A
+    ``ca_bundle_path`` the client cannot load raises ``OSError`` here, before
+    any request.
     """
     if config.service_url is None:
         raise ArkhaiPaymentsConfigurationError("payments service_url is not configured")
     owner = AccountId.model_validate(owner_account).root
-    client_args: dict[str, Any] = {"timeout": timeout, "transport": transport}
+    client_args: dict[str, Any] = {
+        "timeout": timeout,
+        "transport": transport,
+        "ca_bundle": config.ca_bundle_path,
+    }
     if config.development_auth:
         return PaymentsClient(
             config.service_url,
             development_account=owner,
             **client_args,
         )
-    if config.api_key_env is None:
-        raise ArkhaiPaymentsConfigurationError("payments api_key_env is not configured")
-    source = os.environ if environment is None else environment
-    api_key = source.get(config.api_key_env)
-    if not isinstance(api_key, str) or not api_key.strip():
-        raise ArkhaiPaymentsConfigurationError(
-            f"payments API key environment variable {config.api_key_env!r} is unavailable"
-        )
-    return PaymentsClient(config.service_url, api_key=api_key, **client_args)
+    api_key = resolve_payments_api_key(config, environment=environment)
+    return PaymentsClient(
+        config.service_url, api_key=api_key.get_secret_value(), **client_args,
+    )
+
+
+def _usable_key(value: str) -> bool:
+    # The key travels as an HTTP header value.
+    return bool(value.strip()) and "\r" not in value and "\n" not in value
 
 
 def _is_loopback(host: str) -> bool:
@@ -284,20 +352,24 @@ async def arkhai_payments_preflight(
             )
         )
     if not config.development_auth:
-        if config.api_key_env is None:
+        if config.api_key is None and config.api_key_env is None:
             blockers.append(
                 _blocker(
-                    "arkhai_payments.api_key_env_missing",
-                    "an API key environment variable name is required",
+                    "arkhai_payments.api_key_missing",
+                    "a payments key is required: api_key in the secret overlay, "
+                    "or api_key_env naming the variable that holds it",
                 )
             )
-        elif not os.environ.get(config.api_key_env, "").strip():
-            blockers.append(
-                _blocker(
-                    "arkhai_payments.credential_missing",
-                    "the configured payments API key is unavailable",
+        else:
+            try:
+                resolve_payments_api_key(config)
+            except ArkhaiPaymentsConfigurationError:
+                blockers.append(
+                    _blocker(
+                        "arkhai_payments.credential_missing",
+                        "the configured payments API key is unavailable",
+                    )
                 )
-            )
 
     return MechanismReadiness(
         mechanism=ARKHAI_PAYMENTS_MECHANISM,
@@ -529,5 +601,6 @@ __all__ = [
     "arkhai_payments_preflight",
     "create_arkhai_payments_registration",
     "payments_client_for_owner",
+    "resolve_payments_api_key",
     "validate_arkhai_payments_publication_input",
 ]

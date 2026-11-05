@@ -1,15 +1,14 @@
 """Proof that a role can reach and authenticate to its payments service.
 
-Readiness never contacts the service, so the role's own CA trust, key variable
-and service origin are proven together only by an authenticated read made from
-the role's own process environment. The check reads one account's balance with
-exactly the client the role would build, and reports the first step that failed.
+Readiness never contacts the service, so the role's own CA trust, key and
+service origin are proven together only by an authenticated read made from the
+role's own process. The check reads one account's balance with exactly the client
+the role would build, and reports the first step that failed.
 """
 
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -25,7 +24,9 @@ from market_arkhai_payments.errors import (
 from market_arkhai_payments.models import AccountId
 from market_arkhai_payments.settlement_config import (
     ArkhaiPaymentsConfig,
+    ArkhaiPaymentsConfigurationError,
     payments_client_for_owner,
+    resolve_payments_api_key,
 )
 
 AccessStep = Literal["configuration", "credential", "transport", "refused"]
@@ -102,24 +103,29 @@ def check_payments_access(
                        "[Settlement.arkhai_payments] is not enabled")
     if service_url is None:
         return _failed(account, None, "configuration", "service_url is not configured")
-    source = os.environ if environment is None else environment
     if not section.development_auth:
-        if section.api_key_env is None:
+        if section.api_key is None and section.api_key_env is None:
             return _failed(account, service_url, "configuration",
-                           "api_key_env is not configured")
-        key = source.get(section.api_key_env)
-        if not isinstance(key, str) or not key.strip() or "\r" in key or "\n" in key:
+                           "neither api_key nor api_key_env is configured")
+        try:
+            resolve_payments_api_key(section, environment=environment)
+        except ArkhaiPaymentsConfigurationError:
+            # Validation refuses an unusable api_key, so only a variable fails here.
             return _failed(account, service_url, "credential",
                            f"environment variable {section.api_key_env} is unset, empty, "
                            "or not a single-line key")
     try:
         client = payments_client_for_owner(
-            section, account, environment=source, transport=transport,
+            section, account, environment=environment, transport=transport,
         )
     except OSError:
-        # The HTTP client loads the bundle SSL_CERT_FILE names when it is built,
-        # before any request; a missing, unreadable, or malformed bundle raises
-        # here (ssl.SSLError is an OSError), never as a transport error.
+        # The client loads its trust bundle when it is built, before any request,
+        # so a missing, unreadable, or malformed bundle raises here (ssl.SSLError
+        # is an OSError). A configured ca_bundle_path is the role's own setting;
+        # without one, the bundle is the one SSL_CERT_FILE names for the process.
+        if section.ca_bundle_path is not None:
+            return _failed(account, service_url, "configuration",
+                           "the CA bundle ca_bundle_path names could not be loaded")
         return _failed(account, service_url, "transport",
                        "the trust bundle SSL_CERT_FILE names could not be loaded")
     try:

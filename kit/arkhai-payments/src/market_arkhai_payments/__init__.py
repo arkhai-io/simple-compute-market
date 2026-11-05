@@ -85,6 +85,7 @@ from market_arkhai_payments.settlement_config import (
     ArkhaiPaymentsPublicationInput,
     create_arkhai_payments_registration,
     payments_client_for_owner,
+    resolve_payments_api_key,
 )
 
 __all__ = [
@@ -154,6 +155,7 @@ __all__ = [
     "ReceiptIdentity",
     "verify_snapshot",
     "reconcile_accepted_payments",
+    "resolve_payments_api_key",
     "run_payment_reconciliation",
     "selected_payment_option",
     "servicing_stage",

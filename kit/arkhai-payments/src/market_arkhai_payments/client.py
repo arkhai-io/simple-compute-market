@@ -5,6 +5,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import re
+import ssl
 import time
 from collections.abc import Mapping
 from typing import Any, TypeVar
@@ -44,6 +45,10 @@ class PaymentsClient:
     Use a WorkOS user-scoped API key for normal service calls. The explicit
     ``development_account`` mode sends the service's development-only account
     header and is intended for local integration runs.
+
+    ``ca_bundle`` names a PEM file the client verifies the service against,
+    instead of the default trust store; the bundle is loaded here, so one that is
+    missing, unreadable or malformed raises ``OSError`` before any request.
     """
 
     def __init__(
@@ -54,6 +59,7 @@ class PaymentsClient:
         development_account: str | None = None,
         timeout: float = 10.0,
         transport: httpx.BaseTransport | None = None,
+        ca_bundle: str | None = None,
     ) -> None:
         if (api_key is None) == (development_account is None):
             raise ValueError("provide exactly one of api_key or development_account")
@@ -80,6 +86,17 @@ class PaymentsClient:
         else:
             parsed_account = AccountId.model_validate(development_account).root
             headers["X-Account-ID"] = parsed_account
+        # A context built from the bundle alone is this client's verification.
+        # httpx consults SSL_CERT_FILE only when verification is left at its
+        # default, so environment proxies still apply off loopback while the
+        # process's trust store, and every other client's, stays as it is.
+        verify: ssl.SSLContext | bool = True
+        if ca_bundle is not None:
+            # The ssl module reads an empty cafile as none given and would load
+            # the default trust store instead of this bundle alone.
+            if not ca_bundle.strip():
+                raise ValueError("ca_bundle must name a file")
+            verify = ssl.create_default_context(cafile=ca_bundle)
         self._http = httpx.Client(
             base_url=url,
             headers=headers,
@@ -87,6 +104,7 @@ class PaymentsClient:
             follow_redirects=False,
             trust_env=not _is_loopback(url.host),
             transport=transport,
+            verify=verify,
         )
 
     def close(self) -> None:

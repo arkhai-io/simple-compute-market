@@ -78,9 +78,9 @@ def test_an_authenticated_balance_read_is_ok_with_the_accounts_assets_and_holds(
         (section(service_url="ftp://payments.invalid"), "invalid: service_url"),
         (section(enabled=False), "not enabled"),
         (section(service_url=None), "service_url is not configured"),
-        (section(api_key_env=None), "api_key_env is not configured"),
+        (section(api_key_env=None), "neither api_key nor api_key_env is configured"),
     ],
-    ids=["no-section", "invalid-section", "disabled", "no-service-url", "no-api-key-env"],
+    ids=["no-section", "invalid-section", "disabled", "no-service-url", "no-key-form"],
 )
 def test_configuration_failures_name_the_configuration_step_before_any_request(config, expected):
     outcome = check_payments_access(
@@ -103,6 +103,15 @@ def test_an_unusable_key_variable_names_the_credential_step_and_the_variable(env
     outcome, requests = run(environment=environment)
     assert (outcome.step, requests) == ("credential", [])
     assert KEY_ENV in (outcome.detail or "")
+
+
+def test_a_key_stated_in_the_secret_overlay_authenticates_with_no_variable_set():
+    outcome, requests = run(
+        config=ArkhaiPaymentsConfig(**section(api_key_env=None, api_key=KEY)), environment={},
+    )
+    assert outcome.ok
+    assert [r.headers["Authorization"] for r in requests] == [f"Bearer {KEY}"]
+    assert KEY not in outcome.json_line()
 
 
 def test_an_untrusted_or_unreachable_service_names_the_transport_step():

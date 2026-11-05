@@ -1063,7 +1063,18 @@
                     }
                   ]
                 },
+                "^[aA][pP][iI]_[kK][eE][yY]$": false,
                 "^[aA][pP][iI]_[kK][eE][yY]_[eE][nN][vV]$": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "^[cC][aA]_[bB][uU][nN][dD][lL][eE]_[pP][aA][tT][hH]$": {
                   "anyOf": [
                     {
                       "type": "string"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import ssl
 
 import httpx
 import pytest
@@ -37,6 +38,21 @@ def _snapshot_json(terms, *, attachments=()):
         fake.attachments.append(attachment)
     snapshot = fake.get_transaction(data.transaction_id)
     return data, snapshot.model_dump(mode="json", by_alias=True, exclude_none=True)
+
+
+def test_a_ca_bundle_is_loaded_when_the_client_is_built(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        PaymentsClient("https://payments.invalid", api_key="k", ca_bundle=str(tmp_path / "none.pem"))
+    malformed = tmp_path / "malformed.pem"
+    malformed.write_text("-----BEGIN CERTIFICATE-----\nnot a certificate\n", "utf-8")
+    with pytest.raises(ssl.SSLError):
+        PaymentsClient("https://payments.invalid", api_key="k", ca_bundle=str(malformed))
+
+
+@pytest.mark.parametrize("bundle", ["", " "], ids=["empty", "blank"])
+def test_an_empty_ca_bundle_is_refused_rather_than_read_as_the_default_store(bundle):
+    with pytest.raises(ValueError, match="ca_bundle must name a file"):
+        PaymentsClient("https://payments.invalid", api_key="k", ca_bundle=bundle)
 
 
 def test_service_error_codes_surface_as_api_errors():

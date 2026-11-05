@@ -1499,7 +1499,7 @@ test_client.py, test_access_check.py, test_access_check_tls.py}`;
 `make helm-values-schema` rewrites (`helm/charts/storefront/`,
 `helm/charts/bare-metal-storefront/`).
 
-- [ ] 6.1 `ArkhaiPaymentsConfig` gains `api_key: SecretStr | None`, marked
+- [x] 6.1 `ArkhaiPaymentsConfig` gains `api_key: SecretStr | None`, marked
   `json_schema_extra={"secret": True}` as the storefront's other secret fields are, and
   `ca_bundle_path: str | None` (D19). Validation, as `validate_development_auth` refuses
   today's conflicts: `api_key` is refused when empty; `api_key` with `api_key_env`, and
@@ -1507,7 +1507,19 @@ test_client.py, test_access_check.py, test_access_check_tls.py}`;
   set"). Unit cases in `test_settlement_config.py`: each refusal; a configuration loaded
   from TOML text with `api_key` validates under the model's strict mode; `api_key` never
   appears in the model's `repr` or a dumped public view.
-- [ ] 6.2 One key resolution (D19): a public function in `settlement_config.py`, exported
+  Done. Unit (`test_settlement_config.py`, in `make -C kit test-arkhai-payments`, pass):
+  the three conflicts refused naming both forms and never the key, also on a disabled
+  section; an empty, blank or multi-line `api_key` refused without echoing it; an empty or
+  blank `ca_bundle_path` refused; TOML text with `api_key` and `ca_bundle_path` validated
+  strictly (pydantic's strict `SecretStr` accepts a TOML string), the key absent from
+  `repr`, `model_dump_json()` and the JSON dump. Differs from the plan: the key-form
+  conflicts are refused whether or not the section is enabled, since a disabled section
+  still builds clients for accepted deals and one resolution must find one form; only
+  `development_auth`'s loopback rule stays gated on `enabled`. A multi-line key is refused
+  as well as an empty one, since it travels as a header value. `ca_bundle_path` refuses an
+  empty value, because `ssl.create_default_context(cafile="")` reads it as none given and
+  loads the default store (found by the fresh-context check).
+- [x] 6.2 One key resolution (D19): a public function in `settlement_config.py`, exported
   from `__init__.py`, returning the `SecretStr` from `api_key`, otherwise from the variable
   `api_key_env` names in the mapping it is given (the process environment by default),
   and raising `ArkhaiPaymentsConfigurationError` naming the form that is missing or
@@ -1517,7 +1529,16 @@ test_client.py, test_access_check.py, test_access_check_tls.py}`;
   precedence when only one is configured, the preflight blocker, and the check's
   `credential` step from an `api_key` configuration with no environment variable set (the
   delta's "A storefront's key is in its secret overlay").
-- [ ] 6.3 `PaymentsClient(..., ca_bundle: str | None = None)` (D19): when set, the client
+  Done: `resolve_payments_api_key(config, *, environment=None) -> SecretStr`, which also
+  refuses a variable whose value is blank or multi-line. Unit (`test_settlement_config.py`,
+  `test_access_check.py`, pass): each source, a stated `api_key` winning over a set
+  variable, the process environment as default, each failure naming its form; the
+  preflight passing on a stated key with no variable and naming both forms when neither is
+  stated; the check authenticating with `Bearer <api_key>` and `environment={}`. The
+  preflight's blocker code for no key is now `arkhai_payments.api_key_missing` (was
+  `api_key_env_missing`; nothing outside the kit read it). The check reports neither form as
+  `configuration` and an unusable variable as `credential`.
+- [x] 6.3 `PaymentsClient(..., ca_bundle: str | None = None)` (D19): when set, the client
   verifies the service with an SSL context loaded from that file alone and passes it as
   the connection's verification, so the process trust store and the client's proxy
   behaviour are otherwise unchanged; `payments_client_for_owner` passes
@@ -1529,13 +1550,41 @@ test_client.py, test_access_check.py, test_access_check_tls.py}`;
   private CA: a client given the CA's bundle verifies the server with no `SSL_CERT_FILE`
   set; a client without it refuses (`transport`); a missing and a malformed
   `ca_bundle_path` report `configuration`.
-- [ ] 6.4 Package and schema housekeeping (RELEASING.md, "Versioning policy"; `AGENTS.md`,
+  Done: the client builds `ssl.create_default_context(cafile=ca_bundle)` and passes it as
+  `verify`, refusing an empty `ca_bundle` with `ValueError`. Library integration
+  (`test_access_check_tls.py`, the real check and client against a real TLS listener on
+  loopback, pass): a leaf issued by a private CA verifies with that CA as
+  `ca_bundle_path`; another CA's bundle, or none, fails `transport` with no request sent; a
+  missing and a malformed `ca_bundle_path` fail `configuration` with the fixed detail
+  naming `ca_bundle_path` and not the path; the process `SSL_CERT_FILE` cases still fail
+  `transport`. Unit (`test_client.py`, pass): a missing or malformed bundle raises at
+  construction, an empty one `ValueError`. Differs from the plan: the file served a
+  self-signed leaf, not a private CA, so it now issues a CA and a leaf, carrying the
+  extensions Python 3.13's default strict X.509 verification requires (key usage, key
+  identifiers, EKU); without them the configured bundle failed verification. The
+  "verifies with no `SSL_CERT_FILE`" case proves nothing about `SSL_CERT_FILE` on loopback,
+  where the client sets `trust_env=False`; no test can show the process store untouched
+  off loopback without a resolvable non-loopback origin, so that rests on the client
+  setting no process state and on httpx consulting `SSL_CERT_FILE` only for
+  `verify=True`.
+- [x] 6.4 Package and schema housekeeping (RELEASING.md, "Versioning policy"; `AGENTS.md`,
   "Tests and diagnostics"). Bump `kit/arkhai-payments`'s version, `make lock`, and
   document `api_key`, `ca_bundle_path` and the resolution in `kit/arkhai-payments/README.md`.
   Run `make helm-values-schema`, so both storefront charts' generated definitions carry
   `ca_bundle_path` and refuse `api_key` in `config`; the storefronts' stale-schema unit
   test holds it.
-- [ ] 6.5 **Verification checkpoint.** Unit and library integration: `make -C kit
+  Done, with one correction: the kit's version is **not** bumped. Section 1 already bumped
+  it 0.5.0 → 0.6.0 on this branch, and RELEASING.md's "Versioning policy" bumps a package
+  at most once per change against the branch it merges into (a second bump of an
+  unreleased version only moves the exact pins on it), so `make lock` changed no lock.
+  The README documents both key forms, `resolve_payments_api_key`, `ca_bundle_path` and
+  the check's steps. `make helm-values-schema` (after `make init-storefront` and `make
+  init-bare-metal-storefront`, since it runs `--no-sync` in each storefront's environment)
+  added to `helm/charts/storefront/values.schema.json`,
+  `helm/charts/bare-metal-storefront/values.schema.json` and `helm/values.schema.json`
+  (the umbrella's copy of the storefront subchart's definition) `api_key: false` and
+  `ca_bundle_path` as a nullable string under `[Settlement.arkhai_payments]`.
+- [x] 6.5 **Verification checkpoint.** Unit and library integration: `make -C kit
   test-arkhai-payments`. Unit: the three storefront CLI suites still pass over the kit
   (`make test-storefront`, `make test-bare-metal`, `make test-apicredits`), the VM
   storefront's stale-schema test included. `make test`. `make check-packaging`, since the
@@ -1547,6 +1596,35 @@ test_client.py, test_access_check.py, test_access_check_tls.py}`;
   from the relocked environment with the new cases; jobs `test · test-storefront`,
   `test · test-bare-metal` and `test · test-apicredits` — each passes from the relocked
   environments.
+  Results: `make -C kit test-arkhai-payments` (unit and library integration, with mypy,
+  the vector check and the generated-model check) 219 passed. `make test-storefront`
+  1213 passed, 1 skipped (unit, the stale-schema test included) and 525 passed
+  (application integration); `make test-bare-metal` 126, 224, 582, 31 and 137 passed;
+  `make test-apicredits` every suite passed. `make test`: every suite passed but
+  `scripts/tests/test_change_workflow_assumptions.py::test_every_target_and_path_the_workflow_names_is_provided_here`,
+  which fails on `HEAD` before this section: `.claude/change-steps.toml` names `make
+  build-*` (commit 4a9c8e2f6) and the workflow's provisions list does not, outside this
+  change's code. That failure stops `make test` inside `test-deployment-packaging`, so the
+  targets after it were run alone and passed: `make -C helm test-render`, `make
+  test-frp-grant-admission` (203 passed, 15 skipped), `make test-payments-lane-double`
+  (50 passed). `make check-packaging` passed. `make check-change` passed but for its
+  citations check, which reports `e2e-tests/config/config-payments-lane.yml` and
+  `config-bare-metal-lane.yml`, cited by `design.md` and `tasks.md` and created by
+  section 10. End-to-end scenarios confirmed as planned: none exercises this section yet;
+  the three payment markers do from section 9.
+
+  Handoff: the fresh-context check found the version bump (reverted, see 6.4), the empty
+  `ca_bundle_path` falling back to the default store (refused at config and in the
+  client), and tests short of the plan's TLS claims (a client unit case and the
+  "another CA's bundle" transport case added). Declined: moving the TLS test to an
+  `integration/` directory (the kit's tests are flat and the task names the path), and
+  removing the check's second key resolution (it resolves once to classify the failure
+  and `payments_client_for_owner` resolves again, both through the one function).
+  Clearing a stale wheel: `make lock` resolves lower-bound consumers to the highest wheel in
+  `.dist`, so reverting a bump needs `make dist-clean` before `make lock`. Section 9's lane
+  configurations state `api_key` in the secret overlays and `ca_bundle_path`; the
+  bare-metal storefront needs no code change for either, since it parses the section
+  through `ArkhaiPaymentsConfig`.
 
 ## 7. Dispute credentials carry secrets; the mediation credential carries the token
 
