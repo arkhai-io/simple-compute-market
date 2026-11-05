@@ -570,7 +570,7 @@ A domain that contributes routes to a service it does not compose declares their
 | Listing, negotiation, deal, and seller policy state | Storefront | Market-facing state, not physical inventory |
 | Capacity admission and reservation | Site authority | Serialization point for competing reservations |
 | Sellable capacity: each Physical Resource's declared shape, quantity, pool, and match attributes | Site authority | Declared only by registration, a capacity-definitions document, or capacity import; no host write declares capacity, and host records are connection identity only |
-| Host connection identity and membership changes | Compute provisioning host registry | A host record supplies the execution connection; the host authority composes checks, including the compute-family relay-binding rule |
+| Host connection identity, enabled state, and membership changes | Compute provisioning host registry | A host record supplies the execution connection; the registry reports to admission, scheduling, and projection only which hosts take new delivery; the host authority composes checks, including the compute-family relay-binding rule |
 | VM listing shapes a storefront publishes | Storefront, within what the site declares | A storefront pool override, else the pool's `listing_shapes` hint, else the VM domain's default generator; constraints a stated shape carries, merged with the storefront's configured `[admissibility.defaults.vm]`, decide which shapes it would sell, and a site's constraints are advisory input to that policy; feasibility is judged against the site's declarations, and admission remains the site's |
 | A bare-metal listing's shape | Site authority, through the Physical Resource's declaration | Derived from the declared capacity and attributes; the storefront chooses nothing |
 | Resource-pool metadata and provider configuration | Resource-pool service | Provisioning routing metadata; the provider is fixed at creation, and disabled pools remain resolvable |
@@ -794,14 +794,24 @@ does not replace physical accounting: a pool may authorize both VM slices and
 whole-host delivery while the exclusive/shareable conflict rule still prevents
 them from overlapping on one physical host.
 
-A pool's provider also decides whether declarations in the pool must name a host.
-Each provider declares it, and the provisioning composition supplies the
-per-provider requirement as plain data. Site admission and settlement scheduling
-each refuse a declaration naming no host where the pool's provider needs one: the
-same layer-by-layer recheck, so no layer relies on another having refused.
-Dispatch is the last check. It renders execution inventory only from the
-registered host record and refuses a host with none. A composition that delivers
-nothing through hosts supplies no requirement, and its admission is host-agnostic.
+A pool's provider also decides whether declarations in the pool need a host to
+deliver through. Each provider declares it, and the provisioning composition
+supplies the per-provider requirement as plain data. Where the pool is backed and
+its provider needs a host, a declaration has a usable host only when it names one
+that is registered and enabled; the composition that owns hosts tells the lower
+layers which hosts those are through a `DeliverableHosts` report, the identifiers
+of registered, enabled hosts, which each layer reads in the transaction that
+decides, so the site owns no host record. Site admission, the site's rebind
+recheck, and settlement scheduling each refuse a declaration with no usable host,
+and the site's offered read, from which every projection is built, projects it not
+enabled: the same layer-by-layer recheck, so no layer relies on another having
+refused. Both the requirement and the report live in `kit/resource-pools` beside
+the predicate that applies them. Dispatch is the last check. It renders execution
+inventory only from the registered host record and refuses a host with none, and a
+create a disabled one. A composition that delivers nothing through hosts supplies
+no requirement, and its admission is host-agnostic; one that supplies a requirement
+but no report treats every named host as usable. See the
+[site-capacity architecture](../../openspec/specs/site-capacity/architecture.md#declared-capacity-and-connection-identity).
 
 ## Shared vocabulary and identities
 

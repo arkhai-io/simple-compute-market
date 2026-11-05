@@ -12,7 +12,7 @@ from typing import Any, Iterator, Protocol
 
 from sqlalchemy.orm import Session
 
-from market_resource_pools import ResourcePoolService
+from market_resource_pools import DeliverableHosts, ResourcePoolService
 from market_site.ledger import CapacityLedgerService
 
 from .settlement_repository import SettlementRepository, begin_sqlite_write_transaction
@@ -33,6 +33,10 @@ class SchedulingTransaction(Protocol):
     def save_cursor(self, resource_kind: str, *, last_pool_id: str | None, last_resource_by_pool: dict[str, str]) -> Any: ...
     def backing_resource_id(self, capacity_reservation_id: str) -> str | None: ...
     def rebind_capacity(self, *, capacity_reservation_id: str, settlement_resource_id: str) -> None: ...
+    def deliverable_host_ids(self) -> frozenset[str] | None:
+        """The hosts taking new delivery, read in this transaction; ``None``
+        when the composition supplies no report."""
+        ...
 
 
 class SchedulingUnitOfWork(Protocol):
@@ -43,11 +47,13 @@ class SchedulingUnitOfWork(Protocol):
 class SqlAlchemySchedulingTransaction:
     def __init__(self, db: Session, pool_service: ResourcePoolService,
                  capacity_ledger: CapacityLedgerService,
-                 repository: SettlementRepository) -> None:
+                 repository: SettlementRepository,
+                 deliverable_hosts: DeliverableHosts | None = None) -> None:
         self.db = db
         self._pool_service = pool_service
         self._capacity_ledger = capacity_ledger
         self._repository = repository
+        self._deliverable_hosts = deliverable_hosts
 
     def lock_reservation(self, capacity_reservation_id: str) -> Any | None:
         return self._capacity_ledger.lock_reservation(self.db, capacity_reservation_id)
@@ -92,19 +98,35 @@ class SqlAlchemySchedulingTransaction:
             settlement_resource_id=settlement_resource_id,
         )
 
+    def deliverable_host_ids(self) -> frozenset[str] | None:
+        # Read in this transaction's session, so the candidates are judged
+        # against the host state the transaction that places them sees.
+        if self._deliverable_hosts is None:
+            return None
+        return self._deliverable_hosts.deliverable_host_ids(self.db)
+
 
 class SqlAlchemySchedulingUnitOfWork:
-    """Open one SQLite writer transaction for the complete scheduling use case."""
+    """Open one SQLite writer transaction for the complete scheduling use case.
+
+    ``deliverable_hosts``, when supplied, reports the hosts taking new
+    delivery: the registered, enabled ones. The composition that owns hosts
+    supplies it, the same report it gives the site ledger, and each
+    transaction reads it in its own session. With none, every named host is
+    usable.
+    """
 
     def __init__(self, session_factory: Any, pool_service: ResourcePoolService,
                  capacity_ledger: CapacityLedgerService,
                  repository: SettlementRepository | None = None,
-                 transaction_type: type[SqlAlchemySchedulingTransaction] = SqlAlchemySchedulingTransaction) -> None:
+                 transaction_type: type[SqlAlchemySchedulingTransaction] = SqlAlchemySchedulingTransaction,
+                 deliverable_hosts: DeliverableHosts | None = None) -> None:
         self.session_factory = session_factory
         self.pool_service = pool_service
         self.capacity_ledger = capacity_ledger
         self.repository = repository or SettlementRepository()
         self.transaction_type = transaction_type
+        self.deliverable_hosts = deliverable_hosts
 
     @contextmanager
     def transaction(self) -> Iterator[SchedulingTransaction]:
@@ -115,7 +137,10 @@ class SqlAlchemySchedulingUnitOfWork:
         # and its write.
         with self.capacity_ledger.serialized(), self.session_factory() as db:
             begin_sqlite_write_transaction(db)
-            tx = self.transaction_type(db, self.pool_service, self.capacity_ledger, self.repository)
+            tx = self.transaction_type(
+                db, self.pool_service, self.capacity_ledger, self.repository,
+                deliverable_hosts=self.deliverable_hosts,
+            )
             try:
                 yield tx
                 db.commit()

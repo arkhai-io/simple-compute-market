@@ -429,10 +429,22 @@ class Container(containers.DeclarativeContainer):
         peer=providers.Callable(lambda cfg: str(getattr(cfg, "storefront_url", "") or "").rstrip("/"), config),
     )
 
+    connection_codecs = providers.Singleton(_make_connection_codecs, cfg=config)
+
+    # Declared ahead of the ledger and the scheduling unit of work: both read
+    # its report of the hosts taking new delivery, the same object, in the
+    # session that decides.
+    host_authority = providers.Singleton(
+        _make_host_authority,
+        session_factory=session_factory,
+        codecs=connection_codecs,
+    )
+
     capacity_ledger_service = providers.Singleton(
         CapacityLedgerService,
         session_factory=session_factory,
         host_requirement=host_requirement,
+        deliverable_hosts=host_authority,
         # "gpu_count" is this domain's alias for the generic "units" claim
         # key and the dimension its legacy scalar mirrors — kept explicit here
         # rather than hardcoded in kit/site so the ledger stays domain-neutral.
@@ -452,14 +464,6 @@ class Container(containers.DeclarativeContainer):
     # Filled and frozen by adapter composition; the job engine resolves each
     # job's executor through it.
     job_executor_table = providers.Singleton(JobExecutorTable)
-
-    connection_codecs = providers.Singleton(_make_connection_codecs, cfg=config)
-
-    host_authority = providers.Singleton(
-        _make_host_authority,
-        session_factory=session_factory,
-        codecs=connection_codecs,
-    )
 
     probe_runner = providers.Singleton(_make_probe_runner, cfg=config)
 
@@ -598,6 +602,7 @@ class Container(containers.DeclarativeContainer):
         pool_service=resource_pool_service,
         capacity_ledger=capacity_ledger_service,
         repository=settlement_repository,
+        deliverable_hosts=host_authority,
     )
 
     physical_settlement_scheduler = providers.Singleton(

@@ -19,7 +19,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from market_resource_pools import HostRequirement, ResourcePoolService, pool_needs_host
+from market_resource_pools import (
+    HostRequirement,
+    ResourcePoolService,
+    declaration_has_usable_host,
+    pool_needs_host,
+)
 from market_resource_pools_contracts import pool_delivers_offering_mode
 from market_site import resource_satisfies_requirement
 from market_site.ledger import CapacityLedgerService
@@ -78,9 +83,11 @@ class PhysicalSettlementScheduler:
         host_requirement: HostRequirement | None = None,
     ) -> None:
         """``host_requirement`` maps each provider identity to whether its
-        delivery needs a host; see ``market_resource_pools.pool_needs_host``.
-        When supplied, a candidate whose declaration names no host is never
-        placed in a pool whose provider needs one.
+        delivery needs a host; see
+        ``market_resource_pools.declaration_has_usable_host``. When supplied, a
+        candidate whose declaration has no usable host — naming none, or
+        naming one absent from the unit of work's report of hosts taking new
+        delivery — is never placed in a pool whose provider needs one.
         """
         self._pool_service = pool_service
         self._host_requirement = host_requirement
@@ -298,6 +305,10 @@ class PhysicalSettlementScheduler:
         capacity_reservation_id: str,
     ) -> list[SettlementCandidate]:
         pools = {pool.id: pool for pool in tx.list_enabled_pools()}
+        # With no requirement no host rule applies, so the report is not read.
+        deliverable = (
+            tx.deliverable_host_ids() if self._host_requirement is not None else None
+        )
         candidates: list[SettlementCandidate] = []
         for payload in tx.list_candidates(
             resource_kind=requirement.resource_kind,
@@ -311,15 +322,26 @@ class PhysicalSettlementScheduler:
                 pool.policy_tags, requirement.offering_mode
             ):
                 continue
-            # Placing a declaration that names no host in a pool whose provider
-            # delivers through one would commit an assignment no provider can
-            # execute, and an equivalent retry would return it again. Excluding
-            # it here, before policy, rebind, or cursor write, keeps both the
-            # automatic and the explicitly constrained paths from reaching it.
-            # An existing assignment is not re-placed; its recorded host is
-            # checked where it is returned, above.
-            if not getattr(payload, "host_id", None) and pool_needs_host(
-                pool.provider, self._host_requirement
+            # Placing a declaration with no usable host — naming none, or naming
+            # one the unit of work's report leaves out because it is disabled
+            # or unregistered — in a pool whose provider
+            # delivers through a host would commit an assignment no provider
+            # can execute, and an equivalent retry would return it again.
+            # Excluding it here, before policy, rebind, or cursor write, keeps
+            # both the automatic and the explicitly constrained paths from
+            # reaching it, the reservation's own backing included: a hold is
+            # not a delivery, so it is re-placed rather than sent to a host
+            # that cannot take it. The candidate is judged as backed, since its
+            # pool delivers the requested mode and an unbacked pool delivers
+            # nothing. An existing assignment keeps its host and is not
+            # re-placed; it is returned above, and dispatch refuses its create
+            # while the host cannot take it.
+            if not declaration_has_usable_host(
+                getattr(payload, "host_id", None),
+                pool.provider,
+                True,
+                self._host_requirement,
+                deliverable,
             ):
                 continue
             if not resource_satisfies_requirement(

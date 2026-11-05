@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import httpx
 import pytest
+from compute_provisioning_ansible import ssh_connection
+from compute_provisioning_contracts import HostCreate
 from core_storefront.aggregation import AggregateCapacityClient
 from httpx import ASGITransport
 from market_capacity_publication import (
@@ -68,7 +70,18 @@ async def test_the_projection_state_follows_its_site_through_the_real_client(
         transport=ASGITransport(app=app),
     )
 
+    provisioning_client, _ = client_and_queue
+
     async def declare(resource_id: str) -> None:
+        # The host first: the capacity-bucket projection offers a declaration
+        # only while its host is registered and enabled. The address is a
+        # documentation-range placeholder nothing connects to.
+        await provisioning_client.family.register_host(HostCreate(
+            host_id=f"{resource_id}-host",
+            connection=ssh_connection(
+                ssh_host="192.0.2.1", ssh_user="ubuntu", key_path="/keys/id"
+            ),
+        ))
         await admin.register_resource(
             resource_id,
             pool_id="default",

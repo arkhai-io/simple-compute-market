@@ -144,6 +144,9 @@ class TestCapacityClientEndpointCoverage:
     async def test_capacity_read_and_truncate_methods_use_client_contract(self, client_and_queue):
         client, _ = client_and_queue
         ledger = _container_module.resolved_capacity_ledger_service
+        # Admission and the snapshot offer the declaration only while its host
+        # is registered and enabled.
+        _register_host_record(HOST)
         ledger.register_resource(
             resource_id="compute-kvm1-001",
             total_units=8,

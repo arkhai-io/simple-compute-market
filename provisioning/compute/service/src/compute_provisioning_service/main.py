@@ -193,8 +193,10 @@ def _capacity_resource_inventory() -> list[dict[str, object]]:
     ledger = _container_module.resolved_capacity_ledger_service
     if ledger is None:
         raise RuntimeError("capacity ledger is not initialized")
+    # The offered read, so the projected ``enabled`` and every domain view built
+    # from a declaration state what admission would admit against.
     return load_capacity_resource_inventory(
-        ledger.list_resources(), _inventory_views(), container.session_factory()
+        ledger.list_offered_resources(), _inventory_views(), container.session_factory()
     )
 
 

@@ -79,6 +79,7 @@ from market_fulfillment import (
     PhysicalSettlementScheduler,
     SettlementRepository,
     SqlAlchemyFulfillmentUnitOfWork,
+    SqlAlchemySchedulingUnitOfWork,
 )
 from market_fulfillment.db import Base as FulfillmentBase
 from market_resource_pools.db import Base as PoolsBase
@@ -692,18 +693,6 @@ async def client_and_queue(
     lease_end_reports = LeaseEndReports(
         session_factory, signer=identity_context.signer, peer=str(mock_settings.storefront_url),
     )
-    capacity_ledger_service = CapacityLedgerService(
-        session_factory=session_factory,
-        site_id=identity_context.storefront_site_id,
-        lease_end_effect=lease_end_reports.record,
-        unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count",
-        host_requirement=host_requirement,
-        # The release guard exactly as the production container composes it,
-        # so capacity is freed here only on the proof it needs there.
-        release_guard=FulfillmentReleaseGuard(SettlementRepository()),
-        release_effect=release_effects,
-    )
-
     connection_codecs = ConnectionCodecs([SshConnectionCodec(TEST_CONNECTION_KEY)])
     host_authority = HostAuthority(
         session_factory,
@@ -715,6 +704,21 @@ async def client_and_queue(
         connection_change_hooks=_container_module.host_connection_change_hooks(
             connection_codecs
         ),
+    )
+    capacity_ledger_service = CapacityLedgerService(
+        session_factory=session_factory,
+        site_id=identity_context.storefront_site_id,
+        lease_end_effect=lease_end_reports.record,
+        unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count",
+        host_requirement=host_requirement,
+        # The hosts taking new delivery, reported by the host authority as the
+        # production container wires it, so a declaration naming a disabled or
+        # unregistered host is refused and not offered here as it is there.
+        deliverable_hosts=host_authority,
+        # The release guard exactly as the production container composes it,
+        # so capacity is freed here only on the proof it needs there.
+        release_guard=FulfillmentReleaseGuard(SettlementRepository()),
+        release_effect=release_effects,
     )
 
     from market_resource_pools import ResourcePoolService
@@ -765,6 +769,14 @@ async def client_and_queue(
         session_factory=session_factory,
         default_resource_kind="compute.gpu",
         host_requirement=host_requirement,
+        # The same report the ledger reads, as the production container wires
+        # the scheduling unit of work.
+        unit_of_work=SqlAlchemySchedulingUnitOfWork(
+            session_factory,
+            resource_pool_service,
+            capacity_ledger_service,
+            deliverable_hosts=host_authority,
+        ),
     )
 
     capacity_reservation_watchdog = CapacityReservationWatchdog(

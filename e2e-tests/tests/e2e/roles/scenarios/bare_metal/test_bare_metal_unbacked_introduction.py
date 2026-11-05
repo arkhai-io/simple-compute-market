@@ -69,6 +69,7 @@ def introduction_driver(
     bare_metal_site_operator,
     bare_metal_site_capacity,
     bare_metal_registry,
+    provisioning_client,
 ) -> BareMetalIntroductionDriver:
     """Bare metal's driver, with a buyer whose own sink is a file the scenario
     reads and whose ``[bare_metal]`` section pins the lane's registry."""
@@ -126,6 +127,7 @@ def introduction_driver(
         site_operator=bare_metal_site_operator,
         site_capacity=bare_metal_site_capacity,
         registry=bare_metal_registry,
+        provisioning=provisioning_client,
     )
 
 

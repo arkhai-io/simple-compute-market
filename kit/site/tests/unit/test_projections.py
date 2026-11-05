@@ -286,3 +286,55 @@ def test_service_without_pool_directory_omits_pool_metadata():
     service = SiteProjectionService(object(), resource_inventory=lambda: _resources())
     _, rows = service.resource_pools()
     assert "pool_metadata" not in rows[0]
+
+
+class _OfferingLedger:
+    """A ledger whose offered read can differ from its stored one."""
+
+    def __init__(self) -> None:
+        self.offered = _resources()
+
+    def list_resources(self):
+        # The stored view: every declaration enabled, as the operator declared.
+        return _resources()
+
+    def list_offered_resources(self):
+        return [dict(row) for row in self.offered]
+
+
+def test_capacity_buckets_are_built_from_the_offered_read():
+    ledger = _OfferingLedger()
+    ledger.offered[1]["enabled"] = False
+    service = SiteProjectionService(ledger)
+
+    _, rows = service.capacity_buckets()
+
+    assert [row["resource_count"] for row in rows] == [1]
+
+
+def test_capacity_bucket_revision_advances_when_only_offered_state_changes():
+    ledger = _OfferingLedger()
+    service = SiteProjectionService(ledger)
+    first, rows = service.capacity_buckets()
+    assert [row["resource_count"] for row in rows] == [2]
+
+    ledger.offered[1]["enabled"] = False
+    changed, rows = service.capacity_buckets()
+
+    assert [row["resource_count"] for row in rows] == [1]
+    assert changed.revision == first.revision + 1
+    assert changed.digest != first.digest
+
+
+def test_the_default_resource_pool_inventory_is_the_offered_read():
+    ledger = _OfferingLedger()
+    ledger.offered[1]["enabled"] = False
+    service = SiteProjectionService(ledger)
+
+    _, rows = service.resource_pools()
+
+    enabled = {
+        entry["physical_resource_id"]: entry["enabled"]
+        for entry in rows[0]["resources"]
+    }
+    assert enabled == {"host-a": True, "host-b": False}
