@@ -365,17 +365,24 @@ before the other checks because the drift is happening now. Touches
   minimum leaves such locks at the old revision; the revision check then names them,
   and `BUILD_AND_PACKAGING.md` says how to relock one.
 
-## 5. Private keys are refused through gitleaks (D24 item 4)
+## 5. Private keys and provider credentials are refused through gitleaks, and an audit reports every rule (D24 item 4, D25–D30)
 
-Delivers a pinned gitleaks with a repository rule beside `check_public_content.py`
-wherever that runs. Implements D24 item 4 and the delta requirement's private-key
-clauses with its scenarios "A key fixture carries no key material", "Two key fixtures
-share a file", "A key is added in a merge resolution", "A real key is staged", and "A
-key is embedded as one escaped string". Touches a new `.gitleaks.toml`, a new
-`scripts/check_secrets.py`, `scripts/hooks/pre-commit`, `scripts/hooks/pre-push`,
-`scripts/check_push_ready.py`, the `Makefile`'s `check-public-content`,
-`.github/workflows/public-content.yml`, `.github/workflows/tests.yml`, and
-`docs/development/ARCHITECTURE.md`, "Public repository content checks".
+Delivers a pinned gitleaks beside `check_public_content.py` wherever that runs, its
+gate the default rules minus four with the repository's key rule, and a hand-run audit
+of every rule over the tracked tree; and replaces the credential the gate run found.
+Implements D24 item 4, D25, D26, D27, D28, D29 and D30, and the delta requirement's
+public-content and audit clauses with its scenarios "A key fixture carries no key
+material", "Two key fixtures share a file", "A key is added in a merge resolution", "A
+real key is staged", "A key is embedded as one escaped string", "A provider token is
+staged", "A development fixture is added", and "The audit reports what the gate
+passes". Touches `domains/vms/provisioning/iac/README.md`, `.gitleaks.toml`, a new
+`scripts/gitleaks-audit.toml`, `scripts/check_secrets.py` and
+`scripts/tests/test_check_secrets.py`, `scripts/hooks/pre-commit`,
+`scripts/hooks/pre-push`, `scripts/check_push_ready.py` and its tests, the `Makefile`'s
+`check-public-content` and new `check-secrets` and `audit-secrets` targets,
+`.github/workflows/public-content.yml`, `.github/workflows/tests.yml`,
+`docs/development/ARCHITECTURE.md`, "Public repository content checks", and
+`docs/development/RELEASING.md`, "Cutting a release".
 
 Prepared before the section, on the owner's direction of 2026-11-05: installing
 gitleaks is one runnable step, a missing gitleaks names that step rather than leaving
@@ -431,43 +438,89 @@ implemented sections 6 and 4, before this section's session starts:
   gitleaks" passing. `public-content.yml` runs on every push, and no dispatch is owed
   for it.
 
-- [ ] 5.1 Decision gate (D24 item 4): choose the gitleaks release to pin, write
-  `.gitleaks.toml` extending the default configuration, turning its `private-key` rule
-  off, and adding the block rule whose body holds no run of five dashes, then run the
-  pinned release with it against the repository's tree, two fixtures in one file, a key
-  wrapped at short lines, a key embedded as one escaped string, a key added in an
-  intermediate outgoing commit a later commit deletes, and a key introduced only in a
-  merge resolution scanned with `--log-opts=--diff-merges=separate`. Record the release,
-  its checksum, and each case's result in this section's notes. If the release cannot
-  turn off or replace its default rule from an extending configuration, a fixture is
-  refused, or a key passes, stop: the change returns to design (`change-implement`,
-  "Stop cleanly when the plan is wrong"), with no workaround.
-- [ ] 5.2 Add `scripts/check_secrets.py`: it runs the pinned gitleaks with
-  `.gitleaks.toml` and redaction, on staged additions or on a commit range with
-  `--log-opts=--diff-merges=separate`, refuses an installed release other than the pin,
-  naming both, and reports each finding by file and line without its content (D24 item
-  4). Verify: unit tests in a new `scripts/tests/test_check_secrets.py` with an
-  injected runner for the arguments of each mode and the version refusal; library
-  integration tests there running the real pinned release over temporary Git
-  repositories for every case of 5.1, each delta scenario above mapping to one.
-- [ ] 5.3 Run it wherever `check_public_content.py` runs: the pre-commit hook on staged
-  additions, the pre-push hook and `scripts/check_push_ready.py` on every outgoing
-  commit, `make check-public-content`, and `.github/workflows/public-content.yml` on
-  every commit since its base, that workflow and `tests.yml`'s
-  `test-deployment-packaging` job installing the pinned release and checking its
-  checksum (D24 item 4). Verify: unit tests in `scripts/tests/test_check_push_ready.py`
-  and `test_check_public_content.py` show the guarded push refusing an outgoing commit
-  that adds a key and passing the fixtures; running the workflow's own command locally
-  over this branch's commits passes.
-- [ ] 5.4 Record in `docs/development/ARCHITECTURE.md`, "Public repository content
-  checks", gitleaks and its pinned release, how to install it, why the repository
-  replaces the default key rule, and the edit beneath an unchanged key header it
-  cannot see, review remaining the safeguard there (D24 item 4). Verify:
+Replanned against the reviewed design (D25–D30, design review 55), 2026-11-05: tasks
+5.1–5.6 below replace the earlier unchecked 5.1–5.5, none of which was checked. The
+prepared notes before them and the gate-run notes after them name the earlier numbers: the earlier 5.1 is now 5.2, 5.2 is
+5.3, 5.3 is 5.4, 5.4 is 5.5, and 5.5 is 5.6; `make check-secrets`, which the prepared notes above give
+to 5.2, is 5.4's. The work those notes record as committed stands and is built on, not
+redone.
+
+- [ ] 5.1 The README's credential (D25): in `domains/vms/provisioning/iac/README.md`,
+  "Configure Build Variables (Optional)", replace the `root_password` and
+  `root_filename` values the heredoc writes with `<the existing key's password>` and
+  `<its filename>`, as the section's first commit. Record in the notes that the fix is
+  outside the change's stated scope, a found defect fixed in place (D6), and that no
+  customer image was built with the value, so nothing is rotated. Verify: the two
+  lines hold placeholders, and 5.6's audit reports no finding in that file.
+- [ ] 5.2 The gate and audit configurations, confirmed (D24 item 4, D26, D28, D29):
+  move the current `.gitleaks.toml`'s content — `useDefault = true`, `disabledRules =
+  ["private-key"]`, and the `private-key-block` rule as committed — into a new
+  `scripts/gitleaks-audit.toml`, and make `.gitleaks.toml` the gate, extending it by
+  `path = "scripts/gitleaks-audit.toml"` with `disabledRules = ["generic-api-key",
+  "jwt", "curl-auth-header"]`; each file's comments say what it is for, and the gate's
+  say why each of its rules is off, as D26 gives the reasons. Confirm with the pinned
+  8.30.1, run from the repository root as `check_secrets.py` runs it, that the gate
+  loads the nested extension: the gate's scans report keys as `private-key-block` and
+  nothing from the four rules it turns off, and the audit's scan of the tree reports
+  `generic-api-key`, `jwt` and `curl-auth-header` findings. If the nested extension does
+  not load, make the two files self-contained, the key rule written in both, with a
+  unit test asserting the two rules are identical (D29's settled fallback, not a return
+  to design). Restore the tree test's assertion to `found == []` under the gate
+  configuration, any rule counted (D28). Record in the notes the release, its
+  checksum, whether the nested extension loaded, and the tree scan's counts under each
+  configuration: none under the gate; under the audit, the 113 findings D26 describes
+  once 5.1 has removed the README's. The key cases the gate-run notes record are
+  rerun by 5.3's suite under the gate configuration. If a key case fails or the gate
+  finds anything in the tree, stop: the change returns to design (`change-implement`,
+  "Stop cleanly when the plan is wrong").
+- [ ] 5.3 The gate's provider-format cases and the audit in `scripts/check_secrets.py`
+  (D26, D27, D28, D29): add `--audit`, which runs the pinned gitleaks with
+  `scripts/gitleaks-audit.toml` and redaction over `HEAD`'s tracked tree, read as the
+  tree test reads it — one parentless commit of `HEAD^{tree}` in a temporary shared
+  clone, with a fixed author and committer in that clone's environment, the helper
+  shared by the test and the audit — so untracked and ignored files are never scanned;
+  it prints each finding as `<file>:<line>: <rule>` without its content, exits 0 when
+  the scan ran whatever it found, and exits non-zero only when gitleaks could not run
+  or another release is installed. It keeps no baseline (D9). Verify, in
+  `scripts/tests/test_check_secrets.py`: unit cases with the injected runner showing
+  `--audit` passes the audit configuration and the tree source and exits 0 with
+  findings, and an unfinished audit is an error; library integration cases against the
+  real release for "A provider token is staged" (a GitHub personal access token built
+  at runtime, as the key cases assemble their headers, refused naming file and line
+  without echoing it), "A development fixture is added" (one of Anvil's published
+  keys, a contract address, and `private_key: Ed25519PrivateKey`, added and passed),
+  and "The audit reports what the gate passes" (a random 40-character password built
+  at runtime, reported by the audit, which exits 0, and passed by the gate); the
+  existing ten cases run under the gate configuration, each key scenario mapping to
+  one.
+- [ ] 5.4 Run the gate wherever `check_public_content.py` runs (D24 item 4):
+  `scripts/hooks/pre-commit` on staged additions and `scripts/hooks/pre-push` on each
+  pushed ref's commits, each running both checks and failing when either does;
+  `scripts/check_push_ready.py` on every outgoing commit; `make check-public-content`,
+  running both; a new `make check-secrets` running the gate over staged additions, and
+  a new `make audit-secrets` running `--audit`; `.github/workflows/public-content.yml`
+  on every commit since its base; and `tests.yml`'s `test-deployment-packaging` job
+  setting `GITLEAKS_REQUIRED=1` where it runs the script suites, so a skipped
+  real-scanner case fails. Verify: unit tests in `scripts/tests/test_check_push_ready.py`
+  show the guarded push refusing an outgoing commit that adds a key and passing one
+  that adds a fixture; `python3 scripts/check_secrets.py --base origin/dev`, the
+  workflow's own command, passes over this branch's commits.
+- [ ] 5.5 Documentation (D24 item 4, D26, D28, D29): `docs/development/ARCHITECTURE.md`,
+  "Public repository content checks", records gitleaks and its pinned release, how to
+  install it (`make install-gitleaks`), why the repository replaces the default key
+  rule, the three default rules the gate turns off and why, the tree test as the guard
+  on a gitleaks upgrade, the audit and how to run it, and the two things the gate
+  cannot see — an edit beneath an unchanged key header, and a random credential in no
+  provider's format — review remaining the safeguard for both.
+  `docs/development/RELEASING.md`, "Cutting a release", gains the step: run `make
+  audit-secrets` and read what it reports before an official build ships. Verify:
   `make check-doc-citations CHANGE=act-on-owner-intervention-patterns` reports no path
   this section added that fails to resolve.
-- [ ] 5.5 Verification: `pytest -q scripts/tests/test_check_secrets.py
+- [ ] 5.6 Verification: `pytest -q scripts/tests/test_check_secrets.py
   scripts/tests/test_check_public_content.py scripts/tests/test_check_push_ready.py`
-  (unit and library integration) passes; `make check-public-content` passes; `make
+  (unit and library integration) passes with `GITLEAKS_REQUIRED=1`; `make
+  check-public-content` and `make check-secrets` pass; `make audit-secrets` exits 0
+  listing the audit's findings, none in `domains/vms/provisioning/iac/README.md`; `make
   test` passes. End-to-end: none; no scenario exercises the public-content checks.
   Owed by validation: `tests.yml`, job `test · test-deployment-packaging` — it
   installs the pinned gitleaks with its checksum checked, and the real-scanner cases in
@@ -536,6 +589,8 @@ gitleaks' other default rules. No task above is checked.
 - For the next session: once design settles this, edit `disabledRules` (or
   `useDefault`), restore the tree test's assertion to `found == []` if the tree is
   then clean, and continue with 5.1's record and 5.2–5.5 from the work above.
+  Correction: design settled this as D25–D30 (B, with the audit); the replanned tasks
+  5.1–5.6 above stand in for this paragraph.
 
 ## 6. A change's closing checks enforce five more written rules (D24 items 1, 2, 3, 5, 6)
 
@@ -853,11 +908,12 @@ The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
 - [ ] 11.2 Import placement: confirm every import sections 1–6 added inside a function
   carries its reason, which the local-import check (section 6) reports; one that should
   move returns the change to implementation.
-- [ ] 11.3 Documentation compliance: re-check D1–D24 against `openspec/README.md`'s
-  placement rules and the destinations named in 11.9.
+- [ ] 11.3 Documentation compliance: re-check D1–D30 against `openspec/README.md`'s
+  placement rules and the destinations named in 11.9 (D30, 55 F2).
 - [ ] 11.4 Narrative compression: shorten completed task notes to final behaviour,
-  material evidence (the uv release of 4.1, the gitleaks release and cases of 5.1, the
-  active changes 6.1 listed), and destinations.
+  material evidence (the uv release of 4.1, the gitleaks release, the nested
+  extension, and the tree counts of 5.2, the active changes 6.1 listed), and
+  destinations; section 5's gate-run notes compress to what design decided from them.
 - [ ] 11.5 Roadmap currency: record in the promotion record that the change has no
   roadmap impact — it serves no goal of `docs/development/ROADMAP.md` and closes no gap
   row there.
@@ -884,10 +940,16 @@ The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
   - The record names, besides those, the documents sections 4, 5, 7, 8 and 10 wrote:
     `AGENTS.md` (D5, D9), `openspec/README.md` (D6), `docs/agents/domain.md` (D11),
     `docs/agents/change-workflow.md` (D1, D12, D15, D16, D19, D22, D24),
-    `docs/development/ARCHITECTURE.md` (D8, D10, and D24 item 4 under "Public repository
-    content checks"), `docs/development/BUILD_AND_PACKAGING.md` (D24 item 7),
-    `.agents/skills/change-design/SKILL.md` (D12), `.agents/skills/guidance-review/SKILL.md`
-    (D20), and D7, D13 and D23 as having no permanent destination.
+    `docs/development/ARCHITECTURE.md` (D8, D10, and D24 item 4, D26, D28 and D29 under
+    "Public repository content checks"), `docs/development/BUILD_AND_PACKAGING.md` (D24
+    item 7), `docs/development/RELEASING.md`, "Cutting a release" (D29), the comments of
+    `.gitleaks.toml` (D26), `.agents/skills/change-design/SKILL.md` (D12),
+    `.agents/skills/guidance-review/SKILL.md` (D20), and D7, D13, D23, D25 and D30 as
+    having no permanent destination.
+  - D27 and D29's requirement arrive in `openspec/specs/change-workflow/spec.md`, "A
+    change's closing checks enforce written rules", by the archive in 11.11; confirm
+    the requirement's public-content and audit clauses and their three new scenarios
+    are there afterwards.
 - [ ] 11.10 Documentation citations: run `make check-doc-citations
   CHANGE=act-on-owner-intervention-patterns` and resolve every match, then
   `openspec validate act-on-owner-intervention-patterns --strict`.
