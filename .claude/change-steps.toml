@@ -47,6 +47,8 @@ allow = [
   # The running session's id, and only that variable: the rest of the
   # environment may hold credentials.
   "Bash(printenv CLAUDE_CODE_SESSION_ID)",
+  # The installed uv's version, which decides the lock revision it writes.
+  "Bash(uv --version)", "Bash(uv self version)",
 ]
 deny = [
   "Bash(git push*)", "Bash(git reset*)", "Bash(git checkout*)", "Bash(git switch*)",
