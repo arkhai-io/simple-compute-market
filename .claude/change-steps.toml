@@ -159,6 +159,7 @@ allow = [
   "Bash(make typecheck*)", "Bash(scripts/change-workflow push)", "Bash(make helm-values-schema)",
   "Bash(git pull --ff-only workspace *)",
   "Bash(make init*)", "Bash(make -C * init*)", "Bash(make validate-*)", "Bash(helm version*)",
+  "Bash(make build-*)",
 ]
 deny = ["Bash(make run-e2e*)"]
 
