@@ -1192,6 +1192,116 @@ evidence serves the guidance review alone, so it lives in that skill (D20).
   D23), and `guidance-review` (D20).
 - Then closeout.
 
+## Implementation record
+
+What implementation settled within the decisions, the defects it found and fixed in
+place (D6), and the points its fresh-context checks raised and declined. Closeout
+moved them here from the task notes, which keep the evidence.
+
+- **The run's lock (D15).** `flock`, not `lockf`: a POSIX record lock belongs to the
+  process, so an in-process reader would always acquire it, and its close would drop
+  the run's lock. A record is written aside, locked, then renamed into place, so no
+  reader sees it unlocked. `stop` reads the runs of the change's clone when it has
+  one, as `watch` does, since a cloned change's steps run and record there.
+- **Holding the signal (D15, 64 F1, 64 F2).** `termination_deferred()` holds SIGTERM
+  for as long as a run holds its record; `termination_ends_the_run()` covers each
+  runner call only, raises at entry a signal held before it, and sets its handler
+  inside its `try`, so a pending signal cannot leave it unrestored. An interrupted
+  review's `stopped` line carries the reviewer's session, read from the interrupted
+  attempt's own output, and its cost; a rejected review's line carries its session
+  too. Declined: a wrapper test for a signal between network retries, which the
+  before-start test's entry check covers.
+- **The revisit direction (D16).** Beyond the two refusals planned, the log's writer
+  refuses a direction naming a triage a run resuming it supersedes, even while that
+  run waits; a finished triage naming no review; and `--resumes` with `--next`, since
+  the resumed triage names the exit. The next-step computation needed no change: it
+  already takes the last exit logged and holds a stopped run until a line resolves it.
+  Nothing in code stops a resume of the stopped step a revisit leaves; "resolved
+  rather than resumed" rests on `change-orchestrate`, which orders the stop, the
+  direction, the resume, and then the resolution, since resolved before the resume the
+  computation would name the first triage's exit again.
+- **The review field parser (D17).** Its field pattern ran past a line's end, so an
+  empty field took the next line as its value; a value is now the rest of the field's
+  own line, and a nested list reads as empty, so several alternatives are written on
+  the one line, separated by `; or`.
+- **The uv guard (D24 item 7).** `uv_project.py` imports the version check inside the
+  function that runs it, its reason beside it: the image Dockerfiles copy that script
+  alone to run `image` and `install-wheel`, which install a committed lock and are not
+  checked. The eight locks still at revision 3 named no internal package, so `make
+  lock` passed uv no `--upgrade-package` for them and uv, finding nothing changed,
+  left them at their revision; a later rise of the minimum leaves such locks behind
+  again, and the revision check names them. `install.sh` pins uv 0.8.13 and only syncs
+  its own install copy, which reads a revision-5 lock and leaves it unchanged. Found
+  and fixed in place: the root `Makefile`'s `init-prerequisites` and the registry's
+  `init-uv` installed uv 0.8.13 where none was installed, which the guarded `reinit`
+  would refuse; both install the minimum.
+- **Running gitleaks (D24 item 4, D29).** `check_secrets.py` runs gitleaks from the
+  repository root whatever repository it scans, passing the scanned repository as its
+  source, because gitleaks resolves `[extend] path` from its working directory; so the
+  nested extension loads and D29's fallback was not needed. The hooks run both
+  public-content checks, each reporting even after the other refused, and need Python
+  3.11, since the installer reads `tomllib`. Found and fixed in place: the VM IaC
+  README's credential (D25).
+- **The closing checks (D24).** The destinations check names a change's design and
+  proposal files in code, so comment hygiene exempts it there, as it exempts the task
+  file's name in the computation. A local import whose only comment is tool directives
+  (`noqa`, `type: ignore`, and the like) gives no reason; one followed by a reason
+  does. Run on this branch, the history-wording check found three comments sections 1
+  and 3 had added, which were reworded. Found and fixed in place: the roles test
+  collected only `change-*` skills, so it never read `guidance-review`; it reads every
+  workflow skill, and still not OpenSpec's own.
+- **Guidance reviews (D20, D11).** The skill refuses to run unattended or in a clone,
+  whose archive is lost with it; its period is UTC timestamps, a record belonging to
+  it after the start and at or before the end; a finding is counted in the period of
+  its first triage; and a revisit of the advancing exit counts under that exit, not
+  among revisited findings. The owner's term questions are read from the step
+  sessions, not tallied from the workflow logs as D11 had it, since the logs do not
+  hold them.
+- **Declined in the guidance and skills.** "Implementation rules" placed elsewhere
+  than `ARCHITECTURE.md`, since D8 and D10 name it; and removing the triage skill's
+  "The owner decides what to do with each finding", kept as the principle, since
+  every default acceptance is the owner's to revisit.
+
+## Design promotion record
+
+The `spec.md` requirements named by id were written by the archive from the change's
+deltas; every other location was written by hand, in implementation or at closeout.
+
+| Accepted decision | Permanent location |
+|---|---|
+| D1, the table of default acceptances | `openspec/specs/change-workflow/spec.md` (CW-t9bx); `openspec/specs/change-workflow/README.md#the-owner-is-interrupted-only-for-judgement`; `docs/agents/change-workflow.md#default-acceptance` |
+| D2, advancing is the default exit | `openspec/specs/change-workflow/spec.md` (CW-9pbk, CW-3tvs); `openspec/specs/change-workflow/README.md#the-owner-is-interrupted-only-for-judgement`; `docs/agents/change-workflow.md#default-acceptance` |
+| D3, the default rule, its rationale and baseline | `openspec/specs/change-workflow/spec.md` (CW-d5ac, CW-j1nv, CW-neua); `openspec/specs/change-workflow/README.md#triage`; `docs/agents/change-workflow.md#default-acceptance` |
+| D4, revisits outside the graph | `openspec/specs/change-workflow/README.md#triage` |
+| D5, deferred work | `AGENTS.md#deferred-work` |
+| D6, defects found during a change | `openspec/README.md#defects-found-during-a-change`; the review, triage, design and implementation skills |
+| D7 | no permanent destination — a decision not to add a rule |
+| D8, no speculative guard code | `docs/development/ARCHITECTURE.md#no-speculative-guard-code` |
+| D9, amend a rule or comply | `AGENTS.md#amend-a-rule-or-comply` |
+| D10, prefer an existing library | `docs/development/ARCHITECTURE.md#prefer-an-existing-library` |
+| D11, the vocabulary's homes and the workflow's terms | `docs/agents/domain.md`; `openspec/specs/change-workflow/spec.md#terms`; `AGENTS.md#domain-docs` |
+| D12, the promoted preferences | `docs/agents/change-workflow.md#skills`; `.agents/skills/change-design/SKILL.md`, "Classify each decision" |
+| D13 | no permanent destination — the existing rule stays as written |
+| D14, the owner can always reach a running step | `openspec/specs/change-workflow/README.md#the-orchestrator-relays-and-routes` |
+| D15, interrupting a running step | `openspec/specs/change-workflow/spec.md` (CW-k2rv, CW-h7lq, CW-w4ne); `openspec/specs/change-workflow/README.md#the-orchestrator-relays-and-routes`, and the `stop` subcommand in `#interfaces-are-tiered`; `docs/agents/change-workflow.md#orchestrating-a-change` |
+| D16, revisiting a default acceptance | `openspec/specs/change-workflow/spec.md` (CW-r8vz); `openspec/specs/change-workflow/README.md#triage` and `#steps-run-headless-and-resume-with-the-owners-answers`; `docs/agents/change-workflow.md#orchestrating-a-change` |
+| D17, reviewers' alternatives | `openspec/specs/change-workflow/spec.md` (CW-a2lf); `openspec/specs/change-workflow/README.md#reviews-are-files`; `docs/agents/change-workflow.md#reviews` |
+| D18, the classification record | `openspec/specs/change-workflow/spec.md` (CW-d5ac); `openspec/specs/change-workflow/README.md#triage`; `docs/agents/change-workflow.md#default-acceptance` |
+| D19, the revisit marker | `openspec/specs/change-workflow/spec.md` (CW-v1rk); `openspec/specs/change-workflow/README.md#the-intervention-ledger`; `docs/agents/change-workflow.md#the-ledger` |
+| D20, guidance reviews | `openspec/specs/change-workflow/spec.md` (CW-g6ua); `openspec/specs/change-workflow/README.md#guidance-reviews`; `.agents/skills/guidance-review/SKILL.md` |
+| D21, how the revisit rate is read | `openspec/specs/change-workflow/README.md#guidance-reviews` |
+| D22, waiver recommendations and waived parts of validation | `openspec/specs/change-workflow/spec.md` (CW-q3dm, CW-n6wy, CW-zkhs, CW-e7lm); `openspec/specs/change-workflow/README.md#the-owner-is-interrupted-only-for-judgement`, `#validation-observes-a-committed-slice` and `#the-intervention-ledger`; `docs/agents/change-workflow.md#waivers` |
+| D23 | no permanent destination — guidance is removed |
+| D24, the seven checks | `openspec/specs/market-change-workflow/spec.md` (MCW-c4ek, MCW-s8gk, MCW-l5rv); `openspec/specs/market-change-workflow/README.md#the-closing-checks`, `#one-lock-revision` and `#secret-scanning`; `docs/agents/change-workflow.md#skills`; `docs/development/ARCHITECTURE.md#public-repository-content-checks`; `docs/development/BUILD_AND_PACKAGING.md#locks`; `openspec/specs/README.md`, the `contact-exchange-settlement` row |
+| D25 | no permanent destination — a defect fixed in place |
+| D26, the gate's rules | `openspec/specs/market-change-workflow/README.md#secret-scanning`; the comments of `.gitleaks.toml` |
+| D27, what the gate refuses and passes | `openspec/specs/market-change-workflow/spec.md` (MCW-s8gk) |
+| D28, the tree test as the guard on an upgrade | `openspec/specs/market-change-workflow/README.md#secret-scanning` |
+| D29, the audit | `openspec/specs/market-change-workflow/spec.md` (MCW-u2dt); `openspec/specs/market-change-workflow/README.md#secret-scanning`; `docs/development/RELEASING.md#cutting-a-release` |
+| D30 | no permanent destination — the change's own cadence |
+| Roadmap currency | no impact: the change serves no goal of `docs/development/ROADMAP.md` and closes no gap row there |
+| Campaign index currency | the change's row in `openspec/changes/README.md`, under "Independent active changes", set to `in closeout` and linked to its archive; no campaign graph holds it |
+
 ## Open Questions
 
 None. What is deferred has its trigger in a decision: widening or narrowing Rule E,

@@ -3,8 +3,8 @@
 The change workflow ([`change-workflow`](../change-workflow/README.md)) asks each
 repository that adopts it to fill a set of roles. This document says how this
 repository fills them, and why its own part of the workflow — validation's parts, the
-isolation of each change's Helm validation, and its workflow values — is shaped as it
-is. The [specification](spec.md) states this repository's requirements, and its
+isolation of each change's Helm validation, its workflow values, and its checks — is
+shaped as it is. The [specification](spec.md) states this repository's requirements, and its
 [index](index.md) organizes them by id.
 
 ## This repository is the workflow's first adopter
@@ -159,11 +159,52 @@ A clone's bootstrap is `make init` (MCW-uqlq), run in the clone as it is made. I
 failing is almost always the environment, which is why the workflow brings a failed
 bootstrap to the owner rather than retrying it.
 
-## Secret scanning
+## This repository's checks
+
+Some written rules of this repository were breached often enough that reviews kept
+finding them, a written rule nothing checks being a finding waiting to be raised. A
+check moves each from a review's finding to the change's own work, where the agent
+that breaks it finds it before anyone reads the change.
+
+### The closing checks
+
+`make check-change`, which every step that commits runs, holds five of them beside
+its own checks (MCW-c4ek): each decision a design records under a `### D<n>` heading
+names its permanent destination in the proposal; a comment or docstring the change
+adds does not describe history; a package's version moves at most one SemVer step
+from the merge-base, which admits a larger bump replacing a smaller one; an import
+the change adds inside a function gives its reason; and every capability has a row
+in the capability index. Three of them read the change's diff from its merge-base
+with the branch it lands on, `dev` unless the step names another, since against the
+wrong branch a prerequisite's commits read as the change's own. None keeps an
+exception marker: a false positive is reworded, or the rule amended. Whether an
+import's reason is sound, and whether a test sits at the level that can prove its
+behaviour, stay with review, which a pattern cannot judge. Each check and its target
+are listed in the workflow's guide,
+[`docs/agents/change-workflow.md`, "Skills"](../../../docs/agents/change-workflow.md#skills).
+
+### One lock revision
+
+Every committed `uv.lock` carries the lock revision the repository's minimum uv
+writes, and `make check-packaging` fails on one that carries another (MCW-l5rv).
+Agents running different uv releases rewrote each other's locks back and forth, and
+nothing caught it: the minimum admitted both releases, an environment refresh checked
+no version, and the lock check asked only whether a lock satisfied its project. The
+minimum is therefore the first release that writes the repository's revision, and the
+repository's relock and environment refresh commands refuse an older uv before
+running it; a plain `uv run` that relocks a changed project is not guarded, and the
+revision check fails on what it writes before it lands. Making every `uv run` pass
+`--locked` was rejected: it would touch most Makefiles and need a check of its own,
+and still leave a hand-typed `uv run` unguarded. The check is a minimum, not an exact
+pin, so a newer uv still runs; the revision check stops its rewrite landing unseen.
+The minimum, and how to bring a lock to the running uv's revision, are in
+[`BUILD_AND_PACKAGING.md`, "Locks"](../../../docs/development/BUILD_AND_PACKAGING.md#locks).
+
+### Secret scanning
 
 The public-content checks — the hooks, the guarded push, and the Public content
 workflow ([`ARCHITECTURE.md`, "Public repository content checks"](../../../docs/development/ARCHITECTURE.md#public-repository-content-checks))
-— refuse private keys and provider credentials through gitleaks rather than rules
+— refuse private keys and provider credentials (MCW-s8gk) through gitleaks rather than rules
 of the repository's own: a maintained scanner knows far more credential formats
 than the repository could keep current. Every check runs one release, pinned with
 each platform's sha256 in `scripts/gitleaks-pins.toml`, so a finding means the same
@@ -194,7 +235,7 @@ and asserts it finds nothing, under any rule. A gitleaks release whose new rule 
 tree trips therefore fails that test when the pin moves, rather than at someone's
 commit, and a release is changed only with it passing.
 
-The audit, `make audit-secrets`, runs the configuration the gate extends,
+The audit, `make audit-secrets`, runs the configuration the gate extends (MCW-u2dt),
 `scripts/gitleaks-audit.toml`: every default rule but `private-key`, and the
 repository's key rule. It scans `HEAD`'s tracked tree, read as one parentless
 commit of `HEAD^{tree}` in a temporary clone, so nothing untracked or ignored is

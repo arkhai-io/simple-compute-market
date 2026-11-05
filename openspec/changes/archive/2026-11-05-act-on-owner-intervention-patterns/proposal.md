@@ -166,6 +166,11 @@ changes, and whether the change is compatible:
   reviewer writing the earlier format, whose review is now refused at publication;
   records already published are not read again. Counted minor while the major version
   is 0.
+- A validation record's `Parts` line may name a part `waived` — compatible: no
+  reader parses the line, and the record's `Result` keeps its three values.
+- The ledger line gains two values in its existing fields, an `owner_disposition`
+  beginning `revisits default acceptance:` and `"finding": "next"` for a revisit of
+  the advancing exit — compatible: the line's shape is unchanged.
 - The `guidance-review` skill: a new skill — compatible.
 - The `change-triage`, `change-orchestrate`, `change-review`, `change-design`,
   `change-implement`, `change-validate` and `change-archive-cleanup` skills change
