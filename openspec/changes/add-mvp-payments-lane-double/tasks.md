@@ -692,13 +692,45 @@ it, `e2e-tests/tests/unit/test_payments_helper.py`;
 `e2e-tests/settings.toml`; `e2e-tests/pyproject.toml` (the VM marker's description);
 `e2e-tests/README.md`'s payment passages that the code makes false.
 
-- [ ] 4.1 The double in each lane (D1, D3, D6). `compose.payments-double.yml` runs
+- [x] 4.1 The double in each lane (D1, D3, D6). `compose.payments-double.yml` runs
   `payments-double` on the lane's network with no host port, its healthcheck on `/health`
   over HTTPS with the lane CA. Each lane's `-f` list in `e2e-tests/Makefile` (and the
   matching `e2e-*-down`/`-logs` invocations) includes it. Each payment storefront —
   Bob's VM storefront, the bare-metal storefront, the API-credit storefront —
   `depends_on` it with `service_healthy`, mounts the lane CA and sets `SSL_CERT_FILE`.
-- [ ] 4.2 Storefront payments configuration (D9, D2, D11's "deployment values"). Each
+  Done. Each lane's compose variable (`E2E_*_COMPOSE`) is the one list its test, down
+  and logs targets share, so all three carry the new files. Storefront wiring is per
+  lane, in a lane-only overlay: the bare-metal lane's `compose.bare-metal-local.yml`
+  and the API-credit lane's `compose.apicredits-lane.yml`, both already lane-only, and
+  a new `compose.vms-lane.yml` for VM, since `compose.vms-local.yml` is shared with the
+  full local stack. The CA reaches each container at `/run/payments-lane-double/lane-ca.pem`
+  from `${PAYMENTS_LANE_CA_FILE}`, and the seller token as `ARKHAI_PAYMENTS_API_KEY`
+  from `${PAYMENTS_LANE_SELLER_API_KEY}`, both guarded with `:?`.
+  Evidence:
+  - Unit, `e2e-tests/tests/unit/test_domain_stack_configuration.py` (static reads of
+    the overlay files: `depends_on`, `SSL_CERT_FILE`, the token variable and the CA
+    mount for each storefront; no host port on the double; `-f
+    compose.payments-double.yml` three times in `e2e-tests/Makefile`, a substring
+    count, not a check of each `E2E_*_COMPOSE`; no "payments" in
+    `docker-compose.yml` and no `PAYMENTS_LANE` variable in `compose.vms-local.yml` or
+    `compose.apicredits-local.yml`): pass.
+  - Compose render, `scripts/tests/test_lane_compose.py` and
+    `scripts/tests/test_bare_metal_compose.py` in `make test-release-tooling`, which
+    run `docker compose config` over each lane's files, in the order
+    `e2e-tests/Makefile` layers them (lists copied by hand, not read from the
+    Makefile), with the env file the root target prints. A new
+    case per lane checks the rendered double (image, no ports), the storefront's
+    `depends_on`, `SSL_CERT_FILE`, the token equal to the fixture seller's, the CA and
+    configuration mounts, and each registry's recommendation parsing as the fixture
+    authority. A full-stack case checks the double is absent there and Bob and the
+    credits storefront keep the stack profiles and no payments variables: 2181 passed.
+    These suites first failed (6 cases) because the section had not layered the new
+    files into them; the fresh-context check caught it.
+  - System: the bare-metal lane came up with the double healthy and the storefront
+    waiting on it (4.9). The API-credit lane's compose files interpolated (its `down`
+    ran) before that run was stopped; it and the VM lane were not brought up here
+    (4.9).
+- [x] 4.2 Storefront payments configuration (D9, D2, D11's "deployment values"). Each
   payment storefront's lane configuration gains `[Settlement.arkhai_payments]`:
   `enabled = true`, `service_url = "https://payments-double:8443"`, the double's receipt
   identity, `fee_bps = 250`, `livemode = false`, and `api_key_env` naming a variable the
@@ -709,12 +741,72 @@ it, `e2e-tests/tests/unit/test_payments_helper.py`;
   configuration reaches only the lanes: select each lane's file through the existing
   `*_STOREFRONT_CONFIG` or secrets-overlay variables the dev-env targets print, and leave
   the root development stack's configuration unchanged.
-- [ ] 4.3 Registry recommendations (D7). Each lane's registry — both VM registries, the
+  Done, through `*_STOREFRONT_CONFIG`, as full lane copies:
+  - VM: `domains/vms/storefront/storefront.bob.lane.toml`, `storefront.bob.toml` plus
+    the payments section, `arkhai.payments.v1` in `priority`, and the
+    `[[DisputeCredential]]` (variable `VM_LANE_DISPUTE_API_KEY`, set by
+    `compose.vms-lane.yml` to a labelled public development value).
+  - API credits: `domains/apicredits/storefront/storefront.credits.lane.toml`,
+    `storefront.credits.toml` plus the payments section, `priority`, and a payment
+    publication clause in `[pricing].settlements` (1000 USD/6 base units per token to
+    the seller's payee account, P7D window, 15-day dispute window).
+  - Bare metal: `storefront.dev.toml` edited in place; it is the lane's alone.
+  Why copies rather than an overlay: the storefronts' Dynaconf loaders merge with
+  `merge_enabled`, which concatenates lists, so an overlay restating `priority` would
+  duplicate entries, and the settlement registry refuses duplicates. A unit test holds
+  each copy equal to its stack profile once the payments additions are removed, so the
+  two cannot drift silently.
+  Correction to the plan's premise for the API-credit lane: enabling payments alone
+  publishes no payment option. The credits storefront's option builder publishes one
+  only from a publication clause, and the seeded listing passes none of its own. A
+  `[pricing].settlements` clause supplies it; it is configuration only, and it reaches
+  every listing created without clauses, which in the lane is the seed. By reading
+  `listing_service.publish_from_quota`, the seed's Alkahest escrow is still offered
+  beside it, so `e2e_credits_deal` keeps its option; nothing here ran either the
+  option builder over the clause or that scenario (4.9).
+  `make e2e-vms-dev-env` was split: its stack values moved to `e2e-vms-stack-env`, which
+  the full local stack's `e2e-dev-identities-env` now calls, as the API-credit stack
+  already had `e2e-apicredits-stack-env`; the lane target adds
+  `VMS_BOB_STOREFRONT_CONFIG` and the double's values.
+  Evidence: unit, `test_domain_stack_configuration.py` (each lane copy equals its
+  profile minus the payments additions, the profile has payments off; each lane
+  storefront's payments section equals the double's fixture receipt identity and fee,
+  `service_url`, `livemode = false` and `api_key_env`, with no `[[Dispute]]`; Bob's
+  credential matches the fixture authority and its variable is set; the API-credit
+  clause pays the fixture seller account): pass. System: the bare-metal storefront
+  configuration served the payment deal (4.9).
+- [x] 4.3 Registry recommendations (D7). Each lane's registry — both VM registries, the
   bare-metal registry, the API-credit registry and the compute registry it routes through
   — sets `REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES` to the pinned authority
   rendered from `tools/payments-lane-double/fixtures/dispute-authority.toml`, through the
   lane's dev-env target. No storefront or buyer configuration gains a `[[Dispute]]` entry.
-- [ ] 4.4 Per-lane settings and the test runner (D9). Each lane target passes its
+  Done. A new stdlib-only script, `tools/payments-lane-double/scripts/lane_env.py`,
+  reads the double's fixtures and prints `VAR=value` lines; the root Makefile runs it
+  with the host's `python3 -I` (3.11 or newer, for `tomllib`). It sits outside the
+  double's package, so the wheel and image do not carry it, following
+  `kit/arkhai-payments/scripts/check_vectors.py`. Its `compose` mode gives
+  `PAYMENTS_LANE_DISPUTE_AUTHORITIES` (the authority document as a one-item JSON array,
+  single-quoted for Compose), `PAYMENTS_LANE_CA_FILE` and `PAYMENTS_LANE_SELLER_API_KEY`;
+  each lane's dev-env target appends them. The five registries read the first through
+  `REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES` in the lane overlays.
+  Evidence:
+  - `tools/payments-lane-double/tests/integration/test_lane_env.py` (5 cases, in the
+    double's `make test`): two read the script without running it (its imports are
+    standard library only; the service URL's host is a name the leaf certificate
+    covers, at the double's port); three run it in a separate isolated (`-I`) process
+    of the project's own interpreter, not the host `python3` the Makefile uses, so
+    the 3.11 floor is untested, and check its output equals its functions', the
+    recommendation validates as the fixture's `DisputeEntry`, and the runner values.
+    Pass.
+  - Compose render, `test_lane_compose.py`'s per-lane case: the single-quoted value
+    reaches each of the five registries as JSON equal to the fixture authority. Pass.
+  - Static, the registry cases in `test_domain_stack_configuration.py` (only that each
+    overlay names the guarded variable): pass.
+  - System: in the bare-metal lane the storefront published a payment option and the
+    buyer accepted it; the option builder publishes none without an authority
+    advertising `arkhai.payments.v1`, so the recommendation reached the storefront
+    (4.9).
+- [x] 4.4 Per-lane settings and the test runner (D9). Each lane target passes its
   `ARKHAI_PAYMENTS__*` overrides to `test-buyer-machine` — `SERVICE_URL`,
   `SERVICE_IDENTITY`, `BUYER_ACCOUNT`, `BUYER_MARKETPLACE_CREDENTIAL`,
   `SELLER_MARKETPLACE_CREDENTIAL` (that lane's storefront key, in that lane's scheme),
@@ -725,7 +817,42 @@ it, `e2e-tests/tests/unit/test_payments_helper.py`;
   Confirm the `market` subprocess the scenarios run inherits the token variable and
   `SSL_CERT_FILE` (`e2e-tests/tests/e2e/roles/buyer_cli.py`), passing them through
   where its environment is built explicitly.
-- [ ] 4.5 The helper (D6). In `helpers/payments.py`: `PAYMENTS.LANE_OWNED`, a strict
+  Done. `lane_env.py runner` prints the shared overrides (`SERVICE_URL`,
+  `SERVICE_IDENTITY`, `FEE_BPS`, `LIVEMODE=false`, `LANE_OWNED=true`, `API_KEY_ENV`,
+  `BUYER_ACCOUNT`, `SELLER_ACCOUNT`), the buyer's token under `PAYMENTS_BUYER_API_KEY`
+  (no `ARKHAI_` prefix, so the runner's settings never load it), and
+  `SSL_CERT_FILE=/run/payments-lane-double/lane-ca.pem`. Root targets
+  `e2e-{vms,bare-metal,apicredits}-payments-env` add the buyer marketplace seed and
+  the lane storefront's own key, read from its identity env file; bare metal adds
+  `COMPUTE_HOURLY_GROSS=1000000` and `DISPUTE_WINDOW=P7D`. Each lane target writes
+  `.e2e-<lane>-payments.env` (git-ignored) and passes it to `test-buyer-machine` as
+  `PAYMENTS_ENV_FILE`, which adds `--env-file` and the CA mount. String values carry
+  `@str`, since the runner's Dynaconf parses environment values as TOML.
+  Differences from the plan:
+  - `SELLER_ACCOUNT` goes to every lane, not only bare metal: the VM scenario's listing
+    reads it as its payee account.
+  - The buyer marketplace seed is a Makefile constant (`E2E_PAYMENTS_BUYER_SEED`, 32
+    bytes of `0xb1` as unpadded base64url), not a fixture file. The first lane run used
+    hex and failed at profile creation: an Ed25519 credential must be unpadded
+    base64url. `settings.toml`'s old comment calling the credentials hex was wrong too.
+  - The API-credit scenario's refund built an Ed25519 signer from a hex seed and
+    trusted it as the storefront's publisher. The lane's credits storefront signs as an
+    eip191 principal (Anvil 3), so the refund now signs with
+    `create_signer(<the lane's storefront scheme>, SELLER_MARKETPLACE_CREDENTIAL)`,
+    checks it is the pinned storefront principal, and trusts that principal, as the
+    bare-metal scenario does. The design's "Facts" called that credential an Ed25519
+    seed; the plan's "that lane's storefront key, in that lane's scheme" is what holds.
+  `buyer_cli.py` builds the subprocess environment from `dict(os.environ)`, so the
+  token variable and `SSL_CERT_FILE` reach `market` unchanged; no change needed.
+  `config-docker.yml` is unchanged.
+  Evidence: `test_lane_env.py`'s runner case (the script run in a separate process)
+  covers `lane_env.py runner` only: pass. The root `e2e-<lane>-payments-env` targets
+  (the buyer seed, the seller key read with `sed`, the bare-metal extras) have no test
+  of their own. System: the bare-metal target's output served the bare-metal payment
+  deal (4.9), its `market` subprocess approving at the double. The VM and API-credit
+  targets, and the API-credit refund's new signer path, are unrun: those lanes did not
+  run here (4.9).
+- [x] 4.5 The helper (D6). In `helpers/payments.py`: `PAYMENTS.LANE_OWNED`, a strict
   boolean defaulting to false; with it true, an unready target fails naming its URL
   rather than skipping. `target_ready` builds an `ssl.SSLContext` from `SSL_CERT_FILE`
   when it is set and passes it as `verify`, keeping `trust_env=False`. `settings.toml`
@@ -733,7 +860,19 @@ it, `e2e-tests/tests/unit/test_payments_helper.py`;
   unready lane-owned target fails naming the URL; an unready external target still
   skips; the probe uses a context built from `SSL_CERT_FILE` and disables environment
   proxies, through an injected readiness seam rather than the network.
-- [ ] 4.6 The VM scenario's mediation prerequisite (D2). A `MEDIATION.SERVICE_URL`
+  Done. `target_ready(url, *, get=httpx.get, environ=os.environ)`: `get` and `environ`
+  are the injected seams. Beyond the plan, `LANE_OWNED` set with no `SERVICE_URL` fails
+  too, naming both: a lane that claims its own target and configures none is a broken
+  lane, which the MODIFIED requirement fails by name.
+  Unit, `test_payments_helper.py` (new: unready lane-owned fails naming the URL; ready
+  lane-owned yields its policy; lane-owned without a target fails; unready with
+  `LANE_OWNED=false` still blocks; the probe's `verify` is a context holding exactly the
+  lane CA's certificates with `trust_env=False`; without `SSL_CERT_FILE` it keeps
+  `verify=True`; four unhealthy or unreachable answers read unready; `LANE_OWNED` joins
+  the strict-boolean case): pass. The probe cases replace `get`, so no TLS handshake
+  runs in them. System: the bare-metal lane's scenario read the double ready over HTTPS
+  under the lane CA (`GET https://payments-double:8443/health` 200 in its log).
+- [x] 4.6 The VM scenario's mediation prerequisite (D2). A `MEDIATION.SERVICE_URL`
   setting, blank by default in `settings.toml`, read by a helper beside the payments
   helper; `test_vm_payment_deal.py`'s stages 3 and 4
   (`test_operator_end_files_one_case_without_a_local_payment_remedy`,
@@ -742,16 +881,41 @@ it, `e2e-tests/tests/unit/test_payments_helper.py`;
   `e2e_vm_payment_deal` marker's description in `e2e-tests/pyproject.toml`. Raise
   `e2e-tests`' bound on `arkhai-kit-arkhai-payments` only if it uses the new API, and
   relock if it does. Unit: the helper blocks on blank and returns the URL otherwise.
-- [ ] 4.7 `check-payments` at lane setup (D6, D12). After `up --wait`, each lane target
+  Done. `helpers/mediation.py`'s `configured_mediation()`; a module fixture
+  `mediation_target` in `test_vm_payment_deal.py`, requested by stages 3 and 4 only, so
+  pytest skips them by name before their bodies run. `[default.mediation]` in
+  `settings.toml`. The module docstring now says what the lane runs. The marker
+  descriptions of all three payment scenarios were updated, not only VM's: the other two
+  said "blocked without a reachable payments target", which a lane-owned target makes
+  false. `e2e-tests` uses no new kit API, so no bound change and no relock.
+  The setting is a gate only: the stages file with the authority their Agreement pins,
+  through the registries, and never contact the URL. The helper's docstring and the
+  README say so.
+  Unit, `tests/unit/test_mediation_helper.py` (blank, whitespace and null block naming
+  the setting; a set URL is returned stripped and without its trailing slash): pass.
+  Stages 3–4's skip in the VM lane is unrun here (4.9).
+- [x] 4.7 `check-payments` at lane setup (D6, D12). After `up --wait`, each lane target
   runs `docker compose exec <storefront> <cli> check-payments --account <the lane's
   seller account>` for each payment storefront, and fails the target, before pytest, on a
   nonzero exit.
-- [ ] 4.8 `e2e-tests/README.md`: correct the passages sections 1–4 make false — the shared
+  Done: an `e2e_check_payments` macro in `e2e-tests/Makefile`, `exec -T` (no TTY in CI),
+  the account from `lane_env.py seller-account`, and on failure an `::error::` line
+  naming the service. System: in the bare-metal lane it printed
+  `{"check": "payments", "outcome": "ok", "service_url": "https://payments-double:8443",
+  "account": "00000000-0000-4000-8000-0000000000b2", "assets": [], "held": 0}` and the
+  lane went on to pytest. The VM (`bob-storefront`, `market-storefront`) and API-credit
+  (`credits-storefront`, `apicredits-storefront`) invocations are unrun here (4.9).
+- [x] 4.8 `e2e-tests/README.md`: correct the passages sections 1–4 make false — the shared
   payment configuration (a lane now configures its own target, `LANE_OWNED`), "Hosted VM
   servicing" (stages 1–2 run against the double, 3–4 need `MEDIATION.SERVICE_URL`), and
   "Bare-metal payment deal" (it runs in the lane; the re-drive repeats the canonical
   commit). The rest of the permanent documentation is closeout's.
-- [ ] 4.9 **Verification checkpoint.** Unit: `make test-e2e-unit`, with
+  Done: those three passages, plus the lane setup check. The bare-metal passage already
+  described the re-drive as the canonical commit and keeps it. Package documentation the
+  code needed also changed: `tools/payments-lane-double/README.md` (how lanes run the
+  double, `lane_env.py`) and `dev-env/identities/README.md` (a "The payments lane
+  double" section, cited by the new overlays, and the stack table's files).
+- [x] 4.9 **Verification checkpoint.** Unit: `make test-e2e-unit`, with
   `test_payments_helper.py` and the mediation helper's cases. System: run each lane —
   `make -C e2e-tests test-e2e-bare-metal`, `test-e2e-apicredits` and `test-e2e-vm` — and
   confirm each lane's `check-payments` passes at setup and its payment scenario runs: the
@@ -764,6 +928,101 @@ it, `e2e-tests/tests/unit/test_payments_helper.py`;
   (API-credit lane) and `e2e_vm_payment_deal` (VM lane) exercise this section; every other
   marker in the three lanes' module lists must stay green.
   Owed by validation: `tests.yml`, job `test · test-e2e-unit` — passes.
+
+  Evidence, local, after both fresh-context checks' fixes unless noted:
+  - `make test-e2e-unit`: 537 passed, with `test_payments_helper.py`,
+    `test_mediation_helper.py` and the new `test_domain_stack_configuration.py` cases.
+  - `make -C tools/payments-lane-double test`: `check-tls` passes; 49 passed, with the
+    five `test_lane_env.py` cases.
+  - `make test-release-tooling`: 2181 passed, with the Compose render cases (4.1).
+  - `make -C helm test-render`: passes, `test_the_development_configuration_passes_the_schema`
+    included over the edited `storefront.dev.toml`.
+  - `make test`: exit 0, after the render-suite fix. The first run failed six render
+    cases (4.1). It ran before the second check's fixes, which touched comments, a
+    `settings.toml` comment line, the README and these notes, and no code path.
+  - `make check-packaging`: all eight checks OK. `make check-change`: every check passes.
+  - System, bare-metal lane, `make -C e2e-tests test-e2e-bare-metal` (before the fresh
+    checks; the later edits touch no code it ran). The stack came up with the double
+    healthy, and `check-payments` printed `"outcome": "ok"` for the seller's account.
+    pytest: 61 passed, 2 failed, 2 skipped, 3 errors. The three errors were
+    `e2e_bare_metal_payment_deal` failing at setup on the hex buyer seed (4.4). After
+    the seed fix, `test-buyer-machine BUYER_MODULE=e2e_bare_metal_payment_deal
+    PAYMENTS_ENV_FILE=…` against the running stack passed all three stages with no
+    skip: discovery of the payment option, approval at the double, receipt-gated mock
+    delivery, re-drive from the run log, seller refund read back as reversed at the
+    double, and physical teardown. The run's env file was regenerated by hand with
+    the Edit tool for that rerun, because the root target that writes it is outside
+    this step's allowed commands; the committed Makefile constant is the same value.
+  - The two failures predate this change: `test_bare_metal_introduction.py::TestStage02_Reveal`
+    and `test_bare_metal_unbacked_introduction.py::...test_03_the_unbacked_listing_offers_only_an_introduction`
+    read the option-level `mechanism` key, which `dev`'s 38a5fec12 (#314) removed from
+    published options. The two skips follow the first failure. VM's
+    `e2e_vm_introduction` shares `introduction_stages.py` and will fail the same way.
+    Not fixed here: outside the section, and owned by whoever repairs #314's fallout.
+  - API-credit and VM lanes: not run. Every lane names its chain container `anvil` and
+    publishes port 8545, the bare-metal stack stayed up after its run, and this step may
+    run neither `docker` nor `make -C e2e-tests e2e-*-down`, so no second lane could
+    come up. The API-credit run got as far as its `down` (its compose files
+    interpolate) before it was stopped. Both are left to validation's pipeline. Unrun
+    there: `check-payments` in `bob-storefront` and `credits-storefront`;
+    `e2e_credits_payment_deal`, including its new refund signer and the seed's payment
+    option; `e2e_vm_payment_deal` stages 1–2 reading `running` and stages 3–4's
+    mediation skip; and every other VM and API-credit marker with the registries'
+    new recommendation.
+
+  End-to-end confirmed: `e2e_bare_metal_payment_deal` passes in the bare-metal lane.
+  `e2e_credits_payment_deal` and `e2e_vm_payment_deal` are the API-credit and VM lanes'
+  evidence, owed to validation's pipeline. Each lane target's `check-payments` step is
+  part of the lane run. The bare-metal and VM lanes' introduction markers fail for the
+  pre-existing reason above.
+  Owed by validation, confirmed: `tests.yml`, job `test · test-e2e-unit` passes. Corrected
+  to add the jobs this section's other suites run in, since it changed their tests and
+  the files they render: `tests.yml`, job `test · test-payments-lane-double`, with
+  `test_lane_env.py`; and `tests.yml`, job `test · test-deployment-packaging`, which runs
+  `make test-release-tooling`'s Compose render cases and `make -C helm test-render`.
+
+  Fresh-context checks, two:
+  - Fixed after the first: the six render-suite failures (the blocking finding); the
+    script moved from the package to `scripts/`, out of the wheel and image; its test
+    moved to `tests/integration/`; a rendered check that the recommendation arrives as
+    JSON; two helper comments; the double README's claim that nothing restates the
+    fixtures; the mediation setting described as the gate it is; the Python 3.11 floor
+    documented; overstated notes.
+  - Fixed after the second: a history comment copied into the credits lane copy; a
+    forward reference to the cluster service in `lane_env.py`; `seller_account`
+    documented; the README's note that the VM readiness gate reads its own
+    `PAYMENTS.MEDIATION_URL`; four overstated notes.
+  - Declined: patching the helpers' module-level `settings` in their tests, which
+    `test_payments_helper.py` already does and which has no other seam; the static
+    overlay checks in `test_domain_stack_configuration.py` beside the render cases,
+    because the render cases skip without Docker Compose and the static ones do not;
+    regenerating an old `.e2e-<lane>.env` in `e2e-*-down`/`-logs` (a local file
+    predating this change lacks `PAYMENTS_LANE_*`, so down refuses until the next lane
+    run rewrites it; CI starts clean).
+
+  Handoff to section 5 and closeout:
+  - Section 5 can reuse `tools/payments-lane-double/scripts/lane_env.py` for
+    `topology-secrets.sh` (the seller token) and the e2e-tests chart's `PAYMENTS` values
+    (`runner` mode prints them). Its `SERVICE_URL` is the double's Compose name, which
+    D3 makes the cluster Service name too.
+  - Lane-only storefront copies: `storefront.bob.lane.toml` and
+    `storefront.credits.lane.toml`; a change to `storefront.bob.toml` or
+    `storefront.credits.toml` must be made to the copy, or
+    `test_a_lane_storefront_configuration_is_its_stack_profile_plus_payments` fails.
+  - Closeout items, passages this section makes false: `docs/development/TESTING.md`'s
+    "Private Service Dependencies" ("a blank SERVICE_URL … is what the pipeline runs",
+    an unready target always blocking) and the bare-metal lane's "Unconfigured payments
+    remain a named blocked prerequisite"; `DEPLOYMENT_AND_CONFIG.md`'s "Per-domain stack
+    composition" (the overlay list, and "passes only the signer credential through the
+    environment" for the lane's bare-metal storefront) and its naming of
+    `storefront.bob.toml` as the VM lane's configuration; `ROADMAP.md`'s "none
+    configures a payments target"; `.github/workflows/e2e.yml`'s lane descriptions,
+    incomplete. Also for closeout to judge: `openspec/specs/deployment-state/spec.md`'s
+    requirement that public renderings contain no payment authority, beside lane
+    Compose renders that now run the double.
+  - The design's "Facts" call the API-credit seller credential an Ed25519 seed; it is
+    the lane storefront's eip191 key (4.4). Narrative compression should correct it.
+  - The session ran long; section 5 should start fresh.
 
 ## 5. Helm: the subchart, the storefront chart options, and the local rehearsal
 

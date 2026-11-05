@@ -105,8 +105,8 @@ E2E_MODULE ?= e2e_vm_payment_deal or e2e_deal or e2e_deal_buyer_cli or e2e_buy o
               or e2e_alkahest_trusted_oracle \
               or e2e_listing_shapes or e2e_vm_introduction \
               or e2e_non_erc20_settlement
-# The API-credit lane's scenarios. The payment deal is blocked without a
-# payments target and skips naming it.
+# The API-credit lane's scenarios. The payment deal runs against the lane's
+# payments double.
 E2E_APICREDITS_MODULE ?= e2e_credits_deal or e2e_credits_payment_deal
 # The bare-metal lane's scenarios. `e2e_bare_metal_deal` is in neither lane: it
 # needs a real whole host to SSH into, which the pipeline never has.
@@ -114,11 +114,21 @@ E2E_BARE_METAL_MODULE ?= e2e_bare_metal_publication or e2e_bare_metal_introducti
                          or e2e_bare_metal_unbacked_introduction or e2e_bare_metal_mock_deal \
                          or e2e_bare_metal_payment_deal
 
+# A lane's payments settings: an environment file of the runner's PAYMENTS
+# overrides and the buyer's payments token, which the lane target writes from the
+# payments double's committed fixtures, and the lane CA they name as
+# SSL_CERT_FILE, mounted where they name it. Unset, the runner gets neither, as a
+# run against no payments target does; a rerun against a lane's stack passes that
+# lane's file, `$(CURDIR)/../.e2e-<lane>-payments.env`.
+PAYMENTS_ENV_FILE ?=
+PAYMENTS_CA_FILE := $(abspath $(CURDIR)/../tools/payments-lane-double/tls/lane-ca.pem)
+
 test-buyer-machine:
 	docker run --rm \
 		--network=$(NETWORK) \
 		-e ACTIVE_PROFILES=docker \
 		-e CONFIG_DIRECTORY=/app/config \
+		$(if $(PAYMENTS_ENV_FILE),--env-file "$(PAYMENTS_ENV_FILE)" -v $(PAYMENTS_CA_FILE):/run/payments-lane-double/lane-ca.pem:ro) \
 		-v $(CURDIR)/tests:/app/tests:ro \
 		-v $(CURDIR)/src:/app/src:ro \
 		-v $(CURDIR)/config:/app/config:ro \
@@ -195,6 +205,21 @@ endef
 # $(2): the root Makefile's environment target.
 e2e_env_if_missing = test -f "$(1)" || $(MAKE) -s --no-print-directory $(2) > "$(1)"
 
+# Each lane runs the payments lane double (compose.payments-double.yml), and its
+# payment storefronts settle against it. Once the stack is up, each storefront
+# checks its payments access from its own container -- its configuration, its CA
+# mount and its token -- by an authenticated read of the seller's own balance at
+# the double, and a failed check fails the lane by name before any scenario runs,
+# rather than leaving the payment scenarios to fail one by one. The check prints
+# one JSON line naming the step that failed. $(1): the environment file; $(2):
+# the compose arguments; $(3): the storefront service; $(4): its command.
+PAYMENTS_LANE_ENV := python3 -I $(abspath $(CURDIR)/../tools/payments-lane-double/scripts/lane_env.py)
+define e2e_check_payments
+docker compose --env-file "$(1)" $(2) exec -T $(3) \
+	$(4) check-payments --account "$$($(PAYMENTS_LANE_ENV) seller-account)" \
+	|| { echo "::error::$(3) cannot use the lane's payments double; its check-payments line above names the step" >&2; exit 1; }
+endef
+
 # The stacks run one after another, never side by side on one host: each names
 # its chain container `anvil` and publishes fixed host ports (8545 in every
 # stack; 8080 and 8081 in the VM and bare-metal stacks). The order is a recipe
@@ -209,17 +234,23 @@ test-e2e:
 	$(MAKE) test-e2e-apicredits
 
 # VM lane: Bob's and Alice's storefronts and provisioning authorities, the two
-# VM registries, and the dev chain.
+# VM registries, the payments double, and the dev chain. Bob settles payments
+# against the double; Alice does not.
 E2E_VMS_ENV ?= $(CURDIR)/../.e2e-vms.env
+E2E_VMS_PAYMENTS_ENV ?= $(CURDIR)/../.e2e-vms-payments.env
 E2E_VMS_PROJECT := simple-market-service
-E2E_VMS_COMPOSE := -p $(E2E_VMS_PROJECT) -f compose.vms.yml -f compose.vms-local.yml
+E2E_VMS_COMPOSE := -p $(E2E_VMS_PROJECT) -f compose.vms.yml -f compose.vms-local.yml \
+	-f compose.payments-double.yml -f compose.vms-lane.yml
 
 test-e2e-vm:
 	cd .. && $(MAKE) -s --no-print-directory e2e-vms-dev-env > "$(E2E_VMS_ENV)"
+	cd .. && $(MAKE) -s --no-print-directory e2e-vms-payments-env > "$(E2E_VMS_PAYMENTS_ENV)"
 	cd .. && docker compose --env-file "$(E2E_VMS_ENV)" $(E2E_VMS_COMPOSE) down -v --remove-orphans
 	cd .. && $(MAKE) build-e2e-vm
 	cd .. && $(call e2e_up,$(E2E_VMS_ENV),$(E2E_VMS_COMPOSE))
-	$(MAKE) test-buyer-machine NETWORK=$(E2E_VMS_PROJECT)_default BUYER_MODULE="$(E2E_MODULE)"
+	cd .. && $(call e2e_check_payments,$(E2E_VMS_ENV),$(E2E_VMS_COMPOSE),bob-storefront,market-storefront)
+	$(MAKE) test-buyer-machine NETWORK=$(E2E_VMS_PROJECT)_default BUYER_MODULE="$(E2E_MODULE)" \
+		PAYMENTS_ENV_FILE="$(E2E_VMS_PAYMENTS_ENV)"
 
 e2e-vm-down:
 	cd .. && $(call e2e_env_if_missing,$(E2E_VMS_ENV),e2e-vms-dev-env)
@@ -229,22 +260,27 @@ e2e-vm-logs:
 	@cd .. && $(call e2e_env_if_missing,$(E2E_VMS_ENV),e2e-vms-dev-env)
 	@cd .. && docker compose --env-file "$(E2E_VMS_ENV)" $(E2E_VMS_COMPOSE) logs --no-color
 
-# Bare-metal lane: one site, the bare-metal storefront, its registry, and the
-# dev chain. Every stack value comes from `make e2e-bare-metal-dev-env`, which
-# names the storefront's development configuration files
-# (domains/bare_metal/storefront/storefront.dev.toml and its secrets overlay);
-# see compose.bare-metal-local.yml.
+# Bare-metal lane: one site, the bare-metal storefront, its registry, the
+# payments double, and the dev chain. Every stack value comes from
+# `make e2e-bare-metal-dev-env`, which names the storefront's development
+# configuration files (domains/bare_metal/storefront/storefront.dev.toml and its
+# secrets overlay); see compose.bare-metal-local.yml.
 E2E_BARE_METAL_ENV ?= $(CURDIR)/../.e2e-bare-metal.env
+E2E_BARE_METAL_PAYMENTS_ENV ?= $(CURDIR)/../.e2e-bare-metal-payments.env
 E2E_BARE_METAL_PROJECT := simple-market-bare-metal
 E2E_BARE_METAL_COMPOSE := -p $(E2E_BARE_METAL_PROJECT) \
-	-f compose.bare-metal.yml -f compose.dev.yml -f compose.bare-metal-local.yml
+	-f compose.bare-metal.yml -f compose.dev.yml \
+	-f compose.payments-double.yml -f compose.bare-metal-local.yml
 
 test-e2e-bare-metal:
 	cd .. && $(MAKE) -s --no-print-directory e2e-bare-metal-dev-env > "$(E2E_BARE_METAL_ENV)"
+	cd .. && $(MAKE) -s --no-print-directory e2e-bare-metal-payments-env > "$(E2E_BARE_METAL_PAYMENTS_ENV)"
 	cd .. && docker compose --env-file "$(E2E_BARE_METAL_ENV)" $(E2E_BARE_METAL_COMPOSE) down -v --remove-orphans
 	cd .. && $(MAKE) build-e2e-bare-metal
 	cd .. && $(call e2e_up,$(E2E_BARE_METAL_ENV),$(E2E_BARE_METAL_COMPOSE))
-	$(MAKE) test-buyer-machine NETWORK=$(E2E_BARE_METAL_PROJECT)_default BUYER_MODULE="$(E2E_BARE_METAL_MODULE)"
+	cd .. && $(call e2e_check_payments,$(E2E_BARE_METAL_ENV),$(E2E_BARE_METAL_COMPOSE),bare-metal-storefront,bare-metal-storefront)
+	$(MAKE) test-buyer-machine NETWORK=$(E2E_BARE_METAL_PROJECT)_default BUYER_MODULE="$(E2E_BARE_METAL_MODULE)" \
+		PAYMENTS_ENV_FILE="$(E2E_BARE_METAL_PAYMENTS_ENV)"
 
 e2e-bare-metal-down:
 	cd .. && $(call e2e_env_if_missing,$(E2E_BARE_METAL_ENV),e2e-bare-metal-dev-env)
@@ -255,19 +291,23 @@ e2e-bare-metal-logs:
 	@cd .. && docker compose --env-file "$(E2E_BARE_METAL_ENV)" $(E2E_BARE_METAL_COMPOSE) logs --no-color
 
 # API-credit lane: the credits registry, service, storefront, and sample app,
-# the lane's own compute-schema registry, and the dev chain; see
-# compose.apicredits-lane.yml.
+# the lane's own compute-schema registry, the payments double, and the dev
+# chain; see compose.apicredits-lane.yml.
 E2E_APICREDITS_ENV ?= $(CURDIR)/../.e2e-apicredits.env
+E2E_APICREDITS_PAYMENTS_ENV ?= $(CURDIR)/../.e2e-apicredits-payments.env
 E2E_APICREDITS_PROJECT := simple-market-apicredits
 E2E_APICREDITS_COMPOSE := -p $(E2E_APICREDITS_PROJECT) -f compose.apicredits.yml \
-	-f compose.apicredits-local.yml -f compose.apicredits-lane.yml
+	-f compose.apicredits-local.yml -f compose.payments-double.yml -f compose.apicredits-lane.yml
 
 test-e2e-apicredits:
 	cd .. && $(MAKE) -s --no-print-directory e2e-apicredits-dev-env > "$(E2E_APICREDITS_ENV)"
+	cd .. && $(MAKE) -s --no-print-directory e2e-apicredits-payments-env > "$(E2E_APICREDITS_PAYMENTS_ENV)"
 	cd .. && docker compose --env-file "$(E2E_APICREDITS_ENV)" $(E2E_APICREDITS_COMPOSE) down -v --remove-orphans
 	cd .. && $(MAKE) build-e2e-apicredits
 	cd .. && $(call e2e_up,$(E2E_APICREDITS_ENV),$(E2E_APICREDITS_COMPOSE))
-	$(MAKE) test-buyer-machine NETWORK=$(E2E_APICREDITS_PROJECT)_default BUYER_MODULE="$(E2E_APICREDITS_MODULE)"
+	cd .. && $(call e2e_check_payments,$(E2E_APICREDITS_ENV),$(E2E_APICREDITS_COMPOSE),credits-storefront,apicredits-storefront)
+	$(MAKE) test-buyer-machine NETWORK=$(E2E_APICREDITS_PROJECT)_default BUYER_MODULE="$(E2E_APICREDITS_MODULE)" \
+		PAYMENTS_ENV_FILE="$(E2E_APICREDITS_PAYMENTS_ENV)"
 
 e2e-apicredits-down:
 	cd .. && $(call e2e_env_if_missing,$(E2E_APICREDITS_ENV),e2e-apicredits-dev-env)

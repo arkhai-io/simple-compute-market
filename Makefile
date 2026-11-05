@@ -17,6 +17,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: test-release-tooling test-deployment-packaging test-registry-client test-provisioning-adapter test-e2e-unit
 .PHONY: test-frp-grant-admission test-frp-grant-admission-frp test-frp-grant-admission-floor build-frp-grant-admission
 .PHONY: test-payments-lane-double build-payments-lane-double
+.PHONY: e2e-vms-stack-env e2e-vms-payments-env e2e-bare-metal-payments-env e2e-apicredits-payments-env
 .PHONY: dist-arkhai-core-registry
 .PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits test-provisioning-iac-native
 .PHONY: dist-bare-metal-buyer
@@ -314,13 +315,22 @@ build: ## Build the wheels, the buyer CLI binary, and every runtime image
 # development value; see dev-env/identities/README.md, which lists the files
 # each target satisfies.
 #
-#   e2e-vms-dev-env         the VM lane (compose.vms.yml, compose.vms-local.yml)
+#   e2e-vms-dev-env         the VM lane (compose.vms.yml, compose.vms-local.yml,
+#                           compose.payments-double.yml, compose.vms-lane.yml)
 #   e2e-apicredits-dev-env  the API-credit lane (compose.apicredits.yml,
-#                           compose.apicredits-local.yml, compose.apicredits-lane.yml)
+#                           compose.apicredits-local.yml, compose.payments-double.yml,
+#                           compose.apicredits-lane.yml)
 #   e2e-bare-metal-dev-env  the bare-metal lane, below
 #   e2e-dev-identities-env  the full local stack (docker-compose.yml and both
 #                           market overlays): the VM and API-credit values except
-#                           the API-credit lane's own compute registry
+#                           each lane's own, its compute registry and payments
+#
+# Each lane's payment values come from the payments double's committed fixtures
+# (tools/payments-lane-double/fixtures) through its scripts/lane_env.py, which the
+# host's python3 (3.11 or newer) runs with the standard library alone: the Compose
+# variables here, and
+# the test runner's PAYMENTS settings from e2e-<lane>-payments-env, which
+# e2e-tests/Makefile passes to the runner as an environment file.
 #
 # The e2e targets write a file rather than eval'ing captured output: compose
 # reads the file itself, so nothing has to survive a shell round-trip, and a
@@ -360,10 +370,38 @@ e2e-dev-identities: ## Print shell exports pointing the full local stack at comm
 
 e2e-dev-identities-env: ## Print the full local stack's VAR=value lines for `docker compose --env-file`
 	@$(E2E_REQUIRE_PROVISIONING_MODE)
-	@$(MAKE) -s --no-print-directory e2e-vms-dev-env
+	@$(MAKE) -s --no-print-directory e2e-vms-stack-env
 	@$(MAKE) -s --no-print-directory e2e-apicredits-stack-env
 
+E2E_PAYMENTS_LANE_ENV := python3 -I $(CURDIR)/tools/payments-lane-double/scripts/lane_env.py
+# The wallet-free Ed25519 marketplace seed the payment scenarios' buyer signs
+# with: 32 bytes of 0xb1, as the unpadded base64url an Ed25519 credential is
+# written in. A public development value, never to be used on a public network;
+# its byte echoes the buyer's payments account, ...b1, which it is independent of.
+E2E_PAYMENTS_BUYER_SEED := sbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbE
+# The lane storefront's own signing key, read from its identity environment file:
+# the seller credential a payment scenario refunds with. $(1): the file.
+e2e_seller_credential = $(shell sed -n 's/^ARKHAI_IDENTITY_CREDENTIAL=//p' $(1))
+# The test runner's PAYMENTS settings shared by every lane, then the lane's seller.
+# `@str` keeps a hex key a string through the runner's settings loader.
+# $(1): the lane storefront's identity environment file.
+define e2e_payments_runner_env
+@$(E2E_PAYMENTS_LANE_ENV) runner
+@echo 'ARKHAI_PAYMENTS__BUYER_MARKETPLACE_CREDENTIAL=@str $(E2E_PAYMENTS_BUYER_SEED)'
+@echo 'ARKHAI_PAYMENTS__SELLER_MARKETPLACE_CREDENTIAL=@str $(call e2e_seller_credential,$(1))'
+endef
+
 e2e-vms-dev-env: ## Print the VM lane's VAR=value lines for `docker compose --env-file`
+	@$(MAKE) -s --no-print-directory e2e-vms-stack-env
+	@# The lane's own: Bob's configuration with payments, and the double's values.
+	@echo 'VMS_BOB_STOREFRONT_CONFIG=$(CURDIR)/domains/vms/storefront/storefront.bob.lane.toml'
+	@$(E2E_PAYMENTS_LANE_ENV) compose
+
+e2e-vms-payments-env: ## Print the VM lane test runner's PAYMENTS settings, for `docker run --env-file`
+	$(call e2e_payments_runner_env,$(E2E_IDENTITY_DIR)/bob.identity.env)
+
+# The VM stack's values, shared by its lane and the full local stack.
+e2e-vms-stack-env:
 	@$(E2E_REQUIRE_PROVISIONING_MODE)
 	@mkdir -p "$(E2E_BUYER_RUNTIME_DIR)/profile" "$(E2E_BUYER_RUNTIME_DIR)/state"
 	@echo 'VMS_PROVISIONING_ACTIVE_PROFILES=$(E2E_PROVISIONING_PROFILES)'
@@ -406,6 +444,12 @@ e2e-apicredits-dev-env: ## Print the API-credit lane's VAR=value lines for `dock
 	@# The compute-schema registry the credits scenario routes discovery
 	@# across; only the lane runs it, since the full stack has VM's.
 	@echo 'APICREDITS_COMPUTE_REGISTRY_IDENTITY_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/registry-a.eip191'
+	@# The storefront's configuration with payments, and the double's values.
+	@echo 'APICREDITS_STOREFRONT_CONFIG=$(CURDIR)/domains/apicredits/storefront/storefront.credits.lane.toml'
+	@$(E2E_PAYMENTS_LANE_ENV) compose
+
+e2e-apicredits-payments-env: ## Print the API-credit lane test runner's PAYMENTS settings, for `docker run --env-file`
+	$(call e2e_payments_runner_env,$(E2E_IDENTITY_DIR)/api-credits.identity.env)
 
 # ---------------------------------------------------------------------------
 # e2e-bare-metal-dev-env — the bare-metal end-to-end lane's `--env-file`
@@ -458,6 +502,14 @@ e2e-bare-metal-dev-env: ## Print VAR=value lines for the bare-metal lane's `dock
 	@echo 'BARE_METAL_BUYER_IMAGE=arkhai:e2e-tests'
 	@echo 'BARE_METAL_BUYER_IDENTITY_ENV_FILE=$(E2E_BARE_METAL_DIR)/buyer.identity.env'
 	@echo 'BARE_METAL_BUYER_CONFIG_FILE=$(E2E_BARE_METAL_DIR)/buyer.toml'
+	@$(E2E_PAYMENTS_LANE_ENV) compose
+
+# The bare-metal payment scenario's whole-host fixture adds its price and the
+# mandate's authorization window to the shared settings.
+e2e-bare-metal-payments-env: ## Print the bare-metal lane test runner's PAYMENTS settings, for `docker run --env-file`
+	$(call e2e_payments_runner_env,$(E2E_IDENTITY_DIR)/bob.identity.env)
+	@echo 'ARKHAI_PAYMENTS__COMPUTE_HOURLY_GROSS=1000000'
+	@echo 'ARKHAI_PAYMENTS__DISPUTE_WINDOW=@str P7D'
 
 build-dev: ## Build everything `build` does, the dev chain image, the test image, and the payments double
 	$(MAKE) build

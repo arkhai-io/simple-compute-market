@@ -7,18 +7,26 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import tomllib
 
 import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+DOUBLE_FIXTURES = REPO_ROOT / "tools/payments-lane-double/fixtures"
 
-# Each stack: its environment target, its compose project, and its files.
+# Each stack: its environment target, its compose project, and its files, in the
+# order e2e-tests/Makefile layers them.
 STACKS = {
     "vm": (
         "e2e-vms-dev-env",
         "simple-market-service",
-        ("compose.vms.yml", "compose.vms-local.yml"),
+        (
+            "compose.vms.yml",
+            "compose.vms-local.yml",
+            "compose.payments-double.yml",
+            "compose.vms-lane.yml",
+        ),
     ),
     "apicredits": (
         "e2e-apicredits-dev-env",
@@ -26,13 +34,19 @@ STACKS = {
         (
             "compose.apicredits.yml",
             "compose.apicredits-local.yml",
+            "compose.payments-double.yml",
             "compose.apicredits-lane.yml",
         ),
     ),
     "bare-metal": (
         "e2e-bare-metal-dev-env",
         "simple-market-bare-metal",
-        ("compose.bare-metal.yml", "compose.dev.yml", "compose.bare-metal-local.yml"),
+        (
+            "compose.bare-metal.yml",
+            "compose.dev.yml",
+            "compose.payments-double.yml",
+            "compose.bare-metal-local.yml",
+        ),
     ),
     "full": (
         "e2e-dev-identities-env",
@@ -110,7 +124,7 @@ def test_the_vm_lane_composes_no_api_credit_service(tmp_path: Path) -> None:
 
 def test_the_api_credit_lane_composes_its_own_compute_registry(tmp_path: Path) -> None:
     services = _render(tmp_path, "apicredits")["services"]
-    assert set(services) == API_CREDIT_SERVICES | {"anvil", "compute-registry"}
+    assert set(services) == API_CREDIT_SERVICES | {"anvil", "compute-registry", "payments-double"}
     registry = services["compute-registry"]
     environment = registry["environment"]
     assert environment["REGISTRY_AUTHORITY_ID"] == "compute-registry"
@@ -159,11 +173,80 @@ def test_the_bare_metal_storefront_reads_its_settings_from_mounted_files(
     tmp_path: Path,
 ) -> None:
     storefront = _render(tmp_path, "bare-metal")["services"]["bare-metal-storefront"]
-    # Only the configuration directory and the signer credential travel through
-    # the environment; every setting is in the files mounted under it.
-    assert set(storefront["environment"]) == {"XDG_CONFIG_HOME", "ARKHAI_IDENTITY_CREDENTIAL"}
+    # Only the configuration directory, the signer credential, and what the
+    # payments client reads from its process environment -- its CA bundle and its
+    # token -- travel through the environment; every setting is in the files
+    # mounted under the configuration directory.
+    assert set(storefront["environment"]) == {
+        "XDG_CONFIG_HOME", "ARKHAI_IDENTITY_CREDENTIAL", "SSL_CERT_FILE", "ARKHAI_PAYMENTS_API_KEY",
+    }
     targets = {volume["target"] for volume in storefront["volumes"]}
     assert {"/etc/arkhai/storefront.toml", "/etc/arkhai/storefront.secrets.toml"} <= targets
+
+
+# Each lane's payment storefront, the configuration it mounts, and the registries
+# its listings reach.
+PAYMENT_LANES = {
+    "vm": (
+        "bob-storefront", "domains/vms/storefront/storefront.bob.lane.toml",
+        ("registry", "registry-b"),
+    ),
+    "apicredits": (
+        "credits-storefront", "domains/apicredits/storefront/storefront.credits.lane.toml",
+        ("api-credits-registry", "compute-registry"),
+    ),
+    "bare-metal": (
+        "bare-metal-storefront", "domains/bare_metal/storefront/storefront.dev.toml",
+        ("bare-metal-registry",),
+    ),
+}
+
+
+def _fixture(name: str) -> dict:
+    return tomllib.loads((DOUBLE_FIXTURES / name).read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("stack", sorted(PAYMENT_LANES))
+def test_each_lane_settles_against_its_payments_double(tmp_path: Path, stack: str) -> None:
+    """The lane runs the double with no host port; its payment storefront trusts
+    the lane CA and holds the seller's token from the double's fixtures; and its
+    registries recommend the pinned dispute authority as JSON the registry reads."""
+    services = _render(tmp_path, stack)["services"]
+    storefront_name, configuration, registries = PAYMENT_LANES[stack]
+    double = services["payments-double"]
+    assert double["image"] == "arkhai:payments-lane-double"
+    assert not double.get("ports")
+
+    storefront = services[storefront_name]
+    environment = storefront["environment"]
+    assert storefront["depends_on"]["payments-double"]["condition"] == "service_healthy"
+    assert environment["SSL_CERT_FILE"] == "/run/payments-lane-double/lane-ca.pem"
+    seller = _fixture("accounts.toml")["accounts"]["seller"]
+    assert environment["ARKHAI_PAYMENTS_API_KEY"] == seller["token"]
+    mounts = {v["target"]: v["source"] for v in storefront["volumes"]}
+    assert mounts["/run/payments-lane-double/lane-ca.pem"] == str(
+        REPO_ROOT / "tools/payments-lane-double/tls/lane-ca.pem"
+    )
+    assert mounts["/etc/arkhai/storefront.toml"] == str(REPO_ROOT / configuration)
+
+    authority = _fixture("dispute-authority.toml")
+    for name in registries:
+        recommended = services[name]["environment"]["REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES"]
+        assert json.loads(recommended) == [authority], name
+
+
+def test_the_full_stack_runs_no_payments_double(tmp_path: Path) -> None:
+    services = _render(tmp_path, "full")["services"]
+    assert "payments-double" not in services
+    for name, configuration in (
+        ("bob-storefront", "domains/vms/storefront/storefront.bob.toml"),
+        ("credits-storefront", "domains/apicredits/storefront/storefront.credits.toml"),
+    ):
+        assert not {"SSL_CERT_FILE", "ARKHAI_PAYMENTS_API_KEY"} & set(
+            services[name].get("environment") or {}
+        ), name
+        mounts = {v["target"]: v["source"] for v in services[name]["volumes"]}
+        assert mounts["/etc/arkhai/storefront.toml"] == str(REPO_ROOT / configuration), name
 
 
 @pytest.mark.parametrize(

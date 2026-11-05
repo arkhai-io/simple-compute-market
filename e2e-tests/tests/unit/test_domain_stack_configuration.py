@@ -2,12 +2,25 @@
 
 from __future__ import annotations
 
+import copy
 import tomllib
 from pathlib import Path
 
+import pytest
 import yaml
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+_DOUBLE = _REPO_ROOT / "tools/payments-lane-double"
+_PAYMENTS = "arkhai.payments.v1"
+_CA_MOUNT = "/run/payments-lane-double/lane-ca.pem"
+
+
+def _toml(relative: str | Path) -> dict:
+    return tomllib.loads((_REPO_ROOT / relative).read_text(encoding="utf-8"))
+
+
+def _compose(relative: str) -> dict:
+    return yaml.safe_load((_REPO_ROOT / relative).read_text(encoding="utf-8"))
 
 
 def test_api_credit_stack_has_no_committed_admin_credential():
@@ -132,3 +145,142 @@ def test_bare_metal_stack_keeps_role_credentials_and_state_separate():
         "bare-metal-storefront-data",
     ):
         assert f"{name}:" in domain_compose
+
+
+# --- the payments lane double in the lanes -------------------------------------
+#
+# Each lane's payment storefront settles against the lane's payments double. The
+# double's committed fixtures (tools/payments-lane-double/fixtures) are the one
+# source of the receipt identity, the accounts and the pinned dispute authority;
+# a storefront configuration is a static file, so these checks hold its copies to
+# the fixtures. Every value is a public development value.
+
+# (lane configuration, its settlement table's key, the overlay that wires the
+# lane's storefront and that storefront's service, the stack profile it extends)
+_LANE_STOREFRONTS = (
+    ("domains/vms/storefront/storefront.bob.lane.toml", "Settlement",
+     "compose.vms-lane.yml", "bob-storefront", "domains/vms/storefront/storefront.bob.toml"),
+    ("domains/bare_metal/storefront/storefront.dev.toml", "Settlement",
+     "compose.bare-metal-local.yml", "bare-metal-storefront", None),
+    ("domains/apicredits/storefront/storefront.credits.lane.toml", "settlement",
+     "compose.apicredits-lane.yml", "credits-storefront",
+     "domains/apicredits/storefront/storefront.credits.toml"),
+)
+# Every registry a lane's storefronts publish to or its buyers discover through.
+_LANE_REGISTRIES = (
+    ("compose.vms-lane.yml", "registry"),
+    ("compose.vms-lane.yml", "registry-b"),
+    ("compose.bare-metal-local.yml", "bare-metal-registry"),
+    ("compose.apicredits-lane.yml", "api-credits-registry"),
+    ("compose.apicredits-lane.yml", "compute-registry"),
+)
+
+
+def _environment(service: dict) -> dict[str, str]:
+    return dict(item.split("=", 1) for item in service.get("environment", []))
+
+
+def _without_lane_payments(config: dict, settlement: str) -> dict:
+    """``config`` without what a lane adds for payments."""
+    stripped = copy.deepcopy(config)
+    table = stripped[settlement]
+    table.pop("arkhai_payments", None)
+    table["priority"] = [item for item in table["priority"] if item != _PAYMENTS]
+    stripped.pop("DisputeCredential", None)
+    pricing = stripped.get("pricing", {})
+    pricing["settlements"] = [
+        clause for clause in pricing.get("settlements", []) if clause["mechanism"] != _PAYMENTS
+    ]
+    if not pricing["settlements"]:
+        del pricing["settlements"]
+    return stripped
+
+
+@pytest.mark.parametrize(
+    ("lane", "settlement", "profile"),
+    [(lane, settlement, profile) for lane, settlement, _, _, profile in _LANE_STOREFRONTS if profile],
+)
+def test_a_lane_storefront_configuration_is_its_stack_profile_plus_payments(
+    lane, settlement, profile
+):
+    """The VM and API-credit lanes run their own copy of a profile the full local
+    stack also runs, so the stack runs no payments; the copy differs only in
+    what payments adds."""
+    assert _without_lane_payments(_toml(lane), settlement) == _without_lane_payments(
+        _toml(profile), settlement
+    )
+    assert not (_toml(profile)[settlement].get("arkhai_payments") or {}).get("enabled")
+
+
+@pytest.mark.parametrize(("lane", "settlement"), [item[:2] for item in _LANE_STOREFRONTS])
+def test_each_lane_storefront_settles_against_the_double(lane, settlement):
+    accounts = _toml(_DOUBLE / "fixtures/accounts.toml")
+    config = _toml(lane)
+    payments = config[settlement]["arkhai_payments"]
+
+    assert _PAYMENTS in config[settlement]["priority"]
+    assert payments == {
+        "enabled": True,
+        "service_url": "https://payments-double:8443",
+        "service_identity": accounts["receipt_identity"],
+        "fee_bps": accounts["fee_bps"],
+        "livemode": False,
+        "api_key_env": "ARKHAI_PAYMENTS_API_KEY",
+    }
+    # The dispute authority reaches the seller through its registries alone.
+    assert "dispute" not in {key.lower() for key in config}
+
+
+@pytest.mark.parametrize(("overlay", "service"), [item[2:4] for item in _LANE_STOREFRONTS])
+def test_each_lane_overlay_wires_its_storefront_to_the_double(overlay, service):
+    storefront = _compose(overlay)["services"][service]
+    environment = _environment(storefront)
+
+    assert storefront["depends_on"]["payments-double"] == {"condition": "service_healthy"}
+    assert environment["SSL_CERT_FILE"] == _CA_MOUNT
+    assert environment["ARKHAI_PAYMENTS_API_KEY"].startswith("${PAYMENTS_LANE_SELLER_API_KEY:?")
+    assert any(
+        volume.startswith("${PAYMENTS_LANE_CA_FILE:?") and volume.endswith(f":{_CA_MOUNT}:ro")
+        for volume in storefront["volumes"]
+    )
+
+
+@pytest.mark.parametrize(("overlay", "service"), _LANE_REGISTRIES)
+def test_each_lane_registry_recommends_the_pinned_dispute_authority(overlay, service):
+    environment = _environment(_compose(overlay)["services"][service])
+
+    assert environment["REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES"].startswith(
+        "${PAYMENTS_LANE_DISPUTE_AUTHORITIES:?"
+    )
+
+
+def test_the_vm_lane_storefront_holds_a_credential_for_the_pinned_authority():
+    authority = _toml(_DOUBLE / "fixtures/dispute-authority.toml")
+    (credential,) = _toml("domains/vms/storefront/storefront.bob.lane.toml")["DisputeCredential"]
+    environment = _environment(_compose("compose.vms-lane.yml")["services"]["bob-storefront"])
+
+    identity = ("interface", "origin", "account", "record_key")
+    assert {key: credential[key] for key in identity} == {key: authority[key] for key in identity}
+    assert environment[credential["api_key_env"]]
+
+
+def test_the_api_credit_lane_listing_pays_the_double_seller_account():
+    accounts = _toml(_DOUBLE / "fixtures/accounts.toml")
+    pricing = _toml("domains/apicredits/storefront/storefront.credits.lane.toml")["pricing"]
+    (clause,) = [item for item in pricing["settlements"] if item["mechanism"] == _PAYMENTS]
+
+    assert clause["asset"] == clause["mechanism_input"]["asset"] == accounts["asset"]
+    assert clause["mechanism_input"]["payee_account"] == accounts["accounts"]["seller"]["account"]
+
+
+def test_the_double_runs_only_in_the_lanes_and_publishes_no_host_port():
+    double = _compose("compose.payments-double.yml")["services"]["payments-double"]
+    makefile = (_REPO_ROOT / "e2e-tests/Makefile").read_text(encoding="utf-8")
+    full_stack = (_REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert double["image"] == "arkhai:payments-lane-double"
+    assert "ports" not in double
+    assert makefile.count("-f compose.payments-double.yml") == 3
+    assert "payments" not in full_stack
+    for shared in ("compose.vms-local.yml", "compose.apicredits-local.yml"):
+        assert "PAYMENTS_LANE" not in (_REPO_ROOT / shared).read_text(encoding="utf-8")

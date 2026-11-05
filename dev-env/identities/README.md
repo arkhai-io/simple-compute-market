@@ -34,9 +34,9 @@ stack has its own environment target, which supplies all of them:
 
 | Stack | Files | Values |
 |---|---|---|
-| VM lane | `compose.vms.yml` (with `compose.dev.yml` and `domains/vms/compose.yml`), `compose.vms-local.yml` | `make e2e-vms-dev-env` |
-| API-credit lane | `compose.apicredits.yml` (with `compose.dev.yml` and `domains/apicredits/compose.yml`), `compose.apicredits-local.yml`, `compose.apicredits-lane.yml` | `make e2e-apicredits-dev-env` |
-| Bare-metal lane | `compose.bare-metal.yml`, `compose.dev.yml`, `compose.bare-metal-local.yml` | `make e2e-bare-metal-dev-env` |
+| VM lane | `compose.vms.yml` (with `compose.dev.yml` and `domains/vms/compose.yml`), `compose.vms-local.yml`, `compose.payments-double.yml`, `compose.vms-lane.yml` | `make e2e-vms-dev-env` |
+| API-credit lane | `compose.apicredits.yml` (with `compose.dev.yml` and `domains/apicredits/compose.yml`), `compose.apicredits-local.yml`, `compose.payments-double.yml`, `compose.apicredits-lane.yml` | `make e2e-apicredits-dev-env` |
+| Bare-metal lane | `compose.bare-metal.yml`, `compose.dev.yml`, `compose.payments-double.yml`, `compose.bare-metal-local.yml` | `make e2e-bare-metal-dev-env` |
 | Full local stack | `docker-compose.yml`, `compose.vms-local.yml`, `compose.apicredits-local.yml` | `make e2e-dev-identities-env` |
 
 Not all are paths. `VMS_REGISTRY_ADMIN_API_KEY` and
@@ -201,6 +201,38 @@ stand in for the other. `make e2e-apicredits-dev-env` binds the credential, and
 the lane's settings in `e2e-tests/config/config-docker.yml` pin the same
 identifier. The full local stack has VM's compute registry and never layers
 `compose.apicredits-lane.yml`.
+
+## The payments lane double
+
+Each lane runs the payments lane double (`compose.payments-double.yml`), and its
+payment storefront — Bob's VM storefront, the bare-metal storefront, the credits
+storefront — settles against it. The double's own values live with it, in
+`tools/payments-lane-double/fixtures/` and `tls/`, documented in its
+[README](../../tools/payments-lane-double/README.md): the receipt-signing seed and
+identity, the buyer's and seller's payments accounts and bearer tokens, the
+pinned dispute authority, and the lane CA. Nothing here repeats them.
+`tools/payments-lane-double/scripts/lane_env.py` reads them for the root
+`Makefile`, with the host's Python 3.11 or newer: each lane's environment target
+prints the CA file, the
+seller's token and the registries' recommended dispute authorities for Compose,
+and each `e2e-<lane>-payments-env` target prints the test runner's `PAYMENTS`
+settings and the buyer's token, which `e2e-tests/Makefile` passes to the runner
+as an environment file.
+
+The lane values that are not the double's:
+
+| Value | Where | Role |
+|---|---|---|
+| 32 bytes of `0xb1`, as unpadded base64url | `E2E_PAYMENTS_BUYER_SEED` in the root `Makefile` | the payment scenarios' wallet-free Ed25519 buyer marketplace seed |
+| `bob.identity.env`, `api-credits.identity.env` | this directory | the seller credential a payment scenario refunds with: each lane storefront's own key, in its own scheme |
+| `vm-lane-dispute-public-development-credential` | `compose.vms-lane.yml` | Bob's credential toward the pinned dispute authority, under the variable his `[[DisputeCredential]]` names; nothing at its `.invalid` origin ever reads it |
+
+The VM and API-credit lanes run their own copies of the storefront profiles the
+full local stack runs, `domains/vms/storefront/storefront.bob.lane.toml` and
+`domains/apicredits/storefront/storefront.credits.lane.toml`, which add payments
+and nothing else, so the full stack keeps running without them. The bare-metal
+lane's `domains/bare_metal/storefront/storefront.dev.toml` is the only deployment
+that file configures, so it carries payments itself.
 
 ## Alice's provisioning authority
 

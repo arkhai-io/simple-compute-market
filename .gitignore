@@ -146,6 +146,9 @@ celerybeat.pid
 .e2e-vms.env
 .e2e-bare-metal.env
 .e2e-apicredits.env
+.e2e-vms-payments.env
+.e2e-bare-metal-payments.env
+.e2e-apicredits-payments.env
 .venv
 env/
 venv/

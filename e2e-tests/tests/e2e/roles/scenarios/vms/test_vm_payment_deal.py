@@ -1,8 +1,13 @@
 """Hosted VM commit, servicing, operator end/case and separate physical release.
 
-Requires the shared PAYMENTS profile and the exact mediation authority's seller
-credential. The public lane reports blocked without those external services.
-Provisioning uses the VM lane's mock executor, not a real guest or SSH proof.
+The commit and servicing stages need a payments target, which the VM lane runs
+as its payments double (PAYMENTS). The operator-end and refund stages also need
+a dispute authority that accepts a filed case, MEDIATION.SERVICE_URL, and report
+a blocked skip naming it where none is configured, as in the lane, whose
+registries recommend an authority that can never answer. Servicing still reads
+the deal running then, because the storefront holds a dispute credential for that
+authority. Provisioning uses the VM lane's mock executor, not a real guest or SSH
+proof.
 """
 
 from __future__ import annotations
@@ -20,6 +25,7 @@ from e2e_harness.settings import settings
 from tests.e2e.roles.helpers.compute_deal import (
     DealLease, advance_fulfillment_to, advance_storefront, wait_for_stage_event,
 )
+from tests.e2e.roles.helpers.mediation import configured_mediation
 from tests.e2e.roles.helpers.payments import configured_payments, payment_setting
 from tests.e2e.roles.scenarios.vms.conftest import (
     _publisher_trust, _signer, capacity_source_for,
@@ -42,6 +48,12 @@ pytestmark = [
 @pytest.fixture(scope="module")
 def payments_config():
     return configured_payments()
+
+
+@pytest.fixture(scope="module")
+def mediation_target():
+    """The case stages' dispute authority; a blocked skip when none is configured."""
+    return configured_mediation()
 
 
 @pytest.fixture(scope="module")
@@ -169,7 +181,7 @@ def test_commit_replay_and_servicing_keep_the_same_hosted_deal(
 
 
 def test_operator_end_files_one_case_without_a_local_payment_remedy(
-    hosted, payments_config, storefront_admin_client, deal_driver,
+    mediation_target, hosted, payments_config, storefront_admin_client, deal_driver,
 ):
     assert hosted.get("transaction"), "hosted commit did not complete"
     deal_driver.arm_teardown_gate()
@@ -200,7 +212,7 @@ def test_operator_end_files_one_case_without_a_local_payment_remedy(
 
 
 def test_seller_refund_is_financial_and_release_waits_for_the_callback(
-    hosted, payments_config, storefront_seller_client, provisioning_client,
+    mediation_target, hosted, payments_config, storefront_seller_client, provisioning_client,
     provisioning_test_client, storefront_admin_client, vm_lifecycle_buyer, deal_state,
 ):
     assert hosted.get("case_ref"), "operator end did not produce its authority case"

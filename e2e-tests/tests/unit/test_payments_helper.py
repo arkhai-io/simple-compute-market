@@ -1,18 +1,25 @@
-"""The shared payments helper blocks only an absent or unready payments target.
+"""The shared payments helper blocks only an absent or unready external target.
 
-A pipeline configures no payments target, so its payment scenarios are blocked.
+A run that configures no payments target has its payment scenarios blocked.
 Once a target is configured, the run is expected to supply everything else, and
 a missing setting fails rather than hiding a broken configuration behind a skip.
-Every value below is a development fixture, never used on any network.
+A lane's own target, marked LANE_OWNED, fails when it is not ready. Every value
+below is a development fixture, never used on any network.
 """
 
 from __future__ import annotations
 
+import ssl
+from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 
 from tests.e2e.roles.helpers import payments
+
+# The payments lane double's CA, a public development certificate.
+_LANE_CA = Path(__file__).resolve().parents[3] / "tools/payments-lane-double/tls/lane-ca.pem"
 
 Failed = pytest.fail.Exception
 Skipped = pytest.skip.Exception
@@ -111,7 +118,86 @@ def test_development_auth_written_false_still_requires_an_api_key(configure) -> 
     assert "PAYMENTS.API_KEY_ENV is required without DEVELOPMENT_AUTH" in str(outcome)
 
 
-@pytest.mark.parametrize("flag", ["LIVEMODE", "DEVELOPMENT_AUTH"])
+def test_an_unready_lane_owned_target_fails_naming_it(configure) -> None:
+    configure(**_COMPLETE, LANE_OWNED="true")
+    outcome = _outcome(ready=lambda _url: False)
+    assert isinstance(outcome, Failed)
+    assert "the lane's own payments service at http://127.0.0.1:9 is not ready" in str(outcome)
+
+
+def test_a_ready_lane_owned_target_yields_its_policy(configure) -> None:
+    configure(**_COMPLETE, LANE_OWNED=True)
+    config = payments.configured_payments(ready=lambda _url: True)
+    assert config.service_url == "http://127.0.0.1:9"
+
+
+def test_a_lane_owned_run_without_a_target_fails(configure) -> None:
+    configure(LANE_OWNED=True)
+    outcome = _outcome(ready=_never_asked)
+    assert isinstance(outcome, Failed)
+    assert "PAYMENTS.LANE_OWNED is set but PAYMENTS.SERVICE_URL is not configured" in str(outcome)
+
+
+def test_an_unready_target_marked_external_still_blocks(configure) -> None:
+    configure(**_COMPLETE, LANE_OWNED="false")
+    outcome = _outcome(ready=lambda _url: False)
+    assert isinstance(outcome, Skipped)
+    assert "blocked: payments service at http://127.0.0.1:9 is not ready" in str(outcome)
+
+
+class _Probe:
+    """Records the request the readiness probe makes and answers it."""
+
+    def __init__(self, response: httpx.Response | Exception) -> None:
+        self.response = response
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    def __call__(self, url: str, **kwargs: Any) -> httpx.Response:
+        self.calls.append((url, kwargs))
+        if isinstance(self.response, Exception):
+            raise self.response
+        return self.response
+
+
+def _healthy() -> httpx.Response:
+    return httpx.Response(200, json={"status": "ok"})
+
+
+def test_the_probe_trusts_the_ca_ssl_cert_file_names_and_no_proxy() -> None:
+    probe = _Probe(_healthy())
+    assert payments.target_ready(
+        "https://payments-double:8443", get=probe, environ={"SSL_CERT_FILE": str(_LANE_CA)},
+    )
+    ((url, kwargs),) = probe.calls
+    assert url == "https://payments-double:8443/health"
+    assert kwargs["trust_env"] is False
+    context = kwargs["verify"]
+    assert isinstance(context, ssl.SSLContext)
+    lane_ca = ssl.create_default_context(cafile=str(_LANE_CA)).get_ca_certs()
+    assert context.get_ca_certs() == lane_ca and lane_ca
+
+
+def test_without_ssl_cert_file_the_probe_keeps_default_verification() -> None:
+    probe = _Probe(_healthy())
+    assert payments.target_ready("https://payments.example", get=probe, environ={})
+    ((_, kwargs),) = probe.calls
+    assert kwargs["verify"] is True and kwargs["trust_env"] is False
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(503, json={"status": "ok"}),
+        httpx.Response(200, json={"status": "starting"}),
+        httpx.Response(200, text="not json"),
+        httpx.ConnectError("certificate verify failed"),
+    ],
+)
+def test_the_probe_reports_an_unhealthy_or_unreachable_target_unready(response) -> None:
+    assert not payments.target_ready("https://payments-double:8443", get=_Probe(response), environ={})
+
+
+@pytest.mark.parametrize("flag", ["LIVEMODE", "DEVELOPMENT_AUTH", "LANE_OWNED"])
 def test_a_flag_that_is_not_a_boolean_fails(configure, flag) -> None:
     configure(**{**_COMPLETE, flag: "yes"})
     outcome = _outcome(ready=lambda _url: True)

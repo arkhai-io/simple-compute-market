@@ -1,7 +1,15 @@
-"""Explicit payments policy for payment deal scenarios: the API-credit
-scenario reads it here, and other payment scenarios may reuse it."""
+"""Explicit payments policy for the payment deal scenarios, which read it here.
 
-from collections.abc import Callable
+A run names its payments target in PAYMENTS.SERVICE_URL. A lane that runs its
+own target, the payments lane double, also sets PAYMENTS.LANE_OWNED: an unready
+target is then the lane's own failure and fails the scenario by name, where an
+external target that is not ready blocks it.
+"""
+
+import os
+import ssl
+from collections.abc import Callable, Mapping
+from typing import Any
 
 import httpx
 import pytest
@@ -11,8 +19,9 @@ from market_identity import Identity, IdentityScheme
 from e2e_harness.settings import settings
 from tests.e2e.roles.buyer_cli import _toml_quote
 
-# Whether a payments target is configured at all; with none, payment scenarios
-# are blocked rather than failed, which is what a pipeline without one runs.
+# Whether a payments target is configured at all; with none, and none claimed as
+# the lane's own, payment scenarios are blocked rather than failed: the target is
+# an authority the run does not supply.
 _TARGET_KEY = "SERVICE_URL"
 # Everything else a configured payments run supplies itself: the service policy
 # it pins and its parties' accounts and credentials.
@@ -44,10 +53,23 @@ def payment_flag(name: str) -> bool:
     pytest.fail(f"PAYMENTS.{name} must be true or false, not {value!r}")
 
 
-def target_ready(url: str) -> bool:
-    """Whether the payments service at `url` reports itself ready."""
+def target_ready(
+    url: str,
+    *,
+    get: Callable[..., Any] = httpx.get,
+    environ: Mapping[str, str] = os.environ,
+) -> bool:
+    """Whether the payments service at `url` reports itself ready.
+
+    Environment proxies are never used: the probe asks the target itself. httpx
+    reads SSL_CERT_FILE only alongside the proxy variables, so a CA bundle it
+    names, such as a lane's CA for its payments double, is loaded here as the
+    only trust the probe has, just as the payments client trusts it.
+    """
+    cafile = environ.get("SSL_CERT_FILE")
+    verify: ssl.SSLContext | bool = ssl.create_default_context(cafile=cafile) if cafile else True
     try:
-        health = httpx.get(url + "/health", timeout=5.0, trust_env=False)
+        health = get(url + "/health", timeout=5.0, trust_env=False, verify=verify)
         return health.status_code == 200 and health.json().get("status") == "ok"
     except (httpx.HTTPError, ValueError):
         return False
@@ -56,13 +78,19 @@ def target_ready(url: str) -> bool:
 def configured_payments(
     *, ready: Callable[[str], bool] = target_ready
 ) -> ArkhaiPaymentsConfig:
-    """Return the explicit service policy, blocking only an absent or unready target.
+    """Return the explicit service policy, blocking only an absent or unready
+    external target.
 
     With no target configured the scenario is blocked. With one configured, a
     missing setting the run supplies itself is a broken configuration, so it
     fails, naming the setting, before the target is asked whether it is ready.
+    An unready target blocks the scenario, unless it is the lane's own
+    (PAYMENTS.LANE_OWNED), which fails it, naming the target.
     """
+    lane_owned = payment_flag("LANE_OWNED")
     if not payment_setting(_TARGET_KEY):
+        if lane_owned:
+            pytest.fail(f"PAYMENTS.LANE_OWNED is set but PAYMENTS.{_TARGET_KEY} is not configured")
         pytest.skip(f"blocked: PAYMENTS.{_TARGET_KEY} not configured")
     missing = [key for key in _REQUIRED_KEYS if not payment_setting(key)]
     if missing:
@@ -83,6 +111,8 @@ def configured_payments(
     if not config.development_auth and not config.api_key_env:
         pytest.fail("PAYMENTS.API_KEY_ENV is required without DEVELOPMENT_AUTH")
     if not ready(url):
+        if lane_owned:
+            pytest.fail(f"the lane's own payments service at {url} is not ready")
         pytest.skip(f"blocked: payments service at {url} is not ready")
     return config
 

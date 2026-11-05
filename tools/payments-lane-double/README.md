@@ -105,6 +105,20 @@ there. Outside the image, `python -m payments_lane_double` reads
 `PAYMENTS_LANE_DOUBLE_FIXTURES`, `PAYMENTS_LANE_DOUBLE_TLS`,
 `PAYMENTS_LANE_DOUBLE_HOST` and `PAYMENTS_LANE_DOUBLE_PORT`.
 
+- The VM, bare-metal and API-credit lanes run the image as the Compose service in
+  `compose.payments-double.yml`, with no host port, and each lane's overlay points
+  its payment storefront at it. `scripts/lane_env.py` prints the values a lane
+  needs from the committed fixtures: `compose` for the lane's Compose files (the
+  lane CA file, the seller's token, and the pinned dispute authority as the
+  registries' JSON recommendation), `runner` for the test runner's `PAYMENTS`
+  settings and the buyer's token, and `seller-account` for the account a
+  storefront's payments check reads. The root `Makefile` runs it with the host's
+  `python3 -I`, which must be 3.11 or newer, so it imports only the standard
+  library; it is not part of the package the image runs. The lane storefronts'
+  configuration files are static and repeat the receipt identity, fee, service
+  URL, the seller's account and the pinned authority;
+  `e2e-tests/tests/unit/test_domain_stack_configuration.py` holds those copies to
+  the fixtures.
 - `make test` (here) checks the TLS files and runs the unit and library integration
   suite: the kit's real `PaymentsClient` against the app through an in-process
   transport, with an injected clock. From the repository root,
