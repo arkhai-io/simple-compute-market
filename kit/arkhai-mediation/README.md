@@ -61,6 +61,10 @@ env -u ALL_PROXY -u all_proxy NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,12
   the signed authority record: SCM must not invent their per-part decomposition.
   Per-case filing protection is not an assertion that a payment extension remains
   open; only a payment-authority read establishes that.
+- `case` returns the existing accepted/pending filing-outcome envelope. Accepted
+  case bindings must match the requested case, Agreement and transaction; pending
+  protection must name the requested case. Recovery preserves pending outcomes
+  without another filing and still requires the original signed filed record.
 - Supply `capture=...` on the client to persist exact response bytes in the role's
   evidence store. The record projection also retains a canonical signed entry;
   that projection is not a substitute for exact transport-byte capture.

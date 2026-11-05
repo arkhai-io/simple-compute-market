@@ -20,7 +20,8 @@ sequence before every review, choosing which step runs next. The workflow makes
 agents do the transport. Each phase's procedure is written once, as a skill any
 agent harness can load; reviews are exchanged as files; validation runs unattended;
 an orchestrating session carries the change from one step to the next; and the owner
-reads every finding and decides every design question.
+reads every finding, discussed or reported in a triage's table of default
+acceptances, and decides every design question.
 
 ## The process
 
@@ -37,12 +38,28 @@ planning exposes returns the change to design.
 
 A change stops for the owner at four kinds of moment: the design discussion's
 questions; the owner's notes on each implementation round, read through the round
-view; the triage discussion — each finding's disposition, and, once every finding is
-disposed and before any fix, whether the fixes merit another review round, asked
-while the owner is still present; and the interrupts no rule can settle, such as an
-environmental remedy validation proposes, a denial that needs a rule, a proposed
-return, a stopped step, or a prerequisite to release. Every other transition
-advances on conditions the computation checks.
+view; the triage discussion — each discussed finding's disposition, and, when the
+agent recommends another review round, whether the fixes merit it, asked once every
+discussed finding is disposed and before any fix, while the owner is still present;
+and the interrupts no rule can settle, such as an environmental remedy validation
+proposes, a denial that needs a rule, a proposed return, a stopped step, or a
+prerequisite to release. Every other transition advances on conditions the
+computation checks.
+
+A triage asks only what the owner's answer could change. A review finding the
+default rule admits is accepted by default and reported, not asked ([Triage](#triage));
+and when the agent recommends advancing, the triage takes the advancing exit without
+asking and reports it beside its table of default acceptances. The owner's recorded
+answers showed why: at the gates of the triages measured, the owner took the
+agent's recommendation to advance 55 times in 56, and its recommendation of another
+round 18 times in 20, so the question about advancing cost a turn every round and
+almost never changed anything, while disagreement concentrated where another round
+was recommended. A recommendation of another round is still argued and asked. The
+table rides on the triage's last question when it asks one, so a correction there is
+an ordinary disposition made before any fix; a triage that asks nothing gives it in
+its final report, and a correction after the fixes revisits the finished triage. The
+owner is never made to wait on a confirmation of the table: that would be the
+question under another name, leaving the owner's window idle.
 
 Reviews are not gates. A gate at each review would ask the owner a question whose
 answer does not vary, and asking it leaves the owner's window idle while their
@@ -62,7 +79,8 @@ the return leads to is a round of its own, read, validated, and reviewed afresh 
 even a rework of the returned round's own sections, which under the returned round
 would reach the next round unread and unreviewed. A declined return is the owner's
 to settle, since the triage it ended no longer says what follows. A triage with
-nothing to dispose of advances without the owner. An implementation round, and the
+nothing to discuss that recommends advancing advances without asking the owner
+anything. An implementation round, and the
 merge before closeout, advance only on a `passed` validation of their final commit,
 and after a closeout review a correction
 outside `openspec/` and `docs/` is validated before archive cleanup, so a code
@@ -89,6 +107,22 @@ intervention is the transition the workflow did not plan for. Only a decision th
 log attributes to the owner directs a step or confirms a return, as with the
 owner's other decisions — a branch decision, a waiver — so the orchestrating session
 directs nothing of its own accord, and never records a step's exit on its behalf.
+
+A waiver skips evidence, so only the owner waives, and no waiver is taken by
+default: until how often the owner accepts each kind is measured, a wrong default
+would cost a broken pipeline found later. But the owner had been proposing nearly
+every waiver themselves, for a few recurring reasons, so a step that meets a guard the
+owner may waive recommends a waiver when one of those reasons, written as a criterion,
+holds — commits that differ from validated ones only in paths no part of validation
+exercises, a failure already diagnosed as environmental in an earlier record, a review
+and a validation of commits differing only in records or documentation, or a decision
+after a return to design confined to one requirement's wording or a choice the design
+review weighed — naming the criterion and its evidence (CW-q3dm); the merge before
+closeout keeps its own judgement. Criteria with no recommendation would leave the
+owner to spot every waiver. Each recommendation is a ledger line, taken or declined,
+so a guidance review can count them by criterion, the evidence a later change would
+need to take a criterion's waivers by default. The criteria themselves are in the
+workflow's guide, under "Waivers".
 
 The archive is the boundary no direction crosses. An archived change's deltas are
 already merged into `openspec/specs/`, so design, planning, and implementation
@@ -251,8 +285,8 @@ branch's push does not trigger — is written on its own
 show, and gates no task. A task gated on evidence no session can produce stays
 unchecked, and the next-step computation names implementation for it
 indefinitely; a round advances only on a passed validation, and every validation
-dispatches what the change's complete sections owe, so the owed evidence keeps its
-gate without a checkbox. An older plan that put such evidence inside a
+dispatches what the change's complete sections owe unless the owner waived that part,
+so the owed evidence keeps its gate without a checkbox. An older plan that put such evidence inside a
 verification task is corrected by the implementation session, which checks the task
 on its own evidence and names the rest as owed; closeout records the owed
 observations from the latest passing validation, as it records the pipeline run.
@@ -325,14 +359,31 @@ is [`market-change-workflow`'s](../market-change-workflow/README.md#validations-
 
 Evidence only a push produces is dispatched by validation, from the run of the
 validated commit, never judged from a sibling run. Every validation dispatches what
-its complete sections owe, because a fix commit can break evidence an earlier commit
-produced, as with the pipeline.
+its complete sections owe, unless the owner waived that part, because a fix commit
+can break evidence an earlier commit produced, as with the pipeline.
 
 "Fixes nothing" protects the commit, not the machine. A failure diagnosed as
 environmental is put to the owner with its remedy and its part rerun on the owner's
 word; only failures the commit caused, or whose cause is unknown, become findings.
 A result is `passed`, `failed`, or `inconclusive`, the last meaning no failure was
 the commit's but some part produced no evidence.
+
+Any part may be waived, by the owner alone. The owner can already waive validation
+entirely, so forbidding a part would only push them to that when one part blocks
+them; and a repository's broadest part is often wider than a change confined to a
+few files needs. A waived part is an omission of evidence, recorded as `waived`:
+neither passed, failed, nor inconclusive, and counted in no result, which is judged
+on the parts that ran. Recording it `inconclusive` would stop every validation for a
+ruling the owner already gave; an environmental failure the owner waives rather than
+remedies is recorded so too. A waiver for later validations — the Helm and pipeline
+parts for the rest of a change, say, while nothing it touches affects what they
+validate — is the owner's decision in the change's workflow log, naming the parts and
+the condition, which validation reads before it runs any part. An instruction passed
+in a validation's invocation is no waiver: a validation started by hand would miss
+it, and two places would have to remember it. A standing waiver lapses, and the part
+runs, when the commits since that part last ran include a merge, which brings in code
+the change did not write, or break the condition. Waiving every part is no
+validation at all, but the owner's direction past the guard it remedies.
 
 ### An implementation round is triaged together, in a fresh session
 
@@ -365,6 +416,13 @@ format, so an error or a truncated answer never becomes history, while narration
 before the title is left to the transcript; a run that published nothing is a
 failed run however many earlier records exist.
 
+Every finding states its alternatives: each option a reasonable owner might choose,
+with its trade-off, or `none` and why the fix is evident (CW-a2lf). "None" is a
+statement, not an omission, and the publishing check refuses a finding without the
+field, since an absent line cannot tell "none" from "not considered". The field gives
+default acceptance's weakest condition — that no alternative exists — a reading
+independent of the triaging agent's, usually by another model, at no cost of a run.
+
 `reviews/` is untracked: it is working history, and anything durable in it reaches
 permanent documentation through promotion. It moves with the change into the
 archive; for a change worked in its own clone, archive cleanup copies it into the
@@ -391,19 +449,118 @@ accepts is an unwritten rule, and the question is whether to write it.
 
 The implementing agent states a position on every finding — agree, disagree, or
 partly — with a reason either way, so that deference to the reviewer is visible
-rather than the default. Every finding reaches the owner, one per message, each
-after any decision that could change it: a summary up front invites dispositions
-before the arguments are read, and a question about one finding is not acceptance
-of another. A finding is disposed of only when the owner says so.
+rather than the default. Every finding the triage does not accept by default reaches
+the owner, one per message, each after any decision that could change it: a summary
+up front invites dispositions before the arguments are read, and a question about
+one finding is not acceptance of another. Such a finding is disposed of only when
+the owner says so; silence never disposes of it.
+
+A review finding is accepted by default when it meets every condition of the default
+rule (CW-d5ac): it comes from a review, not a validation record, the owner's notes,
+or the orchestrating session's observations; it is not `blocking`; the agent agrees
+and proposes one edit or one fix; neither the reviewer nor the agent lays out an
+alternative, and the agent names nothing that would change its recommendation; and
+its fix touches no interface or representation, migration or compatibility path, the
+change's scope, or the validation environment. Such a finding is reported in the
+triage's table, not presented on its own.
+
+The rule comes from the owner's recorded dispositions. Over the 478 findings of the
+changes triaged in the period measured, 79% were accepted as proposed; and of the 313
+whose full presentation survived, the class the rule describes — measured as Rule E —
+covered 23%, with one accepted with a condition and one overridden: 2.7%
+intervention overall, about 10% on the later changes held out from the measurement.
+Each condition excludes where the owner intervened: findings from a validation
+record (62% intervention) or the owner's notes (30%); a finding where the agent laid
+out alternatives or named what would change its mind (31% and 36%); and fixes
+touching an interface (29%), a migration (50%), the validation environment (50%), or
+the change's scope (23%). Wider rules covered more of the earlier changes at about 2%
+but rose to 10–14% on the later ones, so the rule is stated in the workflow's own
+terms rather than fitted. Its `blocking` exclusion is the one input besides the
+record that the agent does not judge, which matters while agents learn the rule, and
+the reviewer's alternatives add a second. It starts conservative and is widened only
+on evidence a guidance review brings.
+
+A default acceptance's triage entry records its classification — how the finding met
+each condition — written as its position is decided, before any finding is
+presented, and its disposition reads "accepted by default". A dropped alternative is
+invisible in a one-line table, so drift in how agents read "no alternative" across
+many triages is the realistic failure, and the recorded classifications are what a
+guidance review samples to catch it. An independent check of each triage's
+classification by another agent was rejected as a run per triage that narrows the
+rule whenever two readings differ, most of whose purpose the reviewer's alternatives
+already serve; auditing default acceptances in the next review would be late, and a
+workflow duty in a review about the change; watching only how often the owner
+revisits is blind to the failure it is meant to catch.
+
+The owner may revisit a default acceptance, or the advancing exit a triage took, at
+any time before archive cleanup ends (CW-r8vz). Before the fixes, the table rides on
+the triage's last question, so a revisit is an ordinary disposition. After, on the
+owner's direction naming the triage's run, that finished triage is resumed with the
+owner's words — the only finished run a resume accepts, and only while it is the
+latest triage of its reviews: it holds every finding's context, amends its fix in a
+new commit, logs the correction, and names its exit again, so a revisit may become
+another round or a return. A step started after it is stopped first, and is resolved
+rather than resumed, since its tree moved under it. Carrying the revisit into the next
+triage as a note was rejected: after a design review, the plan and a round of code
+would be built on the wrong edit, and after a closeout review there is no next triage.
+Directing the revisit to the step that owns the work was rejected too, since no node
+takes a pre-closeout or closeout revisit and that step lacks the triage's reasoning.
+A revisit adds no node or edge to the graph: it resumes a step that exists, under the
+owner's direction. Should revisits become frequent enough to complicate rounds,
+bringing them into the graph is a change a guidance review would propose. Once
+archive cleanup reaches `done`, a revisit belongs on the pull request.
+
+### Guidance reviews
+
+The owner's corrections show where the guidance is wrong, missing, or unenforced,
+and default acceptance needs watching, so the owner periodically runs a guidance
+review (CW-g6ua), through the `guidance-review` skill. It is not a step of any change:
+no node, no step-table row, no outcome. It runs interactively in the owner's
+workspace, which alone holds every cleaned-up change's records. It reads every
+change's ledger, triage records, and workflow log since the last review; reports the
+dispositions, the default acceptances and their revisits before and after the fixes,
+an audit of a sample of recorded classifications against their findings, the waivers
+recommended and taken by criterion, and the terms the owner asked about; groups the
+owner's corrections into guidance that is false, rules applied but unwritten, and
+rules written but unenforced; and lists candidate edits for the owner to pick, which
+it writes as a change's proposal on the owner's word. A skill rather than each review
+re-deriving its method; and not a change of its own, since a guidance review has
+nothing to land, only a proposal to start.
+
+Every guidance review, whether or not it writes a proposal, appends a line to a
+period ledger, `openspec/changes/archive/guidance-reviews.jsonl`, untracked beside the
+cleaned-up records it measures: its period and its headline figures. The next review
+starts where the last line ends and has the earlier figures to compare with. The
+newest proposal could not serve as the cursor, since a review that picks nothing
+writes none; a tracked table of periods would commit outside any change; and asking
+the owner for a start date each time would keep the history in the owner's memory.
+What reaches the repository from a review is aggregates and the principles drawn from
+them, never the owner's words.
+
+No numeric threshold narrows or widens the default rule. Each guidance review reports
+the period's default acceptances, revisits, and audit beside the rule's measured
+baseline — 2.7% intervention overall, about 10% on the held-out changes — and proposes
+keeping, narrowing, or widening it, or bringing revisits into the graph; the owner
+decides. Fixed thresholds over samples this small would be noise.
 
 ### The intervention ledger
 
-The intervention ledger (`interventions.jsonl`, tracked) records only the owner's
-course corrections: deciding otherwise than the agent proposed, or adding context
-that changes the work. Most dispositions accept the proposal and are recorded only
-in the triage file; the ledger exists to show where the agents' judgement needed
-correcting, and the owner's periodic guidance reviews read it. It is tracked so it
-travels with the change through archival.
+The intervention ledger (`interventions.jsonl`, tracked) records the owner's course
+corrections: deciding otherwise than the agent proposed, or adding context that
+changes the work. Most dispositions accept the proposal and are recorded only in the
+triage file; the ledger exists to show where the agents' judgement needed
+correcting, and the owner's guidance reviews read it. It is tracked so it travels
+with the change through archival.
+
+Two kinds of line need marking for a guidance review to count them. A correction of
+a default acceptance, before its fix or after, is an ordinary entry whose disposition
+begins `revisits default acceptance:` (CW-v1rk), a revisit of the advancing exit
+naming the finding `next`; the workflow log, where a revisit after the fixes has its
+direction, says which it was. And a waiver a step recommended is a line whether or
+not the owner takes it, its agent's position naming the recommendation and its
+criterion, a declined one being a correction like any other (CW-n6wy). A step that
+commits nothing leaves the line to the step that next commits: a validation's to the
+triage that reads its record, or archive cleanup for a record no triage reads.
 
 ## The engine
 
@@ -512,8 +669,8 @@ exported to the SVG beside it, and maintained by review.
 
 ### The command and its tiers
 
-Every operation the engine offers is a subcommand of the one command: starting and
-resuming steps, recording outcomes and decisions, running a review, finding a change
+Every operation the engine offers is a subcommand of the one command: starting,
+resuming, and stopping steps, recording outcomes and decisions, running a review, finding a change
 and its records, the next-step computation, clones and their history, round views,
 following runs, cost, the guarded push, and the checks of the index, a task list, the
 push's preconditions, and the skills. The command is the engine's promise, and its
@@ -536,6 +693,44 @@ whose recommendation the owner was weighing. It runs at medium effort: it needs 
 large context for a change's relayed turns, not the effort of judging them. Its
 model and effort are the step table's `[orchestrator]` row, which carries no
 permission rules, since the session runs on the owner's own.
+
+The owner can always reach a running step. The orchestrating session starts a long
+step in the background and stays free, so the owner can speak to it mid-step, and on
+the owner's word it stops the step through the command,
+`scripts/change-workflow stop`, naming the step when validation and a review run side
+by side (CW-k2rv). A message reaches the owner only at a turn's end, and a step
+otherwise ends either waiting for the owner or after its fixes are committed and the
+next step started; without a stop, an owner who saw a step going wrong could only
+wait for it. The run is logged `stopped` with its session, the agent or reviewer it
+started is ended, so no orphaned reviewer writes output after the stop, and the
+interrupt is recorded as the owner's decision, which resolves no run; the session
+then recovers the stop as any stop, as the owner says — resumed with the owner's
+words, rerun, or resolved and the change directed elsewhere. A stopped review
+publishes nothing and is rerun, and a stop commits nothing (CW-w4ne). The same
+procedure stops the step running after a triage when the owner revisits that
+triage's default acceptance ([Triage](#triage)).
+
+`stop` signals only a process it verifies is still the recorded run (CW-h7lq). Each
+run holds an exclusive lock on its record for as long as it runs, opened so the run's
+children do not inherit it, and a record counts as a run only while its lock is held,
+for `stop` and the round view alike; the kernel releases the lock however the process
+ends, so neither a reused process id nor a surviving child can pass for the run.
+`stop` checks the lock as it selects the run and again just before it signals, and
+refuses a stale record or a run that ended between the checks. The second check and
+the signal are two system calls the lock cannot make atomic, and that window is an
+accepted risk: the signal reaches another process only if the kernel hands out its
+whole process-id range between them, to a process of the same user, which no test
+can trigger, so guarding it would be guard code for a case nobody can describe. A
+process's recorded start time and Linux's process handles would each close it for
+one platform only, and a control channel per run would add a thread and a protocol to
+every runner. The run holds its record from before its agent or reviewer starts
+until its line is written, and a stop ends the run only while that process runs; one
+held before it starts ends the run as it would start, and one after it has exited
+ends nothing, so the run logs the outcome it reached. Killing the run there would
+delete a published review, or log `stopped` over a step whose outcome, commits
+included, was reached. The harness's own stop of a background command was rejected,
+since a SIGKILL leaves no log line, and delivering words into a running session is
+not something a headless run accepts.
 
 What only the orchestrating session sees is still reported. Misbehaviour of the
 workflow's tooling that shows across steps — an answer delivered to the wrong
@@ -588,7 +783,8 @@ A question from a step is a resume, never a restart. The step ends its turn with
 history and carries on. The resume names the run it answers by its place in the
 log, and the wrapper refuses a run that is not waiting, since with validation and a
 review running side by side the log's last run is not necessarily the one that
-asked. Design and triage are discussions held this way: each reply is a turn whose
+asked. The one finished run it resumes is a triage the owner's direction names for a
+revisit, and that direction is spent by the one resume. Design and triage are discussions held this way: each reply is a turn whose
 message the orchestrating session shows the owner, and the owner's reply resumes
 the step. The step's loading — guidance, specifications, code, reviews — stays in
 its own session rather than accumulating in the orchestrating one, at the cost of
@@ -839,8 +1035,9 @@ fast-forward-only pulls between a change's clone and the owner's workspace.
 
 Where the repository provides a pre-push check, the guarded push runs it before it
 pushes or reports success, as Git runs a pre-push hook: the remote as its argument,
-and one line naming the branch and `HEAD` on its input. A check that fails refuses
-the push with its reasons. The engine reaches the check only as a command, so it
+and one line naming the branch and `HEAD` on its input. A repository may provide
+several, and each runs whatever another reports. A check that fails refuses the push
+with its reasons. The engine reaches the check only as a command, so it
 loads in any repository, and runs it itself rather than leaving it to Git's own
 hook, which each checkout enables by hand: a clone without the hook would otherwise
 push unchecked.
@@ -991,6 +1188,8 @@ Each step is its own skill (`change-design`, `change-plan`, `change-review`,
 visible on their own. The owner may start any step by hand; `change-orchestrate`
 starts them in turn, and is built on the leaf skills rather than replacing them, so
 a step the orchestrating session runs and a step the owner runs are the same step.
+`guidance-review` is a skill of the workflow outside any change's steps, which the
+owner runs ([Guidance reviews](#guidance-reviews)).
 
 A skill has one source under `.agents/skills/`, and each harness loads it through a
 link (`.claude/skills/`, `.codex/skills/`). Two copies drift, and the drift is
@@ -1012,9 +1211,9 @@ used only by the engine and its shipped skills.
 
 | Interface | Tier |
 |---|---|
-| The subcommands `start`, `next`, `record`, `note`, `review`, `find` (with `--records` and `--json`), `clone`, `clone-remove`, `clone where`, `round-view`, `round-done`, `watch`, `cost`, `history`, `check index`, `check tasks`, `check push`, `check skills`, and `push`; their flags, exit-status categories, and structured outputs | public |
+| The subcommands `start`, `next`, `record`, `note`, `stop`, `review`, `find` (with `--records` and `--json`), `clone`, `clone-remove`, `clone where`, `round-view`, `round-done`, `watch`, `cost`, `history`, `check index`, `check tasks`, `check push`, `check skills`, and `push`; their flags, exit-status categories, and structured outputs | public |
 | Those subcommands' report text for a person | outside the promise |
-| The skill names `change-<step>` and `change-orchestrate`, and their argument forms (`<change>`, `<change> sections 3-4`, `<change> from <branch>`) | public |
+| The skill names `change-<step>`, `change-orchestrate`, and `guidance-review`, and their argument forms (`<change>`, `<change> sections 3-4`, `<change> from <branch>`) | public |
 | `hook post-compaction` | provisional: the installer and the harness adapters take its wiring |
 | `convert` | provisional: removed once no change needs converting |
 | `check graph` | internal: it holds the engine's own graph diagram to the graph table, which no adopter, person, or runner relies on |
@@ -1155,7 +1354,7 @@ review: a module's constant or a tool it invokes is not collected.
 | Assumption | Where the engine holds it |
 |---|---|
 | The protected branches the guarded push refuses, and the remote it pushes to | `push.PROTECTED`, `push.DEFAULT_REMOTE` |
-| The pre-push check's path, a Python script run as a command with the engine's interpreter, never imported | `push.PRE_PUSH_CHECK` |
+| The pre-push checks' paths, each a Python script run as a command with the engine's interpreter, never imported | `push.PRE_PUSH_CHECKS` |
 | The branch a review reads the change against | `review.DEFAULT_BASE` |
 | The change index's path | `index.INDEX` |
 | The guidance documents a session re-reads after its context is compacted | `hook.REQUIRED` |

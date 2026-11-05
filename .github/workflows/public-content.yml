@@ -11,7 +11,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Check every new commit for recognizable private content
+      # The pinned gitleaks, verified against scripts/gitleaks-pins.toml.
+      - name: Install the pinned gitleaks
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          make install-gitleaks GITLEAKS_INSTALL_DIR="$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      # Both public-content checks read every commit since the event's base, and each
+      # reports what it found even when the other has already failed.
+      - name: Check every new commit for recognizable private content and secrets
         env:
           PR_BASE: ${{ github.event.pull_request.base.sha }}
           PUSH_BASE: ${{ github.event.before }}
@@ -22,4 +30,7 @@ jobs:
           if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
             base="origin/$INTEGRATION_BRANCH"
           fi
-          python3 scripts/check_public_content.py --base "$base"
+          status=0
+          python3 scripts/check_public_content.py --base "$base" || status=1
+          python3 scripts/check_secrets.py --base "$base" || status=1
+          exit "$status"

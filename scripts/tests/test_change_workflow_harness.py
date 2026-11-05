@@ -4,10 +4,15 @@ anchored at the checkout it starts in."""
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
-from change_workflow.harness import UNATTENDED_RUN, Progress, anchored, claude_command, run_claude
+import pytest
+
+from change_workflow.harness import (UNATTENDED_RUN, Progress, anchored, claude_command,
+                                     run_claude, run_codex)
+from change_workflow.running import Terminated, termination_ends_the_run
 from change_workflow.steps import Model, StepRules
 
 
@@ -20,6 +25,41 @@ def test_the_process_a_claude_run_starts_sees_it_is_the_wrappers(tmp_path: Path)
     status = run_claude(command, tmp_path, said.append)
 
     assert (status, said) == (0, ["1\n"])
+
+
+# A process that writes its id to the file it is given, signals the run that
+# started it as a stop would, and runs on until it is ended.
+_SIGNALLING = ("import os, signal, sys, time; open(sys.argv[1], 'w').write(str(os.getpid())); "
+               "os.kill(os.getppid(), signal.SIGTERM); time.sleep(60)")
+
+
+def _gone(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    return False
+
+
+def test_a_terminated_codex_run_ends_its_reviewer(tmp_path: Path) -> None:
+    """Library integration: a real reviewer process, which the run ends before it
+    is logged, so nothing writes the review after the stop."""
+    started = tmp_path / "reviewer.pid"
+
+    with pytest.raises(Terminated), termination_ends_the_run():
+        run_codex([sys.executable, "-c", _SIGNALLING, str(started)], tmp_path / "review.log")
+
+    assert _gone(int(started.read_text("utf-8")))
+
+
+def test_a_terminated_claude_run_ends_its_agent(tmp_path: Path) -> None:
+    """Library integration: a real agent process, ended before the run is logged."""
+    started = tmp_path / "agent.pid"
+
+    with pytest.raises(Terminated), termination_ends_the_run():
+        run_claude([sys.executable, "-c", _SIGNALLING, str(started)], tmp_path, lambda _: None)
+
+    assert _gone(int(started.read_text("utf-8")))
 
 
 def test_relative_file_rules_are_anchored_at_the_checkout(tmp_path: Path) -> None:

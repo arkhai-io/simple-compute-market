@@ -23,6 +23,12 @@ An internal package is one the lock resolves from the repository wheelhouse.
 A lock that resolves anything from another local path is an error. Any
 derivation failure exits non-zero before a uv command runs.
 
+`lock` and `reinit` may rewrite a lock, so they refuse a uv older than the
+repository's minimum before running it (`check_uv_version.py`); the repository's
+relock and environment refresh go through here. `image` syncs a committed lock
+under `--locked` and `install-wheel` reads no lock, so neither writes one, and
+both skip the check.
+
 Conventions and the checks that enforce them:
 docs/development/BUILD_AND_PACKAGING.md.
 """
@@ -44,6 +50,16 @@ PYTHON_DECLARATION = ".python-version"
 _SKIPPED_DIRS = {".venv", "node_modules", "openspec", ".git"}
 
 Runner = Callable[[Sequence[str], Path], int]
+# Why the installed uv may not write a lock, or None when it may.
+UvProblem = Callable[[], str | None]
+_REWRITES_LOCK = ("lock", "reinit")
+
+
+def _installed_uv_problem() -> str | None:
+    # Imported here, not at module level: image builds copy this script alone to
+    # run `image` and `install-wheel`, which never reach this function.
+    from check_uv_version import problem
+    return problem()
 
 
 class DerivationError(Exception):
@@ -213,8 +229,11 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None, *, root: Path = ROOT,
-         run: Runner = _run) -> int:
+         run: Runner = _run, uv_problem: UvProblem = _installed_uv_problem) -> int:
     args = _parser().parse_args(argv)
+    if args.command in _REWRITES_LOCK and (found := uv_problem()):
+        print(f"uv_project: {args.command} refused: {found}", file=sys.stderr)
+        return 2
     try:
         if args.command == "lock":
             projects = [p.resolve() for p in args.projects] or locked_projects(root)

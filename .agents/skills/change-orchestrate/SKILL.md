@@ -28,7 +28,9 @@ sections — the workflow log, and the denials report, through which alone you r
 a transcript. Never read code, reviews, or
 change documents to form or state a view of a finding or a design question, and
 add nothing to a step's message but a routing note ("validation and review are
-starting") and the `make change-watch` line.
+starting") and the `make change-watch` line. While a step runs you stay free for
+the owner, who may interrupt it or revisit a finished triage through you
+("Interrupting and revisiting").
 
 ## Recover from the files
 
@@ -250,8 +252,13 @@ report is often the earlier one. Design and triage stay conversations with the
 owner. A triage names its exit in its outcome — the change advances, another review
 round runs, or the triage returns the change to an earlier phase — with the records
 it triaged, and the computation routes on that; its file's `## Next` is prose that
-nothing routes on. There is no gate to bring to the owner, and a triage with
-nothing to dispose of advances without them.
+nothing routes on. There is no gate to bring to the owner: a triage recommending
+advancing takes that exit without asking, and one with nothing to discuss that
+recommends advancing asks nothing. Its table of findings accepted by default, and an advancing exit it took,
+reach the owner in its messages: relay them as any message, the table with the
+question it rides on or the final report that carries it, and add no prompt of
+your own to confirm them. The owner may revisit either ("Interrupting and
+revisiting", below).
 
 An `owner` result carrying `merging` is a merge in progress in the checkout; it
 concludes as "Maintain the workflow" says, and nothing else runs until it has.
@@ -270,8 +277,9 @@ with proper shell quoting or structured command arguments.
 
 ### The owner's directions
 
-Every direction is the owner's: a confirmed return, a repeat review, a waiver, and
-an intervention sending the change to any node of the graph. Record one only on
+Every direction is the owner's: a confirmed return, a repeat review, a waiver of a
+step, and an intervention sending the change to any node of the graph; a waiver of
+parts of validation is a decision with no target (below). Record one only on
 their word, `--by owner`, its target as `--next <step>`, with `--kind <kind>` for
 a review or a triage (the kind of review it triages), `--sections '1,2;3'` for
 sections out of the plan's order, and `--target <step>` — itself qualified by
@@ -304,8 +312,11 @@ direction with no `resolves`, since no run waits on it: `--by owner --next revie
 
 After a confirmed return to design, once the design step has finished, the
 computation names a design review of what it settled. The owner may waive that
-review. Only on the owner's word, record it as their direction to planning, naming
-no run:
+review; the design step's message recommends it when a criterion of the guide's
+"Waivers" holds. A recommendation the owner declines is a ledger line too, in the
+form below with their reason, appended uncommitted for the design review's triage
+to commit with its own (`change-triage`, step 6). Only on the owner's word, record a waiver as their
+direction to planning, naming no run:
 
 ```text
 scripts/change-workflow note <change> orchestrator --by owner --next plan --decision "waives another design review" --reason <the owner's reason>
@@ -316,7 +327,7 @@ Append the waiver's line to the change's
 planning to commit with its plan:
 `{"review": "plan", "finding": "<the decision the design step settled>",
 "section": null, "lens": "readiness", "basis": "judgement", "severity": null,
-"agent_position": "the next-step computation named another design review",
+"agent_position": "<the design step's recommended waiver and its criterion, as its message gave them, or, when it recommended none, that the next-step computation named another design review>",
 "owner_disposition": "<the owner's waiver and reason>", "summary": "<one line>"}`.
 Recompute: the computation names planning, and planning's entry check, which asks
 the computation, accepts it.
@@ -327,6 +338,18 @@ the owner may waive that validation, judging the paths its reason names. Only on
 the owner's word, record `--by owner --next archive-cleanup` with no `resolves`,
 the paths in its reason; archive cleanup finds the direction in the log and writes
 the waiver to the ledger.
+
+When the owner waives parts of validation for later validations — "skip Helm and
+the pipeline for the rest of this change" — record their decision with no `--next`,
+naming the parts and the condition they are waived on, so validation finds it in the
+log ("Waivers" in the guide, "Waiving parts of validation"):
+
+```text
+scripts/change-workflow note <change> orchestrator --by owner --decision "waive the helm and pipeline parts of validation for the rest of this change, while <the condition>" --reason <the owner's words>
+```
+
+Never pass a waiver in a validation's `ARGUMENTS`: validation reads waivers only
+from the log, where every later validation, by hand or orchestrated, finds them.
 
 After the pre-closeout triage, the merge step brings the branch the change lands on
 into the change's branch and proposes what follows it. `make merge` merges the
@@ -346,6 +369,60 @@ scripts/change-workflow note <change> orchestrator --by owner --resolves <merge-
 
 A failed validation of the merged `HEAD` names the merge again, which repairs it;
 an inconclusive one names the owner, as any validation's does.
+
+### Interrupting and revisiting
+
+You stay free while a step runs, so the owner can reach you mid-step
+(`docs/agents/change-workflow.md`, "Interrupting a running step"). On their word
+only, stop the run, naming the step when validation and a review run side by side:
+
+```text
+scripts/change-workflow stop <change> [--step <step>]
+```
+
+It reads the change's clone itself when the change has one. A refusal — nothing in
+progress, two runs and no step named, a stale record, a run that ended between its
+checks — signalled nothing: relay it. Then record the interrupt as the owner's
+decision, resolving no run:
+
+```text
+scripts/change-workflow note <change> orchestrator --by owner --decision "interrupt <step>" --reason <the owner's words>
+```
+
+The run's background command then exits with its line: `stopped`, with its
+session, or, when the stop reached it after its agent or reviewer had exited, the
+outcome it reached, routed as any. Recover a stop as the owner says, as any stop
+("Read every denial before advancing"): resume a stopped step's `seq` with their
+words, rerun it fresh, or resolve it with `--resolves` and direct the change
+elsewhere. A stop commits nothing, and an interrupted review published nothing and
+is rerun, never resumed.
+
+The owner may revisit a finding a triage accepted by default, or the advancing exit
+it took (`docs/agents/change-workflow.md`, "Revisiting a default acceptance").
+Before its fixes, the revisit is their reply to the triage's question: relay it as
+any. After the triage finished, on their word, in this order:
+
+1. stop each step started after the triage that is still running, as above —
+   validation and a review side by side are two stops, each naming its step; the
+   direction below records the owner's decision;
+2. record their direction naming the triage's run, relaying a refusal — a later
+   triage of the same reviews, or a run that is not a finished triage:
+
+   ```text
+   scripts/change-workflow note <change> orchestrator --by owner --resumes <triage-seq> --decision "revisits <label>" --reason <the owner's words>
+   ```
+
+3. resume that triage with their words, `scripts/change-workflow resume <change>
+   --seq <triage-seq> --answer <the owner's words>`, as its own background command,
+   and relay its messages as any triage's; its outcome names its exit again and
+   governs;
+4. once the resumed run has logged its line, resolve each stopped step rather than
+   resuming it, since its tree moved under it: `--by owner --resolves
+   <stopped-seq>`, one line per run, the owner's revisit as its reason. Resolved before the resume,
+   the computation would name the first triage's exit again.
+
+Recompute after each. Once archive cleanup has reached `done`, nothing is left to
+resume: tell the owner a revisit belongs on the pull request.
 
 **An interactive run left unrecorded.** A step the owner runs interactively records
 its own outcome with `record`. When the owner tells you they ran a step themselves
@@ -555,8 +632,8 @@ that round's triage, a commit also moves the `HEAD` the round's validation and
 review describe, so a permission a run needs then is granted for that one run,
 fresh or resumed, and the table edit committed once the round is triaged, unless
 the owner says otherwise. Commit on a clean worktree only, since the guarded push
-refuses any other: while the waiver's ledger line waits for planning, the commit
-waits too. Never write the change's feature work of your own accord; never read a
+refuses any other: while a design review's waiver line waits for planning, or a
+declined one for that review's triage, the commit waits too. Never write the change's feature work of your own accord; never read a
 finding's code to decide what to change.
 
 The merge before closeout is a step of the graph (`merge`), not maintenance: run it
@@ -615,14 +692,16 @@ scripts/change-workflow note <change> orchestrator --by <owner-or-orchestrator> 
 Add `--reads <seq>` for the run whose denials were read, `--resolves <seq>` only
 for the run settled, and, for the owner's direction alone, `--next <step>` with
 the `--kind`, `--sections`, and `--target` that qualify it ("The owner's
-directions"). A confirmed return resolves its run; a repeat review, and the
-owner's waiver of a design review or of archive cleanup's validation, name no run.
+directions"), or `--resumes <seq>` for a revisit of a finished triage
+("Interrupting and revisiting"). A confirmed return resolves its run; a repeat
+review, the owner's waiver of a design review or of archive cleanup's validation,
+an interrupt, and a revisit's direction resolve no run.
 Record every routing or recovery decision, the owner's included, with its reason.
 Never append log lines by hand or clear one run with a decision about another.
 Leaf skills record their exits, design decisions, and the intervention ledger:
 relay the owner's answer to the waiting leaf rather than substituting your own
-record. The ledger line of the owner's waiver of a design review is the one you
-write.
+record. The ledger line of the owner's answer to another design review — a waiver,
+or a recommended waiver declined — is the one you write.
 
 ## Report what only you see
 

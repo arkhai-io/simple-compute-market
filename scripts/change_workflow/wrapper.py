@@ -28,11 +28,7 @@ CW-k5mk, CW-xgq3, CW-0ia3, CW-ebmo, CW-1dld, CW-tl5v, and CW-yzer.
 
 from __future__ import annotations
 
-import signal
 import sys
-import threading
-from collections.abc import Iterator
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -41,10 +37,10 @@ from .common import ORCHESTRATOR, Clock, Entry, StepError, repository_root, utc_
 from .cost import conversation_file, measured_before, measured_cost, read_conversation
 from .harness import (NETWORK_RETRIES, Runner, claude_command, missing_program, run_claude,
                       unreachable)
-from .log import last_run, log_path, read_log, record_outcome
+from .log import last_run, log_path, read_log, record_outcome, revisit_direction, revisit_refusal
 from .outcome import load_schema, outcome_problems, triage_outcome_problems
 from .records import git_head, next_transcript
-from .running import recorded_run, runs_directory
+from .running import recorded_run, runs_directory, termination_deferred, termination_ends_the_run
 from .steps import Model, StepRules, load_steps
 from .stream import Stream
 from .subagents import subagent_denials
@@ -52,36 +48,6 @@ from .subagents import subagent_denials
 
 def step_prompt(rules: StepRules, change: str, arguments: str = "") -> str:
     return f"/{rules.skill} {change}" + (f" {arguments}" if arguments else "")
-
-
-class Terminated(BaseException):
-    """The wrapper was told to stop by a signal while its run went on."""
-
-
-@contextmanager
-def _termination_ends_the_run() -> Iterator[None]:
-    """Turn SIGTERM into `Terminated` while a run goes on.
-
-    A process killed by SIGTERM's default action writes nothing, and a log whose
-    last line is a run's question cannot tell a run still going from one that
-    died. Raised in the wrapper, the signal ends the run as any interruption
-    does: the runner stops the session it can no longer watch, and the run is
-    logged `stopped`, naming the signal, with the session to resume. SIGKILL
-    cannot be caught, so a run killed that way still leaves no line. Signal
-    handlers can be set only on the main thread; elsewhere nothing changes.
-    """
-    if threading.current_thread() is not threading.main_thread():
-        yield
-        return
-
-    def stop(signum: int, _frame: Any) -> None:
-        raise Terminated(f"received {signal.Signals(signum).name}")
-
-    previous = signal.signal(signal.SIGTERM, stop)
-    try:
-        yield
-    finally:
-        signal.signal(signal.SIGTERM, previous)
 
 
 def run_outcome(status: int, result: dict[str, Any] | None, schema: dict[str, Any],
@@ -245,6 +211,10 @@ class Wrapper:
         last run is not necessarily the one that asked. It must be waiting — its
         step's latest run, ended with a question, or stopped with no decision
         line resolving it — since an answer to any other run has nowhere to go.
+        The one finished run that may be resumed is a triage the owner revisits:
+        named by their unused direction (`revisit_direction`), and still the
+        latest triage of the reviews it triaged (`revisit_refusal`). Its line
+        records the run it `resumes`, which uses the direction.
 
         A granted rule applies to this run alone: it is passed on this command line
         and noted on this run's log line, never added to the step table, so the
@@ -266,20 +236,32 @@ class Wrapper:
         if step not in steps or step == "review":
             raise StepError(f"seq {seq} is a {step} line, not the run of a step that can be "
                             "resumed")
-        latest = last_run(log, [step])
-        if latest is None or latest["seq"] != seq:
-            raise StepError(f"seq {seq} is not {step}'s latest run, so it no longer waits")
-        resolved = {e.get("resolves") for e in entries if e.get("outcome") == ORCHESTRATOR}
-        if seq in resolved:
-            raise StepError(f"seq {seq} ended {previous.get('outcome')} and a decision line "
-                            "resolves it, so it no longer waits")
-        if previous.get("outcome") not in ("question", "stopped"):
-            raise StepError(f"seq {seq} ended {previous.get('outcome')}, not with a question "
-                            "or a stop, so it is not waiting for an answer")
+        revisited = (previous.get("outcome") == "finished"
+                     and revisit_direction(entries, seq) is not None)
+        if revisited:
+            if refusal := revisit_refusal(entries, seq):
+                raise StepError(f"the revisit is refused: {refusal}")
+        else:
+            latest = last_run(log, [step])
+            if latest is None or latest["seq"] != seq:
+                raise StepError(f"seq {seq} is not {step}'s latest run, so it no longer waits")
+            resolved = {e.get("resolves") for e in entries if e.get("outcome") == ORCHESTRATOR}
+            if seq in resolved:
+                raise StepError(f"seq {seq} ended {previous.get('outcome')} and a decision line "
+                                "resolves it, so it no longer waits")
+            if previous.get("outcome") not in ("question", "stopped"):
+                raise StepError(f"seq {seq} ended {previous.get('outcome')}, not with a "
+                                "question or a stop, so it is not waiting for an answer"
+                                + ("; a finished triage is resumed only on the owner's "
+                                   "direction to revisit it, `note --by owner --resumes "
+                                   f"{seq}`" if step == "triage" else ""))
         if not previous.get("session"):
             raise StepError(f"{change}'s {step} run (seq {seq}) recorded no session to "
                             "resume; run the step again")
-        extra = {"sections": previous["sections"]} if previous.get("sections") else {}
+        extra: Entry = {"sections": previous["sections"]} if previous.get("sections") else {}
+        if revisited:
+            # Marks the direction used: it resumes the run once.
+            extra["resumes"] = seq
         if granted:
             extra["granted"] = list(granted)
         # Framed, so an answer starting with `-` is never read as a flag.
@@ -291,8 +273,13 @@ class Wrapper:
               models: Sequence[Model], *, session: str | None, granted: Sequence[str] = (),
               extra: Entry | None = None) -> Entry:
         """Run one turn and log it, recorded as in progress in the checkout until its
-        line is written, however it ends."""
-        with recorded_run(self.runs(self.root), step, change, clock=self.clock):
+        line is written, however it ends.
+
+        A stop's SIGTERM is held from before the record is written until after it
+        is removed, and ends the run only while its agent runs, so a run is never
+        killed with its line unwritten."""
+        with termination_deferred(), recorded_run(self.runs(self.root), step, change,
+                                                  clock=self.clock):
             return self._logged_turn(step, rules, change, log, prompt, models,
                                      session=session, granted=granted, extra=extra)
 
@@ -319,10 +306,9 @@ class Wrapper:
         progress = transcript.with_suffix(".progress")
         named = transcript.relative_to(log.parent).as_posix()
         attempts: list[Stream] = []
-        with _termination_ends_the_run():
-            outcome, status, failure, model, stream, passed_over, logged = (
-                self._attempt_models(rules, prompt, schema, models, session, granted,
-                                     transcript, progress, attempts))
+        outcome, status, failure, model, stream, passed_over, logged = (
+            self._attempt_models(rules, prompt, schema, models, session, granted,
+                                 transcript, progress, attempts))
         extra = {**(extra or {}), **model.entry(), "exit_status": status, "transcript": named}
         if passed_over:
             extra["unavailable"] = passed_over
@@ -372,7 +358,8 @@ class Wrapper:
                                          session=session, granted=granted)
                 failure, status, reached = None, None, None
                 try:
-                    status = self.runner(command, self.root, stream.feed)
+                    with termination_ends_the_run():
+                        status = self.runner(command, self.root, stream.feed)
                     reached = unreachable(stream.failure_text(status))
                 except FileNotFoundError as exc:
                     if missing_program(exc, command):

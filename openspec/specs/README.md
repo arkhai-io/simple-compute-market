@@ -19,6 +19,7 @@ An architecture companion does not replace a normative requirement. When explana
 | Change workflow | [Spec](change-workflow/spec.md) | [README](change-workflow/README.md), [index](change-workflow/index.md) |
 | CLI query language | [Spec](cli-query-language/spec.md) | [Architecture](cli-query-language/architecture.md) |
 | Compute provisioning contract | [Spec](compute-provisioning-contract/spec.md) | — |
+| Contact-exchange settlement | [Spec](contact-exchange-settlement/spec.md) | — |
 | Deal lifecycle | [Spec](deal-lifecycle/spec.md) | [Architecture](deal-lifecycle/architecture.md) |
 | Deployment and state | [Spec](deployment-state/spec.md) | [Architecture](deployment-state/architecture.md) |
 | frp grant admission | [Spec](frp-grant-admission/spec.md) | [Architecture](frp-grant-admission/architecture.md) |

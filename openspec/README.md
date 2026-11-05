@@ -122,7 +122,7 @@ Every `tasks.md` for a change or a major section within one must end with a clos
 10. **Documentation citations.** Run `make check-doc-citations CHANGE=<change-name>` after promotion, so the documents it wrote are there to resolve, and resolve every match; then validate the change with `openspec validate <change-name> --strict`, the last check before the archive. A change with no spec deltas records that instead, since the validator rejects a change with none, and archives with `--skip-specs`. `AGENTS.md` treats a citation whose target does not resolve as a blocking defect rather than a stale link, and this target additionally rejects a citation pointing at a *tombstone*: a tombstoned file still exists on disk while its content is gone, so the plain existence test that preceded this could never fail on a rename-to-tombstone — the likeliest broken citation in a renaming change. Scoped to the change on purpose. A change owes the citations it wrote, and gating archival on the whole repository's documentation debt would let one team's stale runbook block everyone else's, which turns a check into something people route around. Run the target unscoped to see the repository-wide picture.
 11. **Archival.** Archive the change as the last step, once every other part is done: `openspec archive <change-name> -y` merges its spec deltas into `openspec/specs/` and moves it to `changes/archive/<date>-<change-name>/`; the change's row in [`changes/README.md`](changes/README.md) then links to that directory. A change whose `spec.md` promotion was made by hand before this rule archives with `--skip-specs`, so the merge is not applied twice. The closeout review and its triage then read the archived change and the permanent documents as archived, and find the change by name under the archive (`scripts/change-workflow find <change-name>`).
 
-If a plan's closeout task is growing unusually large on its own, that is a signal the change may have scope-crept past its original boundary — worth a deliberate decision about whether to split it into a new change, not something to notice only once the section is already difficult to review.
+If a plan's closeout task grows unusually large on its own, decide deliberately whether the growth belongs to the change — a found defect fixed in place, or unification the architecture favours — or is separate work better split, rather than noticing only once the section is hard to review ([Defects found during a change](#defects-found-during-a-change)).
 
 During implementation, maintain a promotion record in the active change:
 
@@ -136,6 +136,10 @@ During implementation, maintain a promotion record in the active change:
 ```
 
 The record is change history and remains in the change directory. The destination documents describe only the resulting current state.
+
+## Defects found during a change
+
+A defect found while working a change is fixed in that change when its fix is understood and small beside the change, even where it lies outside the change's stated scope: a change of its own costs a design, reviews, validation and a closeout, which a small fix does not repay. A defect that is large, or not understood well enough to fix without a design of its own, gets its own change, or an unowned gap where no change owns its area (`AGENTS.md`, "Deferred work"). This is a judgement of proportion, not a rule that changes stay narrow, and growth that unifies behaviour the architecture wants shared ([`ARCHITECTURE.md`, "Composition from above and below"](../docs/development/ARCHITECTURE.md#composition-from-above-and-below)) is not scope creep. A defect fixed outside the stated scope is recorded where the change's reviewers will see it: in the task notes, or in the triage record.
 
 ## Implementation completion checklist
 

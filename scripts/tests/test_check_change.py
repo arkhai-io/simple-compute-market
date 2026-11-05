@@ -13,7 +13,9 @@ from check_change import OPENSPEC, checks, main, openspec_command, run_checks
 
 CHANGE = "shape-bounds"
 NAMES = ["comment hygiene", "agent skills", "documentation citations", "task list",
-         "change index", "specification index", "openspec validate"]
+         "change index", "specification index", "openspec validate",
+         "decision destinations", "history wording", "version bumps", "local imports",
+         "capability index"]
 
 
 def _checkout(tmp_path: Path) -> Path:
@@ -64,7 +66,32 @@ def test_every_check_passing_prints_one_line(tmp_path: Path) -> None:
         # The change named, so its deltas count as the archive will leave them.
         ["make", "--no-print-directory", "check-spec-index", f"CHANGE={CHANGE}"],
         ["bunx", OPENSPEC, "validate", CHANGE, "--strict"],
+        ["make", "--no-print-directory", "check-decision-destinations", f"CHANGE={CHANGE}"],
+        ["make", "--no-print-directory", "check-history-wording", "CHANGE_BASE=dev"],
+        ["make", "--no-print-directory", "check-version-bumps", "CHANGE_BASE=dev"],
+        ["make", "--no-print-directory", "check-local-imports", "CHANGE_BASE=dev"],
+        ["make", "--no-print-directory", "check-capability-index"],
     ]
+
+
+def test_the_diff_checks_read_from_the_branch_the_change_lands_on(tmp_path: Path) -> None:
+    runner = FakeChecks()
+
+    run_checks(CHANGE, root=_change(tmp_path), runner=runner, which=_bunx,
+               echo=lambda _: None, base="release")
+
+    assert [command[-1] for command in runner.commands[8:11]] == ["CHANGE_BASE=release"] * 3
+
+
+def test_the_command_takes_the_branch_the_change_lands_on(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[tuple[str, str]] = []
+    monkeypatch.setattr("check_change.run_checks",
+                        lambda change, base: seen.append((change, base)) or 0)
+
+    assert main([CHANGE, "--base", "release"]) == 0
+    assert main([CHANGE]) == 0
+    assert seen == [(CHANGE, "release"), (CHANGE, "dev")]
 
 
 @pytest.mark.parametrize("failing", NAMES)
@@ -96,8 +123,9 @@ def test_an_archived_change_validates_the_permanent_specifications(tmp_path: Pat
     assert run_checks(CHANGE, root=_change(tmp_path, archived=True), runner=runner,
                       which=_bunx, echo=lambda _: None) == 0
 
-    assert runner.commands[-1] == ["bunx", OPENSPEC, "validate", "--specs", "--strict"]
-    assert checks(CHANGE, archived=False, which=_bunx)[-1][1][-2:] == [CHANGE, "--strict"]
+    validator = NAMES.index("openspec validate")
+    assert runner.commands[validator] == ["bunx", OPENSPEC, "validate", "--specs", "--strict"]
+    assert checks(CHANGE, archived=False, which=_bunx)[validator][1][-2:] == [CHANGE, "--strict"]
 
 
 def test_an_unknown_change_is_refused_before_any_check_runs(tmp_path: Path) -> None:
@@ -126,4 +154,6 @@ def test_a_directory_outside_any_repository_is_refused_naming_it(
 def test_the_command_needs_one_change(capsys: pytest.CaptureFixture[str]) -> None:
     assert main([""]) == 2
     assert main([]) == 2
+    assert main([CHANGE, "--base"]) == 2
+    assert main([CHANGE, "--base", ""]) == 2
     assert "usage" in capsys.readouterr().err

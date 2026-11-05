@@ -2,7 +2,8 @@
 
 The guard's meaning is Git's own state — attachment, upstream configuration, what a
 push sends — so a temporary repository with a bare remote is the lowest level that
-proves it; a fake Git would only restate the guard's assumptions.
+proves it; a fake Git would only restate the guard's assumptions. The repository's
+pre-push checks are absent unless a test provides one.
 """
 
 from __future__ import annotations
@@ -14,6 +15,8 @@ from pathlib import Path
 import pytest
 
 from change_workflow import push as guard
+
+PUBLIC_CONTENT, SECRETS = (script for script, *_ in guard.PRE_PUSH_CHECKS)
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -145,13 +148,13 @@ def test_every_refusal_is_reported_at_once(repo: Path) -> None:
     assert len(problems) == 2
 
 
-def _provide_check(repo: Path, source: str) -> None:
+def _provide_check(repo: Path, source: str, name: str = PUBLIC_CONTENT) -> None:
     """Give the repository a pre-push check, ignored so the worktree stays clean."""
-    script = repo / guard.PRE_PUSH_CHECK[0]
+    script = repo / name
     script.parent.mkdir(parents=True, exist_ok=True)
     script.write_text(source, "utf-8")
     with (repo / ".git/info/exclude").open("a", encoding="utf-8") as exclude:
-        exclude.write(f"/{guard.PRE_PUSH_CHECK[0]}\n")
+        exclude.write(f"/{name}\n")
 
 
 def test_the_pre_push_check_is_run_as_a_git_hook_and_its_refusal_stops_both_actions(
@@ -184,7 +187,7 @@ def test_a_pre_push_check_failing_silently_is_named(
 def _provide_this_repositorys_check(repo: Path) -> None:
     """This repository's own pre-push check, the public-content scan, where the
     engine looks for it."""
-    provided = Path(__file__).resolve().parents[2] / guard.PRE_PUSH_CHECK[0]
+    provided = Path(__file__).resolve().parents[2] / PUBLIC_CONTENT
     _provide_check(repo, provided.read_text("utf-8"))
 
 
@@ -214,3 +217,18 @@ def test_private_content_refuses_publication(
     err = capsys.readouterr().err
     assert "personal home path" in err
     assert private not in err
+
+
+def test_every_pre_push_check_runs_and_each_refusal_is_reported(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    for name in (PUBLIC_CONTENT, SECRETS):
+        _provide_check(repo, f"import sys\nprint('REFUSED: {name}', file=sys.stderr)\n"
+                             "sys.exit(1)\n", name)
+
+    assert guard.main(["push"], root=repo) == 1
+
+    err = capsys.readouterr().err
+    assert f"REFUSED: {PUBLIC_CONTENT}" in err
+    assert f"REFUSED: {SECRETS}" in err
+    assert _remote_head(repo, "feat/change") == ""

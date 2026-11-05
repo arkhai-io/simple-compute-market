@@ -1,25 +1,28 @@
 ---
 name: change-triage
-description: Triage a review of an OpenSpec change with the repository owner — check every finding against the files, state your own position on each, present all of them, record the owner's dispositions and the ledger, ask whether the accepted fixes merit another review round, carry accepted outcomes into the change, and name the exit the owner's answer chooses — the change advances, another review round runs, or it returns — with the records it triaged. For an implementation round, triage the reviews, the validation record, and the owner's own notes together, then fix what the owner accepts and commit it. Use after a review lands in a change's reviews/ directory, when the owner pastes a review or notes, when the owner says "triage the review of <change>", or when `make triage` invokes you.
+description: Triage a review of an OpenSpec change with the repository owner — check every finding against the files, state your own position on each, accept by default the review findings the default rule admits and report them in one table, present every other finding, record the dispositions and the ledger, take the advancing exit when you recommend it or ask whether the accepted fixes merit another review round, carry accepted outcomes into the change, and name the exit — the change advances, another review round runs, or it returns — with the records it triaged; resumed after it finished, amend a fix the owner revisits. For an implementation round, triage the reviews, the validation record, and the owner's own notes together, then fix what is accepted and commit it. Use after a review lands in a change's reviews/ directory, when the owner pastes a review or notes, when the owner says "triage the review of <change>", or when `make triage` invokes you.
 ---
 
 # Triaging a review
 
 A review is advice. The owner decides what to do with each finding, and reads every
-one. Your job is to make that reading fast and well-founded: check each finding
+one: a finding the default rule admits in one table, every other one discussed on
+its own. Your job is to make that reading fast and well-founded: check each finding
 against the files, say plainly whether you agree and why, and propose what to do.
 You are the agent working the change, so you are neither the reviewer's ally nor
 the change's defender. A finding is not right because a reviewer raised it, and
 not wrong because it criticizes work you did. Agreement needs a reason exactly as
 disagreement does.
 
-Change nothing in response to a finding until the owner has disposed of it.
+Change nothing in response to a finding until the owner has disposed of it, or it
+is accepted by default (step 2), and then not before every discussed finding is
+disposed of.
 
 **An implementation round** is the reviews of a commit's implementation, the
 validation of the same commit, and the owner's own notes on its diff, triaged
 together in one session — a fresh one, not the implementing session. It follows
 every step below, with three additions: the validation record and the owner's notes
-are inputs (step 1); you fix what the owner accepts, in this session, and commit it
+are inputs (step 1); you fix what is accepted, in this session, and commit it
 (step 5); and the fix commit is validated again.
 
 It is an implementation round when any untriaged record is an implementation
@@ -106,13 +109,17 @@ the session, and every turn ends with an outcome matching
   wait for it inside one Bash call, with a blocking `tail -f … | grep -m1` on that
   file matching the line it prints when it ends, repeated when the call times out
   — never with Monitor, a wake-up, or a shell loop.
-- **The end is an outcome.** Each finding you present (step 3) and the question
-  whether another round is merited (step 6) is a `question`. When the dispositions
-  are recorded, the accepted fixes and every tracked edit committed and pushed, and
-  `## Next` written,
+- **The end is an outcome.** Each discussed finding you present (step 3) and, when
+  you recommend another round, the question whether one is merited (step 6) is a
+  `question`; the table of default acceptances rides on the last of them. When the
+  dispositions are recorded, the accepted fixes and every tracked edit committed and
+  pushed, and `## Next` written,
   end with `finished`, `next` the exit the triage chose (step 6), and `triaged`
-  the records it triaged (step 4). A triage with
-  nothing to dispose of asks nothing and ends `finished` (step 6). At a closeout triage, a
+  the records it triaged (step 4); its `message` reports an advancing exit taken
+  without asking beside the table, and carries the table itself when no question
+  did. A triage with nothing to discuss that
+  recommends advancing asks nothing and ends `finished` (step 6); a triage resumed
+  for a revisit ends as step 6 ends once its amendment is committed (step 7). At a closeout triage, a
   finding whose fix needs code is a `question` naming the correction it needs
   (step 5): the change is archived, so no step takes it back to implementation,
   and the owner directs the correction.
@@ -176,8 +183,8 @@ When the owner pastes a review from elsewhere, save it verbatim as the change's
 next numbered record, `NN-<kind>-external.md`, numbered after every file in
 `reviews/` and `reviews/transcripts/`, so later reviews read it as history. Never
 overwrite a record: if the name exists when you write, take the next number. Its
-findings may carry no lens, basis, or severity; you assign them in step 2 and say
-that you did.
+findings may carry no lens, basis, severity, or alternatives; you assign them in
+step 2 and say that you did.
 
 When two reviews of the same kind await triage — typically one from `make review`
 and one pasted — triage them together. Where both raise the same issue, present it
@@ -191,7 +198,11 @@ For an implementation round, also take:
   severity `blocking`. Check each diagnosis against the logs it cites, under
   `.snapshot/`, rather than trusting it. Its `## Environment` entries and an
   `inconclusive` part are missing evidence, never findings: say what evidence is
-  missing and whether the round can be judged without it. Observations it records
+  missing and whether the round can be judged without it. A `waived` part is the
+  owner's omission of that evidence: name it, and the decision the record cites,
+  but it is neither a finding nor missing evidence to raise. A waiver the validation
+  recommended, which its `## Environment` records with its criterion, is a ledger
+  line you append (step 4), taken or declined. Observations it records
   about other changes or about the validation tooling are presented, not triaged as
   findings against this change. Read every untriaged validation record, not only
   the latest: an earlier record's `V<n>` failures are presented too, merged with
@@ -207,11 +218,21 @@ For an implementation round, also take:
   every record's commit at the top of its triage file, then compare them before
   anything else. When they differ, the records are a round
   only if the owner waives the rule, judging the changes between the commits: name
-  both, summarize what changed (`git log --oneline <reviewed>..<validated>`), and
-  ask. Record a waiver in the triage file of each record involved and as one
-  ledger line (`"finding": "commit"`, under the review's record name, the owner's
-  reason as the disposition). Without a waiver, stop: the reviewed commit is
-  validated, or the validated commit reviewed, before the round is triaged.
+  both, summarize what changed (`git log --oneline <reviewed>..<validated>` and the
+  paths of `git diff --stat <reviewed> <validated>`), and ask. Recommend the waiver
+  when a criterion of `docs/agents/change-workflow.md`'s "Waivers" holds — here,
+  typically, that the two commits differ only in records or documentation —
+  naming the criterion and the paths; with none holding, recommend none. Record a
+  waiver in the triage file of each record involved and as one ledger line
+  (`"finding": "commit"`, under the review's record name, the owner's reason as the
+  disposition, and, for a waiver you recommended, the recommendation and its
+  criterion as the `agent_position`); a recommendation the owner declines is a
+  ledger line too, a correction like any other. Without a waiver, stop: the
+  reviewed commit is validated, or the validated commit reviewed, before the round
+  is triaged. A stop commits nothing, and the tracked ledger is left clean for the
+  step that remedies it, so name a declined recommendation in the stop's `reason`,
+  which the workflow log keeps (interactively, in your report); the triage of the
+  round, once its commits agree, appends the line, reading the log for it.
   A validation record alone — the re-validation of an earlier round's fix commit —
   is triaged only for its `V<n>` failures, each like any finding. No validation
   record alone is routed to triage: the computation brings a failed or
@@ -268,11 +289,15 @@ For each finding, open what it cites and decide:
   evidence. Where the finding is factually wrong, show the file that says so.
   Where it is right but its suggested action is not the best fix, say `partly` and
   propose the better one.
-- **Classification:** its lens, basis, and severity, keeping the reviewer's unless
-  you disagree with them, and saying so when you change them.
+- **Lens, basis, and severity:** keep the reviewer's unless you disagree with them,
+  and say so when you change them.
+- **Alternatives:** read the reviewer's `Alternatives:` field — `none — <why>`, or
+  options with their trade-offs — and weigh each option it names; for a pasted
+  review, assign the field yourself. Say what would change your recommendation,
+  when anything would.
 - **Outcome if accepted**, one of:
-  - **edit** — a correction with one evident fix to the change's documents, which
-    you will make;
+  - **edit** — a correction with one evident fix to the change's documents, or to
+    the document a small out-of-scope defect lies in (below), which you will make;
   - **decision** — the fix requires choosing between real alternatives, which is
     design work: it goes to the design discussion (`change-design`), not into an
     edit you choose yourself;
@@ -281,16 +306,42 @@ For each finding, open what it cites and decide:
   - **fix** — in an implementation round only: a change to the code, tests, or
     documentation that this session makes after the dispositions (step 5);
   - **none** — the finding is informational or already handled.
+
+  A defect a finding shows outside the change's stated scope is an `edit` or a
+  `fix` when its fix is understood and small beside the change, recorded in the
+  task notes or the triage record; one that is large, or not understood well enough
+  to fix without a design of its own, is `none`, recorded where `AGENTS.md`'s
+  "Deferred work" says — its own change, or an unowned gap
+  (`openspec/README.md#defects-found-during-a-change`).
 - **Section:** the `tasks.md` section the finding concerns, when it concerns one.
+- **Default acceptance:** whether the finding is accepted by default or discussed.
+  It is accepted by default when every condition of the default rule holds
+  (`change-workflow`'s CW-d5ac; `docs/agents/change-workflow.md`, "Default
+  acceptance"), and discussed otherwise:
+  - it comes from a review — not a validation record, the owner's notes, or the
+    orchestrating session's observations;
+  - its severity, as triaged, is not `blocking`;
+  - your position is `agree`, and you propose one `edit` or one `fix`;
+  - neither the reviewer's `Alternatives:` field nor you lay out an alternative,
+    and you name nothing that would change your recommendation;
+  - its fix touches no interface or representation, migration or compatibility
+    path, the change's scope, or the validation environment.
+
+  Decide it with the position, before any finding is presented, and write a
+  default acceptance's reading of each condition into its triage entry as its
+  `Classification:` line (step 4). A finding of which you cannot say that every
+  condition holds is discussed.
 
 A finding that challenges a decision the owner made ("Challenges D<n>") is never
 dismissed on the grounds that the owner decided it. State the decision's recorded
 rationale, whether the challenge defeats it, and recommend; the owner reaffirms or
-changes the decision.
+changes the decision, so such a finding is discussed, never accepted by default.
 
-## 3. Present every finding
+## 3. Present every discussed finding
 
-The owner must be able to decide every finding from what you write, without
+Every finding not accepted by default is discussed: presented on its own, and
+disposed of only by the owner's word. The owner must be able to decide every
+discussed finding from what you write, without
 opening the review, the design, or the code. A one-line claim and a pointer-laden
 position are not enough: the owner needs the design's current state and the
 consequence, not only the reviewer's objection.
@@ -337,17 +388,38 @@ triage record. File and line references go on the evidence line; they support th
 argument and never replace it. A finding that is an obvious agreed edit gets one
 paragraph. End every finding with a single `→` outcome line.
 
-Present one finding per message, each discussed in full, and wait for the
+Present one discussed finding per message, each in full, and wait for the
 owner's answer before the next. A summary of every finding up front invites a
 disposition before the owner has read the argument, so open the first message
-with only an agenda: each finding's label and heading emoji, one line, no
-positions.
+with only an agenda: each discussed finding's label and heading emoji, one line, no
+positions, and how many findings are accepted by default.
 
-A finding is disposed of only when the owner states a disposition for its label.
-A question about it, a discussion of another finding, or moving on disposes of
-nothing; never infer acceptance from silence. Before asking whether another round
-is merited, name any finding still without a disposition and ask about it. The owner may answer
-several at once or say to batch the rest; never propose it.
+A discussed finding is disposed of only when the owner states a disposition for its
+label. A question about it, a discussion of another finding, or moving on disposes
+of nothing; never infer acceptance from silence. Before step 6 — asking whether
+another round is merited, or taking the advancing exit — name any discussed finding
+still without a disposition and ask about it. The owner may answer several at once
+or say to batch the rest; never propose it.
+
+The default acceptances reach the owner in one table, the form
+`docs/agents/change-workflow.md`'s "Default acceptance" gives — each finding's
+label, its severity, the finding in one line, and its outcome:
+
+```markdown
+#### Accepted by default
+
+| Finding | Severity | The finding | Outcome |
+|---|---|---|---|
+| 04 F5 | should | design.md cites a ROADMAP heading that was renamed | edit: cite `#goal-8-post-commitment-lifecycle` |
+```
+
+It rides on the last question you ask, after its `→` line: the question whether
+another round is merited when you recommend one (step 6), and otherwise the last
+discussed finding; if the owner's answer to that finding brings you to recommend
+another round, show the table again with that question. A triage that asks nothing
+gives the table in its final report. A reply that corrects an item of the table is
+the owner's disposition of it, made before any fix: record it, and log it as a
+revisit (step 4).
 
 Order the findings so that each comes after any decision that could change its
 outcome, and otherwise most severe first: disposing of a finding only for a later
@@ -375,19 +447,34 @@ record and the owner's notes included — in this form:
 - **Lens / basis / severity:** <as triaged; note any change from the reviewer's>
 - **Position:** <agree | disagree | partly> — <reason, with evidence>
 - **Proposed outcome:** <edit | decision | task | fix | none> — <what>
-- **Owner disposition:** <what the owner decided, in their terms>
+- **Classification:** <a default acceptance only: accepted by default — how it met each condition>
+- **Owner disposition:** <what the owner decided, in their terms | accepted by default>
 - **Result:** <what was done: the edit made, the decision sent to design, the task added, the fix made>
 
 ## Next
 
-<the exit, in words> (`<its target>`) — <the owner's words, and any condition>
+<the exit, in words> (`<its target>`) — <the owner's words, and any condition | taken as recommended>
 ```
 
-`## Next` is the triage's last edit, written once step 6 is answered and the
+A default acceptance's `Classification:` line is written as its position is
+decided, before any finding is presented (step 2). It states how the finding met
+each condition in turn, and its disposition reads "accepted by default", not a
+disposition the owner stated:
+
+```markdown
+- **Classification:** accepted by default — from 04-design; should; agree, one edit; no alternative (the heading has one current name), reviewer's none; nothing would change it; touches one citation in design.md
+- **Owner disposition:** accepted by default
+```
+
+A guidance review samples these lines against their findings (`guidance-review`),
+so write each condition's reading, not a bare "all hold".
+
+`## Next` is the triage's last edit, written once step 6 is settled and the
 accepted fixes are committed (step 5) — or, on a return, before its
 work-in-progress commit, with no step 6. It is prose, for whoever reads the
 history: the exit the triage chose, in words and as its target, and the owner's
-words, such as Planning (`{"step": "plan"}`) — the owner: "Advance." Nothing
+words, such as Planning (`{"step": "plan"}`) — the owner: "Advance.", or, for an
+advancing exit taken without asking, that you took it as recommended. Nothing
 routes on it: the triage's outcome names its exit in `next` and the records it
 triaged in `triaged`, and `scripts/change-workflow next` reads a review whose triage
 file no recorded outcome names as a triage still in progress, whatever the file
@@ -425,15 +512,34 @@ a disposition revises an earlier one, the new entry's `owner_disposition` starts
 with `revises <review> <finding>:` so the ledger reads as history rather than as a
 contradiction.
 
+A default acceptance is not a disposition the owner stated, so it writes no entry.
+A correction of one is an entry whose `owner_disposition` starts `revisits default
+acceptance:`, at either moment the owner makes it: in reply to the question the
+table rode on, before the fix (step 3), or after the triage finished, when the
+owner's revisit resumes this session (step 7). A later revision of that entry uses
+`revises` as any other:
+
+```json
+{"review": "04-design", "finding": "F5", "section": null, "lens": "documentation", "basis": "evidence", "severity": "should", "agent_position": "agree: the heading was renamed; accepted by default", "owner_disposition": "revisits default acceptance: cite the goal's row in ROADMAP's table instead, which survives renames", "summary": "Default-accepted citation fix redirected to a stable target"}
+```
+
+A waiver you recommended (step 1) is an entry whether the owner takes it or not:
+its `agent_position` names the recommendation and its criterion, and its
+`owner_disposition` the owner's word, with their reason when they decline it. So
+is a waiver the validation recommended, under its record (`NN-validation`), its
+`finding` the part it waived.
+
 After writing ledger entries, say how many you appended and for which findings.
 The ledger is often a new, untracked file whose changes do not show in a diff, so
 the owner cannot otherwise see that it was written.
 
 ## 5. Carry out the accepted outcomes
 
-Ask step 6's question first: once every finding and every point of the owner's
-notes has a disposition, and before any outcome is carried out, the owner decides
-whether the round's accepted fixes merit another review round, while still present.
+Settle step 6 first: once every discussed finding and every point of the owner's
+notes has a disposition, and before any outcome is carried out, you take the
+advancing exit you recommend, or the owner, while still present, decides whether
+the round's accepted fixes merit the other round you recommend. The default
+acceptances' outcomes are carried out with the rest.
 
 - **edit:** make it, and record it in the finding's `Result`.
 - **decision:** settled with the owner when it was presented, in the same session, as
@@ -442,6 +548,9 @@ whether the round's accepted fixes merit another review round, while still prese
   settled, as `change-design` records decisions.
 - **task:** append it to `tasks.md` in the section it concerns, amending rather than
   replacing, with the finding cited in its note.
+- **none:** nothing to carry out, except for a large or vague out-of-scope defect
+  (step 2): record it where `AGENTS.md`'s "Deferred work" says, and name where in
+  the finding's `Result`.
 - **fix, at a closeout triage:** the change is archived, and its code was reviewed
   and validated before closeout, so a closeout triage makes documentation fixes
   only. A finding whose fix needs code is not fixed by the steps below: stop, tell
@@ -451,9 +560,10 @@ whether the round's accepted fixes merit another review round, while still prese
   the archived change, before archive cleanup. Once it is validated, suggest
   a review of the fix's diff — an external one, or `make review KIND=implementation`
   — and say why; whether to have it is the owner's call, and nothing requires it.
-- **fix:** once every finding has a disposition, make the accepted fixes, as
-  `change-implement` makes a section's changes: the change and the decision it
-  rests on, and no more; at the lowest test level that proves it; comments
+- **fix:** once every finding has a disposition or is accepted by default, make
+  the accepted fixes, as `change-implement` makes a section's changes: the change
+  and the decision it rests on, and no more, an out-of-scope defect's fix (step 2)
+  recorded as outside the plan; at the lowest test level that proves it; comments
   describing the current system. Every step is denied edits under `.claude/`, so
   an accepted fix there — the step table, the project's Claude Code settings — is
   made by the orchestrating session or the owner, on the owner's word, and you
@@ -489,15 +599,21 @@ merged and the permanent specifications are what its fixes touched.
 ## 6. Choose the exit
 
 A review is not a gate: the change moves on the exit the triage names, and the
-owner is asked only what needs their judgement. Once every finding and every point
-of the owner's notes has a disposition, and before any fix is made, ask the owner
-whether the accepted fixes merit another review round of the same kind.
+owner is asked only what needs their judgement. Once every discussed finding and
+every point of the owner's notes has a disposition, and before any fix is made,
+decide whether the accepted fixes merit another review round of the same kind.
 Recommend, from what the fixes will change: another round when the dispositions
 changed a central decision — the representation, an authority boundary, an
 interface's operations, or the change's scope — so the reviews just triaged no
 longer describe the change, naming the decisions that changed; advancing when the
-fixes are corrections the reviewer would only confirm. The answer chooses the
-triage's exit among those its node declares:
+fixes are corrections the reviewer would only confirm.
+
+Advancing is the default exit (`docs/agents/change-workflow.md`, "Default
+acceptance"): when you recommend it, take it without asking, and report it in your
+final report beside the table of default acceptances, with the reason, so the
+owner can revisit it (step 7). When you recommend another round, argue it and ask,
+the table riding on the question (step 3); the owner's answer chooses. The exit is
+one of those the triage's node declares:
 
 | Triage of | Advancing | Another round | A return |
 |---|---|---|---|
@@ -510,12 +626,15 @@ An implementation round's triage may instead name sections out of the plan's ord
 `{"step": "implement", "sections": [["5"]]}`, sessions as `rounds` lists them,
 when the owner's dispositions send the change to them next; the computation records
 them as a round as it starts. Name the exit under `## Next` (step 4) once the fixes
-are committed, with the owner's words, and as the outcome's `next`. An exit the
+are committed, with the owner's words or that you took it as recommended, and as
+the outcome's `next`. An exit the
 node does not declare is brought to the owner rather than taken.
 
-A triage with no finding to present and no point of the owner's notes to dispose of
-asks nothing: its exit is the advancing one, `## Next` saying there was nothing to
-dispose of, and it finishes.
+A triage with no finding to discuss and no point of the owner's notes to dispose of
+that recommends advancing asks nothing: it makes the default acceptances' fixes,
+takes the advancing exit, `## Next` saying there was nothing to discuss, and
+finishes, its final report carrying the table. One that recommends another round
+asks that question alone, the table riding on it.
 
 What follows is the computation's, from that exit
 (`scripts/change-workflow next`), which checks the guards on it and names the step
@@ -555,8 +674,10 @@ contradict its status misleads every agent that reads the index — then run
 
 Whichever exit it names, a triage of any kind then commits what it changed
 and no fix commit (step 5) already holds — the change's documents its
-dispositions edited, `interventions.jsonl`, the index row, and any other tracked
-file an `edit` changed — as one commit naming the change and the review, and
+dispositions edited, `interventions.jsonl` with any line the orchestrating session
+left uncommitted for you, such as a declined waiver of this design review, the
+index row, and any other tracked file an `edit` or a recorded defect changed — as
+one commit naming the change and the review, and
 pushes it with `scripts/change-workflow push`, so the next step reads a committed change from
 a clean worktree. After a pre-closeout review such a commit needs no validation
 when it changes only paths under `openspec/` and `docs/`: closeout's own checks
@@ -568,3 +689,39 @@ to `archived`, or draft the merge yourself: that is archive cleanup's, in a fres
 session. Tell the owner archive cleanup is next, and end `finished`. With another
 review of the same kind as its exit, leave the status, and say what that review
 reads.
+
+## 7. A revisit after the triage finished
+
+The owner may revisit a default acceptance, or the advancing exit you took, after
+this triage finished. The orchestrating session then stops any step started after
+it, records the owner's direction naming this run (`--resumes`), and resumes this
+session with the owner's words (`docs/agents/change-workflow.md`, "Revisiting a
+default acceptance"): a message resuming a finished triage is that revisit.
+
+1. **Check again**: the branch carries the change and the worktree is clean, and,
+   for an implementation round, `scripts/change-workflow check round-view` passes.
+   The stopped step is resolved, not resumed, so its uncommitted work is not yours
+   to commit: if the worktree holds any, stop and ask the owner to clear it. Read
+   what was committed since your last commit (`git log <that commit>..HEAD`), and
+   the change's files again where it touched them.
+2. **Record the revisit.** The owner's words dispose of each finding they revisit.
+   Add a `- **Revisit:**` line to its triage entry with their words and what the
+   amendment does, leaving the earlier lines as they stand, and append its
+   `revisits default acceptance:` ledger line (step 4). A revisit of the advancing
+   exit is logged the same way, as `"finding": "next"` under the review's record,
+   the advancing recommendation as the `agent_position`, and recorded in `## Next`.
+3. **Amend in a new commit** what the revisit changes, carried out as step 5
+   carries out its outcome — an `edit` as an edit, a `fix` with a fix's checks —
+   and pushed with `scripts/change-workflow push`; never rewrite the earlier
+   commit, which is pushed and may be validated. When the amendment contradicts
+   what was committed after the triage, the change returns to design or planning,
+   as an accepted fix that shows the plan wrong does ("Running unattended"); at a
+   closeout triage, which has no return, tell the owner, as step 5 does for a fix
+   needing code.
+4. **Name the exit again** (step 6): the revisit may change what the fixes merit,
+   so recommend afresh, taking the advancing exit or asking about another round.
+   When your earlier advance set the row's `Status` and the exit is now another,
+   put the row back as it stood before, its notes with it, and run
+   `scripts/change-workflow check index`. Rewrite `## Next` in each review's triage
+   file with the owner's words, and end as step 6 ends, `triaged` naming the same
+   records: this outcome is the later one naming them, so it governs.

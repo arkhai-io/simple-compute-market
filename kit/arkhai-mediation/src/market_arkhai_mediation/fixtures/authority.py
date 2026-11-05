@@ -102,7 +102,7 @@ class MediationContractFake:
         if path.startswith("/cases/"):
             case = self.cases.get(unquote(path[len("/cases/"):]))
             if case is not None:
-                return httpx.Response(200, json=case)
+                return httpx.Response(200, json={"status": "accepted", "case": case})
         return httpx.Response(404, json={"code": "invalid_request"})
 
     def _file(self, actor: str, filing: dict) -> dict:
