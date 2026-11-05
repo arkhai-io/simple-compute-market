@@ -13,7 +13,8 @@ against the double's app through an in-process transport); application integrati
 in-process app through its typed clients); chart render tests; and system (the
 `e2e-tests` markers, and the local release's `helm test`).
 
-Order: 1 → 5, then the closeout, 6. Section 1 adds the kit's balance read and the
+Round 1's order was 1 → 5 (the replanned order below runs 6 → 12, then the closeout,
+13). Section 1 adds the kit's balance read and the
 payments check function (D5, D12); section 2 builds the double on it (D1, D3, D4, D8);
 section 3 adds the storefront CLIs' `check-payments` and the VM storefront's
 unreachable-mediation proof (D2, D12); section 4 wires the three Compose lanes (D2, D6,
@@ -23,6 +24,23 @@ this change's implementation. Permanent specifications, companions, `ARCHITECTUR
 `TESTING.md`, `DEPLOYMENT_AND_CONFIG.md`, the operator handbook, `tools/README.md` and
 the roadmap are written at closeout; a section writes only the package documentation its
 code needs (the double's README, the kit's README entry).
+
+**Replanned against the redesign** that round 1's triage returned the change for (31 O1)
+and `reviews/50-design.triage.md` advanced. Sections 1–5 are round 1's, kept as
+implemented; where the reviewed design changes what they built, the correction notes under
+sections 4 and 5 name the later section that carries it. Sections 6–12 implement D13–D23
+and the revisions of D2, D3, D6, D11, D12 and D19, in the order of D22's cadence:
+section 6 makes the payments kit take a secret key and a configured CA (D19, D12);
+section 7 gives dispute credentials a secret key and makes `MediationCredential` carry
+the resolved token (D19, D2); section 8 gives the registry profile-shaped env files (D16);
+section 9 moves the Compose stacks onto committed overlays, profiles and secret overlays
+(D15, D16, D17, D19, D20, D23); section 10 moves the test runner onto committed lane
+profiles and retires the Makefile's environment targets (D14, D18, D20, D21, D6);
+section 11 gives the registry chart its env-file profile (D16); section 12 moves the
+storefront charts onto a derived `ca_bundle_path` and the secret overlay (D3, D11, D12,
+D19). Section 13, the closeout, replaces the unstarted section-6 closeout this plan
+first ended with, replanned for D1–D23. Each section needs only the sections before it.
+No dependency gates implementation.
 
 Fixture discipline for every section (`AGENTS.md`, "Test fixtures and local development
 configuration"; D4): every account, token, key, seed and certificate added is a
@@ -703,6 +721,15 @@ it, `e2e-tests/tests/unit/test_payments_helper.py`;
 `e2e-tests/settings.toml`; `e2e-tests/pyproject.toml` (the VM marker's description);
 `e2e-tests/README.md`'s payment passages that the code makes false.
 
+Correction, replanned against the redesign (D9, D14–D21, D23): this section's wiring
+through generated environment files — 4.2's `api_key_env` and `SSL_CERT_FILE` in the
+storefronts' environment, 4.3's `PAYMENTS_LANE_DISPUTE_AUTHORITIES`, 4.4's
+`e2e-<lane>-payments-env` targets and `lane_env.py compose|runner`, 4.5's
+`SSL_CERT_FILE` probe — is superseded. Section 9 moves the stacks onto committed
+overlays, profiles and secret overlays, and section 10 the runner onto committed lane
+profiles. The double, the scenarios, `LANE_OWNED`, the mediation prerequisite and
+`check-payments` at setup stand.
+
 - [x] 4.1 The double in each lane (D1, D3, D6). `compose.payments-double.yml` runs
   `payments-double` on the lane's network with no host port, its healthcheck on `/health`
   over HTTPS with the lane CA. Each lane's `-f` list in `e2e-tests/Makefile` (and the
@@ -1083,6 +1110,12 @@ under `helm/charts/bare-metal-storefront/`; `helm/charts/registry/` values only 
 the recommendation needs them; `helm/charts/e2e-tests/` values for `PAYMENTS`;
 `helm/tests/{test_release_topology.py, test_image_overlay.py}`.
 
+Correction, replanned against the redesign (D3, D11, D19): 5.2's CA option setting
+`SSL_CERT_FILE` and 5.3's payments-key option are superseded. Section 12 makes the CA
+option derive `[Settlement.arkhai_payments].ca_bundle_path` and removes the payments-key
+option, the key travelling in the agent's runtime secret overlay. The subchart, the
+payments-only render case, the `helm test` check and validation's run of it stand.
+
 - [x] 5.1 The subchart (D3, D11). `payments-lane-double`, disabled in `helm/values.yaml`,
   enabled in `helm/local-values.yaml` and disabled again in
   `helm/bare-metal-release-values.yaml`, so the two-release topology runs one double. Its
@@ -1449,29 +1482,482 @@ the recommendation needs them; `helm/charts/e2e-tests/` values for `PAYMENTS`;
     unknown key. The fix removes the unowned-work row for this in
     `openspec/changes/README.md`.
 
-## 6. Closeout
+## 6. The payments kit's secret key and configured CA
 
-Confirm and promote the verified design, then archive last (D1–D12 and every delta
-requirement). The eleven parts follow `openspec/README.md#plan-closeout-requirements` in
-order. Closeout changes no code: a part needing a code, lock, chart, or test change
+Delivers `[Settlement.arkhai_payments].api_key` as a secret setting, one key resolution,
+`ca_bundle_path` with `PaymentsClient`'s CA argument, and the payments check's
+`configuration` step for an unloadable bundle (D19's payments-key, one-resolution and
+CA-bundle bullets; D12; settlement-configuration MODIFIED "Payments configuration
+separates accounts and credentials"; deployment-state "A storefront checks its payments
+access from its own container", scenario "The storefront's CA bundle cannot be loaded").
+
+Files: `kit/arkhai-payments/src/market_arkhai_payments/{settlement_config.py, client.py,
+access_check.py, __init__.py}`; `kit/arkhai-payments/tests/{test_settlement_config.py,
+test_client.py, test_access_check.py, test_access_check_tls.py}`;
+`kit/arkhai-payments/README.md`; `kit/arkhai-payments/pyproject.toml` and every lock
+`make lock` rewrites; the storefront charts' generated `values.schema.json` files that
+`make helm-values-schema` rewrites (`helm/charts/storefront/`,
+`helm/charts/bare-metal-storefront/`).
+
+- [ ] 6.1 `ArkhaiPaymentsConfig` gains `api_key: SecretStr | None`, marked
+  `json_schema_extra={"secret": True}` as the storefront's other secret fields are, and
+  `ca_bundle_path: str | None` (D19). Validation, as `validate_development_auth` refuses
+  today's conflicts: `api_key` is refused when empty; `api_key` with `api_key_env`, and
+  either with `development_auth`, are refused naming both (the delta's "Both key forms are
+  set"). Unit cases in `test_settlement_config.py`: each refusal; a configuration loaded
+  from TOML text with `api_key` validates under the model's strict mode; `api_key` never
+  appears in the model's `repr` or a dumped public view.
+- [ ] 6.2 One key resolution (D19): a public function in `settlement_config.py`, exported
+  from `__init__.py`, returning the `SecretStr` from `api_key`, otherwise from the variable
+  `api_key_env` names in the mapping it is given (the process environment by default),
+  and raising `ArkhaiPaymentsConfigurationError` naming the form that is missing or
+  unavailable. `payments_client_for_owner`, `arkhai_payments_preflight` and
+  `check_payments_access` call it and no longer read `api_key_env` themselves; the
+  preflight's blocker for a missing key names both forms. Unit cases: each source,
+  precedence when only one is configured, the preflight blocker, and the check's
+  `credential` step from an `api_key` configuration with no environment variable set (the
+  delta's "A storefront's key is in its secret overlay").
+- [ ] 6.3 `PaymentsClient(..., ca_bundle: str | None = None)` (D19): when set, the client
+  verifies the service with an SSL context loaded from that file alone and passes it as
+  the connection's verification, so the process trust store and the client's proxy
+  behaviour are otherwise unchanged; `payments_client_for_owner` passes
+  `config.ca_bundle_path`. `check_payments_access` reports a bundle `ca_bundle_path` names
+  that is missing, unreadable or malformed as step `configuration`, with a fixed detail
+  naming `ca_bundle_path`, before any request (D12). Round 1's `transport` classification
+  of a process-level `SSL_CERT_FILE` that cannot be loaded stays, since a process may
+  still set one. Cases in `test_access_check_tls.py`, which already serves TLS from a
+  private CA: a client given the CA's bundle verifies the server with no `SSL_CERT_FILE`
+  set; a client without it refuses (`transport`); a missing and a malformed
+  `ca_bundle_path` report `configuration`.
+- [ ] 6.4 Package and schema housekeeping (RELEASING.md, "Versioning policy"; `AGENTS.md`,
+  "Tests and diagnostics"). Bump `kit/arkhai-payments`'s version, `make lock`, and
+  document `api_key`, `ca_bundle_path` and the resolution in `kit/arkhai-payments/README.md`.
+  Run `make helm-values-schema`, so both storefront charts' generated definitions carry
+  `ca_bundle_path` and refuse `api_key` in `config`; the storefronts' stale-schema unit
+  test holds it.
+- [ ] 6.5 **Verification checkpoint.** Unit and library integration: `make -C kit
+  test-arkhai-payments`. Unit: the three storefront CLI suites still pass over the kit
+  (`make test-storefront`, `make test-bare-metal`, `make test-apicredits`), the VM
+  storefront's stale-schema test included. `make test`. `make check-packaging`, since the
+  kit's version and locks change.
+  End-to-end: none yet — the lanes take `api_key` and `ca_bundle_path` in section 9, and
+  `e2e_bare_metal_payment_deal`, `e2e_credits_payment_deal` and `e2e_vm_payment_deal`
+  exercise them from then. None is owed here.
+  Owed by validation: `tests.yml`, job `test · test-kits` — the payments kit suite passes
+  from the relocked environment with the new cases; jobs `test · test-storefront`,
+  `test · test-bare-metal` and `test · test-apicredits` — each passes from the relocked
+  environments.
+
+## 7. Dispute credentials carry secrets; the mediation credential carries the token
+
+Delivers `DisputeCredential.api_key`, a `MediationCredential` that carries a validated
+resolved token, a `MediationClient` that reads no environment, and every direct
+constructor migrated (D19's dispute-credentials bullet and contract; D2's VM storefront
+credential; settlement-configuration MODIFIED "Dispute credentials are bound by identity
+and no template ships an authority", its scenarios "A storefront's dispute credential is
+in its secret overlay" and "A mediation credential is built from an unusable token").
+
+Files: `kit/deal-lifecycle/src/market_deal_lifecycle/configuration.py` and a new
+`kit/deal-lifecycle/tests/unit/test_dispute_credential.py`;
+`kit/arkhai-mediation/src/market_arkhai_mediation/client.py`,
+`kit/arkhai-mediation/README.md`, `kit/arkhai-mediation/examples/first_use.py`,
+`kit/arkhai-mediation/tests/integration/{test_adapter.py, test_ruling_traces.py}`;
+`kit/deal-servicing/examples/{receipt_first_use.py, respondent_first_use.py,
+seller_first_use.py, watch_first_use.py}`,
+`kit/deal-servicing/tests/integration/{test_filing_owner_recovery.py, test_respondent.py,
+test_review_fix_a.py}`; `domains/vms/storefront/src/market_storefront/deal_lifecycle.py`,
+`domains/vms/storefront/tests/integration/{test_lifecycle_admin.py,
+test_lifecycle_ends.py, test_servicing_unreachable_authority.py}`;
+`domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/lifecycle.py`;
+`domains/vms/buyer/src/arkhai_vms_buyer/lifecycle.py` and
+`domains/vms/buyer/tests/test_lifecycle_adoption.py`;
+`domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/lifecycle.py` and
+`domains/bare_metal/buyer/tests/test_lifecycle_adoption.py`; the touched kits'
+`pyproject.toml` versions and every lock `make lock` rewrites. Scripts under
+`docs/attachments/` keep their wording (D18, D19).
+
+- [ ] 7.1 `DisputeCredential` gains `api_key: SecretStr | None`, refused when empty at
+  configuration validation as a malformed `api_key_env` is, and one of `api_key` and
+  `api_key_env` is required, both refused as `ArkhaiPaymentsConfig` refuses both key
+  forms (D19). `resolve()` returns `api_key` when set, otherwise
+  the variable's value, and still raises `ValueError` for an unset or empty variable, which
+  the storefronts' `credential_available` reads as no usable credential (D2's
+  `repair_required`). Unit cases in `test_dispute_credential.py`: each form, both or
+  neither refused, an empty `api_key` refused, `resolve()` from each form and its
+  `ValueError`, and the token absent from `repr`.
+- [ ] 7.2 `MediationCredential(identity, *, token: SecretStr)` (D19's contract): the field
+  is renamed and keyword-only; `__post_init__` raises `TypeError` for a token that is not a
+  `SecretStr`, and `ValueError` for an empty token, one with surrounding whitespace, or one
+  containing CR or LF — the checks `MediationClient.__init__` makes today, moved there.
+  `MediationClient` loses `environ=` and reads no environment. Library integration cases
+  in `kit/arkhai-mediation/tests/integration/test_adapter.py`: each refusal, including an
+  unmigrated positional `MediationCredential(identity, "DEMO_PAYEE")` failing at
+  construction; a client built from a valid credential authenticates with exactly that
+  token.
+- [ ] 7.3 Migrate every direct constructor (D19): the VM and bare-metal storefronts' and
+  buyers' lifecycle composition obtain the token through `DisputeCredential.resolve()` and
+  build `MediationCredential(identity, token=...)`; the `kit/arkhai-mediation` and
+  `kit/deal-servicing` examples and the kit and domain tests named above pass
+  `token=SecretStr(...)` instead of an `environ` mapping; `kit/arkhai-mediation/README.md`
+  shows the new form. A repository search for `MediationCredential(` and `environ=` at
+  mediation call sites finds no unmigrated use outside `docs/attachments/`.
+  `test_servicing_unreachable_authority.py` gains a case whose `[[DisputeCredential]]`
+  states `api_key` with no variable set, and still reads `state == "running"` with a
+  non-`Accepted` dispute outcome, the poll's transport error reaching the cycle, which
+  logs it and completes, and no repair mark (D2).
+- [ ] 7.4 Bump the versions of `kit/deal-lifecycle` and `kit/arkhai-mediation` and of any
+  other package whose public surface changed, and `make lock` (RELEASING.md, "Versioning
+  policy").
+- [ ] 7.5 **Verification checkpoint.** Unit and library integration: `make -C kit
+  test-deal-lifecycle`, `make -C kit test-arkhai-mediation`, `make -C kit
+  test-deal-servicing` (its examples run as tests where they are collected). Application
+  integration: `make test-storefront` (the lifecycle and unreachable-authority cases),
+  `make test-bare-metal`, `make test-vms-buyer`. `make test`. `make check-packaging`.
+  End-to-end: `e2e_vm_payment_deal`'s stage 2 exercises the VM storefront's credential
+  once section 9 puts it in Bob's secret overlay; none is owed here.
+  Owed by validation: `tests.yml`, jobs `test · test-kits`, `test · test-storefront`,
+  `test · test-bare-metal` and `test · test-vms-buyer` — each passes from the relocked
+  environments with the migrated constructors.
+
+## 8. The registry reads profile-shaped env files
+
+Delivers the registry's `CONFIG_DIRECTORY`/`ACTIVE_PROFILES` loading of
+`config-<profile>.env`, the `registry_filter_spec_path` setting the filter-specification
+loader reads through an injected `Settings`, and the unread variables removed (D16's
+registry half; deployment-state "The registry reads profile-shaped env files", its loader
+obligation and scenarios "A lane registry layers a lane profile" and "A profile selects
+the filter specification").
+
+Files: `core/registry/src/core_registry/{config.py, api/filter_spec.py}` and the
+filter-specification loader's callers; `core/registry/tests/unit/test_filter_spec.py`,
+`core/registry/tests/integration/test_settled_envelope_across_specs.py`, a new
+`core/registry/tests/unit/test_config_profiles.py`; `core/registry/Dockerfile`,
+`core/registry/.env.docker-compose`; `core/registry/README.md`;
+`core/registry/pyproject.toml` and its lock.
+
+- [ ] 8.1 Profile env files (D16). `Settings` loads, after its current dotenv defaults,
+  `<CONFIG_DIRECTORY>/config-<profile>.env` for each entry of `ACTIVE_PROFILES` in order,
+  a later file overriding an earlier one and the process environment overriding every
+  file. Both resolver variables are read from the process environment by the composition
+  that builds `Settings`, not as settings. The profile files extend the dotenv list the
+  class already reads, so a profile file that does not exist is skipped as a missing
+  default file is. The misleading comment on `.env.local`'s priority states the actual
+  order. Unit cases in `test_config_profiles.py`, against files in a temporary directory:
+  two profiles layering, the later winning; the process environment winning over both;
+  no `ACTIVE_PROFILES` loading the defaults alone; a JSON list
+  (`REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES`) parsed from a single-quoted line;
+  a hex identifier read as a string.
+- [ ] 8.2 The filter-specification path (D16). `registry_filter_spec_path` is a `Settings`
+  field aliased to `REGISTRY_FILTER_SPEC_PATH`, unset meaning the packaged
+  `filter-spec.yaml`. `api/filter_spec.py` resolves its default path from a `Settings` it
+  is given, defaulting to the module's `settings`, and no longer reads `os.environ`. The
+  cases in `test_filter_spec.py` and `test_settled_envelope_across_specs.py` that select
+  a specification through `monkeypatch.setenv` pass a `Settings` instead (`AGENTS.md`,
+  "Tests and diagnostics"). A new case loads a specification a profile file names, with no
+  process variable set (the delta's "A profile selects the filter specification").
+- [ ] 8.3 The unread variables (D16). Remove `ENABLE_HEALTH_CHECKS`,
+  `HEALTH_CHECK_INTERVAL`, `ENDPOINT_CHECK_TIMEOUT` and `HEARTBEAT_TTL_SECS` from
+  `core/registry/Dockerfile` and `core/registry/.env.docker-compose`, after confirming by
+  search that nothing reads them (the chart's copies and `CHAIN_ID` go in section 11).
+  Document the profile loading and the setting in `core/registry/README.md`. Bump the
+  registry's version and relock if its metadata changed.
+- [ ] 8.4 **Verification checkpoint.** Unit and application integration: `make
+  test-registry`. `make test`. `make check-packaging` when the version or lock changed.
+  End-to-end: none yet — the lane registries take profiles in section 9 and the chart in
+  section 11; every lane's publication and discovery scenarios exercise the registry from
+  then. None is owed here.
+  Owed by validation: `tests.yml`, job `test · test-registry` — passes with the new and
+  reworked cases.
+
+## 9. Compose stacks on committed overlays, profiles and secret overlays
+
+Delivers every lane's and the full local stack's configuration in committed files: base
+and domain files without development binds or guards, literal binds in the root-level
+overlays, the five lane registries on profile env files, the three provisioning services
+on site profiles, storefront payments, dispute and wallet keys in secret overlays, the
+payments CA as `ca_bundle_path`, and the provisioning mode interpolated last (D15, D16's
+lane profiles, D17, D19, D20's overlay half, D23, D7, D2, D3; deployment-state "A stack's
+configuration lives in committed files" and "A storefront's secrets reach it through its
+secret overlay").
+
+Files: `domains/vms/compose.yml`, `domains/apicredits/compose.yml`,
+`domains/bare_metal/compose.yml`; `compose.bare-metal.yml`, `compose.vms-local.yml`,
+`compose.apicredits-local.yml`, `compose.vms-lane.yml`, `compose.apicredits-lane.yml`,
+`compose.bare-metal-local.yml`, and the header comments of `compose.vms.yml`,
+`compose.apicredits.yml`, `compose.payments-double.yml`; new
+`dev-env/registry/config-{registry-a, registry-b, api-credits-registry, compute-registry,
+bare-metal-registry, payments-lane}.env`; new
+`dev-env/provisioning/config-{vms-bob-site, vms-alice-site, bare-metal-site}.yml`;
+`dev-env/identities/{bob.storefront.secrets.toml, bare-metal.storefront.secrets.toml}`,
+new `dev-env/identities/{alice.storefront.secrets.toml,
+api-credits.storefront.secrets.toml}`; deleted
+`domains/vms/storefront/{.env.bob.docker, .env.alice.docker}` and
+`dev-env/identities/api-credits.wallet.env`; the lane storefront configurations
+`domains/vms/storefront/storefront.bob.lane.toml`,
+`domains/apicredits/storefront/storefront.credits.lane.toml`,
+`domains/bare_metal/storefront/storefront.dev.toml`; `scripts/tests/{test_lane_compose.py,
+test_bare_metal_compose.py, test_multi_storefront_compose.py}`.
+
+- [ ] 9.1 Base files keep topology (D15). Every development bind and every `${VAR:?…}`
+  guard for one leaves `domains/{vms,apicredits,bare_metal}/compose.yml` and
+  `compose.bare-metal.yml`; values the topology fixes — service names, ports, data paths,
+  the definition documents' container paths, `REDIS_URL`, callback URLs — stay. First
+  confirm, by bringing each affected service up without its binds, that it refuses to
+  start; a service that starts without one keeps that guard, recorded here with the
+  service and what it started without.
+- [ ] 9.2 Literal overlays (D15). The `-local` and `-lane` overlays bind every committed
+  file the base files no longer name, stated relative to the repository root: credential
+  and identity files, storefront configurations and secret overlays, the bare-metal host
+  and pool documents and SSH placeholder, the lane CA, and the buyer runtime directories
+  as `./.e2e-buyer/…` (D18). The VM lane's Bob configuration and the API-credit lane's
+  storefront configuration replace the base mount by its target. No overlay reads a
+  variable but `PROVISIONING_MODE` (9.4).
+- [ ] 9.3 Registry profiles (D16, D7). Each of the five lane registries sets
+  `CONFIG_DIRECTORY=/etc/arkhai/registry` and its `ACTIVE_PROFILES`, binds
+  `./dev-env/registry`, and keeps only its credential bind; its `REGISTRY_*` values move
+  from `environment:` and from the bare-metal wrapper's variables into its
+  `config-<registry>.env` — registry-b's admin and bootstrap keys and the API-credit
+  registry's filter specification path included. `config-payments-lane.env` holds the
+  recommended dispute authorities, one JSON line restating
+  `tools/payments-lane-double/fixtures/dispute-authority.toml`; each lane overlay appends
+  `payments-lane` to its registries' profiles (both VM registries, the API-credit and
+  compute registries, the bare-metal registry). The full local stack's registries load
+  their own profiles without `payments-lane`. Each file carries the public-development
+  label.
+- [ ] 9.4 Provisioning site profiles and the mode (D17, D20). `provisioning`,
+  `alice-provisioning` and `bare-metal-provisioning` set `CONFIG_DIRECTORY=/app/config`,
+  bind the packaged `config.yml` and `config-docker.yml` from
+  `provisioning/compute/service/src/compute_provisioning_service/config/` and their site
+  profile as single files, and state `ACTIVE_PROFILES=docker,<site>,${PROVISIONING_MODE:-mock}`;
+  their `PROVISIONING_*` identity, storefront-identity, site-id and admin-identity
+  variables move into the site profiles as quoted YAML strings, and the `@str` comments go.
+  The base files keep `ACTIVE_PROFILES=docker`.
+- [ ] 9.5 Storefront secrets and trust (D19, D23, D2, D3). The lane storefronts' payments
+  key is `[Settlement.arkhai_payments].api_key` in their secret overlay (Bob's, the
+  bare-metal storefront's, the API-credit storefront's new one), restating the seller token
+  in `tools/payments-lane-double/fixtures/accounts.toml`; their lane configurations drop
+  `api_key_env` and state `ca_bundle_path = "/run/payments-lane-double/lane-ca.pem"`, the
+  overlay binding the lane CA there. The VM lane's `[[DisputeCredential]]` moves whole into
+  Bob's secret overlay with an `api_key`, retiring `VM_LANE_DISPUTE_API_KEY`. Bob's and
+  Alice's `[Wallet] private_key` and the API-credit storefront's move from the
+  `STOREFRONT_`/`APICREDITS_STOREFRONT_` override variables into their secret overlays,
+  Alice's new; the wallet env files are deleted once a search confirms no other reader.
+  No `SSL_CERT_FILE`, `ARKHAI_PAYMENTS_API_KEY` or wallet variable is left in any overlay.
+- [ ] 9.6 Restated values held to their sources (D21, the stack half). In
+  `scripts/tests/`, replacing the compose test modules' checks of variables: each
+  registry profile's principal derives from its credential file; the provisioning site
+  profiles' pins equal the runner's `config-docker.yml` pins; the secret overlays' tokens
+  equal `accounts.toml`; `config-payments-lane.env` equals `dispute-authority.toml`; each
+  lane configuration's `ca_bundle_path` is the target its overlay binds the lane CA to;
+  every overlay bind's source exists; `docker compose config` renders every lane's and the
+  full stack's file list with no environment file, and no rendered base file carries a
+  development bind.
+- [ ] 9.7 **Verification checkpoint.** Unit: `make test-release-tooling` (the compose test
+  modules and 9.6's cases). System, from this checkout: each lane's stack comes up from its
+  Compose files alone (`docker compose -p <project> -f … up -d --wait`) and its storefront's
+  `check-payments` prints `ok`; the full local stack comes up with its documented file list.
+  `make test`.
+  End-to-end: every marker of the three lanes runs on these stacks once section 10
+  changes the lane targets; `e2e_bare_metal_payment_deal`, `e2e_credits_payment_deal` and
+  `e2e_vm_payment_deal` exercise the secret overlays, `ca_bundle_path` and the dispute
+  credential.
+  Owed by validation: `tests.yml`, job `test · test-deployment-packaging` — `make
+  test-release-tooling`'s compose render cases pass.
+
+## 10. The runner's lane profiles and the Make targets
+
+Delivers the runner's shared payments profile and per-lane profiles, the helper's token
+and CA handling, lane targets naming only their files and mode, and the environment
+targets retired (D14, D18, D20's Make half, D21's runner half and `lane_env.py`, D6's
+probe; test-compatibility "A lane's runner reads committed lane profiles"; deployment-state
+"A stack's configuration lives in committed files", scenario "A lane stack is brought up").
+
+Files: new `e2e-tests/config/config-payments-lane.yml` and
+`e2e-tests/config/config-{vms,bare-metal,apicredits}-lane.yml`;
+`e2e-tests/tests/e2e/roles/helpers/payments.py` and the shared buyer-configuration writer
+it uses; `e2e-tests/settings.toml`; `e2e-tests/tests/unit/{test_payments_helper.py,
+test_domain_stack_configuration.py}`; `e2e-tests/Makefile`; the root `Makefile`;
+`tools/payments-lane-double/scripts/lane_env.py` and
+`tools/payments-lane-double/tests/integration/test_lane_env.py`; `.gitignore`;
+`docker-compose.yml`'s header; `dev-env/identities/README.md`;
+`docs/development/VALIDATION_RUNBOOK.md` (§6's mock-profile note, §8's full stack);
+`e2e-tests/README.md`; `tools/payments-lane-double/README.md`.
+
+- [ ] 10.1 Runner profiles (D14). `config-payments-lane.yml` holds the shared `payments`
+  section — service URL and identity, fee, livemode, `lane_owned`, `ca_bundle_path`,
+  `api_key_env`, `buyer_api_key`, the buyer and seller accounts and the buyer's marketplace
+  seed — and each `config-<lane>-lane.yml` only its seller marketplace credential, the
+  bare-metal one adding `compute_hourly_gross` and `dispute_window`. Each file carries the
+  public-development label. `e2e-tests/settings.toml` documents `ca_bundle_path` and
+  `buyer_api_key` with empty defaults.
+- [ ] 10.2 The helper (D14, D6). The payments helper writes `PAYMENTS.BUYER_API_KEY` into
+  the `market` subprocess's environment under the variable `PAYMENTS.API_KEY_ENV` names,
+  as provisioning writes `ANSIBLE_CONFIG` from its settings; the readiness probe trusts
+  `PAYMENTS.CA_BUNDLE_PATH` with proxies still disabled; the shared buyer-configuration
+  writer passes `ca_bundle_path` into the buyer's `[Settlement.arkhai_payments]`. The probe
+  no longer reads `SSL_CERT_FILE`. Unit cases in `test_payments_helper.py`: the token
+  reaches the subprocess environment and no other; the probe trusts the configured bundle
+  and fails on a missing one; the buyer configuration carries `ca_bundle_path`.
+- [ ] 10.3 Lane targets (D18, D20, D14). In `e2e-tests/Makefile`: each `test-e2e-<lane>`,
+  `e2e-<lane>-down` and `e2e-<lane>-logs` names its Compose files and project only, with
+  `PROVISIONING_MODE` exported to Compose; `test-buyer-machine` takes `RUNNER_PROFILES`
+  (each lane target sets `docker,payments-lane,<lane>-lane`; unset, `docker` alone) and one
+  literal lane-CA mount, and passes no environment file; `e2e_env_if_missing`, the
+  environment-file variables and the stale "deadlines" comment go. `check-payments` at
+  setup keeps `lane_env.py seller-account`.
+- [ ] 10.4 Retire the environment targets (D18, D20). In the root `Makefile`: remove
+  `e2e-vms-dev-env`, `e2e-apicredits-dev-env`, `e2e-bare-metal-dev-env`, both
+  `e2e-*-stack-env` helpers, `e2e-dev-identities`, `e2e-dev-identities-env`, the three
+  `e2e-<lane>-payments-env`, their variables, the buyer seed and the `sed` read, and their
+  `.PHONY` entries; keep the `PROVISIONING_MODE` `mock`/`real` check for the targets that
+  bring a stack up. `.gitignore` drops the generated environment files and keeps
+  `.e2e-buyer/`. `.github/workflows/e2e.yml`'s `PROVISIONING_MODE` keeps working unchanged.
+- [ ] 10.5 `lane_env.py` (D21). It keeps only `seller-account` and `seller-token`; the
+  `compose` and `runner` modes, `CA_MOUNT`, `BUYER_API_KEY_ENV` and `_setting` go.
+  `test_lane_env.py` follows, and gains the runner half of D21: the runner profiles' tokens,
+  accounts, receipt identity and fee equal `accounts.toml`, and each lane profile's seller
+  key equals the `ARKHAI_IDENTITY_CREDENTIAL` of the identity file its storefront signs
+  with (`bob.identity.env`, `api-credits.identity.env`).
+- [ ] 10.6 Documents the targets named (D18). `docker-compose.yml`'s header and
+  `VALIDATION_RUNBOOK.md` §8 give the full stack's `docker compose -f docker-compose.yml -f
+  compose.vms-local.yml -f compose.apicredits-local.yml up -d`, the runbook's buyer step
+  creating `.e2e-buyer/…` first and §6's note naming `PROVISIONING_MODE`;
+  `dev-env/identities/README.md`'s table lists each stack's overlays and profiles instead
+  of a target, and its fixture statements cover the new secret overlays and profiles;
+  `e2e-tests/README.md`'s "Shared payment-scenario configuration" and lane passages and
+  `tools/payments-lane-double/README.md` describe the profiles and secret overlays. Dated
+  records under `docs/attachments/` keep their wording.
+- [ ] 10.7 **Verification checkpoint.** Unit: `make test-e2e-unit`,
+  `make test-payments-lane-double`, `make test-release-tooling`. System:
+  `make -C e2e-tests test-e2e-vm`, `test-e2e-bare-metal` and `test-e2e-apicredits` from
+  this checkout, each lane's markers green as before; `make test`.
+  End-to-end: `e2e_bare_metal_payment_deal` (bare-metal lane) and
+  `e2e_credits_payment_deal` (API-credit lane) pass without skips, `e2e_vm_payment_deal`'s
+  stages 1–2 pass and 3–4 report the mediation blocked skip (VM lane), and every other
+  marker in the three lanes' module lists stays green.
+  Owed by validation: `tests.yml`, jobs `test · test-e2e-unit`,
+  `test · test-payments-lane-double` and `test · test-deployment-packaging` — each passes.
+
+## 11. The registry chart's env-file profile
+
+Delivers the registry chart rendering its values as `config-production.env`, the
+`secretProfile` option, the retired key Secrets refused, and a Deployment environment of
+the two resolver variables (D16's chart half; deployment-state "The registry reads
+profile-shaped env files", scenarios "The registry chart renders a release" and "A values
+file uses a retired key Secret").
+
+Files: `helm/charts/registry/templates/{deployment.yaml, _helpers.tpl}`, a new
+`helm/charts/registry/templates/configmap.yaml`; `helm/charts/registry/values.yaml`;
+`helm/values.yaml` and `helm/values.schema.json` where they state the registry aliases'
+`auth`; `helm/scripts/test-render.sh`; `helm/tests/test_release_topology.py`.
+
+- [ ] 11.1 The rendered profile (D16). A ConfigMap key `config-production.env` renders the
+  identity, descriptor, `config.*` the registry reads, `PORT` from `service.port`, the
+  constant `REGISTRY_AUTHORITY_CREDENTIAL_FILE` and `REGISTRY_FILTER_SPEC_PATH` from
+  `config.filterSpecPath`, each value quoted for a dotenv reader and the dispute
+  authorities as one JSON line; it mounts under `/app/config` with
+  `CONFIG_DIRECTORY=/app/config` and `ACTIVE_PROFILES=production`. The chart's posture
+  `fail` checks stay. The five unread variables are no longer rendered; their values keys
+  stay accepted, so an existing values file renders (D16).
+- [ ] 11.2 `secretProfile` (D16). `secretProfile: {secretName, profile}` mounts
+  `config-<profile>.env` from that existing Secret under `/app/config` and appends the
+  profile to `ACTIVE_PROFILES`; `auth.bootstrapKeySecret` and `auth.adminKeySecret` with a
+  name set fail rendering naming `secretProfile`. The umbrella's registry aliases drop
+  their empty `auth` blocks. The Deployment's `env` holds only `CONFIG_DIRECTORY` and
+  `ACTIVE_PROFILES`.
+- [ ] 11.3 Render cases (D16; the delta's scenarios) in `helm/scripts/test-render.sh` or
+  `helm/tests/test_release_topology.py`, where registry rendering is asserted today: the
+  rendered profile's lines for the default and the API-credit alias, each with its own
+  filter specification path; the Deployment's environment holding exactly the two
+  variables; a `secretProfile` mounted and appended; each retired key refused by name; the
+  posture checks still failing as before.
+- [ ] 11.4 **Verification checkpoint.** Chart render: `make -C helm test-render`. Unit:
+  `make test-release-tooling`. `make test`.
+  End-to-end: no pipeline marker exercises the chart; validation's Helm part deploys the
+  release, whose registry must start from the rendered profile for its scenario pod and
+  payments check to pass.
+  Owed by validation: `tests.yml`, job `test · test-deployment-packaging` — `make -C helm
+  test-render` passes with the registry cases.
+
+## 12. Storefront charts: a derived `ca_bundle_path` and the secret overlay
+
+Delivers both storefront charts' CA option deriving `ca_bundle_path`, the payments-key
+option removed, the payments-check pod without payments variables, and the local release's
+token in the runtime secret overlay (D3, D11, D12, D19's charts bullet; deployment-state "A
+storefront chart trusts a deployment-supplied CA bundle", "A storefront's secrets reach it
+through its secret overlay", "The local release rehearses a deployment's payments
+interface", "A storefront checks its payments access from its own container" (Helm half),
+and MODIFIED "A storefront's configuration reaches it through its configuration system").
+
+Files: `helm/charts/storefront/{values.yaml, values.schema.json,
+templates/deployment.yaml, templates/_helpers.tpl, templates/tests/payments-check-test.yaml,
+tests/test_render.py}` and the same under `helm/charts/bare-metal-storefront/`;
+`helm/values.schema.json`; `helm/local-values.yaml`, `helm/bare-metal-release-values.yaml`,
+`helm/fixtures/payments-ed25519-values.yaml`; `helm/Makefile` (`LOCAL_SECRETS`);
+`helm/scripts/topology-secrets.sh`; `helm/tests/test_release_topology.py`;
+`tools/payments-lane-double/README.md`'s Helm passage.
+
+- [ ] 12.1 The CA option derives `ca_bundle_path` (D3). With the option set, each chart
+  mounts the bundle as before and adds `[Settlement.arkhai_payments].ca_bundle_path`,
+  naming the mounted file, to the rendered configuration where `config` states none, and
+  fails rendering naming both paths where `config` states another; it sets no
+  `SSL_CERT_FILE`. Unset, it adds neither mount nor setting.
+- [ ] 12.2 The key in the secret overlay (D19, D11). Remove both charts' `paymentsKey`
+  option, its helpers, its `api_key_env` checks and its environment entry, from the
+  Deployment and the payments-check pod alike; the values schemas no longer accept it.
+  `helm/local-values.yaml` and `helm/bare-metal-release-values.yaml` drop `paymentsKey` and
+  `api_key_env`; `topology-secrets.sh` writes the seller token as
+  `[Settlement.arkhai_payments].api_key` into each storefront's runtime Secret's
+  `storefront.secrets.toml` (`arkhai-bob-runtime` and the bare-metal release's) from
+  `lane_env.py seller-token`, instead of creating `seller-payments-key`, which leaves
+  `LOCAL_SECRETS`. `helm/fixtures/payments-ed25519-values.yaml` follows.
+- [ ] 12.3 The payments-check pod (D12). It mounts the configuration, the secret overlay
+  and the CA bundle, and carries the identity credential and no payments variable, from
+  the helpers the Deployment uses.
+- [ ] 12.4 Render cases (D3, D11, D12, D19; the deltas' scenarios), in both charts'
+  `tests/test_render.py` and `helm/tests/test_release_topology.py`: the derived
+  `ca_bundle_path` from a ConfigMap and from a Secret source; a stated different path
+  refused naming both; neither mount nor setting when unset; no `SSL_CERT_FILE` and no
+  payments variable in the Deployment or the check pod; a `config` stating `api_key`
+  refused by the values schema; the bare-metal pod environment holding only the
+  configuration directory and the signing credential, with and without the CA option
+  (the MODIFIED requirement's scenario); the payments-only case and the check pod mounting
+  no data volume, as before; the local topology's Secrets without `seller-payments-key`.
+- [ ] 12.5 **Verification checkpoint.** Chart render: `make -C helm test-render`. Unit:
+  `make test-release-tooling`, `make test-payments-lane-double`. `make test`.
+  End-to-end: no pipeline marker exercises the charts; validation's Helm part deploys the
+  release and runs every `-payments-check` pod (D12), which must pass with the key from the
+  runtime secret overlay and trust from the derived `ca_bundle_path`. Serving payment
+  scenarios on Helm is not owed (D11).
+  Owed by validation: `tests.yml`, jobs `test · test-deployment-packaging` — `make -C helm
+  test-render` and release tooling pass with the new cases — and
+  `test · test-payments-lane-double` — passes.
+
+## 13. Closeout
+
+Replanned against the redesign: replaces the unstarted section-6 closeout this plan first
+ended with. Confirm and promote the verified design, then archive last (D1–D23 and every
+delta requirement). The eleven parts follow `openspec/README.md#plan-closeout-requirements`
+in order. Closeout changes no code: a part needing a code, lock, chart, or test change
 returns the change to implementation.
 
-- [ ] 6.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene` and read every
-  comment and docstring sections 1–5 added: the kit's `access_check.py` and balance view,
-  the double's modules, fixtures and generator, the storefront CLIs' subcommands, the
-  compose overlay and lane targets, the helper, the charts' values and templates. Each
-  states current behaviour and every fixture value's label is present. A needed
-  correction returns to implementation.
-- [ ] 6.2 **Import placement — confirm.** Every import sections 1–5 added is at module
+- [ ] 13.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene` and read every
+  comment and docstring sections 1–12 added: the kit's `access_check.py`, key resolution
+  and balance view; the mediation credential and dispute credential; the registry's
+  loader; the double's modules, fixtures and generator; the storefront CLIs' subcommands;
+  the Compose files, profiles and secret overlays and the lane targets; the helper; the
+  charts' values and templates. Each states current behaviour and every fixture value's
+  label is present. A needed correction returns to implementation.
+- [ ] 13.2 **Import placement — confirm.** Every import sections 1–12 added is at module
   level unless a verified cycle or recorded lazy-load reason keeps it local. A needed move
   returns to implementation.
-- [ ] 6.3 **Documentation compliance.** Check D1–D12 against `openspec/README.md`'s
+- [ ] 13.3 **Documentation compliance.** Check D1–D23 against `openspec/README.md`'s
   placement rules and the promotion record below, recording a disposition per decision,
   and check every promoted statement against the code.
-- [ ] 6.4 **Narrative compression.** Compress section notes to final behaviour,
+- [ ] 13.4 **Narrative compression.** Compress section notes to final behaviour,
   validation evidence, deferred work, and destinations, moving durable rationale into
   `design.md` first.
-- [ ] 6.5 **Roadmap currency.** In `docs/development/ROADMAP.md`:
+- [ ] 13.5 **Roadmap currency.** In `docs/development/ROADMAP.md`:
   - Goal 8's open-gap row "Payment scenarios skip without a target, and hostile payment
     and dispute-authority cases cannot be driven deterministically": narrow it to the
     dispute-authority double, controls and evidence classes `add-arkhai-payments-lane-double`
@@ -1483,55 +1969,80 @@ returns the change to implementation.
   - "Payment qualification boundaries": replace "none configures a payments target" with
     the lanes' double and what it does not establish;
   - add an unowned gap: payment scenarios are not served on the local Helm release,
-    revisited when an external run fails in a way the charts shape (D11).
-- [ ] 6.6 **Campaign index currency.** In `openspec/changes/README.md`, set this change's
+    revisited when an external run fails in a way the charts shape (D11);
+  - add an unowned gap: the registry is configured by profile env files rather than the
+    Dynaconf loader the provisioning service uses, from the profiles and `secretProfile`
+    this change gives it (D13, D16);
+  - add an unowned gap: the signing credential `ARKHAI_IDENTITY_CREDENTIAL` is the one
+    secret not delivered as a secret profile, revisited when a change decides identity
+    credential delivery (D19, the design's Open Questions).
+- [ ] 13.6 **Campaign index currency.** In `openspec/changes/README.md`, set this change's
   row to its archived state and link, and update the Reach hosts campaign's graph lines
   naming it. Note in `qualify-real-provisioning-by-scenario`'s row that its storefront
-  chart CA option is delivered here and its delta's same-named requirement must be dropped
-  or reduced to a MODIFIED at its reverification; note in
-  `add-arkhai-payments-lane-double`'s row its D1/D7 revision and the fixture-identity
-  guard it owns. Run `make check-change-index`. Archive cleanup, not closeout, releases
-  the dependents.
-- [ ] 6.7 **Packaging.** Run `make check-packaging` and resolve every failure, then
+  chart CA option is delivered here as a chart-derived `ca_bundle_path`, the storefront's
+  payments key being `api_key` in its secret overlay, and that its delta's same-named
+  requirement must be dropped or reduced to a MODIFIED at its reverification; note in
+  `add-arkhai-payments-lane-double`'s row its D1/D7 revision, the fixture-identity guard it
+  owns, and the `MediationCredential` carrying a resolved token it inherits. Run
+  `make check-change-index`. Archive cleanup, not closeout, releases the dependents.
+- [ ] 13.7 **Packaging.** Run `make check-packaging` and resolve every failure, then
   `make check-architecture-change CHANGE=add-mvp-payments-lane-double`. No `.agents/`,
   `.claude/` or `.codex/` edit is planned; if one was made, run `make check-agent-skills`.
-- [ ] 6.8 **End-to-end pipeline.** Confirm the pipeline passes on the closeout candidate
+- [ ] 13.8 **End-to-end pipeline.** Confirm the pipeline passes on the closeout candidate
   and record the run, its result, and the scenarios exercising this change:
   `e2e_bare_metal_payment_deal` and `e2e_credits_payment_deal` passing without skips,
   `e2e_vm_payment_deal`'s stages 1–2 passing and 3–4 reporting the mediation blocked
-  skip, and each lane's `check-payments` at setup; and the Helm part's payments check. A
-  pipeline that cannot run for an unrelated reason is recorded as a blocker naming its
-  cause and owner, and what it gates is unrun.
-- [ ] 6.9 **Promotion.** Write and record in the promotion record:
+  skip, each lane's `check-payments` at setup, and every lane's other markers green on the
+  stacks configured from committed files; and the Helm part's payments check with the
+  registry started from its rendered profile. A pipeline that cannot run for an unrelated
+  reason is recorded as a blocker naming its cause and owner, and what it gates is unrun.
+- [ ] 13.9 **Promotion.** Write and record in the promotion record:
   - `openspec/specs/test-compatibility/architecture.md`, "Payment evidence ownership":
     the in-lane double, what it mirrors and serves, what its results establish and do
     not, and the VM scenario's mediation prerequisite; its "Lifecycle contract evidence"
     sentence on the kit's fake, made accurate;
   - `docs/development/TESTING.md`, "Private Service Dependencies": the lanes' payments
-    target, the per-lane settings, `LANE_OWNED`, the pinned unanswerable authority, and
-    the principle that a double mirrors its producer's API unless there is a compelling
-    reason to deviate;
-  - `docs/development/ARCHITECTURE.md`, "Testing strategy": that principle as a
-    repository-wide rule;
-  - `docs/development/DEPLOYMENT_AND_CONFIG.md`: under "Kubernetes: ConfigMap and Secret
-    mounting", the storefront charts' CA bundle and payments-key options; under
-    "Settlement consumer configuration and cutover", the storefront payments check; and
-    under "Release topology", that a local release configures a service through the same
-    values a deployment uses, never development-only modes, with the payments double
-    enabled once per namespace;
-  - `docs/operator-handbook.md`: a new "Payments access" section — the CA ConfigMap and
-    key Secret a deployment supplies, `check-payments`, and the Helm test;
+    target, the runner's shared and per-lane payments profiles, `LANE_OWNED`, the pinned
+    unanswerable authority, and the principle that a double mirrors its producer's API
+    unless there is a compelling reason to deviate; and its lane paragraph on
+    `PROVISIONING_MODE`, made accurate for the overlays' interpolated profile;
+  - `docs/development/ARCHITECTURE.md`, "Testing strategy": the double-mirroring
+    principle as a repository-wide rule; "Deployment topology": the secret-profile rule
+    (principle 3) and the committed-stack-configuration rule (principle 4);
+  - `docs/development/DEPLOYMENT_AND_CONFIG.md`:
+    - "Profile-based configuration": the secret-profile rule — a service takes its
+      secrets from a secret profile or overlay file, never from an environment variable
+      its configuration names — and the signing credential as its one exception;
+    - "Kubernetes: ConfigMap and Secret mounting": the storefront charts' CA option and
+      its derived `ca_bundle_path`, and the payments key in the runtime secret overlay;
+    - "Registry descriptor configuration": the registry's profile env files, the chart's
+      rendered `config-production.env`, `secretProfile`, and the retired key Secrets;
+    - "Per-domain stack composition": the committed-stack-configuration rule, each
+      stack's overlays, registry and provisioning profiles and secret overlays, base files
+      holding topology only with no committed fallback, `PROVISIONING_MODE` as the one
+      value a run supplies, and the full stack's command, replacing the generated
+      environment files;
+    - "Settlement consumer configuration and cutover": the storefront payments check, its
+      steps, and `api_key` and `ca_bundle_path`;
+    - "Release topology": that a local release configures a service through the same
+      values a deployment uses, never development-only modes, with the payments double
+      enabled once per namespace;
+  - `docs/operator-handbook.md`: a new "Payments access" section — the CA ConfigMap a
+    deployment supplies, the payments key in the storefront's runtime secret overlay,
+    `check-payments`, and the Helm test; and a new "Registry secret profile" section —
+    moving `auth.bootstrapKeySecret` and `auth.adminKeySecret` to a Secret holding
+    `config-<profile>.env` named by `secretProfile`;
   - `tools/README.md`: the payments double as a lane collaborator, the third kind of
     tool, beside `issue-discovery` and `frp-grant-admission`;
   - the deltas into `openspec/specs/test-compatibility/spec.md`,
-    `openspec/specs/deployment-state/spec.md` and `openspec/specs/market-composition/spec.md`,
-    written by the archive (6.11);
+    `openspec/specs/deployment-state/spec.md`, `openspec/specs/market-composition/spec.md`
+    and `openspec/specs/settlement-configuration/spec.md`, written by the archive (13.11);
   - `openspec/specs/README.md`: no new capability or companion, so no entry; confirm.
-- [ ] 6.10 **Documentation citations.** Run
+- [ ] 13.10 **Documentation citations.** Run
   `make check-doc-citations CHANGE=add-mvp-payments-lane-double` after promotion and
   resolve every match, then `openspec validate add-mvp-payments-lane-double --strict`.
-- [ ] 6.11 **Archival.** `openspec archive add-mvp-payments-lane-double -y`, merging the
-  three deltas into `openspec/specs/`; then point the index row at the archive directory.
+- [ ] 13.11 **Archival.** `openspec archive add-mvp-payments-lane-double -y`, merging the
+  four deltas into `openspec/specs/`; then point the index row at the archive directory.
 
 ## Design promotion record
 
@@ -1539,13 +2050,24 @@ returns the change to implementation.
 |---|---|
 | D1 The double's project and its place among tools | `tools/README.md`; `tools/payments-lane-double/README.md` |
 | D2 Lanes running the double; the VM scenario's mediation prerequisite and dispute credential | `openspec/specs/test-compatibility/spec.md` (delta); `openspec/specs/test-compatibility/architecture.md`, "Payment evidence ownership"; `e2e-tests/README.md` |
-| D3 Committed lane CA and leaf; injection in Helm | `tools/payments-lane-double/README.md`; `openspec/specs/deployment-state/spec.md` (delta); `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Kubernetes: ConfigMap and Secret mounting" |
+| D3 Committed lane CA and leaf; the CA option deriving `ca_bundle_path` | `tools/payments-lane-double/README.md`; `openspec/specs/deployment-state/spec.md` (delta); `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Kubernetes: ConfigMap and Secret mounting" |
 | D4 No production guard; the unusable pinned authority | `openspec/specs/test-compatibility/spec.md` (delta); `docs/development/TESTING.md`, "Private Service Dependencies"; `docs/development/ROADMAP.md` |
 | D5 The balance read | `openspec/specs/market-composition/spec.md` (delta); `kit/arkhai-payments/README.md` |
 | D6 Lane-owned targets fail | `openspec/specs/test-compatibility/spec.md` (delta); `docs/development/TESTING.md`, "Private Service Dependencies" |
 | D7 The pinned authority through the registry | `docs/development/TESTING.md`, "Private Service Dependencies"; `e2e-tests/README.md` |
 | D8 The double mirrors the service | `openspec/specs/test-compatibility/spec.md` (delta); `docs/development/TESTING.md`; `docs/development/ARCHITECTURE.md`, "Testing strategy" |
-| D9 Per-lane settings | `e2e-tests/README.md`, "Shared payment-scenario configuration"; `docs/development/TESTING.md` |
-| D10 Implementation cadence | change history only |
-| D11 The local release's payments rehearsal and the chart options | `openspec/specs/deployment-state/spec.md` (delta); `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Release topology"; `docs/operator-handbook.md`, "Payments access"; `docs/development/ROADMAP.md` (the Helm-serving gap) |
+| D9 Lane configuration in committed files, never generated by Make (principle 4) | `openspec/specs/deployment-state/spec.md` (delta); `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Per-domain stack composition"; `docs/development/ARCHITECTURE.md`, "Deployment topology" |
+| D10 Round 1's implementation cadence | change history only |
+| D11 The local release's payments rehearsal | `openspec/specs/deployment-state/spec.md` (delta); `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Release topology"; `docs/operator-handbook.md`, "Payments access"; `docs/development/ROADMAP.md` (the Helm-serving gap) |
 | D12 `check-payments` | `openspec/specs/deployment-state/spec.md` (delta); `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Settlement consumer configuration and cutover"; `docs/operator-handbook.md`, "Payments access" |
+| D13 The cleanup in this change | change history only; `docs/development/ROADMAP.md` (the registry's Dynaconf gap) |
+| D14 The runner's shared and per-lane payments profiles | `openspec/specs/test-compatibility/spec.md` (delta); `docs/development/TESTING.md`, "Private Service Dependencies"; `e2e-tests/README.md`, "Shared payment-scenario configuration" |
+| D15 Development binds in the overlays; base files keep topology | `openspec/specs/deployment-state/spec.md` (delta); `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Per-domain stack composition"; `dev-env/identities/README.md` |
+| D16 The registry's profile env files and chart | `openspec/specs/deployment-state/spec.md` (delta); `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Registry descriptor configuration"; `docs/operator-handbook.md`, "Registry secret profile"; `core/registry/README.md` |
+| D17 Provisioning site profiles | `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Per-domain stack composition"; `dev-env/identities/README.md` |
+| D18 The environment targets retired | `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Per-domain stack composition"; `docs/development/VALIDATION_RUNBOOK.md`, "Bring Up Local Stack"; `docker-compose.yml`'s header; `e2e-tests/README.md` |
+| D19 Secrets through secret overlays; trust through configuration (principle 3) | `openspec/specs/settlement-configuration/spec.md` (delta); `openspec/specs/deployment-state/spec.md` (delta); `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Profile-based configuration" and "Kubernetes: ConfigMap and Secret mounting"; `docs/development/ARCHITECTURE.md`, "Deployment topology"; `kit/arkhai-payments/README.md`; `kit/arkhai-mediation/README.md`; `docs/development/ROADMAP.md` (the signing-credential gap) |
+| D20 The provisioning mode | `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Per-domain stack composition"; `docs/development/TESTING.md`'s lane paragraph |
+| D21 Tests holding restated values | change history only; the tests are their own record |
+| D22 Implementation cadence | change history only |
+| D23 Storefront wallet keys in the secret overlays | `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Per-domain stack composition"; `dev-env/identities/README.md` |
