@@ -19,7 +19,7 @@ from typing import Sequence
 
 import pytest
 
-import change_clone as clones
+from change_workflow import clone as clones
 from change_workflow import running
 
 CHANGE = "seed-pool"

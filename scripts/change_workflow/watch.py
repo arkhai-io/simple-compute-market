@@ -13,9 +13,9 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from change_workflow.common import Entry, StepError
-from change_workflow.records import TRANSCRIPTS
-from change_workflow.stream import call_summary, tool_summary
+from .common import Entry, StepError
+from .records import TRANSCRIPTS
+from .stream import call_summary, tool_summary
 
 
 def newest_progress(reviews: Path) -> Path | None:

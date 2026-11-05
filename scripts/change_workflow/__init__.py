@@ -1,21 +1,37 @@
-"""The tooling that runs the steps of an OpenSpec change and keeps its workflow log.
+"""The workflow's engine: the tooling that runs the steps of an OpenSpec change,
+keeps its workflow log, and computes its next step.
 
-Each module holds one concern, on the standard library alone:
+Each module holds one concern, on the standard library alone, and reaches its
+siblings by relative import:
 
+- `common` — what every part shares: the repository a command acts on, found from
+  the working directory, the engine's error, and its clock;
 - `graph` — the workflow's graph: its nodes, their exits, joins, and guards, which
-  the next-step computation interprets;
+  the next-step computation interprets, and the steps and review kinds it declares,
+  the engine's only list of either;
 - `diagram` — the architecture's hand-laid diagram of the graph, held to the table
-  (`make change-graph`);
-- `outcome` — the outcome a step ends with, checked against its schema;
+  (`scripts/change-workflow check graph`);
+- `outcome` — the outcome a step ends with, checked against its schema, and the
+  records a triage's outcome names;
 - `log` — the change's workflow log, the orchestrating session's notes, and the
   owner's branch decisions; it is the log's only writer;
 - `records` — the numbered records in a change's `reviews/`, the validation they
   hold, and the commits they name;
+- `find` — a change's directory by its name, active or archived, and its records,
+  in this checkout or the owner's workspace;
+- `index` — the change index, `openspec/changes/README.md`: its rows, each row's
+  status and dependencies, and the check that holds it to the change directories;
+- `tasks` — the check that every task of a change's task list sits under its own
+  section's heading;
+- `next_step` — the next-step computation: where a change stands, read from its
+  files and its log, and the step it names;
 - `steps` — the step table: each step's skill, permissions, and models;
 - `stream` — a Claude Code run's event stream, transcript, progress, and denials;
+- `subagents` — the denials a run's subagents met, read from their transcripts;
 - `harness` — the Claude Code and Codex commands, and how each harness says it
   cannot serve a model;
 - `cost` — what each run cost;
+- `cost_report` — what a change's runs cost, by step and by round;
 - `running` — the record of each run in progress in a checkout, which a round view
   reads before it moves the checkout;
 - `wrapper` — running a step unattended, and resuming a waiting run;
@@ -23,8 +39,20 @@ Each module holds one concern, on the standard library alone:
 - `watch` — following the steps as they run, and a run's denials report;
 - `convert` — a change's records brought into the workflow log's format, on the
   owner's confirmation, with the direction to where the change stands;
-- `cli` — the command line, which `scripts/run_change_step.py` runs.
+- `clone` — a change's own clone of the owner's workspace: creating, reading, and
+  removing it;
+- `history` — a change's history copied from its clone into the owner's workspace;
+- `round_view` — an implementation round shown as uncommitted changes for the owner
+  to read;
+- `push` — the guarded push of a change's own branch;
+- `skills` — the check that every agent skill is loaded from its one shared source;
+- `hook` — what a Claude Code session re-reads after its context is compacted;
+- `cli` — the engine's command, `scripts/change-workflow`, its subcommands
+  dispatched to the modules above.
 
-Contract: openspec/specs/change-workflow/spec.md, "Unattended step runs end with a
-structured outcome".
+Beside them, `workflow.mk` is the make fragment whose targets call the command, for
+a repository's `Makefile` to include; it carries no compatibility promise.
+
+Contract: openspec/specs/change-workflow/spec.md, CW-r3ka, CW-5qne, CW-m7fk, and
+CW-c2tw.
 """

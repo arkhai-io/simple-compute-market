@@ -8,8 +8,12 @@ in [`openspec/README.md`](../../openspec/README.md); the status a change is in, 
 what it waits on, are in its row of the
 [change index](../../openspec/changes/README.md). The workflow's contract is the
 [`change-workflow` specification](../../openspec/specs/change-workflow/spec.md),
-and why it is shaped as it is, its
-[architecture companion](../../openspec/specs/change-workflow/architecture.md).
+organized by its [`index.md`](../../openspec/specs/change-workflow/index.md); how
+the workflow and its engine work, and why they are shaped as they are, its
+[`README.md`](../../openspec/specs/change-workflow/README.md). This repository's own
+part — its validation parts, its Helm validation namespace, and how it provides each
+role the workflow asks of a repository — is
+[`market-change-workflow`](../../openspec/specs/market-change-workflow/README.md).
 
 ## Skills
 
@@ -40,7 +44,7 @@ memory.
 
 Every step but the review opens an interactive Claude Code session. With
 `UNATTENDED=1` the same target runs the step headless instead, through
-`scripts/run_change_step.py`: held to its step's permissions in
+`scripts/change-workflow start <step> <change> --unattended`: held to its step's permissions in
 `.claude/change-steps.toml`, on its step's models, ending with an outcome appended
 to the change's workflow log. `make plan` unattended resumes the design step's
 session; `FRESH=1` starts a fresh one. The review always runs unattended.
@@ -53,7 +57,7 @@ one naming no node is refused. Run interactively, a
 step records its own outcome as its last act:
 
 ```text
-python3 scripts/run_change_step.py record <change> <step> --outcome '<the outcome, as JSON>'
+scripts/change-workflow record <change> <step> --outcome '<the outcome, as JSON>'
 ```
 
 It checks the outcome as the wrapper checks an unattended run's, and appends it with
@@ -76,8 +80,8 @@ name its path from the repository root. A wrapper stopped by SIGTERM logs its ru
 leaves no line.
 
 Every step that commits — design, planning, implementation, triage, closeout, and
-archive cleanup — pushes each commit right after through `make push-branch`, the
-guarded push of exactly `HEAD`, the only push a step may make. A pushed branch
+archive cleanup — pushes each commit right after through `scripts/change-workflow
+push` (`make push-branch`), the guarded push of exactly `HEAD`, the only push a step may make. A pushed branch
 starts nothing: validation dispatches the end-to-end pipeline itself.
 
 Validation dispatches CI workflows too, for evidence only a run of one produces.
@@ -120,16 +124,16 @@ That order is a graph: one table in `scripts/change_workflow/graph.py` declares
 each step — a review by its kind, a triage by the kind of review it triages — its
 exits, the records a join waits for, the guards on each exit with the step that
 satisfies each, and the entry guards without which a step cannot do its work.
-The `change-workflow` architecture shows it as a diagram laid out by hand,
-`docs/development/diagrams/change-workflow-graph.drawio` and its SVG export, and a
-test fails when the source, or the copy of it the export embeds, draws a box or an
+The `change-workflow` `README.md` shows it as a diagram laid out by hand,
+`openspec/specs/change-workflow/diagrams/change-workflow-graph.drawio` and its SVG
+export, and a test fails when the source, or the copy of it the export embeds, draws a box or an
 edge the table does not, or misses one. A change to the table redraws the source in
 draw.io, from what `make change-graph` reports — each box and edge to add, change,
 or remove — and exports the SVG again with the source embedded; the SVG is never
 edited by hand.
-`scripts/change_next_step.py` routes on the exit the last step named, and on your
+`scripts/change-workflow next` routes on the exit the last step named, and on your
 latest direction, checking each against the table, as the `change-workflow`
-specification's "The next step is computed from the files" requires: an unmet
+specification's CW-4rqr, "The next step is computed from the files", requires: an unmet
 guard names the step that satisfies it, and an exit the table does not allow comes
 to you.
 
@@ -137,25 +141,70 @@ A step that finds the change in the wrong state refuses and says why. Design and
 implementation take only an active change. Closeout archives the change as its last
 step, so every step after it — the closeout review, its triage, validation, archive
 cleanup — finds the change under `openspec/changes/archive/` by its name
-(`python3 scripts/find_change.py <change>`). `make review KIND=closeout` refuses a
+(`scripts/change-workflow find <change>`). `make review KIND=closeout` refuses a
 change that is not archived, and `make archive-cleanup` one that is not. Planning,
 the merge, closeout, and archive cleanup ask the next-step computation as they
 start, and go on only when it names them — archive cleanup also when it names a validation
 before it, which it then checks for your waiver.
 
 `make check-change CHANGE=<change>` runs a step's closing checks — comment hygiene,
-the agent skills, the change's citations and task list, the change index, and the
-pinned strict OpenSpec validation — printing only failures and one pass line. `make
+the agent skills, the change's citations and task list, the change index, each
+indexed capability's `spec.md` against its `index.md` with the change's deltas
+counted (`make check-spec-index`), and the pinned strict OpenSpec validation —
+printing only failures and one pass line. `make
 check-tasks CHANGE=<change>` fails when a numbered task sits under another section's
 heading; the steps that act on a task list run it first.
 
 Ask the owner questions in prose, never through a multiple-choice selector
 (`AGENTS.md`, "Asking the owner").
 
+## The engine's command
+
+Everything the workflow's engine does is reached through one executable,
+`scripts/change-workflow`, whose package is `scripts/change_workflow/`; nothing in
+the repository imports the package. Its subcommands:
+
+```text
+scripts/change-workflow start <step> <change> [--unattended] [--allow …] [--sections …] [--session …] [--arguments …] [--fresh]
+scripts/change-workflow next | record | note | review | find | clone | clone-remove | clone where
+scripts/change-workflow resume | log | watch | denials | round-view | round-done | cost | history | push
+scripts/change-workflow check index | check tasks | check push | check skills | check round-view | check graph
+scripts/change-workflow hook post-compaction | convert
+```
+
+`start` opens a step: interactively by default, headless with `--unattended`. It
+refuses an archived change for design, planning, implementation, and the merge, and
+refuses while a round view is open; it opens the change's workflow log with a line
+carrying the log's format before any step runs. `start orchestrate <change>` opens
+the orchestrating session on the step table's `[orchestrator]` row. Every subcommand
+exits 0 on success, 1 on a refusal or a failed check with its reason on standard
+error, and 2 on a usage error. `find --json <change>` prints the change's `name`,
+`directory`, `archived`, `records`, and the record set's `format`; `clone where
+<change>` prints the change's clone, or nothing when it is worked in place, and
+refuses an unknown change or an unusable clone.
+
+The workflow's make targets — `make design`, `make review`, `make change-next`, and
+the rest — are a fragment of the package, `scripts/change_workflow/workflow.mk`,
+which the root `Makefile` includes after setting this repository's values
+(`CHANGE_WORKFLOW_MERGE_FROM` and `CHANGE_WORKFLOW_REVIEW_BASE`, both `dev`). Each
+target is a thin call of the command.
+
+Which of these another party may rely on is tiered in the `change-workflow`
+specification (CW-5qne) and its
+[`README.md`](../../openspec/specs/change-workflow/README.md): the subcommands, their
+flags, exit-status categories, and structured outputs, and the skills' names and
+argument forms, are public; `hook post-compaction` and `convert` are provisional;
+`check graph` and the unattended-run marker are internal; a report written for a
+person carries no promise; and the make targets and `CHANGE_WORKFLOW_*` variables
+are a convenience outside the surface, changed without a compatibility promise. A
+change to the workflow names, in its proposal, each public interface it changes and
+whether the change is compatible (`openspec/README.md`, "Change documentation
+requirements").
+
 ## Orchestrating a change
 
 `make orchestrate CHANGE=<change>` opens one Claude Code session that carries the
-change through its steps: it runs the step `scripts/change_next_step.py` computes,
+change through its steps: it runs the step `scripts/change-workflow next` computes,
 each unattended through its `make` target, shows each step's message as written,
 and sends your reply back as written. It forms no view of a finding or a design
 question. It commits nothing while a step runs. It also creates the change's clone
@@ -207,7 +256,7 @@ guard that is not met, a confirmed return — by telling the orchestrating sessi
 which records your direction, `by: owner`:
 
 ```text
-python3 scripts/run_change_step.py note <change> orchestrator --by owner --next validate --target closeout --decision "validate HEAD before closeout" --reason "<why, and what it skips>"
+scripts/change-workflow note <change> orchestrator --by owner --next validate --target closeout --decision "validate HEAD before closeout" --reason "<why, and what it skips>"
 ```
 
 `--next` names the step, `--kind` a review's kind or the kind of review a triage
@@ -230,7 +279,7 @@ named their exits — or which has numbered records and no log, is read as nothi
 until it is converted, and the computation brings it to you with the command:
 
 ```text
-python3 scripts/run_change_step.py convert <change>
+scripts/change-workflow convert <change>
 ```
 
 Run between steps, never while one runs. Alone, it writes nothing: it shows the
@@ -250,7 +299,7 @@ effort. No step may edit it: a rule or model changes as a tracked edit, which yo
 commit, or which the orchestrating session commits on your word in the change's
 clone.
 The orchestrating session reads each run's denials from its log line
-(`python3 scripts/run_change_step.py denials <change> <seq>`) and proposes the
+(`scripts/change-workflow denials <change> <seq>`) and proposes the
 narrowest rule for a gap, either granted for one run or as a table edit. After a
 deny-rule denial no other tool may do the work, except where the rule exists only
 to keep file writes on the Edit and Write tools — the table's comments name those
@@ -265,13 +314,13 @@ and `REVIEW_EFFORT` (below) are yours for a review run by hand, not the table's.
 resumed, and is never added to the table: the run's log line records it as
 `granted`, and the step's next run is held to its table again. A fresh run takes
 it through its step's target, several rules separated by `;`, each passed to the
-script as its own `--allow`:
+command as its own `--allow`:
 
 ```text
 make validate CHANGE=<change> UNATTENDED=1 ALLOW='Bash(gh run download *);Bash(make check-packaging)'
 ```
 
-A resumed run takes it as `--allow` on `python3 scripts/run_change_step.py resume`.
+A resumed run takes it as `--allow` on `scripts/change-workflow resume`.
 Since a grant commits nothing, it recovers a stop met between a round's sections
 being committed and its triage, when no table edit may be committed. A deny rule is
 never granted.
@@ -285,8 +334,8 @@ leaves its work uncommitted for its resume, or, on your word, for the orchestrat
 session to commit to a separate work-in-progress branch; one stopped by a refusing
 guard or a moved `HEAD` commits nothing. Work left uncommitted after a step finished is that
 step's defect: the orchestrating session brings it to you and commits it only on
-your word. The branch is the guard against unfinished work: only `dev` is
-protected.
+your word. The branch is the guard against unfinished work: a change's branch
+is not protected; only `main` and `dev` are.
 
 **The merge before closeout.** Once the pre-closeout triage advances the change,
 the merge step (`change-merge`) brings the branch the change lands on into the
@@ -425,8 +474,8 @@ change-history CHANGE=<change>` in the clone, which copies the archived change's
 `reviews/` and the validation evidence its records name
 (`.snapshot/validation/<commit>/`, `.snapshot/e2e-logs/<run>/`) into your
 workspace at the same paths. Your workspace therefore holds the history of every
-cleaned-up change, and a session working another change finds it with `python3
-scripts/find_change.py --records <change>`, which looks in its own checkout first,
+cleaned-up change, and a session working another change finds it with
+`scripts/change-workflow find --records <change>`, which looks in its own checkout first,
 then in your workspace. The copy is safe to run again: it copies what is missing,
 leaves what is the same, extends a file the clone has since grown — the workflow log
 and transcripts only grow — and refuses, naming it and overwriting nothing, any file
@@ -549,13 +598,13 @@ the directory in place; for a change worked in its own clone it also copies it i
 your workspace, which holds the history of every cleaned-up change ("History and
 removal", above).
 
-`workflow.jsonl` is written by `scripts/run_change_step.py` alone: each unattended
+`workflow.jsonl` is written by `scripts/change-workflow` alone: each unattended
 run's outcome with its session, commit, model, cost, and denials; each interactive
 run's outcome as `record` appends it, marked `interactive`; each `round` line; each
 `orchestrator` line, a decision naming the run it resolves or whose denials it read
 and, for your direction, the target it directs; and a conversion's `convert` line.
-Every line carries the log's format marker, `"format": 2`. `python3
-scripts/run_change_step.py log <change>` prints it.
+Every line carries the log's format marker, `"format": 2`.
+`scripts/change-workflow log <change>` prints it.
 
 The three steps that edit the index — triage when a phase-closing review's triage
 advances the change, closeout, and archive cleanup — run `make check-change-index`

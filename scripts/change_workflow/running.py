@@ -25,7 +25,7 @@ from datetime import timezone
 from pathlib import Path
 from typing import Callable, Iterator
 
-from change_workflow.common import Clock, utc_now
+from .common import Clock, utc_now
 
 RUNS = "change-runs"
 

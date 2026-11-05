@@ -6,80 +6,72 @@ Real-provisioning offers stay closed to general buyers until the observations th
 qualification owes pass on a frozen, reviewed candidate
 (`docs/development/VALIDATION_RUNBOOK.md#observations-the-qualification-owes`).
 `docs/development/ROADMAP.md` Goal 1 records none made that way.
-`qualify-arkhai-real-provisioning` made them as an operator-run procedure, driving
-the shipped buyer and typed operator APIs from orchestration kept outside this
-repository. Those results are not qualification, because they were not bound to a
-frozen candidate. The procedure also cannot be rerun from this repository: its
-steps, its correlation and the half of its pass criteria that no helper asserts
-live with whoever ran it.
 
-End-to-end scenarios are defined here. A deployment supplies only the topology a
-scenario runs against: its services, secrets, accounts, funding and hosts. This
-change makes the owed observations into scenarios. Any operator with a conforming
-deployment can then run them on a candidate, and the criteria cannot drift from
-the runbook.
+`qualify-arkhai-real-provisioning` made them as an operator-run procedure, driving the
+shipped buyer and typed operator APIs from orchestration kept outside this repository.
+Those results are not qualification, because they were not bound to a frozen candidate.
+The procedure also cannot be rerun from this repository: its steps, its correlation and
+the half of its pass criteria that no helper asserts live with whoever ran it.
 
-Today's real-provisioning modules deal through the typed driver and settle on
-Alkahest, so by the runbook's own terms they make none of these observations: a
-deal driven through the typed operator clients does not make observation 2. The
-payment scenarios buy through the shipped buyer in `arkhai.payments.v1`, but only
-against mock or controlled delivery.
+Today's real-provisioning modules deal through the typed driver and settle on Alkahest,
+so by the runbook's own terms they make none of these observations. No purchase settled
+in `arkhai.payments.v1` runs in any lane: without a payments target every payment
+scenario is a blocked skip.
 
 ## What Changes
 
-- **Scenarios** for observations 2, 4, 5 and 6, each buying through the shipped
-  buyer CLI and paying in `arkhai.payments.v1` TEST, against a real-provisioning
-  target:
-  - **Observation 2:** two concurrent CPU-only VM deals. The first guest's SSH
-    heartbeat continues while the second is created and torn down. Both leases
-    expire naturally. The management client's and libvirtd's process generations
-    are observed before, during and after.
-  - **Observation 4:** the bare-metal normal cycle. The pinned relay endpoint, the
-    nonroot tenant and wrong-key refusal are checked. Bounded working-data seeding
-    precedes an ordinary reclaim that the scenario starts with the buyer's teardown,
-    and its verification follows it. There is no GPU check: GPU hosts are a
-    different scenario.
-  - **Observation 5:** the bare-metal successor cycle: the foreign-descendant
-    refusal, the queued same-job retry, held capacity and notification, then
-    fixture-only repair and completion.
-  - **Observation 6:** repeat registration and adoption as a stage. Typed reads
-    are taken before and after reapplying the canonical registrations and one
-    publication cycle, including relay quarantine and the consumed-UID history.
-- **Correlation** in each scenario of the buyer run, Agreement, signed receipt and
-  transaction, reservation, jobs, relay lease and grant, and the deployment's
-  funding reference. Each link is read from the authority that owns it, and a link
-  not read is reported unproven.
-- **An outcome per observation:** made, failed or unproven. It is written with its
-  correlation and candidate binding to an operator-supplied restricted output
-  directory, never into the repository.
-- **Observability in the typed clients.** Reads an observation needs that no typed
-  client offers are added to the owning service and its client: a VM host's
-  management and hypervisor process generations, and a bare-metal host's
-  consumed-UID history.
-- **Configuration the deployment supplies.** Each relay the real-provisioning
-  target names gains an optional `admission_log` setting: a harness-local file of
-  the admission plugin's documented log lines, from which the scenario reads each
-  lease's grant admission. The scenarios reuse the existing `PAYMENTS` settings for
-  the payments target and parties, and use only the payments interface this
-  repository already imports. Like every real-provisioning module, they are in no
-  default lane, and they report a blocked skip without a target.
-- **In-cluster payments over HTTPS.** The storefront charts gain an option to trust
-  a deployment-supplied CA bundle through `SSL_CERT_FILE`. A kit test pins that an
-  `https://<service>.<namespace>.svc.cluster.local` payments origin is accepted
-  and plain HTTP to it refused. The HTTPS requirement is unchanged.
-- **A programmable mock dispute authority** as a module of the chart. It is the
-  `arkhai.mediation.v1` double, run with a deployment-supplied identity and
-  programmed by the scenario before a run, so that payment listings publish and
-  any dispute-side call is deterministic.
-- **Method amendment.** The scenarios join the accepted operator-procedure
-  method, which is retained, as the repeatable and deterministic way to make
-  these observations. The runbook, testing guide and test-compatibility documents
-  are amended.
+- **Locally verifiable buyer purchases.** A shared buyer-purchase stage set buys through
+  the shipped buyer (`market buy`, `market bare-metal buy`) in `arkhai.payments.v1`. It
+  runs in the VM and bare-metal lanes against mock provisioning and the in-lane payments
+  double from `add-mvp-payments-lane-double`.
+- **Shared post-settlement stages.** The canonical compute deal's stages from fulfillment
+  onwards are keyed on the deal's settlement reference, so the Alkahest and
+  buyer-purchase sets share them. A lease's ending is shared only among scenarios that
+  end the same way: the watchdog-expiry stages by the Alkahest set and the VM purchase,
+  while the bare-metal purchase runs its own buyer-teardown stage.
+- **External-topology qualification scenarios** extend those purchases against a
+  configured real-provisioning target and payments target, adding only the real-host
+  observations:
+  - **Observation 2:** two concurrent CPU-only VM purchases. The first guest's SSH
+    heartbeat continues while the second is created and torn down. Both leases end
+    through the watchdog's expiry path. The management client's and libvirtd's process
+    generations are read before, during and after.
+  - **Observations 4 and 5:** the bare-metal normal cycle, then the successor and refusal
+    cycle. Each lease is ended by the buyer's teardown. There is no GPU check.
+  - **Observation 6:** repeat registration and adoption across both hosts. The consumed-UID
+    history is read through the existing working-data operator route.
+- **Correlation and payment checks.** Each stage logs the identifiers it reads. Each
+  observation's outcome is made only when every stage it requires passed, and unproven
+  when one it requires skipped. Grant admission is checked against the key recorded for
+  each lease. Each
+  transaction is checked against its Agreement and receipt. The buyer's balance drop
+  must equal the scenario's own debits, under a dedicated-account precondition.
+- **One listing per real resource** offers every mechanism the stack composes. Adoption
+  requires the adopting module's own mechanism.
+- **A host diagnostics VM operator job** reports boot, kernel, running-guest count, and
+  systemd facts for libvirtd, the buyer tunnel client and an optional management unit.
+  The operator client submits it like every operator action, and a typed
+  `HostDiagnostics` parse reads the succeeded job's result.
+- **Target configuration.** The VM host gains an optional `management_unit`. Each relay
+  access gains an optional `admission_log`: a harness-local file of the admission
+  plugin's documented log lines.
+- **In-cluster payments over HTTPS.** The storefront charts gain an option to trust a
+  deployment-supplied CA bundle through `SSL_CERT_FILE`, and a kit test pins the
+  cluster-service HTTPS origin.
+- **A pinned dispute authority.** The deployment pins an authority identity with a real
+  payments account. No authority service or double is built here.
+- **Runbook amendments.**
+  - Observation 2's leases end through the watchdog's expiry path.
+  - Observation 4 drops its GPU clause, since GPU work stays owed for each GPU offer.
+  - Observation 5's notification is the reclaim job's recorded error and scheduled retry.
+- **Testing guidance.** `TESTING.md` distinguishes locally verifiable from
+  external-topology end-to-end scenarios, says what each covers, and states how external
+  evidence is supplied.
 
-No new settlement mechanism, payments API, funding call, default pipeline lane,
-host-specific configuration or LIVE-money test is introduced. Funding a buyer stays
-the deployment's step: the testing boundary leaves operator test funds to the
-payments target (`docs/development/TESTING.md#private-service-dependencies`).
+No new settlement mechanism, funding call, default lane for the external scenarios,
+host-specific configuration or LIVE-money test is introduced. Funding the buyer, and any
+setup needing knowledge this repository lacks, is the deployment's topology. External
+evidence is supplied free-form by the deployment's operator; no record format is defined.
 
 ## Capabilities
 
@@ -89,48 +81,58 @@ None.
 
 ### Modified Capabilities
 
-- `test-compatibility`: qualification observations are made by scenarios against a
-  configured deployment. The configuration a deployment supplies, the outcome
-  record and the correlation a scenario owes.
+- `test-compatibility`: locally verifiable and external-topology scenarios; shared
+  buyer-purchase and post-settlement stages; the qualification scenarios and their
+  target fields; one listing per real resource.
+- `physical-provisioning`: the host diagnostics VM operator job.
+- `deployment-state`: the storefront charts' trusted CA bundle option.
+
+## Dependencies
+
+- `add-mvp-payments-lane-double` gates implementation: the locally verifiable purchases
+  need its in-lane payments double, the payer balance read, and its lane CA trust.
 
 ## Impact
 
-- `e2e-tests/tests/e2e/roles/scenarios/vms/` and `.../bare_metal/`: new scenario
-  modules, or a buyer-purchase mode of the real-provisioning modules (design
-  decides). Shared payment, SSH, buyer-CLI, working-data and real-provisioning
-  helpers are reused.
+- `e2e-tests/tests/e2e/roles/helpers/compute_deal_stages.py` and a new buyer-purchase
+  stage set; their source checks under `e2e-tests/tests/unit/`.
+- New local payment scenarios in `e2e-tests/tests/e2e/roles/scenarios/vms/` and
+  `.../bare_metal/`, and three qualification modules.
+- The VM real-provisioning driver's listing creation and adoption.
 - `e2e-tests/src/e2e_harness/real_provisioning_target.py` and
-  `config-real-provisioning-target.yml.example`: each relay's `admission_log`.
-- The owning services and their typed clients: signed admin reads for the missing
-  observations, with tests at the levels that own them.
-- `e2e-tests/pyproject.toml`: markers for the new scenarios.
-- `helm/charts/storefront`, `helm/charts/bare-metal-storefront`: the trusted CA
-  bundle option. `helm/Chart.yaml` and a new subchart: the mock dispute authority
-  module.
+  `config-real-provisioning-target.yml.example`: `management_unit` and `admission_log`.
+- `e2e-tests/pyproject.toml`: markers for the new modules.
+- `domains/vms/provisioning`: the host diagnostics action, its playbook, mock default
+  output, and the operator client's `diagnose_host` and `HostDiagnostics`, with tests at
+  the levels that own them.
+- `helm/charts/storefront`, `helm/charts/bare-metal-storefront`: the CA bundle option and
+  render tests.
 - `kit/arkhai-payments` tests: the cluster-service HTTPS origin.
-- Documentation: `docs/development/VALIDATION_RUNBOOK.md` §29,
-  `docs/development/TESTING.md`, `openspec/specs/test-compatibility/`,
-  `docs/development/ROADMAP.md` Goal 1, and `openspec/changes/README.md`.
-- No database migration is expected. The new admin reads are additive.
+- No database migration.
 
 ## Permanent documentation impact
 
-- [ ] `docs/development/ARCHITECTURE.md`
+- [x] `docs/development/ARCHITECTURE.md`
 - [x] Existing subsystem specification
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
 ### Knowledge to promote
 
-- Qualification observations are made by scenarios against a configured deployment,
-  and the configuration and funding the deployment supplies:
-  `openspec/specs/test-compatibility/spec.md` and `architecture.md`, at
-  `#payment-evidence-ownership`.
-- How to run the scenarios on a candidate, and how outcomes are recorded:
-  `docs/development/VALIDATION_RUNBOOK.md` §29, and `docs/development/TESTING.md`,
-  *Accepted Arkhai purchase qualification*.
-- The target's `admission_log`: `docs/development/TESTING.md` and the target
+- The two kinds of end-to-end scenario, minimal extension, topology ownership,
+  stepping rather than waiting, and free-form external evidence:
+  `docs/development/TESTING.md` (a new section), with the repository-wide rule in
+  `docs/development/ARCHITECTURE.md`'s testing philosophy.
+- The buyer-purchase and shared post-settlement stages, and the qualification
+  scenarios: `openspec/specs/test-compatibility/spec.md`, and `architecture.md` at
+  `#ordinary-arkhai-purchase-evidence`; `docs/development/TESTING.md`, "The
+  real-provisioning lane".
+- Running the scenarios on a candidate, and the amended observations 2, 4 and 5:
+  `docs/development/VALIDATION_RUNBOOK.md` §25 and §29.
+- `management_unit` and `admission_log`: `docs/development/TESTING.md` and the target
   example.
-- The new admin reads: the owning services' specifications.
-- Goal 1's qualification gap gains this change as its owner:
-  `docs/development/ROADMAP.md`.
+- The host diagnostics job: `openspec/specs/physical-provisioning/spec.md` and the VM
+  IaC README.
+- The CA bundle option: `openspec/specs/deployment-state/spec.md` and
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`.
+- Goal 1's qualification row and the new unowned gaps: `docs/development/ROADMAP.md`.

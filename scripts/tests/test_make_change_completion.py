@@ -100,6 +100,32 @@ def test_loads_lazy_make_completion(repository: Path) -> None:
     assert _complete(repository, "make tri", ["make", "tri"], preload=False) == ["triage"]
 
 
+@pytest.fixture
+def including(repository: Path) -> Path:
+    """A repository whose Makefile, like this one's, takes the workflow's targets from
+    the engine's fragment."""
+    (repository / "Makefile").write_text(
+        f"CHANGE_WORKFLOW_MERGE_FROM := dev\ninclude {ROOT}/scripts/change_workflow/workflow.mk\n"
+        "check-change:\n\t@true\n", "utf-8")
+    return repository
+
+
+def test_the_fragments_targets_complete(including: Path) -> None:
+    assert _complete(including, "make change-n", ["make", "change-n"]) == ["change-next"]
+    assert _complete(including, "make round-", ["make", "round-"]) == [
+        "round-done", "round-view", "round-view-closed"]
+    assert _complete(including, "make check-ch", ["make", "check-ch"]) == [
+        "check-change", "check-change-index"]
+
+
+def test_change_names_complete_on_the_fragments_targets(including: Path) -> None:
+    assert _complete(including, "make round-view CHANGE=orch",
+                     ["make", "round-view", "CHANGE", "=", "orch"]) == ["orch-one", "orch-two"]
+    assert _complete(including, "make archive-cleanup CHANGE=old",
+                     ["make", "archive-cleanup", "CHANGE", "=", "old"]) == [
+                         "old-change", "older-change"]
+
+
 def test_missing_changes_directory(tmp_path: Path) -> None:
     assert _complete(tmp_path, "make triage CHANGE=",
                      ["make", "triage", "CHANGE", "=", ""]) == []

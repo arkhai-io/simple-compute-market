@@ -15,13 +15,12 @@ from pathlib import Path
 import pytest
 
 from change_workflow import diagram, graph
-from change_workflow.common import STEPS
 from change_workflow.diagram import DIAGRAMS, EXPORT, SOURCE, drawn
-from change_workflow.graph import (ARCHIVE_CLEANUP, CLOSEOUT_TRIAGE, DESIGN, NODES, OWNER,
+from change_workflow.graph import (ARCHIVE_CLEANUP, CLOSEOUT_TRIAGE, DESIGN, NODES, OWNER, STEPS,
                                    TABLE, WAIT, Node)
 
 ROOT = Path(__file__).resolve().parents[2]
-ARCHITECTURE = Path("openspec/specs/change-workflow/architecture.md")
+ARCHITECTURE = Path("openspec/specs/change-workflow/README.md")
 
 EXITS = [(declaration.node, exit_) for declaration in TABLE for exit_ in declaration.exits]
 
@@ -247,7 +246,8 @@ def test_the_export_embeds_the_diagram_it_draws() -> None:
 
 def test_the_architecture_shows_the_export_and_names_its_source() -> None:
     document = (ROOT / ARCHITECTURE).read_text("utf-8")
-    to_diagrams = "../../../" + DIAGRAMS.as_posix()
+    # The diagram lives in its capability, beside the document that shows it.
+    to_diagrams = DIAGRAMS.relative_to(ARCHITECTURE.parent).as_posix()
 
     assert f"]({to_diagrams}/{EXPORT.name})" in document
     assert f"]({to_diagrams}/{SOURCE.name})" in document
@@ -288,7 +288,9 @@ def test_the_report_lists_each_departure_and_fails(capsys) -> None:
     status = diagram.main(ROOT / SOURCE, table)
 
     assert status == 1
-    assert capsys.readouterr().out == (
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err == (
         f"{SOURCE} departs from the table; redraw it, and export its SVG from it with the "
         "source embedded:\n"
         "- no edge draws ('triage_closeout', 'design', ('a return',))\n"

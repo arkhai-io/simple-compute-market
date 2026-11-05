@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/post_compaction_context.py\"",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && scripts/change-workflow hook post-compaction",
             "timeout": 30,
             "statusMessage": "Restoring repository guidance after compaction"
           }

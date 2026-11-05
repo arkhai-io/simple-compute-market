@@ -9,17 +9,36 @@ package, so the check understands exactly the keywords the schema uses.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Callable
 
-from change_workflow.common import ROOT, StepError
-from change_workflow.graph import TargetError, node_of
+from .common import FORMAT, StepError, repository_root
+from .graph import TargetError, node_of, review_phase
 
-SCHEMA = ROOT / ".agents" / "change-outcome.schema.json"
+# The schema's place in the repository the command acts on.
+SCHEMA = Path(".agents/change-outcome.schema.json")
+# The schema's `$id` names the record-set format its outcomes belong to.
+_SCHEMA_ID = re.compile(r":format:(\d+)$")
 
 
-def load_schema(path: Path = SCHEMA) -> dict[str, Any]:
-    return json.loads(path.read_text("utf-8"))
+def schema_format(schema: dict[str, Any]) -> int | None:
+    """The record-set format the schema's `$id` states; None when it states none."""
+    identifier = schema.get("$id")
+    match = _SCHEMA_ID.search(identifier) if isinstance(identifier, str) else None
+    return int(match.group(1)) if match else None
+
+
+def load_schema(path: Path | None = None) -> dict[str, Any]:
+    """The outcome schema at `path`, or the repository's own; refused when its `$id`
+    states another format than the one this engine records, since its outcomes would
+    be logged as lines of a format they do not belong to."""
+    where = repository_root() / SCHEMA if path is None else path
+    schema = json.loads(where.read_text("utf-8"))
+    if (stated := schema_format(schema)) != FORMAT:
+        raise StepError(f"{where} states format {stated} in its $id, and this engine records "
+                        f"format {FORMAT}")
+    return schema
 
 
 _TYPES: dict[str, Callable[[Any], bool]] = {
@@ -30,7 +49,7 @@ _TYPES: dict[str, Callable[[Any], bool]] = {
     "integer": lambda value: isinstance(value, int) and not isinstance(value, bool),
 }
 # Keywords that describe a schema rather than constrain a value.
-_ANNOTATIONS = {"$schema", "title", "description"}
+_ANNOTATIONS = {"$schema", "$id", "title", "description"}
 
 
 def schema_problems(value: Any, schema: dict[str, Any], path: str = "outcome") -> list[str]:
@@ -91,9 +110,12 @@ def harness_schema(schema: dict[str, Any]) -> dict[str, Any]:
     Claude Code makes the schema a tool's input schema, and the API refuses a top-level
     `allOf`, `anyOf`, or `oneOf` there, so the per-outcome requirements are left out:
     the property descriptions still name them, and the wrapper checks the full schema
-    when the run ends, logging an outcome that misses one as `stopped`.
+    when the run ends, logging an outcome that misses one as `stopped`. The `$id`
+    constrains nothing a step writes: it names the format for the engine, and a tool's
+    input schema is given only what the harness enforces.
     """
-    return {key: value for key, value in schema.items() if key not in ("allOf", "anyOf", "oneOf")}
+    return {key: value for key, value in schema.items()
+            if key not in ("allOf", "anyOf", "oneOf", "$id")}
 
 
 def outcome_problems(outcome: Any, schema: dict[str, Any] | None = None) -> list[str]:
@@ -110,3 +132,52 @@ def outcome_problems(outcome: Any, schema: dict[str, Any] | None = None) -> list
         except TargetError as exc:
             problems.append(f"outcome.next names no node: {exc}")
     return problems
+
+
+_RECORD_NAME = re.compile(r"^\d+-([a-z]+(?:-[a-z]+)*)$")
+
+
+def triaged_problems(triaged: Any, reviews: Path) -> list[str]:
+    """Why `triaged`, the records a triage's outcome names, does not name what it
+    triaged; empty when it does.
+
+    It is a non-empty list of distinct names, each a numbered record in `reviews` as
+    its file is named without `.md`, `NN-<kind>`, with its triage file beside it, and
+    at least one of them a review, `-external` included; the others may be the
+    validation, the owner's notes, or the orchestrating session's observations
+    triaged with it. Whether a record belongs to the triage the computation meant
+    cannot be checked here: the triage file beside it is that triage's mark.
+    """
+    if triaged is None:
+        return ["the triage names no records in triaged"]
+    if not isinstance(triaged, list) or not triaged:
+        return [f"triaged is not a non-empty list of records: {triaged!r}"]
+    problems = []
+    seen: set[str] = set()
+    kinds = []
+    for name in triaged:
+        if not isinstance(name, str) or not (match := _RECORD_NAME.match(name)):
+            problems.append(f"{name!r} is not a record's name, NN-<kind>")
+            continue
+        if name in seen:
+            problems.append(f"{name} is named twice")
+            continue
+        seen.add(name)
+        if not (reviews / f"{name}.md").is_file():
+            problems.append(f"{name} is no record in reviews/")
+        elif not (reviews / f"{name}.triage.md").is_file():
+            problems.append(f"{name} has no triage file beside it")
+        kinds.append(match.group(1))
+    if not problems and not any(review_phase(kind.removesuffix("-external")) is not None
+                                for kind in kinds):
+        problems.append(f"{', '.join(triaged)} names no review")
+    return problems
+
+
+def triage_outcome_problems(outcome: Any, reviews: Path) -> list[str]:
+    """Why a triage's outcome does not name what it triaged; empty when it does, or
+    when it ends without an exit — a question, a block, or a stop — and so names
+    nothing the next step is routed on."""
+    if not isinstance(outcome, dict) or outcome.get("outcome") not in ("finished", "returned"):
+        return []
+    return triaged_problems(outcome.get("triaged"), reviews)

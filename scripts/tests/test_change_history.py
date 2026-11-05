@@ -16,9 +16,9 @@ from typing import Sequence
 
 import pytest
 
-import change_clone
-import change_history as history
-import find_change
+from change_workflow import clone as change_clone
+from change_workflow import find as find_change
+from change_workflow import history
 
 CHANGE = "seed-pool"
 ARCHIVED = Path("openspec/changes/archive/2026-10-22-seed-pool")
@@ -279,9 +279,12 @@ def test_the_command_fails_naming_each_refusal(
 
     assert history.main(["sync", CHANGE], root=clone) == 1
 
-    out = capsys.readouterr().out
+    out, err = capsys.readouterr()
     assert "Refused, the workspace's file left as it is:" in out
     assert f"{(REVIEWS / '01-implementation.md').as_posix()}: the workspace's copy" in out
+    # The exit 1's reason is on standard error too, not only in the report.
+    assert (f"ERROR: not copied, the workspace's file left as it is: "
+            f"{(REVIEWS / '01-implementation.md').as_posix()}: the workspace's copy") in err
 
 
 def test_the_command_refuses_outside_a_clone(
