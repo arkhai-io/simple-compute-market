@@ -549,7 +549,7 @@ def _file_backed_ledger(tmp_path):
 
 def test_no_write_commits_between_a_decisions_host_read_and_its_end(tmp_path):
     """A host disabled while a decision runs commits only after it, so no
-    decision acts on a host state it no longer has."""
+    decision acts on a host state that has changed under it."""
     ledger, hosts = _file_backed_ledger(tmp_path)
 
     ledger.probe(claim=VM_CLAIM)

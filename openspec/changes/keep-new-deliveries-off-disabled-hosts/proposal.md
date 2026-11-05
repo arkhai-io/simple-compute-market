@@ -126,17 +126,54 @@ read a host record's enabled flag" is owned by this change and closes with it.
 
 ### Knowledge to promote
 
-| Decision | Provisional permanent destination |
-|---|---|
-| A backed declaration whose provider needs a host is offered only with a registered, enabled host, applied at admission, rebind, scheduling, and both projections (D3/D12, D8) | `openspec/specs/site-capacity/spec.md` (admission and projection requirements), `openspec/specs/fulfillment/spec.md` (scheduling requirement), via the delta specs |
-| A listing whose delivery has no usable host is the same as a listing with no host, and neither appears; why projected `enabled` follows admission (D5, D12) | `openspec/specs/site-capacity/architecture.md`, "Declared capacity and connection identity" |
-| Host eligibility reaches the kit layers through a composition-supplied seam read in the caller's session, beside the host requirement (D2, D6, D7) | `openspec/specs/site-capacity/architecture.md`; `docs/development/ARCHITECTURE.md`'s resource-pools paragraph on the host requirement, restated to name the usable-host rule |
-| New placement never uses an unusable host; an existing assignment keeps its host (D4) | `openspec/specs/fulfillment/spec.md`, via the delta spec |
-| What disabling a host means (D11) | `openspec/specs/physical-provisioning/spec.md`, via the delta spec; `docs/operator-handbook.md`, the host-documents bullet "A host the document does not name is left as it is"; `docs/development/DEPLOYMENT_AND_CONFIG.md`, the host retention paragraph |
-| A host record contributes nothing to a projection's capacity or attributes; admission, scheduling, and projection learn only the ids of hosts taking new delivery (D11, 11 F1) | `openspec/specs/site-capacity/spec.md` and `openspec/specs/physical-provisioning/spec.md`, via the delta specs |
-| The ledger states each declaration's offered state in one read, from which every projection and the snapshot are built (11 F2) | `openspec/specs/site-capacity/spec.md`, via the delta spec; `openspec/specs/site-capacity/architecture.md` |
-| A change of host state emits no capacity event (D9) | `openspec/specs/site-capacity/architecture.md` |
-| Host definitions documents keep retaining unnamed hosts, on the remaining reason (D10) | `openspec/specs/physical-provisioning/architecture.md`, its retention paragraph restated; `docs/development/DEPLOYMENT_AND_CONFIG.md`'s host retention paragraph restated on the same reason |
-| The gap closes; "Host records are used only where a connection is made" restated | `docs/development/ROADMAP.md` Goal 1 |
-| Each layer's proof of the usable-host rule, the offered read, and the bare-metal publication stages | `docs/development/TESTING.md`, "Host Requirement Enforcement" |
-| pools-6 drops its claim to the rule (D1) | `openspec/changes/pools-6-fair-scheduling-policy/` proposal and design, and its row in `openspec/changes/README.md` |
+Provisional permanent destinations, one bullet per decision in `design.md`:
+
+- D1, pools-6 drops its claim to the rule: `openspec/changes/pools-6-fair-scheduling-policy/`
+  proposal and design, and its row in `openspec/changes/README.md`.
+- D2, host eligibility reaches the kit layers through a composition-supplied seam
+  read in the caller's session: `openspec/specs/site-capacity/architecture.md`;
+  `docs/development/ARCHITECTURE.md`'s resource-pools paragraph on the host
+  requirement, restated to name the usable-host rule.
+- D3 and D12, a backed declaration whose provider needs a host is offered only with
+  a registered, enabled host: `openspec/specs/site-capacity/spec.md` (admission and
+  projection requirements) and `openspec/specs/fulfillment/spec.md` (scheduling
+  requirement), via the delta specs; and, for D12, the principle that a listing
+  whose delivery has no usable host is the same as a listing with no host:
+  `openspec/specs/site-capacity/architecture.md`, "Declared capacity and connection
+  identity".
+- D4, new placement never uses an unusable host and an existing assignment keeps
+  its host: `openspec/specs/fulfillment/spec.md`, via the delta spec.
+- D5, why projected `enabled` follows admission:
+  `openspec/specs/site-capacity/architecture.md`, "Declared capacity and connection
+  identity".
+- D6, the seam and the rule beside the host requirement:
+  `openspec/specs/site-capacity/architecture.md`; `docs/development/ARCHITECTURE.md`'s
+  resource-pools paragraph on the host requirement.
+- D7, a composition that supplies no report applies none:
+  `openspec/specs/site-capacity/architecture.md`; `docs/development/ARCHITECTURE.md`'s
+  resource-pools paragraph on the host requirement.
+- D8, where the rule is applied and how a refusal answers:
+  `openspec/specs/site-capacity/spec.md` and `openspec/specs/fulfillment/spec.md`,
+  via the delta specs.
+- D9, a change of host state emits no capacity event:
+  `openspec/specs/site-capacity/architecture.md`, "Event privacy and convergence".
+- D10, host definitions documents keep retaining unnamed hosts, on the remaining
+  reason: `openspec/specs/physical-provisioning/architecture.md`, its retention
+  paragraph restated; `docs/development/DEPLOYMENT_AND_CONFIG.md`'s host retention
+  paragraph restated on the same reason.
+- D11, what disabling a host means, and that a host record contributes nothing to
+  a projection's capacity or attributes, admission, scheduling, and projection
+  learning only the ids of hosts taking new delivery (with 11 F1):
+  `openspec/specs/physical-provisioning/spec.md` and
+  `openspec/specs/site-capacity/spec.md`, via the delta specs;
+  `docs/operator-handbook.md`, the host-documents bullet "A host the document does
+  not name is left as it is"; `docs/development/DEPLOYMENT_AND_CONFIG.md`, the host
+  retention paragraph.
+- 11 F2 and 21 F2, the ledger states each declaration's offered state in one read,
+  from which every projection and the snapshot are built:
+  `openspec/specs/site-capacity/spec.md`, via the delta spec;
+  `openspec/specs/site-capacity/architecture.md`.
+- The gap closes, and "Host records are used only where a connection is made" is
+  restated: `docs/development/ROADMAP.md` Goal 1.
+- Each layer's proof of the usable-host rule, the offered read, and the bare-metal
+  publication stages: `docs/development/TESTING.md`, "Host Requirement Enforcement".
