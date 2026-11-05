@@ -17,9 +17,11 @@ from compute_provisioning_client import (
     ComputeProvisioningClient,
     ComputeProvisioningError,
 )
+from compute_provisioning_ansible import ssh_connection
 from compute_provisioning_contracts import (
     FulfillmentRequestBody,
     FulfillmentScheduleRequest,
+    HostCreate,
 )
 from market_resource_pools_contracts import PoolCreate
 from compute_provisioning_service import container as _container_module
@@ -59,6 +61,14 @@ async def clients(client_and_queue):
             id=POOL, label=POOL, provider="vm.ansible",
             policy_tags={"advertisable_modes": ["vm"], "capacity_backing": "backed", "deliverable_modes": ["vm"]},
             provider_config={"playbook_path": "playbooks/vm-operations.yaml"},
+        ))
+        # The usable declaration's host is registered, so it is offered; the
+        # address is a documentation-range placeholder nothing connects to.
+        await provisioning_client.family.register_host(HostCreate(
+            host_id="kvm-host-requirement",
+            connection=ssh_connection(
+                ssh_host="192.0.2.1", ssh_user="ubuntu", key_path="/keys/id"
+            ),
         ))
         await admin.register_resource(
             "hosted", pool_id=POOL, host_id="kvm-host-requirement", total_units=4,

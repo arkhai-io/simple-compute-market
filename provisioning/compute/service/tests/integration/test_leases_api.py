@@ -28,7 +28,9 @@ from compute_provisioning_client import (
     ComputeProvisioningClient,
     ComputeProvisioningError,
 )
+from compute_provisioning_ansible import ssh_connection
 from compute_provisioning_contracts import (
+    HostCreate,
     LeaseForceRelease,
     LeaseReleaseOversight,
     LeaseRetryRelease,
@@ -45,8 +47,21 @@ _START = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
 def _seeded():
-    """The site ledger, with the KVM host the lease tests reserve on."""
+    """The site ledger, with the KVM host the lease tests reserve on.
+
+    The host is registered as well as declared: the ledger admits against a
+    declaration only while the host it names is registered and enabled. Its
+    address is a documentation-range placeholder nothing connects to.
+    """
     ledger = _container_module.resolved_capacity_ledger_service
+    hosts = _container_module.resolved_host_authority
+    if hosts.get_host("kvm1") is None:
+        hosts.register_host(HostCreate(
+            host_id="kvm1",
+            connection=ssh_connection(
+                ssh_host="192.0.2.1", ssh_user="ubuntu", key_path="/keys/id"
+            ),
+        ))
     if "compute-kvm1-001" not in {r["resource_id"] for r in ledger.list_resources()}:
         ledger.register_resource(
             resource_id="compute-kvm1-001",

@@ -1,14 +1,18 @@
 """Allowlisted physical-resource inventory for site projection APIs.
 
-The resource-pool projection is built from capacity declarations alone. A
-declaration is the authority for a Physical Resource's shape, quantity, pool,
-attributes, and enablement, so it projects whether or not it names a host and
-whether or not that host is registered. Host records are connection identity,
-used where a connection is made: at dispatch, which refuses a host with no
-record. Joining them here would add nothing a consumer reads, would leak the
-provisioner's connection address to storefronts, and would let a host record
-hide a declaration. See
-openspec/specs/site-capacity/spec.md#requirement-the-resource-pool-projection-is-built-from-capacity-declarations.
+The resource-pool projection is built from capacity declarations, every one of
+them, as the site ledger's offered read gives them. A declaration is the
+authority for a Physical Resource's shape, quantity, pool, and attributes. Its
+``enabled`` arrives as the site offers it: a declaration in a backed pool whose
+provider needs a host is offered only when the host it names takes new
+delivery, so one with no usable host arrives not enabled, and every view built
+from it here, such as one reporting availability, follows. This module reads no
+host record: what the projection learns of hosts is that one judgement, made by
+the ledger from the identifiers of the hosts taking new delivery. Host records
+are connection identity, joined to a declaration only where a connection is
+made, at dispatch; joining them here would leak the provisioner's connection
+address to storefronts. See
+openspec/specs/site-capacity/spec.md#requirement-admission-applies-the-pool-providers-host-requirement.
 
 Every domain view is contributed: this module projects what is neutral and
 attaches the views the composed projections return, naming none of them. A
@@ -67,9 +71,11 @@ def load_capacity_resource_inventory(
 ) -> list[dict[str, Any]]:
     """Project every capacity declaration, with the views contributed for it.
 
-    One entry per declaration that records its pool, in declaration order.
-    Nothing is read from host records, and no host identifier or address is
-    added to an entry. Each pool row is read and resolved once, and every
+    ``capacity_resources`` is the ledger's offered read, so each declaration's
+    ``enabled`` is whether the site offers it, and its views are built from
+    that. One entry per declaration that records its pool, in declaration
+    order. Nothing is read from host records, and no host identifier or address
+    is added to an entry. Each pool row is read and resolved once, and every
     declaration of the pool is given that context; a declaration whose pool
     has no row, or a row whose declarations do not resolve, projects with no
     views.

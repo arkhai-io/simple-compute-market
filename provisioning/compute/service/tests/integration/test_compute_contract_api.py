@@ -9,7 +9,8 @@ from compute_provisioning_client import (
     ComputeProvisioningClient,
     ComputeProvisioningError,
 )
-from compute_provisioning_contracts import LeaseState
+from compute_provisioning_ansible import ssh_connection
+from compute_provisioning_contracts import HostCreate, LeaseState
 from market_fulfillment import SettlementRecord, SettlementRecordState
 from market_site.db import ReservationState
 from market_site.ledger import ALLOCATION_MODE_EXCLUSIVE
@@ -29,8 +30,19 @@ def _compute_provisioning_client(base_url: str, *, transport):
     )
 
 
+def _register_host(host_id: str) -> None:
+    """Register the host a declaration names: the ledger admits against it only
+    while it is registered and enabled. The address is a documentation-range
+    placeholder nothing connects to."""
+    _container_module.resolved_host_authority.register_host(HostCreate(
+        host_id=host_id,
+        connection=ssh_connection(ssh_host="192.0.2.1", ssh_user="ubuntu", key_path="/keys/id"),
+    ))
+
+
 def _leased_vm_reservation() -> dict:
     ledger = _container_module.resolved_capacity_ledger_service
+    _register_host("kvm1")
     ledger.register_resource(
         resource_id="contract-kvm1",
         total_units=1,
@@ -51,6 +63,7 @@ def _leased_vm_reservation() -> dict:
 
 def _leased_bare_metal_reservation() -> dict:
     ledger = _container_module.resolved_capacity_ledger_service
+    _register_host("bm-contract-1")
     ledger.register_resource(
         resource_id="contract-bare-metal-1",
         total_units=1,

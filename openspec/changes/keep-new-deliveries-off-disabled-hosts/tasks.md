@@ -252,14 +252,22 @@ running service's behaviour through its typed clients (D2, D5, D7, D9, D11, 11 F
 "Host inventory is connection identity"; fulfillment "A provider declares whether
 its delivery needs a host"). Touches `provisioning/compute` and its service.
 
-- [ ] 4.1 `HostAuthority` (`provisioning/compute/src/compute_provisioning/hosts/service.py`)
+- [x] 4.1 `HostAuthority` (`provisioning/compute/src/compute_provisioning/hosts/service.py`)
   implements `DeliverableHosts`: `deliverable_host_ids(db)` returns the ids of
   hosts whose `enabled` is true, read in the given session, so a host with no
   record never appears. Library integration
   (`provisioning/compute/tests/integration/test_host_authority.py`): a disabled
   host leaves the set and an enabled one returns; an unregistered id is never in
   it.
-- [ ] 4.2 The container (`provisioning/compute/service/src/compute_provisioning_service/container.py`)
+  *Done:* structurally, without importing the protocol, so
+  `compute-provisioning` gains no bound for it; `disable_host`'s docstring
+  says what disabling now does. Library integration (the real authority on
+  SQLite) covers the cases listed, plus a second test on file-backed SQLite
+  showing the report reads the caller's own uncommitted disable while another
+  session still sees the host. `provisioning/compute`: 527 passed.
+  *Beyond the plan:* `arkhai-compute-provisioning` takes a minor bump to
+  0.25.0 for the new public method.
+- [x] 4.2 The container (`provisioning/compute/service/src/compute_provisioning_service/container.py`)
   passes `host_authority` as `deliverable_hosts` to `CapacityLedgerService` and
   to `SqlAlchemySchedulingUnitOfWork`, the same object to both (D2).
   `_capacity_resource_inventory` (`provisioning/compute/service/src/compute_provisioning_service/main.py`)
@@ -272,10 +280,27 @@ its delivery needs a host"). Touches `provisioning/compute` and its service.
   beside the existing host-requirement wiring test): the ledger and the
   scheduling unit of work receive the same `deliverable_hosts`, the host
   authority (D7).
-- [ ] 4.3 Unit (`provisioning/compute/service/tests/unit/services/test_capacity_inventory.py`):
+  *Done:* the host authority and its codecs are declared ahead of the ledger
+  in the container, which they do not depend on. *Correction:* the wiring
+  test is in `tests/unit/test_authority_composition.py`, where the
+  container's other identity-of-collaborator tests are; `test_provider_registry.py`
+  holds no container test. It asserts, on a real container, that the ledger's
+  report and the scheduling unit of work's are the host authority, that the
+  scheduler uses that unit of work, and that both hold the same requirement.
+  The integration conftest composes its own ledger and scheduler mirroring the
+  container, so it now passes the host authority to both as well; without
+  that, 4.4 would not exercise the production wiring. *Beyond the plan:*
+  `arkhai-compute-provisioning-service` takes a minor bump to 0.23.0 and
+  raises its bounds to `arkhai-kit-site>=0.13.0`,
+  `arkhai-kit-fulfillment>=0.7.0`, and `arkhai-compute-provisioning>=0.25.0`;
+  locks refreshed. Its code imports neither `DeliverableHosts` nor any
+  resource-pools name newly, so that bound stays.
+- [x] 4.3 Unit (`provisioning/compute/service/tests/unit/services/test_capacity_inventory.py`):
   a declaration handed in not enabled projects not enabled, and its
   `bare_metal.v2` view reports itself unavailable.
-- [ ] 4.4 Application integration through the typed clients
+  *Done:* beside the enabled case; the module docstring now says the builder
+  is handed the offered read.
+- [x] 4.4 Application integration through the typed clients
   (`provisioning/compute/service/tests/integration/test_host_requirement_api.py`,
   extended, or a sibling `test_deliverable_hosts_api.py`), in a backed bare-metal
   or VM pool whose provider needs a host: disabling a host through the family
@@ -290,15 +315,67 @@ its delivery needs a host"). Touches `provisioning/compute` and its service.
   enabled; a declaration in an unbacked pool naming a disabled host keeps its own
   `enabled`; an existing assignment on a host disabled after scheduling is
   returned by an equivalent schedule retry and its create is refused at dispatch.
-- [ ] 4.5 Run the provisioning suites (`uv run pytest provisioning/compute/tests
+  *Done:* a sibling, `test_deliverable_hosts_api.py`, application integration
+  through the family, pool, site-admin, site, and compute clients against the
+  in-process app, five tests: in a backed VM pool, disabling the host makes
+  probe and reserve answer no capacity, makes the constrained schedule of the
+  hold admission had already placed there answer 422 `no_eligible_resource`
+  (scheduling reaches no executor in any case, so that status is the
+  evidence), projects the declaration not enabled in
+  `site-resource-pools`, leaves it out of `site-capacity-buckets` and the
+  snapshot, keeps the operator's listing at its own `enabled`, and leaves the
+  capacity version unchanged; enabling restores each, and the hold is then
+  placed. A bare-metal declaration's `bare_metal.v2` view reports itself
+  unavailable while its host is disabled and available again on enable. A
+  declaration naming an unregistered host is refused by probe and reserve,
+  projected not enabled, left out of the buckets and the snapshot, and refused
+  as a constrained schedule target for a hold on a usable declaration, until
+  the host is registered, when the hold is placed on it. An unbacked pool's
+  declaration naming a disabled host keeps its own `enabled`. An assignment
+  whose host is disabled after scheduling is returned unchanged by a retry;
+  its `begin_fulfillment` answers `dispatch_pending` with no job recorded;
+  and once the host is enabled one convergence cycle submits the create (one
+  job), so the disabled host was what refused it.
+- [x] 4.5 Run the provisioning suites (`uv run pytest provisioning/compute/tests
   provisioning/compute/service/tests`). Where a test through the real container
   declares backed, host-requiring capacity naming a host it never registers and
   so now sees that capacity refused or projected not enabled, register the host
   in the test's own setup — never weaken an assertion or drop the seam — and
   list each file so repaired in the section's handoff.
-- [ ] 4.6 Verification: `uv run pytest provisioning/compute/tests
+  *Done:* once the conftest was wired (4.2), 33 integration tests and the two
+  real-container composition tests declared capacity naming hosts they never
+  registered. Each now registers its hosts in its own setup, at a
+  documentation-range address, with no assertion weakened. Files repaired:
+  `test_capacity_api.py` (a `register_hosts` helper on its `CapacityApi`,
+  called in nine tests), `test_capacity_definitions_api.py`,
+  `test_compute_contract_api.py`, `test_host_requirement_api.py` (its
+  fixture's usable declaration), `test_leases_api.py` (its `_seeded` helper,
+  which `test_lease_end_reports.py` also uses),
+  `test_provisioning_client_endpoint_coverage.py`,
+  `test_site_projection_state.py`, and `test_scheduling_composition.py`
+  (which also had to create the `hosts` table).
+- [x] 4.6 Verification: `uv run pytest provisioning/compute/tests
   provisioning/compute/service/tests` and `make test` pass. End-to-end: section
   5's scenarios.
+  *Done:* run per project (`make test` in each, which reinstalls from
+  `.dist`): `provisioning/compute` unit and library integration, 527 passed;
+  `provisioning/compute/service` unit 644 passed, application integration 579
+  passed. After `make lock`: `make check-packaging` passed and the root
+  `make test` passed. The review fixes that followed touched only the
+  service's tests (rerun: 644 and 579 passed) and one docstring in
+  `hosts/service.py`; the root `make test` was not run again after them.
+  End-to-end: `e2e_bare_metal_publication` (section 5's host disable and
+  enable stages) exercises the wired report through the deployed projections
+  and publication; `e2e_bare_metal_introduction` and the VM lane exercise the
+  path for registered, enabled hosts. Nothing is owed by validation.
+  *Handoff:* the composition scenario's "absent in the next transaction that
+  reads it" rests on 4.1's test of the authority alone and, wired, on 4.4
+  passing through the in-process app; no test reads the report through the
+  container in two transactions directly. The helpers in
+  `test_compute_contract_api.py`, `test_leases_api.py`, and
+  `test_provisioning_client_endpoint_coverage.py` register hosts through the
+  container's host authority rather than the family client, matching the
+  direct ledger seeding those synchronous helpers already do.
 
 ## 5. End-to-end evidence
 
