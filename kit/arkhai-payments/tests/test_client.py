@@ -18,7 +18,7 @@ from market_arkhai_payments import (
 from market_arkhai_payments.fixtures import build_signed_receipt
 from market_arkhai_payments.fixtures.payments_client import FakePaymentsClient
 
-from payment_terms import BUYER, SERVICE, agreement, config, option
+from payment_terms import BUYER, OTHER, PAYEE, SERVICE, agreement, config, option
 
 TXID = "c" * 64
 
@@ -125,6 +125,80 @@ def test_reverse_uses_a_stable_idempotency_key():
 
     _client(handler).reverse(TXID)
     assert seen["key"] == f"reverse-{TXID}"
+
+
+# A public test-only key value that authenticates to nothing; never use it on a
+# public network.
+_TEST_API_KEY = "balance-test-key"
+
+
+def _bearer_client(handler, *, api_key=_TEST_API_KEY):
+    return PaymentsClient(
+        "https://127.0.0.1:9", api_key=api_key, transport=httpx.MockTransport(handler)
+    )
+
+
+def test_balance_read_sends_the_bearer_key_to_the_account_path_and_parses_the_body():
+    seen = {}
+    body = {
+        "available": {"USD/2": "9750"},
+        "held": [
+            {
+                "address": f"hold:{TXID}:0:1800604800",
+                "transaction": TXID,
+                "part": 0,
+                "from": BUYER,
+                "to": PAYEE,
+                "asset": "USD/2",
+                "balance": "10000",
+                "fee": {"bps": 250},
+                "releaseAt": "2027-01-22T08:00:00Z",
+            }
+        ],
+    }
+
+    def handler(request):
+        seen["method"], seen["path"] = request.method, request.url.path
+        seen["authorization"] = request.headers.get("Authorization")
+        return httpx.Response(200, json=body)
+
+    balance = _bearer_client(handler).get_balance(PAYEE)
+    assert seen == {
+        "method": "GET",
+        "path": f"/balances/{PAYEE}",
+        "authorization": f"Bearer {_TEST_API_KEY}",
+    }
+    assert balance.available["USD/2"].root == "9750"
+    assert balance.held[0].root.address == f"hold:{TXID}:0:1800604800"
+
+
+def test_balance_read_of_another_account_raises_the_service_refusal():
+    client = _bearer_client(
+        lambda request: httpx.Response(403, json={"error": "caller_not_authorized"})
+    )
+    with pytest.raises(PaymentsAPIError) as exc:
+        client.get_balance(OTHER)
+    assert (exc.value.status_code, exc.value.code) == (403, "caller_not_authorized")
+
+
+def test_balance_body_outside_the_schema_is_a_protocol_error():
+    client = _bearer_client(
+        lambda request: httpx.Response(200, json={"available": {"USD/2": "1.5"}, "held": []})
+    )
+    with pytest.raises(PaymentsProtocolError):
+        client.get_balance(PAYEE)
+
+
+def test_balance_read_refuses_an_invalid_account_before_any_request():
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, json={"available": {}, "held": []})
+
+    with pytest.raises(ValueError):
+        _bearer_client(handler).get_balance("not-an-account")
+    assert requests == []
 
 
 def _stored(terms):

@@ -1,5 +1,6 @@
 """Stateless client for the external Arkhai payments authority."""
 
+from .access_check import PaymentsAccessOutcome, check_payments_access
 from .adapter import PaymentAdapter, SnapshotVerifier, pinned_snapshot_verifier
 from .reconciliation import (
     ReconciliationPass,
@@ -104,6 +105,7 @@ __all__ = [
     "PaymentSellerStage",
     "PaymentSettlementData",
     "PaymentsAPIError",
+    "PaymentsAccessOutcome",
     "PaymentsBlocked",
     "PaymentsClient",
     "PaymentsError",
@@ -133,6 +135,7 @@ __all__ = [
     "agreement_hash",
     "agreement_payer_account",
     "check",
+    "check_payments_access",
     "create_arkhai_payments_registration",
     "derive_mandate",
     "derive_part_terms",

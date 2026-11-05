@@ -126,6 +126,27 @@ with payments_client_for_owner(config, owner_account) as client:
     snapshot = client.get_transaction(transaction_id)
 ```
 
+`client.get_balance(account)` reads `GET /balances/{account}` and returns the
+generated `Balance`: spendable `available` by asset, from which outgoing escrow
+has already left, and the `held` money the account is owed as payee. The service
+answers only for the credential's own account and refuses any other with 403
+`caller_not_authorized`, which the client raises as a `PaymentsAPIError`.
+
+Readiness never contacts the service, so `check_payments_access(section,
+account)` is how a role proves its payments access: it builds the client exactly
+as `payments_client_for_owner` does, from the role's own environment, reads the
+account's balance, and returns a `PaymentsAccessOutcome`. A failure names its
+step — `configuration` (no section, an invalid or disabled one, no `service_url`
+or `api_key_env`), `credential` (the key variable unset or empty), `transport`
+(unreachable, an untrusted certificate, or an answer outside the contract), or
+`refused` with the service's code. `outcome.json_line()` renders it as one JSON
+line that never contains the key:
+
+```console
+{"check": "payments", "outcome": "ok", "service_url": "https://payments.example",
+ "account": "00000000-0000-4000-8000-000000000012", "assets": ["USD/6"], "held": 0}
+```
+
 ## Seller servicing
 
 `PaymentSellerStage` requires the full trusted policy at construction, so an
@@ -271,6 +292,13 @@ authority used by `FakePaymentsClient` and available for an HTTP double to wrap.
 Inject a signer and integer-second `clock`, explicitly `fund(account, asset,
 amount)`, then `approve(mandate, account=payer)` and `submit(transaction,
 {account, requestId, event})`. `snapshot(transaction)` signs the published frame.
+`balance(account)` first brings every transaction the account is a party to up to
+the clock, as a snapshot does, then returns the published `Balance`: the
+account's `available` funds, matured earnings net of fee included, and, where it
+is the payee, one `held` entry per part and maturity, addressed
+`hold:<transaction>:<part>:<releaseAt seconds>`, with a part's lots that have no
+maturity yet in one `hold:<transaction>:<part>:until` entry held until `stop` or
+`lift`. `FakePaymentsClient.get_balance` serves the same view.
 `advance(transaction)` performs due stops, maturity and reservation refill;
 reads/commands apply due stops without driving the refill scheduler, matching the
 producer's read boundary. The caller owns HTTP, authentication, controls and

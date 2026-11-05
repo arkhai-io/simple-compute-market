@@ -44,7 +44,7 @@ fixtures/payments_client.py, __init__.py}`, a new
 test_access_check.py (new)}`, and the fake's existing tests; `kit/arkhai-payments/README.md`;
 `kit/arkhai-payments/pyproject.toml`; every lock `make lock` rewrites.
 
-- [ ] 1.1 `PaymentsClient.get_balance(account) -> Balance` (D5): validate `account` as
+- [x] 1.1 `PaymentsClient.get_balance(account) -> Balance` (D5): validate `account` as
   `AccountId`, call `GET /balances/{account}`, return the generated `Balance` model
   through `_validated`, and raise `PaymentsAPIError` with the service's code on a
   refusal. Export nothing new from `__init__` beyond what callers need (`Balance` is
@@ -52,7 +52,15 @@ test_access_check.py (new)}`, and the fake's existing tests; `kit/arkhai-payment
   the path and bearer header, a valid body parsed, a 403 `caller_not_authorized` raised
   with that code, a malformed body refused as a protocol error, and an invalid account
   refused before any request.
-- [ ] 1.2 `PaymentsAuthority.balance(account)` (D5). First advance every transaction
+  Unit, `tests/test_client.py` (four new cases, the real client over
+  `httpx.MockTransport`): pass. `Balance` is not exported from `__init__`; callers take it
+  from `market_arkhai_payments.models`. An invalid account raises pydantic's
+  `ValidationError`, a `ValueError`, before any request. The bearer-key cases use a
+  loopback host (`https://127.0.0.1`) because the client sets `trust_env` from the host
+  alone: a non-loopback test origin would let an ambient `HTTPS_PROXY` mount a proxy
+  transport ahead of the mock. These cases prove parsing and refusal handling over a
+  mocked boundary; the client against a serving app is 2.5's library integration.
+- [x] 1.2 `PaymentsAuthority.balance(account)` (D5). First advance every transaction
   whose mandate names the account as `from` or `to`, with `advance(transaction,
   refill=False)`, as `snapshot()` does. Then return `available` from the engine's balances
   for the account (`{}` for an unknown account) and `held` for parts where the account is
@@ -73,11 +81,25 @@ test_access_check.py (new)}`, and the fake's existing tests; `kit/arkhai-payment
   - an after-stop hold before its stop: one `until: stop` entry; an open extension with no
     end: `until: lift`;
   - an account the engine has never seen: `{"available": {}, "held": []}`.
-- [ ] 1.3 `FakePaymentsClient.get_balance(account)` delegates to `engine.balance` (D5),
+
+  Unit, `tests/test_balance_view.py` (eight engine cases, the real `PaymentsAuthority`
+  with an injected clock, approvals through its own `approve` so the payer is debited):
+  pass. Beyond the plan's list it covers an after-stop hold awaiting its stop under an
+  open extension, which reads `until: stop`, and a part seeded with a zero-gross receipt,
+  which lists no empty hold. `releaseAt` uses one `_release_at` helper that
+  `snapshot()` now shares, so the two cannot format a maturity differently; the
+  snapshot's bytes are unchanged, as 1.6's vector replay shows. The rate case starts the
+  part, which also refills a third period, and reads at two periods plus a second: two
+  timed entries, the unearned third period outside `held`.
+- [x] 1.3 `FakePaymentsClient.get_balance(account)` delegates to `engine.balance` (D5),
   recorded in `calls` like its other methods and subject to `unavailable`. Unit: in the
   fake's tests, a served approval then a balance read returns the engine's view, and an
   unavailable fake raises the transport error.
-- [ ] 1.4 The payments check function (D12), in `access_check.py`:
+  Unit, `tests/test_balance_view.py` (two cases): pass. The kit has no test module of
+  the fake's own (its cases live with the stages that use it), so its two cases sit
+  beside the view they delegate to. The approval is the fake's convenience `approve`,
+  which seeds the engine through `load` without a debit.
+- [x] 1.4 The payments check function (D12), in `access_check.py`:
   `check_payments_access(config: ArkhaiPaymentsConfig, account: str, *, environment=None,
   transport=None) -> PaymentsAccessOutcome`. It builds the client through
   `payments_client_for_owner(config, account, …)`, calls `get_balance(account)`, and
@@ -90,14 +112,57 @@ test_access_check.py (new)}`, and the fake's existing tests; `kit/arkhai-payment
   shows. Unit (`tests/test_access_check.py`, with `MockTransport` and an injected
   environment): each outcome and step, and that no rendered outcome contains the API key
   even when the key appears in an exception's text.
-- [ ] 1.5 Version, README and relock (RELEASING.md, "Versioning policy"; `AGENTS.md`,
+  Unit, `tests/test_access_check.py` (the real check, client and
+  `payments_client_for_owner` over `httpx.MockTransport` with an injected environment):
+  pass. As built, differing from the plan's wording:
+  - `config` is `ArkhaiPaymentsConfig | Mapping | None`: `None` (no section) and a raw
+    section that fails validation are `configuration` outcomes, so each CLI passes
+    whatever its settlement root holds under `arkhai_payments` and needs no handling of
+    its own. An invalid section's detail lists each error's location and pydantic type
+    code only, never a message or input, since a key pasted under the wrong name would
+    otherwise be echoed.
+  - The refusal is `step: "refused"` with a separate `code` field, not one `refused
+    <code>` string; the JSON line carries `code` beside `step`.
+  - A `PaymentsProtocolError` (an answer outside the published contract, such as a
+    non-payments server at the URL) is a `transport` step with its own detail: the kit's
+    `PaymentsTransportError` already means "could not be reached or its response could
+    not be read", and the four steps D12 names have no fifth.
+  - A key variable holding a CR or LF is a `credential` failure, checked before the
+    client is built, since `PaymentsClient` would refuse it as a header value.
+  - A malformed `account` raises `ValueError` rather than producing an outcome: it is
+    the caller's argument, not the role's payments access.
+  - Every `detail` is fixed text plus public configuration; no exception message ever
+    reaches one. The redaction cases put the key in a transport exception, a refusal
+    body, a protocol body, an extra section key, `api_key_env` (as a value that is not a
+    variable name, so the section is invalid) and the URL's userinfo. A `credential`
+    detail names the `api_key_env` variable, which is public configuration: a key
+    written as that name is already published in the role's configuration, and the
+    check does not try to recognise one.
+  - The untrusted-certificate case raises a `ConnectError` naming an SSL failure through
+    the mock transport; it relies on httpx raising `ConnectError` for a failed
+    certificate verification, and no real TLS handshake runs in this suite.
+  `check_payments_access` and `PaymentsAccessOutcome` are exported from the package
+  root for the storefront CLIs.
+- [x] 1.5 Version, README and relock (RELEASING.md, "Versioning policy"; `AGENTS.md`,
   "Package and dependency discipline"). Bump `arkhai-kit-arkhai-payments` once, minor,
   against its version on `dev` (confirm with `git show origin/dev:kit/arkhai-payments/pyproject.toml`;
   0.5.0 → 0.6.0 if unchanged). Add the balance read and the check function to the kit's
   README beside the client's other calls. Run `make check-uv-version`, then `make lock`,
   and commit every lock it rewrites. Dependents raise their lower bound on the kit in the
   section that first uses the new API (2.1, 3.1, 4.6).
-- [ ] 1.6 **Verification checkpoint.** Unit: the kit suite (`make -C kit test-arkhai-payments`),
+  `dev` held 0.5.0; bumped to 0.6.0. README: the balance read and the check beside
+  `payments_client_for_owner`, and `PaymentsAuthority.balance` and
+  `FakePaymentsClient.get_balance` in the authority-fixture passage. `make
+  check-uv-version` OK; `make lock` rewrote the kit's lock and every dependent's.
+  Correction to the plan: `domains/bare_metal/buyer` and `domains/bare_metal/storefront`
+  pin the kit exactly (`==0.5.0`), so the bump moved both pins to `==0.6.0`, as
+  RELEASING.md requires of exact pins and as the 0.4.0 → 0.5.0 bump did, with no version
+  bump of either package (3.1 bumps the storefront). The first `make lock` left those two
+  locks, and the VM storefront's and `e2e-tests`' through them, on 0.5.0, because a stale
+  0.5.0 wheel was still in the local `.dist`; CI's fresh wheelhouse would have failed to
+  resolve them. After the pin move every lock resolves 0.6.0, and `make
+  check-packaging` passes.
+- [x] 1.6 **Verification checkpoint.** Unit: the kit suite (`make -C kit test-arkhai-payments`),
   with `test_client.py`, `test_balance_view.py`, `test_access_check.py` and the fake's
   tests, and the existing vector replay (`kit/arkhai-payments/scripts/check_vectors.py`) still passing. Run
   `make test`, `make check-packaging` (1.5 changes a version and locks) and
@@ -107,6 +172,48 @@ test_access_check.py (new)}`, and the fake's existing tests; `kit/arkhai-payment
   `e2e_vm_payment_deal` exercise them once wired. None is owed here.
   Owed by validation: `tests.yml`, job `test · test-kits` — the kit suite passes from
   the relocked environment.
+
+  Evidence, all local:
+  - `make -C kit test-arkhai-payments`: mypy clean; the vector replay passes (published
+    mandates, receipt, attachments, approvals, 4 snapshots and 9 scenario steps;
+    historical raw framing); generated models current; 191 unit tests pass.
+  - `make test`: exit 0, no failing suite. It ran before the last test-only edits
+    (fixture labels, the zero-gross case), which the kit gate above then covered.
+  - `make check-packaging`: passes after the bare-metal pin move.
+  - `make check-change`: comment hygiene, agent skills, task list, change index, spec
+    index and OpenSpec validation pass. Documentation citations fail on three citations
+    of files section 2 creates (`tools/payments-lane-double/README.md`, twice, and
+    `tools/payments-lane-double/fixtures/dispute-authority.toml`). They resolve once
+    section 2 lands.
+
+  End-to-end confirmed: no `e2e-tests` marker exercises section 1, and none was added.
+  The three payment-deal markers reach this code only through sections 3 and 4.
+  Owed by validation, confirmed: `tests.yml`, job `test · test-kits`, which must show
+  the payments kit suite passing from the relocked environment. Its new cases are
+  `test_balance_view.py`, `test_access_check.py` and the balance cases in
+  `test_client.py`.
+
+  Handoff to sections 2 and 3:
+  - The double's `GET /balances/{account}` route is `PaymentsAuthority.balance(account)`.
+    Its 403 for another account is the double's to enforce (D5, D8). The engine answers
+    for any account it is asked about.
+  - The storefront CLIs (3.1) call
+    `check_payments_access(settlement.mechanisms.get("arkhai_payments"), account)` and
+    print `outcome.json_line()`, exiting 0 on `outcome.ok`. They need no handling of a
+    missing or invalid section, which are `configuration` outcomes. They must turn the
+    `ValueError` a malformed `--account` raises into a usage error.
+  - A disabled section fails with `configuration`, as planned, although
+    `payments_client_for_owner` still serves accepted deals while payments is disabled
+    for new ones. A storefront still servicing old payment deals with payments disabled
+    reports the check failed.
+  - Follow-up left deliberately: no test runs a real TLS handshake with an untrusted
+    certificate. Section 2's committed lane CA and leaf make one cheap. For example, the
+    real client against the double over HTTPS with a context that does not trust the
+    lane CA would show the `transport` step end to end. Section 2 or 3 should add it, or
+    record why not.
+  - D12's text in `design.md` says `refused <code>`. The build has `step: "refused"`
+    plus a `code` field (1.4's note). Closeout's narrative compression should bring the
+    design in line.
 
 ## 2. The payments double
 

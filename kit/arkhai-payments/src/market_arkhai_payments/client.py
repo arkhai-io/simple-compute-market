@@ -23,6 +23,7 @@ from market_arkhai_payments.mandates import PaymentsOptionParams
 from market_arkhai_payments.models import (
     ApiError,
     ApprovalRequest,
+    Balance,
     DealAttachment,
     EventCommand,
     Mandate,
@@ -122,6 +123,12 @@ class PaymentsClient:
         identifier = _transaction_id(transaction)
         payload = self._request("GET", f"/transactions/{identifier}")
         return _validated(SignedTransactionSnapshot, payload)
+
+    def get_balance(self, account: str) -> Balance:
+        """Read one account's balance; the service answers only for the caller's own."""
+
+        identifier = AccountId.model_validate(account).root
+        return _validated(Balance, self._request("GET", f"/balances/{identifier}"))
 
     def poll(
         self,
