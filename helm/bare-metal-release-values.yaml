@@ -25,6 +25,10 @@
 #   arkhai-bare-metal-storefront-runtime    `storefront.secrets.toml`: [Wallet]
 #                                           private_key = "<account 8's key>"
 #   arkhai-bare-metal-provisioning-identity `credential`: Anvil account 9's key
+# Its storefront shares release 1's payments Secret and ConfigMap, which the same
+# target creates from the payments lane double's committed fixtures:
+#   seller-payments-key                     `api-key`: the double's seller token
+#   ConfigMap payments-ca-bundle            `ca-bundle.pem`: the committed lane CA
 # Release 2's provisioning reuses release 1's SSH and runtime Secrets, which mock
 # provisioning does not read for delivery. `topology-check` also needs release
 # 1's e2e-tests Secrets: arkhai-buyer-profile-credential (`credential`, Anvil
@@ -57,7 +61,11 @@ global:
     identifier: "0xa0ee7a142d267c1f36714e4a8f75612f20a79720"
 
 # Release 1 runs these; this release runs none of them. Their tests target Bob
-# and release 1's chain.
+# and release 1's chain. The payments lane double's Service, `payments-double`,
+# is not release-scoped, so the namespace runs release 1's alone, which this
+# release's storefront reaches by that name.
+payments-lane-double:
+  enabled: false
 dev-env:
   enabled: false
 registry:
@@ -84,6 +92,22 @@ bare-metal-storefront:
     configMapName: arkhai-node-operator-dev-env-alkahest-addresses
     key: alkahest_anvil_addresses.json
     mountPath: /etc/arkhai/alkahest
+  # Arkhai payments through the values a deployment supplies, as Bob's are in
+  # local-values.yaml: the payments lane double release 1 runs, trusted through
+  # the lane CA in the ConfigMap `payments-ca-bundle`, and the double's seller
+  # token from the Secret `seller-payments-key`, exposed as
+  # ARKHAI_PAYMENTS_API_KEY, the variable [Settlement.arkhai_payments].api_key_env
+  # names; `make -C helm topology-secrets` creates both in the namespace. Its
+  # payments check reads the double's seller account. Each is a public
+  # development value, never for a public network.
+  caBundle:
+    configMapName: payments-ca-bundle
+    key: ca-bundle.pem
+  paymentsKey:
+    secretName: seller-payments-key
+    key: api-key
+  tests:
+    paymentsAccount: 00000000-0000-4000-8000-0000000000b2
   config:
     Identity:
       # Anvil account 8, the storefront's principal and seller wallet, and its
@@ -116,6 +140,7 @@ bare-metal-storefront:
       schema_version: 1
       priority:
         - alkahest.v1
+        - arkhai.payments.v1
       alkahest:
         enabled: true
         # Release 1's dev-env address book, mounted by alkahestAddressBook.
@@ -124,6 +149,18 @@ bare-metal-storefront:
         release_models: [recipient]
         trusted_oracle_addresses: []
         interruptible_oracle_addresses: []
+      # Release 1's payments lane double: its Service, its receipt identity,
+      # and its fee policy, restated from its committed fixtures. Public
+      # development values, never for a public network.
+      arkhai_payments:
+        enabled: true
+        service_url: https://payments-double:8443
+        service_identity:
+          scheme: ed25519
+          identifier: kaKKC3Q4FZOk2UaVeSCJJq_IrYLIg5t2RDWbnrqaSzo
+        fee_bps: 250
+        livemode: false
+        api_key_env: ARKHAI_PAYMENTS_API_KEY
     # Anvil account 8's address; its key is in the overlay Secret above.
     Wallet:
       address: "0x23618e81e3f5cdf7f54c3d65f7fbc0abf5b21e8f"

@@ -1,15 +1,19 @@
 """The values a lane needs to run against the double, read from its committed fixtures.
 
-The root Makefile's lane environment targets run this file with the host's
-``python3 -I``, outside any project environment, so it imports only the standard
-library; ``tomllib`` needs Python 3.11 or newer. It is not part of the double's
-package, which the image runs. Each mode prints ``VAR=value`` lines:
+The root Makefile's lane environment targets, and the local Helm release's
+out-of-band Secret step (``helm/scripts/topology-secrets.sh``), run this file with
+the host's ``python3 -I``, outside any project environment, so it imports only the
+standard library; ``tomllib`` needs Python 3.11 or newer. It is not part of the
+double's package, which the image runs. ``compose`` and ``runner`` print
+``VAR=value`` lines, and the other modes one bare value:
 
 - ``compose``: the variables a lane's Compose files read, for its ``--env-file``;
 - ``runner``: the test runner's ``PAYMENTS`` settings and the buyer's bearer token,
   for ``docker run --env-file``;
-- ``seller-account``: the seller's payee account alone, the account a lane's
-  storefront payments check reads.
+- ``seller-account``: the seller's payee account, the account a storefront
+  payments check reads;
+- ``seller-token``: the seller's bearer token, which a local release's payments
+  key Secret holds.
 
 Every value printed is a public development value, never to be used on a public
 network.
@@ -85,15 +89,17 @@ def runner_lines(accounts: Mapping[str, Any]) -> list[str]:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("mode", choices=("compose", "runner", "seller-account"))
+    parser.add_argument("mode", choices=("compose", "runner", "seller-account", "seller-token"))
     mode = parser.parse_args(argv).mode
     accounts = _load(ACCOUNTS_FILE)
     if mode == "compose":
         lines = compose_lines(accounts, _load(DISPUTE_AUTHORITY_FILE))
     elif mode == "runner":
         lines = runner_lines(accounts)
-    else:
+    elif mode == "seller-account":
         lines = [accounts["accounts"]["seller"]["account"]]
+    else:
+        lines = [accounts["accounts"]["seller"]["token"]]
     sys.stdout.write("".join(f"{line}\n" for line in lines))
     return 0
 

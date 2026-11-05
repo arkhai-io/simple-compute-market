@@ -502,6 +502,222 @@ def test_the_development_configuration_passes_the_schema() -> None:
     assert {key: value for key, value in config.items() if key != "db_path"} == development
 
 
+# --- payments access: the CA bundle, the payments key, the check ------------
+
+CA_FILE = "/etc/arkhai/ca/ca-bundle.pem"
+# A payments section on a placeholder origin and identity, which name nothing real.
+PAYMENTS = {
+    "enabled": True,
+    "service_url": "https://payments.example.com",
+    "service_identity": {"scheme": "ed25519", "identifier": "Q" * 43},
+    "fee_bps": 250,
+    "livemode": False,
+    "api_key_env": "ARKHAI_PAYMENTS_API_KEY",
+}
+SELLER_ACCOUNT = "00000000-0000-4000-8000-0000000000aa"  # a placeholder account
+
+
+def _yaml_block(document: str, key: str) -> str:
+    """The lines nested under the first ``<key>:`` line of ``document``, dedented,
+    without the template's comment lines."""
+    match = re.search(rf"^( *){re.escape(key)}:$", document, re.MULTILINE)
+    assert match, f"{key} not rendered"
+    indent = len(match.group(1))
+    lines = []
+    for line in document[match.end() + 1 :].splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        if line.strip() and len(line) - len(line.lstrip()) <= indent:
+            break
+        lines.append(line)
+    return textwrap.dedent("\n".join(lines)).strip("\n")
+
+
+def _items(block: str) -> dict[str, str]:
+    """Each ``- name: <name>`` list item of ``block``, by its name."""
+    items: dict[str, str] = {}
+    for item in re.split(r"^(?=- )", block, flags=re.MULTILINE):
+        if item.strip():
+            name = re.match(r"- name: \"?([^\"\n]+)\"?", item)
+            assert name, item
+            items[name.group(1)] = item.strip("\n")
+    return items
+
+
+def _ca_bundle(document: str) -> tuple[str, str, str] | None:
+    """The CA bundle's source kind, name, and key, asserted together with its
+    mount and SSL_CERT_FILE, all present or all absent."""
+    env = _items(_yaml_block(document, "env"))
+    mounts = _items(_yaml_block(document, "volumeMounts"))
+    volumes = _items(_yaml_block(document, "volumes"))
+    if "ca-bundle" not in volumes:
+        assert "SSL_CERT_FILE" not in env and "ca-bundle" not in mounts
+        return None
+    assert env["SSL_CERT_FILE"] == f'- name: SSL_CERT_FILE\n  value: "{CA_FILE}"'
+    assert mounts["ca-bundle"] == '- name: ca-bundle\n  mountPath: "/etc/arkhai/ca"\n  readOnly: true'
+    source = re.fullmatch(
+        r'- name: ca-bundle\n  (configMap|secret):\n    (?:name|secretName): "([^"]+)"\n'
+        r'    items:\n      - key: "([^"]+)"\n        path: ca-bundle.pem',
+        volumes["ca-bundle"],
+    )
+    assert source, volumes["ca-bundle"]
+    return source.groups()
+
+
+def _payments_key(document: str) -> tuple[str, str, str] | None:
+    """The variable the payments key is exposed under, its Secret, and its key."""
+    env = _items(_yaml_block(document, "env"))
+    exposed = [
+        re.fullmatch(
+            r'- name: "([^"]+)"\n  valueFrom:\n    secretKeyRef:\n      name: "([^"]+)"\n      key: "([^"]+)"',
+            item,
+        )
+        for name, item in env.items()
+        if name not in ("XDG_CONFIG_HOME", "ARKHAI_IDENTITY_CREDENTIAL", "SSL_CERT_FILE")
+    ]
+    assert len(exposed) <= 1 and all(exposed), env
+    return exposed[0].groups() if exposed else None
+
+
+def test_a_ca_bundle_mounts_from_a_configmap_or_a_secret_and_is_named_by_ssl_cert_file() -> None:
+    for kind, stated in (("configMap", "configMapName"), ("secret", "secretName")):
+        deployment = _source(_ok(_render({"caBundle": {stated: "deployment-ca", "key": "bundle.pem"}})), "deployment.yaml")
+        assert _ca_bundle(deployment) == (kind, "deployment-ca", "bundle.pem"), kind
+
+
+def test_no_ca_bundle_is_mounted_unless_one_is_named() -> None:
+    for rendered in (_render(), _render(values=None)):
+        assert _ca_bundle(_source(_ok(rendered), "deployment.yaml")) is None
+
+
+def test_a_ca_bundle_naming_both_sources_or_no_key_is_refused() -> None:
+    _refused(
+        _render({"caBundle": {"configMapName": "a", "secretName": "b", "key": "ca.pem"}}),
+        "caBundle names both configMapName",
+    )
+    # The chart defaults the key, so an empty one is refused by the values schema.
+    _refused_at(_render({"caBundle": {"configMapName": "a", "key": ""}}), "caBundle.key")
+
+
+def test_the_payments_key_is_exposed_under_the_variable_the_configuration_names() -> None:
+    """The variable is read from the configuration in whatever spelling it is
+    written, as the storefront's loader reads it."""
+    key = {"secretName": "payments-key", "key": "api-key"}
+    for settlement in (
+        {"arkhai_payments": {**PAYMENTS, "api_key_env": "SELLER_PAYMENTS_KEY"}},
+        {"Arkhai_Payments": {"API_KEY_ENV": "SELLER_PAYMENTS_KEY"}},
+    ):
+        deployment = _source(_ok(_render({"paymentsKey": key, **_with_config(Settlement=settlement)})), "deployment.yaml")
+        assert _payments_key(deployment) == ("SELLER_PAYMENTS_KEY", "payments-key", "api-key"), settlement
+
+
+def test_no_payments_key_is_exposed_unless_a_secret_is_named() -> None:
+    overlay = _with_config(Settlement={"arkhai_payments": PAYMENTS})
+    assert _payments_key(_source(_ok(_render(overlay)), "deployment.yaml")) is None
+    assert _payments_key(_source(_ok(_render({"paymentsKey": {"secretName": ""}, **overlay})), "deployment.yaml")) is None
+
+
+def test_a_payments_key_without_a_configured_variable_is_refused_naming_the_setting() -> None:
+    key = {"paymentsKey": {"secretName": "payments-key", "key": "api-key"}}
+    _refused(_render(key), "Settlement.arkhai_payments.api_key_env")
+    without = {key: value for key, value in PAYMENTS.items() if key != "api_key_env"}
+    _refused(_render({**key, **_with_config(Settlement={"arkhai_payments": without})}), "Settlement.arkhai_payments.api_key_env")
+
+
+def test_a_payments_key_variable_the_chart_sets_or_the_loader_reads_is_refused() -> None:
+    """Exposed under a variable the chart already sets, the key would render
+    twice; under one in the STOREFRONT_ override layer, the loader would read it
+    as a setting."""
+    key = {"paymentsKey": {"secretName": "payments-key", "key": "api-key"}}
+    for variable in ("ARKHAI_IDENTITY_CREDENTIAL", "ssl_cert_file", "STOREFRONT_PAYMENTS_KEY"):
+        overlay = {**key, **_with_config(Settlement={"arkhai_payments": {**PAYMENTS, "api_key_env": variable}})}
+        _refused(_render(overlay), f'api_key_env "{variable}" names a variable the chart sets or the loader reads')
+
+
+def _payments_access(**changes) -> dict:
+    """An overlay of the example selling through payments, with its CA bundle,
+    payments key, and check account, and ``changes`` to its config."""
+    return {
+        "caBundle": {"configMapName": "payments-ca-bundle", "key": "ca-bundle.pem"},
+        "paymentsKey": {"secretName": "seller-payments-key", "key": "api-key"},
+        "tests": {"paymentsAccount": SELLER_ACCOUNT},
+        "config": {"Settlement": {"priority": ["alkahest.v1", "arkhai.payments.v1"], "arkhai_payments": PAYMENTS}, **changes},
+    }
+
+
+def _payments_only() -> dict:
+    """The example selling through payments alone: Wallet, Chains, and Alkahest
+    removed, with the Alkahest clause that needs them."""
+    overlay = _payments_access(Wallet=None, Chains=None, pricing={"settlements": None})
+    overlay["config"]["Settlement"] = {"priority": ["arkhai.payments.v1"], "alkahest": None, "arkhai_payments": PAYMENTS}
+    return overlay
+
+
+def test_a_storefront_offering_only_payments_renders_its_payments_access_and_nothing_removed() -> None:
+    manifest = _ok(_render(_payments_only()))
+    config = _config(manifest)
+    deployment = _source(manifest, "deployment.yaml")
+
+    assert "Wallet" not in config and "Chains" not in config
+    assert config["Settlement"] == {"schema_version": 1, "priority": ["arkhai.payments.v1"], "arkhai_payments": PAYMENTS}
+    assert "settlements" not in config["pricing"]
+    assert _ca_bundle(deployment) == ("configMap", "payments-ca-bundle", "ca-bundle.pem")
+    assert _payments_key(deployment) == ("ARKHAI_PAYMENTS_API_KEY", "seller-payments-key", "api-key")
+    assert not re.search(r"rpc_url|chain_id|RPC_URL|CHAIN_ID", deployment + json.dumps(config))
+    python = os.environ.get("BARE_METAL_STOREFRONT_PYTHON")
+    if not python:
+        print("skip: BARE_METAL_STOREFRONT_PYTHON unset; the storefront loader check did not run")
+        return
+    assert _loaded(config, python)["problems"] == []
+
+
+def test_the_payments_check_pod_runs_the_command_with_the_deployments_payments_access() -> None:
+    """The pod's environment, configuration mounts, and their volumes are the
+    Deployment's, less the data volume; it runs the CLI with no probes, and
+    carries no workload selector."""
+    manifest = _ok(_render(_payments_access()))
+    deployment = _source(manifest, "deployment.yaml")
+    pod = _source(manifest, "tests/payments-check-test.yaml")
+    lines = _lines(pod)
+
+    assert f"name: {FULLNAME}-payments-check" in lines
+    assert _yaml_block(pod, "command").splitlines() == [
+        "- bare-metal-storefront", "- check-payments", "- --account", f'- "{SELLER_ACCOUNT}"'
+    ]
+    assert re.search(r"^ +image: (\S+)$", pod, re.MULTILINE).group(1) == re.search(
+        r"^ +image: (\S+)$", deployment, re.MULTILINE
+    ).group(1)
+    assert _yaml_block(pod, "env") == _yaml_block(deployment, "env")
+    deployment_mounts = _items(_yaml_block(deployment, "volumeMounts"))
+    deployment_volumes = _items(_yaml_block(deployment, "volumes"))
+    assert "data" in deployment_mounts and "data" in deployment_volumes
+    assert _items(_yaml_block(pod, "volumeMounts")) == {name: item for name, item in deployment_mounts.items() if name != "data"}
+    assert _items(_yaml_block(pod, "volumes")) == {name: item for name, item in deployment_volumes.items() if name != "data"}
+    # The example's persistence is on: the Deployment mounts its claim, which the
+    # pod must not, and the pod has no probe.
+    assert "persistentVolumeClaim" in deployment and "persistentVolumeClaim" not in pod
+    assert "/var/lib/arkhai" not in pod and "Probe" not in pod
+    assert {'"helm.sh/hook": test', "app.kubernetes.io/component: test", "enableServiceLinks: false"} <= lines
+    assert not any(line.startswith("app.kubernetes.io/name:") for line in lines)
+    # Every payments-deciding piece is present, so the comparison above is not
+    # between two empty lists.
+    assert _ca_bundle(pod) == ("configMap", "payments-ca-bundle", "ca-bundle.pem")
+    assert _payments_key(pod) == ("ARKHAI_PAYMENTS_API_KEY", "seller-payments-key", "api-key")
+    assert {"config", "secrets"} <= set(_items(_yaml_block(pod, "volumes")))
+
+
+def test_the_payments_check_pod_renders_only_with_payments_and_an_account() -> None:
+    def pods(overlay: dict | None, **kwargs) -> int:
+        return _ok(_render(overlay, **kwargs)).count("tests/payments-check-test.yaml")
+
+    assert pods(None) == 0 and pods(None, values=None) == 0
+    assert pods({"tests": {"paymentsAccount": SELLER_ACCOUNT}}) == 0
+    without_account = _payments_access()
+    without_account["tests"] = {"paymentsAccount": ""}
+    assert pods(without_account) == 0
+    assert pods(_payments_access()) == 1
+
+
 # --- the storefront's own loader -----------------------------------------
 
 

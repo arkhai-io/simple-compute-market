@@ -1,9 +1,10 @@
 # payments-lane-double
 
-An HTTP double of the Arkhai payments service, run inside the end-to-end lanes and
-the local Helm release so a payment scenario has a payments target to settle
-against. It is a lane collaborator: it may import the repository's internal kits,
-and nothing imports it.
+An HTTP double of the Arkhai payments service. The end-to-end lanes run it so a
+payment scenario has a payments target to settle against, and the local Helm
+release runs it so its storefronts' payments access can be checked. It is a lane
+collaborator: it may import the repository's internal kits, and nothing imports
+it.
 
 ## What it is
 
@@ -111,14 +112,28 @@ there. Outside the image, `python -m payments_lane_double` reads
   needs from the committed fixtures: `compose` for the lane's Compose files (the
   lane CA file, the seller's token, and the pinned dispute authority as the
   registries' JSON recommendation), `runner` for the test runner's `PAYMENTS`
-  settings and the buyer's token, and `seller-account` for the account a
-  storefront's payments check reads. The root `Makefile` runs it with the host's
+  settings and the buyer's token, `seller-account` for the account a
+  storefront's payments check reads, and `seller-token` for the seller's token
+  alone. The root `Makefile` runs it with the host's
   `python3 -I`, which must be 3.11 or newer, so it imports only the standard
   library; it is not part of the package the image runs. The lane storefronts'
   configuration files are static and repeat the receipt identity, fee, service
   URL, the seller's account and the pinned authority;
   `e2e-tests/tests/unit/test_domain_stack_configuration.py` holds those copies to
   the fixtures.
+- The local Helm release runs the image through the `payments-lane-double`
+  subchart (`helm/charts/payments-lane-double`), which `helm/local-values.yaml`
+  enables and no release values do, behind a Service named `payments-double` in
+  every release, so a namespace runs one double. Its `tls.existingSecret` names a
+  `kubernetes.io/tls` Secret to serve instead of the committed leaf. The release's
+  storefronts reach it through the values a deployment supplies: their payments
+  configuration, a CA bundle ConfigMap holding the lane CA, and a payments key
+  Secret holding the seller's token, which `make -C helm topology-secrets` creates
+  from these fixtures with `scripts/lane_env.py seller-token`. The release's
+  values repeat the receipt identity, fee, service URL, the accounts and the
+  pinned authority, and `helm/tests/test_release_topology.py` holds them to the
+  fixtures. It serves no payment scenario there; each storefront's `helm test`
+  payments check reads the seller's balance.
 - `make test` (here) checks the TLS files and runs the unit and library integration
   suite: the kit's real `PaymentsClient` against the app through an in-process
   transport, with an injected clock. From the repository root,

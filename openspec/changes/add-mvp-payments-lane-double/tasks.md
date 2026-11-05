@@ -1045,7 +1045,7 @@ under `helm/charts/bare-metal-storefront/`; `helm/charts/registry/` values only 
 the recommendation needs them; `helm/charts/e2e-tests/` values for `PAYMENTS`;
 `helm/tests/{test_release_topology.py, test_image_overlay.py}`.
 
-- [ ] 5.1 The subchart (D3, D11). `payments-lane-double`, disabled in `helm/values.yaml`,
+- [x] 5.1 The subchart (D3, D11). `payments-lane-double`, disabled in `helm/values.yaml`,
   enabled in `helm/local-values.yaml` and disabled again in
   `helm/bare-metal-release-values.yaml`, so the two-release topology runs one double. Its
   Service is named `payments-double` (not release-prefixed), port 8443. Its Deployment
@@ -1054,22 +1054,76 @@ the recommendation needs them; `helm/charts/e2e-tests/` values for `PAYMENTS`;
   image's own files, and otherwise uses the image's. Render tests: default disabled; the
   local values render one Deployment and a Service named `payments-double`; the topology
   values render none; `tls.existingSecret` mounts the Secret.
-- [ ] 5.2 The CA bundle option (D3; delta "A storefront chart trusts a
+  Chart render, `helm/charts/payments-lane-double/tests/test_render.py` (5 cases, run by
+  `test-render.sh`'s chart loop): pass. As built:
+  - The Deployment is release-scoped (`<release>-payments-lane-double`), one replica,
+    `Recreate`; only the Service name is fixed.
+  - `tls.existingSecret` names a `kubernetes.io/tls` Secret; its `tls.crt` and `tls.key`
+    mount by `subPath` over `/opt/payments-lane-double/tls/double.pem` and
+    `double.key.pem`. The probes are `httpGet` with `scheme: HTTPS`, which the kubelet
+    does not verify, so they hold whichever certificate is served; the image's
+    healthcheck trusts only the committed lane CA and would not. This is shown at
+    render level only. No test ties the mount targets to the file names the double
+    reads (`settings.py`'s `double.pem` and `double.key.pem`), so renaming one side
+    would fail nothing here; a deployment with its own Secret is unrun.
+  - `helm/values.yaml` restates the subchart's image, so a change's image overlay
+    suffixes it; `helm/tests/test_image_overlay.py` now covers it, since the local
+    release enables it. The umbrella schema gains an open `payments-lane-double` entry
+    beside `bare-metal-storefront`'s; the subchart's own schema is closed.
+  - `TOPOLOGY_ROLLOUT_ORDER` leaves the double out, as it leaves dev-env out: a restart
+    loses every payment it holds in memory. A rebuilt double image therefore does not
+    roll on `topology-up`.
+- [x] 5.2 The CA bundle option (D3; delta "A storefront chart trusts a
   deployment-supplied CA bundle"), on both storefront charts: a value naming a ConfigMap
   and key, or alternatively a Secret and key, mounted read-only and named by
   `SSL_CERT_FILE`; no default; nothing rendered when unset; refused when both sources are
   named. Render tests for each source and unset.
-- [ ] 5.3 The payments-key option (D11; delta "A storefront chart injects the payments key
+  Chart render, three cases in each chart's `tests/test_render.py`: pass. The value is
+  `caBundle: {configMapName, secretName, key}` (per agent in the storefront chart, top
+  level in the bare-metal chart). The chosen key mounts as `ca-bundle.pem` in a
+  read-only directory volume at `/etc/arkhai/ca`, and `SSL_CERT_FILE` is
+  `/etc/arkhai/ca/ca-bundle.pem`. Empty names render nothing. Naming both is refused at
+  render, naming both. A source without its key is refused: by the storefront chart's
+  template, which has no default key, and by the bare-metal chart's values schema, which
+  refuses an empty key; its `values.yaml` states every value with its default, the key
+  included. The test helper asserts the volume, mount and variable together, all present or
+  all absent. The values comments say the bundle replaces the image's trust store, so it
+  must hold every CA the storefront's HTTPS peers chain to.
+- [x] 5.3 The payments-key option (D11; delta "A storefront chart injects the payments key
   from a deployment Secret"), on both storefront charts: a value naming a Secret and key,
   exposed with `secretKeyRef` under the variable the agent configuration's
   `Settlement.arkhai_payments.api_key_env` names, read case-insensitively as the chart
   reads every key it uses; refused at render when the configuration names no
   `api_key_env`; nothing rendered when unset. Render tests: set, unset, and refused.
-- [ ] 5.4 The payments-only render case (D11): a storefront agent with payments
+  Chart render, three cases in each chart: pass. The value is
+  `paymentsKey: {secretName, key}`. The variable is read through each chart's folded
+  lookups at `Settlement`, `arkhai_payments` and `api_key_env`. The set case renders it
+  in two spellings (`arkhai_payments.api_key_env`, `Arkhai_Payments.API_KEY_ENV`). The
+  refusal names `Settlement.arkhai_payments.api_key_env`, with no payments section and
+  with one lacking the key. Nothing renders with no `secretName` or an empty one.
+  Beyond the plan, found by the fresh-context check: a variable the chart already sets
+  (`XDG_CONFIG_HOME`, `ARKHAI_IDENTITY_CREDENTIAL`, `SSL_CERT_FILE`, in any case) is
+  refused, since it would render twice. So is one beginning `STOREFRONT_`, which the
+  loader would read as a setting. One more case per chart covers both refusals.
+- [x] 5.4 The payments-only render case (D11): a storefront agent with payments
   configured and Wallet, Chains and Alkahest set to `null` and RPC off renders with the
   payments configuration, the CA mount and the key variable and nothing for the removed
   settings, on both charts.
-- [ ] 5.5 The `helm test` payments check (D12; the delta's Helm half). A
+  Chart render, one case per chart: pass. The storefront chart renders the local
+  release, with Bob's `Wallet`, `Chains`, `Settlement.alkahest`, `Settlement.contact`,
+  the Alkahest clause and the address book set to `null`, `priority` set to
+  `[arkhai.payments.v1]`, and `global.rpc.enabled: false`. The bare-metal chart
+  renders its example the same way; it has no RPC value. "RPC off" is shown only as
+  far as rendering goes: no storefront template reads `global.rpc`, so setting it
+  changes nothing the storefront chart renders. The case's check for RPC keys
+  re-checks the `Chains` removal. Beyond the plan, each case also runs the
+  storefront's own check over the rendered document: the VM startup refusal reports
+  none, and the bare-metal loader's publication checks report no problem. Both ran in
+  this session, since `make init` had built both storefront environments. The first
+  run caught the test's own overlay, which had left `alkahest.v1` in `priority`;
+  `contact` is removed for the same reason. In CI no job has both Helm and the
+  storefront environments (TESTING.md), so there these two checks print a skip.
+- [x] 5.5 The `helm test` payments check (D12; the delta's Helm half). A
   `payments-check-test.yaml` in each storefront chart, rendered only when payments is
   configured and a `tests.paymentsAccount` value names the account, runs the storefront
   CLI's `check-payments --account <account>` directly, not through the entrypoint, with
@@ -1081,7 +1135,37 @@ the recommendation needs them; `helm/charts/e2e-tests/` values for `PAYMENTS`;
   Render tests: the pod's mounts and variables equal the Deployment's payments-deciding
   ones; it mounts no data volume with persistence enabled; it has no probes and no
   ZeroTier additions.
-- [ ] 5.6 The local rehearsal (D11, D3, D7). `helm/local-values.yaml` configures Bob's
+  Chart render, two cases per chart: pass. Shared helpers:
+  - storefront chart: `storefront.agentEnv`, `storefront.agentConfigMounts` and
+    `storefront.agentConfigVolumes`;
+  - bare-metal chart: `bare-metal-storefront.env`, `.configMounts` and `.configVolumes`.
+  Each Deployment now renders its environment, its configuration mounts and their
+  volumes only through them. The equality case renders the local release (storefront
+  chart) or the example with payments access (bare metal). It compares the pod's whole
+  `env` block with the Deployment's, and its mounts and volumes item by item with the
+  Deployment's less `tun-device` and `arkhai-data` (`data` in bare metal). It checks
+  that persistence is on and the Deployment mounts its claim, which the pod does not.
+  It also checks the pod has no probe, capability, `/dev/net/tun` or `entrypoint.sh`,
+  has the test labels and no `app.kubernetes.io/name`, and has `enableServiceLinks:
+  false`. Each payments-deciding piece is present, so the comparison is not between
+  empty lists. As built, differing from the plan:
+  - In the storefront chart, `tests.paymentsAccount` is per agent
+    (`agents.<name>.tests.paymentsAccount`), and one pod renders per agent that sets it,
+    named `<agent fullname>-payments-check`: each agent has its own credential, key and
+    payee account. The bare-metal chart's is top-level `tests.paymentsAccount`.
+  - "Payments is configured" is read as a non-empty `[Settlement.arkhai_payments]`
+    section in any spelling. An account without one renders nothing, as the plan's
+    "rendered only when" says, rather than refusing.
+  - The pod mounts the Alkahest address book too, when the agent names one: it is a
+    configuration file the loaded settings name, and the check loads them as `serve`
+    does.
+  - The env and mounts are now rendered through the helpers. The suites are not byte
+    snapshots, so what is shown is that every existing assertion over them passes
+    unchanged, the defaults, fixtures and second-agent cases among them. One visible
+    difference: the bare-metal ConfigMap volume's name is now quoted.
+  - `make -C helm test-module MODULE=storefront` still filters the smoke test by name;
+    the payments check runs under `make -C helm test` and `topology-check`.
+- [x] 5.6 The local rehearsal (D11, D3, D7). `helm/local-values.yaml` configures Bob's
   storefront agent and `helm/bare-metal-release-values.yaml` the bare-metal storefront
   agent for payments through the agent configuration and the two options (ConfigMap
   `payments-ca-bundle` / `ca-bundle.pem`, Secret `seller-payments-key` / `api-key`), with
@@ -1094,7 +1178,60 @@ the recommendation needs them; `helm/charts/e2e-tests/` values for `PAYMENTS`;
   `check-local-secrets` refuses a deploy without them. A render test in
   `helm/tests/test_release_topology.py` holds the two releases to one double and both
   storefronts to `https://payments-double:8443`.
-- [ ] 5.7 **Verification checkpoint.** Chart render: `make -C helm test-render`, with every
+  Chart render, `helm/tests/test_release_topology.py` (four new cases, three updated):
+  pass. As built:
+  - Values: Bob's agent in `local-values.yaml` and the bare-metal storefront in
+    `bare-metal-release-values.yaml` gain `[Settlement.arkhai_payments]` (the double's
+    URL, receipt identity, 250 bps, `livemode: false`,
+    `api_key_env: ARKHAI_PAYMENTS_API_KEY`), `arkhai.payments.v1` in `priority`,
+    `caBundle` and `paymentsKey` on the two names D3 and D11 give, and
+    `tests.paymentsAccount` set to the seller's fixture account. The registry's
+    `descriptor.recommendedDisputeAuthorities` names the pinned authority. The registry
+    chart already had the value, so it needed no change.
+  - The new cases:
+    - one double, in release 1, whose Service URL is `lane_env.SERVICE_URL` and both
+      storefronts' `service_url`;
+    - every payments value equal to the double's fixtures, read with `tomllib`: the
+      identity, the fee, the account each payments check reads, the registry's JSON
+      recommendation, and the e2e-tests profile. The profile's accounts, identity
+      and fee are compared with the fixtures, its URL and token variable with
+      `lane_env`'s constants, and only `livemode` and `lane_owned` with
+      `lane_env.runner_lines`. Neither render contains `development_auth`;
+    - the e2e-tests chart refusing credential keys;
+    - every ConfigMap the releases read and no chart renders is `payments-ca-bundle`,
+      which is `LOCAL_CONFIGMAPS` and what the script creates, from the committed
+      lane CA under the key both storefronts mount.
+  - The existing case "created == referenced == checked" covers `seller-payments-key`.
+  - Updated: release 1's and release 2's expected test templates gain
+    `payments-check-test.yaml`, and the rollout order case allows the double's
+    Deployment.
+  - The e2e-tests chart gains a closed `payments` value with only the public keys:
+    `service_url`, `service_identity`, `fee_bps`, `livemode`, `lane_owned`,
+    `api_key_env`, `buyer_account` and `seller_account`. The umbrella's test-config
+    writes it into the `helm` profile when the chart is enabled and the value is
+    non-empty; release 2 has none. Correction to the plan: D9's
+    `BUYER_MARKETPLACE_CREDENTIAL` and `SELLER_MARKETPLACE_CREDENTIAL`, and the buyer's
+    bearer token, are not carried. The profile is a ConfigMap, and charts accept no
+    credential in values (`helm/Makefile`; DEPLOYMENT_AND_CONFIG.md). Their place
+    would be the `e2e-secret` profile `topology-secrets` writes, plus an environment
+    variable for the token. The release serves no payment scenario (D11), so nothing
+    reads them. A payment marker run on Helm would fail by name on the missing
+    credentials, which is what `LANE_OWNED` asks of a broken configuration.
+  - `topology-secrets.sh` creates the `seller-payments-key` Secret (`api-key`) from
+    `lane_env.py seller-token`, a new mode with its own case in the double's
+    `test_lane_env.py`, and the `payments-ca-bundle` ConfigMap (`ca-bundle.pem`) from
+    `tools/payments-lane-double/tls/lane-ca.pem`. It now also requires `python3`.
+    `helm/Makefile` adds `seller-payments-key` to `LOCAL_SECRETS`, and a new
+    `LOCAL_CONFIGMAPS` that `check-local-secrets` checks. Beyond the plan,
+    `deploy-local` now runs `check-local-secrets` first, so the local deploy target
+    checks for both before installing (D3). Validation deploys through
+    `make -C helm deploy`, not `deploy-local`, after `topology-secrets`, so its path is
+    unchanged. `scripts/tests/test_change_build_and_helm_targets.py`'s
+    `topology-secrets` case now counts the ConfigMap's apply.
+  - Bob gets no `[[DisputeCredential]]`. Only the VM lane's scenario needs one (D2);
+    the release serves no payment deal, and the credential's variable would be another
+    environment variable the chart has no option for.
+- [x] 5.7 **Verification checkpoint.** Chart render: `make -C helm test-render`, with every
   render case of 5.1–5.6. Unit: `helm/tests` (`make test-deployment-packaging`). System:
   where a local cluster is available, `make -C helm topology-secrets`, `deploy-local`,
   then `make -C helm test`, whose payments check passes for Bob's storefront, and
@@ -1106,6 +1243,102 @@ the recommendation needs them; `helm/charts/e2e-tests/` values for `PAYMENTS`;
   them. Serving payment scenarios on Helm is not owed (D11).
   Owed by validation: `tests.yml`, job `test · test-deployment-packaging` —
   `make -C helm test-render` passes with the new render cases.
+
+  Evidence, all local:
+  - `make -C helm test-render`: every umbrella assertion and every chart's and
+    `helm/tests/`' render test passes, the new cases of 5.1–5.6 among them. No skip
+    line was printed: both storefront environments exist here, so the startup refusal
+    over the local release with payments, the payments-only checks (5.4) and release
+    2's loader check all ran.
+  - Templates broken once while writing the tests: with `SSL_CERT_FILE` dropped from
+    the storefront chart's environment helper, the CA bundle, payments-only and
+    payments-check cases failed. With a `data` mount added to the bare-metal payments
+    check pod, its equality case failed. Both breaks were reverted.
+  - `make test-deployment-packaging`: release tooling 2181 passed, with the updated
+    `topology-secrets` case, and the render suite above.
+  - `make -C tools/payments-lane-double test`: `check-tls` passes; 50 passed, with the
+    `seller-token` case.
+  - `make test`: exit 0, no failing suite.
+  - `make check-packaging`: all eight checks OK. No dependency or lock changed.
+  - `make check-change`: every check passes.
+  - System: not run. The plan's `topology-secrets`, `deploy-local`, `make -C helm test`
+    and `topology-check` would deploy to a cluster, which this step's commands do not
+    reach. Left to validation's Helm part, with the gap below.
+
+  End-to-end: none, as planned; no `e2e-tests` marker exercises the charts.
+  Correction to the plan's claim that validation's Helm part runs the release's
+  `helm test`, the payments check among them: `scripts/validate_slice.py`'s
+  `_run_scenarios` runs only the scenario pod (`helm test --filter
+  name=<release>-e2e-tests-e2e-scenarios`). Validation's deploy does start the release,
+  the double, and Bob configured for payments, and waits for every rollout; so a
+  storefront that refuses its payments configuration, or a pod naming a missing
+  ConfigMap or Secret, fails it. Nothing automated runs the payments check pods. They
+  run under `make -C helm test` (Bob) and `topology-check` (both storefronts).
+  Closeout's 6.8 asks for "the Helm part's payments check", so the round's triage
+  should decide one of two things:
+  - validation also runs the payments check pods, a change to
+    `scripts/validate_slice.py` outside this section's files;
+  - or 6.8 records it as an owner-run `make -C helm test` against the validated
+    namespace.
+  Owed by validation, confirmed, with one job added:
+  - `tests.yml`, job `test · test-deployment-packaging`: `make -C helm test-render`
+    passes with the new render cases, and release tooling with the updated
+    `topology-secrets` case.
+  - `tests.yml`, job `test · test-payments-lane-double`: the suite passes with the
+    `seller-token` case.
+
+  Fresh-context check. It found no rendering, indentation, schema, layering,
+  comment-hygiene, test-level, packaging or public-content defect. Fixed:
+  - The environment helpers' comments justified only the credential and the key; they
+    now say why `SSL_CERT_FILE`, process trust and not a setting, travels outside the
+    configuration system.
+  - The `api_key_env` collision and `STOREFRONT_` refusals (5.3).
+  - Fixture labels lacking "never for a public network": two in
+    `bare-metal-release-values.yaml`, one in `local-values.yaml`.
+  - `scripts/validate_slice.py`'s `HELM_SCENARIOS` comment, which this section made
+    incomplete.
+  - The storefront chart's `tests` comment, which left out the account condition.
+  - Four overstated notes: 5.1's TLS Secret, 5.4's "RPC off", 5.5's "renders keep
+    their content", and 5.6's profile comparison.
+  After the fixes, `make -C helm test-render` and `make test-deployment-packaging`
+  (release tooling 2181 passed, render suite passed) were re-run and pass. `make test`
+  and `make check-packaging` ran before them; the fixes touched only these chart
+  templates and tests, values comments, a script comment and these notes.
+  Declined:
+  - Testing the bare-metal chart's `required` on a `null` `caBundle.key` or
+    `paymentsKey.key`. The schema refuses an empty key, and the default supplies one;
+    only an explicit `null` reaches the template.
+  - Raising the render suite's Python floor. `test_release_topology.py` now imports
+    `tomllib`, as the bare-metal chart's render test already did, so `test-render.sh`'s
+    `python3` was already 3.11 or newer.
+  Recorded for the round's triage and closeout, not changed here:
+  - `openspec/specs/deployment-state/spec.md`, "A storefront's configuration reaches it
+    through its configuration system". Its scenario says the bare-metal chart's pod
+    environment carries "only the configuration directory and the signing credential".
+    That holds for every render without `caBundle` or `paymentsKey`, and the existing
+    test still asserts it over the example. With either set, the environment also
+    carries `SSL_CERT_FILE` or the payments key. The change's delta only adds
+    requirements, so the archived spec would state both. It needs a MODIFIED delta
+    naming the two options, which is a spec edit for the triage to accept.
+  - Two design statements this section's build narrows, which `design.md` should be
+    brought in line with at narrative compression: D9, "the local release's e2e-tests
+    chart values carry the same keys", holds for the public keys only (5.6); and D3's
+    "the local deploy target creates that ConfigMap" is done by `topology-secrets`,
+    which D3's later sentence names, with `deploy-local` checking for it.
+
+  Handoff to closeout:
+  - Promotion, beyond 6.9's list, of behaviour the section made true, or the passage
+    goes stale:
+    - DEPLOYMENT_AND_CONFIG.md's "Release topology". `topology-up` restarts neither
+      dev-env nor the payments double. `check-local-secrets` now also checks
+      `LOCAL_CONFIGMAPS`, and `deploy-local` runs it.
+    - Its "Kubernetes: ConfigMap and Secret mounting" pod rule.
+    - Its storefront pass-through table of the pod environment.
+    - TESTING.md's "Chart Render Tests" list of what each chart's suite asserts.
+  - The validation gap above (5.7, End-to-end) decides how 6.8 shows the Helm payments
+    check.
+  - The section is a session of its own. The next step is the round's validation and
+    implementation review.
 
 ## 6. Closeout
 

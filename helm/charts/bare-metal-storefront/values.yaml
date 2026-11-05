@@ -33,7 +33,8 @@ replicaCount: 1
 # The storefront refuses to start unless `config` names a registry and its
 # authority pin, an enabled settlement mechanism, and at least one site bound to
 # exactly one service peer; examples/production-values.yaml states each. The
-# pod's environment carries only XDG_CONFIG_HOME and the signing credential.
+# pod's environment carries only XDG_CONFIG_HOME, the signing credential, and,
+# where caBundle and paymentsKey name them, SSL_CERT_FILE and the payments key.
 # ---------------------------------------------------------------------------
 
 # The port the container listens on, its probes call, and its Service exposes;
@@ -66,6 +67,30 @@ alkahestAddressBook:
   configMapName: ""
   key: alkahest_addresses.json
   mountPath: /etc/arkhai/alkahest
+
+# A CA bundle from an existing ConfigMap key, or alternatively an existing Secret
+# key, never both, mounted read-only and named by SSL_CERT_FILE. It replaces the
+# image's trust store, so it holds every CA the storefront's HTTPS peers chain
+# to, such as its payments service's. The chart names no CA of its own; empty
+# names mount none.
+caBundle:
+  configMapName: ""
+  secretName: ""
+  key: ca-bundle.pem
+
+# An existing Secret key holding the storefront's payments API key, exposed under
+# the variable `config`'s [Settlement.arkhai_payments].api_key_env names, which
+# `config` must state; an empty secretName exposes none.
+paymentsKey:
+  secretName: ""
+  key: api-key
+
+tests:
+  # The account the payments check test pod reads the balance of, with
+  # `bare-metal-storefront check-payments --account`: the seller's payee account.
+  # The pod renders only when `config` has [Settlement.arkhai_payments] and this
+  # names an account.
+  paymentsAccount: ""
 
 # In an umbrella release whose `config` names no registry.urls, the storefront
 # publishes to the release's internal registry, and this is its trust, which the

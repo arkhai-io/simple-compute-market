@@ -92,6 +92,14 @@
         }
       }
     },
+    "payments-lane-double": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
     "provisioning": {
       "type": "object",
       "required": [
@@ -604,6 +612,73 @@
               ],
               "minLength": 1,
               "pattern": "^/"
+            }
+          }
+        },
+        "caBundle": {
+          "description": "A CA bundle from an existing ConfigMap key or Secret key, named by SSL_CERT_FILE; empty names mount none.",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "configMapName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "secretName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "key": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1
+            }
+          }
+        },
+        "paymentsKey": {
+          "description": "An existing Secret key exposed under the variable config's Settlement.arkhai_payments.api_key_env names; an empty secretName exposes none.",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "secretName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "key": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1
+            }
+          }
+        },
+        "tests": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "paymentsAccount": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         },

@@ -65,6 +65,12 @@ def test_run_isolated_it_prints_what_its_functions_return() -> None:
     assert _run("seller-account") == [accounts["accounts"]["seller"]["account"]]
 
 
+def test_the_seller_token_mode_prints_the_token_the_double_authenticates_the_seller_by() -> None:
+    directory = load_accounts(FIXTURES / "accounts.toml")
+
+    assert _run("seller-token") == [directory.role("seller").token]
+
+
 def test_the_compose_values_are_the_seller_token_and_the_pinned_authority() -> None:
     directory = load_accounts(FIXTURES / "accounts.toml")
     values = _values(_run("compose"))

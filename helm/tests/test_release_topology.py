@@ -3,7 +3,9 @@
 Release 1 is the umbrella as ``make -C helm deploy-local`` installs it; release 2
 is the same chart under ``bare-metal-release-values.yaml``: the bare-metal
 storefront and its own provisioning service, publishing to release 1's registry.
-Each test renders both releases with the names ``helm/Makefile``'s topology
+Release 1 also runs the payments lane double, which both storefronts are
+configured to reach through the values a deployment supplies. Each test renders
+both releases with the names ``helm/Makefile``'s topology
 targets install them under, and reads the documents the charts render as JSON
 back with ``json``. Standard library only.
 
@@ -14,6 +16,7 @@ configuration loader and publication checks.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import re
@@ -21,6 +24,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import tomllib
 from pathlib import Path, PurePosixPath
 
 UMBRELLA = Path(__file__).resolve().parents[1]
@@ -48,6 +52,14 @@ RELEASE_TWO = _make_variable("TOPOLOGY_RELEASE")
 OVERLAY = UMBRELLA / _make_variable("TOPOLOGY_VALUES")
 RELEASE_ONE_VALUES = (UMBRELLA / "values.yaml", UMBRELLA / "local-values.yaml")
 RELEASE_TWO_VALUES = (*RELEASE_ONE_VALUES, OVERLAY)
+
+# The payments lane double, whose committed fixtures the releases' payments
+# values restate, and the script a Compose lane reads them with.
+DOUBLE = UMBRELLA.parent / "tools" / "payments-lane-double"
+_LANE_ENV_SPEC = importlib.util.spec_from_file_location("lane_env", DOUBLE / "scripts" / "lane_env.py")
+assert _LANE_ENV_SPEC is not None and _LANE_ENV_SPEC.loader is not None
+lane_env = importlib.util.module_from_spec(_LANE_ENV_SPEC)
+_LANE_ENV_SPEC.loader.exec_module(lane_env)
 
 
 def _render(release: str, values: tuple[Path, ...], overlay: dict | None = None) -> subprocess.CompletedProcess[str]:
@@ -402,7 +414,9 @@ def test_topology_up_restarts_every_deployment_but_the_chain() -> None:
     components = {component for _, component in deployments}
 
     assert order == ["registry", "provisioning", "storefront", "bare-metal-storefront"]
-    assert components == {*order, "dev-env"}
+    # The payments lane double is left out for the same reason as the chain: it
+    # keeps every payment in memory, which a restart loses.
+    assert components == {*order, "dev-env", "payments-lane-double"}
 
 
 def _mapping_under(lines: list[str], header: str) -> dict[str, str]:
@@ -471,10 +485,12 @@ _EXPECTED_TEST_TEMPLATES = {
         "templates/tests/provisioning-smoke-test.yaml",
         "templates/tests/e2e-deal-test.yaml",
         "templates/tests/chain-environment-test.yaml",
+        "templates/tests/payments-check-test.yaml",
     },
     RELEASE_TWO: {
         "templates/tests/provisioning-smoke-test.yaml",
         "templates/tests/health-test.yaml",
+        "templates/tests/payments-check-test.yaml",
     },
 }
 
@@ -522,6 +538,130 @@ def test_topology_secrets_creates_every_secret_both_releases_read() -> None:
     checked = {*_make_words("LOCAL_SECRETS"), *_make_words("TOPOLOGY_SECRETS"), *_make_words("TEST_SECRETS")}
 
     assert created == referenced == checked, (created, referenced, checked)
+
+
+def _configmap_references(manifest: str) -> set[str]:
+    return set(re.findall(r'configMap:\n\s+name: "?([^"\s]+)"?', manifest))
+
+
+def _rendered_names(manifest: str, kind: str) -> set[str]:
+    names = set()
+    for document in _documents(manifest):
+        lines = document.splitlines()
+        if f"kind: {kind}" in lines:
+            names.add(next(line.split(": ", 1)[1].strip('"') for line in lines if line.startswith("  name: ")))
+    return names
+
+
+def test_topology_secrets_creates_every_configmap_the_releases_read_and_no_chart_renders() -> None:
+    """The one such ConfigMap is the storefronts' CA bundle, created from the
+    payments lane double's committed lane CA under the key both storefronts
+    mount; `check-local-secrets` checks for it. The payments key Secret beside
+    it holds its token under the key both storefronts read."""
+    release_one, release_two = _release_one(), _release_two()
+    referenced = _configmap_references(release_one) | _configmap_references(release_two)
+    rendered = _rendered_names(release_one, "ConfigMap") | _rendered_names(release_two, "ConfigMap")
+    script = (UMBRELLA / "scripts" / "topology-secrets.sh").read_text()
+    created = set(re.findall(r"kubectl create configmap (\S+)", script))
+
+    assert referenced - rendered == created == set(_make_words("LOCAL_CONFIGMAPS")) == {"payments-ca-bundle"}
+    assert '"--from-file=ca-bundle.pem=$PAYMENTS_LANE_CA_FILE"' in script
+    assert (UMBRELLA / _make_variable("PAYMENTS_LANE_CA_FILE")).resolve() == DOUBLE / "tls" / "lane-ca.pem"
+    assert (UMBRELLA / _make_variable("PAYMENTS_LANE_ENV")).resolve() == DOUBLE / "scripts" / "lane_env.py"
+    assert 'apply seller-payments-key "api-key=' in script
+    for manifest in (release_one, release_two):
+        assert re.search(r'configMap:\n\s+name: "payments-ca-bundle"\n\s+items:\n\s+- key: "ca-bundle.pem"', manifest)
+        assert re.search(r'secretKeyRef:\n\s+name: "seller-payments-key"\n\s+key: "api-key"', manifest)
+
+
+# --- the payments rehearsal -------------------------------------------------
+
+
+def _fixture(name: str) -> dict:
+    with (DOUBLE / "fixtures" / name).open("rb") as handle:
+        return tomllib.load(handle)
+
+
+def _bob_document(manifest: str) -> dict:
+    return json.loads(_block(_source(manifest, "storefront/templates/configmap.yaml"), "storefront.json"))
+
+
+def test_the_two_releases_run_one_payments_double_and_both_storefronts_reach_it() -> None:
+    """Release 1 runs the double; release 2 runs none and its storefront reaches
+    release 1's by the Service name, `payments-double`, that is the same in every
+    release and is the name the double's certificate covers."""
+    release_one, release_two = _release_one(), _release_two()
+
+    deployments = [name for name, component in _labelled(release_one, "Deployment") if component == "payments-lane-double"]
+    assert deployments == [f"{RELEASE_ONE}-payments-lane-double"]
+    assert not any("/charts/payments-lane-double/" in source for source in _sources(release_two))
+    service = _named(release_one, "Service", "payments-double")
+    port = re.search(r"^\s+port: (\d+)$", service, re.MULTILINE)
+    assert port, "Service payments-double renders no port"
+    url = f"https://payments-double:{port.group(1)}"
+    assert url == lane_env.SERVICE_URL
+    for document in (_bob_document(release_one), _storefront_document(release_two)):
+        assert document["Settlement"]["arkhai_payments"]["service_url"] == url
+
+
+def _recommended_dispute_authorities(registry: str) -> list:
+    match = re.search(r"- name: REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES\n\s+value: (\".*\")$", registry, re.MULTILINE)
+    assert match, "the registry recommends no dispute authority"
+    return json.loads(json.loads(match.group(1)))
+
+
+def test_the_local_payments_values_are_the_payments_doubles_committed_fixtures() -> None:
+    """Each payments value the two releases state restates the double's
+    fixtures: the receipt identity and fee both storefronts pin, the seller
+    account both payments checks read, the dispute authority the registry
+    recommends, and the e2e-tests chart's PAYMENTS settings, which are the ones
+    a Compose lane's runner receives. No storefront uses development
+    authentication."""
+    accounts, authority = _fixture("accounts.toml"), _fixture("dispute-authority.toml")
+    release_one, release_two = _release_one(), _release_two()
+    seller = accounts["accounts"]["seller"]["account"]
+
+    for manifest, document, check in (
+        (release_one, _bob_document(release_one), "storefront/templates/tests/payments-check-test.yaml"),
+        (release_two, _storefront_document(release_two), "bare-metal-storefront/templates/tests/payments-check-test.yaml"),
+    ):
+        payments = document["Settlement"]["arkhai_payments"]
+        assert payments["enabled"] is True
+        assert payments["service_identity"] == accounts["receipt_identity"]
+        assert payments["fee_bps"] == accounts["fee_bps"]
+        assert payments["livemode"] is False
+        assert "arkhai.payments.v1" in document["Settlement"]["priority"]
+        assert f'- "{seller}"' in {line.strip() for line in _source(manifest, check).splitlines()}
+        assert "development_auth" not in manifest
+
+    registry = _source(release_one, "charts/registry/templates/deployment.yaml")
+    assert _recommended_dispute_authorities(registry) == [authority]
+
+    runner = dict(line.split("=", 1) for line in lane_env.runner_lines(accounts))
+    assert _smoke_profile(release_one)["payments"] == {
+        "service_url": lane_env.SERVICE_URL,
+        "service_identity": accounts["receipt_identity"]["identifier"],
+        "fee_bps": accounts["fee_bps"],
+        "livemode": runner["ARKHAI_PAYMENTS__LIVEMODE"] == "true",
+        "lane_owned": runner["ARKHAI_PAYMENTS__LANE_OWNED"] == "true",
+        "api_key_env": lane_env.BUYER_API_KEY_ENV,
+        "buyer_account": accounts["accounts"]["buyer"]["account"],
+        "seller_account": seller,
+    }
+    assert "payments" not in _smoke_profile(release_two)
+
+
+def test_the_e2e_tests_chart_refuses_a_payments_credential() -> None:
+    """The PAYMENTS settings render into a ConfigMap, so the parties'
+    marketplace credentials and development authentication are refused."""
+    for key, value in (
+        ("buyer_marketplace_credential", "x"),
+        ("seller_marketplace_credential", "x"),
+        ("development_auth", True),
+    ):
+        refused = _render(RELEASE_ONE, RELEASE_ONE_VALUES, {"e2e-tests": {"payments": {key: value}}})
+        assert refused.returncode != 0, key
+        assert key in refused.stderr, refused.stderr
 
 
 def test_topology_secrets_creates_the_volume_the_deal_test_mounts() -> None:

@@ -174,6 +174,187 @@ the umbrella's `global.provisioning` and `global.provisioningIdentity`, or "".
 {{- end -}}
 
 {{/*
+The storefront's CA bundle, as JSON for fromJson: `configMapName` or
+`secretName`, whichever names the source ("" for the other), and its `key`. Both
+empty is no bundle. The chart names no CA of its own: a deployment supplies the
+ConfigMap or Secret, and the bundle becomes the storefront's whole trust through
+SSL_CERT_FILE, so it must hold every CA the storefront's HTTPS peers chain to.
+Naming both sources is refused, as is a source without its key.
+*/}}
+{{- define "bare-metal-storefront.caBundle" -}}
+{{- $bundle := .Values.caBundle | default dict -}}
+{{- $configMap := $bundle.configMapName | default "" -}}
+{{- $secret := $bundle.secretName | default "" -}}
+{{- if and $configMap $secret -}}
+  {{- fail (printf "bare-metal storefront caBundle names both configMapName %q and secretName %q; name one" $configMap $secret) -}}
+{{- end -}}
+{{- $key := "" -}}
+{{- if or $configMap $secret -}}
+  {{- $key = required "bare-metal storefront caBundle.key is required with its source" $bundle.key -}}
+{{- end -}}
+{{- toJson (dict "configMapName" $configMap "secretName" $secret "key" $key) -}}
+{{- end -}}
+
+{{/*
+Where the CA bundle mounts, the file SSL_CERT_FILE names.
+*/}}
+{{- define "bare-metal-storefront.caBundleDirectory" -}}/etc/arkhai/ca{{- end -}}
+{{- define "bare-metal-storefront.caBundleFile" -}}/etc/arkhai/ca/ca-bundle.pem{{- end -}}
+
+{{/*
+The configuration's `[Settlement.arkhai_payments]` section, matched in any
+spelling at each level and with its nulls removed, as JSON for fromJson, or {}
+when the configuration has none.
+*/}}
+{{- define "bare-metal-storefront.paymentsSection" -}}
+{{- $cfg := deepCopy (.Values.config | default dict) -}}
+{{- include "bare-metal-storefront.dropNulls" $cfg -}}
+{{- $settlement := include "bare-metal-storefront.foldedMap" (dict "doc" $cfg "name" "settlement") | fromJson -}}
+{{- include "bare-metal-storefront.foldedMap" (dict "doc" $settlement "name" "arkhai_payments") -}}
+{{- end -}}
+
+{{/*
+The storefront's payments key, as JSON for fromJson: `secretName` ("" when
+unset), its `key`, and `variable`, the environment variable the storefront reads
+the key from, which is the one its configuration's
+`[Settlement.arkhai_payments].api_key_env` names. The chart learns the name from
+the configuration rather than stating one, so the two cannot disagree; a key
+Secret named while the configuration names no variable is refused, since the
+storefront would never read it. So is a variable the chart already sets, which
+would render twice, and one in the loader's STOREFRONT_ override layer, which
+would hand the key to the loader as a setting.
+*/}}
+{{- define "bare-metal-storefront.paymentsKey" -}}
+{{- $paymentsKey := .Values.paymentsKey | default dict -}}
+{{- $secret := $paymentsKey.secretName | default "" -}}
+{{- $key := "" -}}
+{{- $variable := "" -}}
+{{- if $secret -}}
+  {{- $key = required "bare-metal storefront paymentsKey.key is required with its secretName" $paymentsKey.key -}}
+  {{- $payments := include "bare-metal-storefront.paymentsSection" . | fromJson -}}
+  {{- $variable = include "bare-metal-storefront.foldedValue" (dict "doc" $payments "name" "api_key_env") -}}
+  {{- if not $variable -}}
+    {{- fail (printf "bare-metal storefront names paymentsKey.secretName %q, but its config states no Settlement.arkhai_payments.api_key_env to expose it under" $secret) -}}
+  {{- end -}}
+  {{- if or (has (upper $variable) (list "XDG_CONFIG_HOME" "ARKHAI_IDENTITY_CREDENTIAL" "SSL_CERT_FILE")) (hasPrefix "STOREFRONT_" (upper $variable)) -}}
+    {{- fail (printf "bare-metal storefront config Settlement.arkhai_payments.api_key_env %q names a variable the chart sets or the loader reads as settings; name another" $variable) -}}
+  {{- end -}}
+{{- end -}}
+{{- toJson (dict "secretName" $secret "key" $key "variable" $variable) -}}
+{{- end -}}
+
+{{/*
+What decides how the storefront process loads its configuration and reaches its
+payments service, rendered once for its Deployment and once for its payments
+check test pod, so the two cannot drift: the container's environment, the
+configuration, overlay, address-book, and CA-bundle mounts, and their volumes.
+Each takes the chart root and renders list items at column zero.
+
+`bare-metal-storefront.env`: XDG_CONFIG_HOME, the signing credential, and, where
+the values state them, SSL_CERT_FILE naming the CA bundle and the payments key
+under the variable the configuration names. None is a storefront setting:
+XDG_CONFIG_HOME selects the configuration loaded, the credential and the payments
+key must be kept from the loader, and SSL_CERT_FILE is the process's TLS trust,
+which the storefront's configuration does not state.
+*/}}
+{{- define "bare-metal-storefront.env" -}}
+{{- $bundle := include "bare-metal-storefront.caBundle" . | fromJson -}}
+{{- $paymentsKey := include "bare-metal-storefront.paymentsKey" . | fromJson -}}
+- name: XDG_CONFIG_HOME
+  value: /etc
+- name: ARKHAI_IDENTITY_CREDENTIAL
+  valueFrom:
+    secretKeyRef:
+      name: {{ required "bare-metal storefront identity.credentialSecret.name is required" .Values.identity.credentialSecret.name | quote }}
+      key: {{ required "bare-metal storefront identity.credentialSecret.key is required" .Values.identity.credentialSecret.key | quote }}
+{{- if or $bundle.configMapName $bundle.secretName }}
+- name: SSL_CERT_FILE
+  value: {{ include "bare-metal-storefront.caBundleFile" . | quote }}
+{{- end }}
+{{- if $paymentsKey.secretName }}
+- name: {{ $paymentsKey.variable | quote }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ $paymentsKey.secretName | quote }}
+      key: {{ $paymentsKey.key | quote }}
+{{- end }}
+{{- end -}}
+
+{{/*
+`bare-metal-storefront.configMounts`: storefront.json, the Secret overlay when
+`secret` names one, the Alkahest address book when one is named, and the CA
+bundle when one is named, each read-only.
+*/}}
+{{- define "bare-metal-storefront.configMounts" -}}
+{{- $bundle := include "bare-metal-storefront.caBundle" . | fromJson -}}
+- name: config
+  mountPath: /etc/arkhai/storefront.json
+  subPath: storefront.json
+  readOnly: true
+{{- if .Values.secret.secretName }}
+- name: secrets
+  mountPath: /etc/arkhai/storefront.secrets.toml
+  subPath: storefront.secrets.toml
+  readOnly: true
+{{- end }}
+{{- if .Values.alkahestAddressBook.configMapName }}
+- name: alkahest-address-book
+  mountPath: {{ .Values.alkahestAddressBook.mountPath | quote }}
+  readOnly: true
+{{- end }}
+{{- if or $bundle.configMapName $bundle.secretName }}
+- name: ca-bundle
+  mountPath: {{ include "bare-metal-storefront.caBundleDirectory" . | quote }}
+  readOnly: true
+{{- end }}
+{{- end -}}
+
+{{/*
+`bare-metal-storefront.configVolumes`: the volumes
+`bare-metal-storefront.configMounts` mounts.
+*/}}
+{{- define "bare-metal-storefront.configVolumes" -}}
+{{- $bundle := include "bare-metal-storefront.caBundle" . | fromJson -}}
+- name: config
+  configMap:
+    name: {{ include "bare-metal-storefront.configMapName" . | quote }}
+    items:
+      - key: storefront.json
+        path: storefront.json
+{{- if .Values.secret.secretName }}
+- name: secrets
+  secret:
+    secretName: {{ .Values.secret.secretName | quote }}
+    items:
+      - key: {{ .Values.secret.configKey | quote }}
+        path: storefront.secrets.toml
+{{- end }}
+{{- if .Values.alkahestAddressBook.configMapName }}
+- name: alkahest-address-book
+  configMap:
+    name: {{ .Values.alkahestAddressBook.configMapName | quote }}
+    items:
+      - key: {{ .Values.alkahestAddressBook.key | quote }}
+        path: {{ .Values.alkahestAddressBook.key | quote }}
+{{- end }}
+{{- if $bundle.configMapName }}
+- name: ca-bundle
+  configMap:
+    name: {{ $bundle.configMapName | quote }}
+    items:
+      - key: {{ $bundle.key | quote }}
+        path: ca-bundle.pem
+{{- else if $bundle.secretName }}
+- name: ca-bundle
+  secret:
+    secretName: {{ $bundle.secretName | quote }}
+    items:
+      - key: {{ $bundle.key | quote }}
+        path: ca-bundle.pem
+{{- end }}
+{{- end -}}
+
+{{/*
 A values file's `null` removes what it names, whether or not Helm's merge removed
 it: under the supported Helm release, a parent's `null` for a subchart is dropped
 only where the subchart's own defaults define the key, and the umbrella or an

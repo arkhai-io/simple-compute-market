@@ -102,9 +102,11 @@ LOADER_ENVIRONMENTS = (
 PIPELINE_MARKER_VARIABLES = ("E2E_MODULE", "E2E_BARE_METAL_MODULE",
                              "E2E_APICREDITS_MODULE")
 # The scenarios run against the Helm deployment. The local release enables
-# Alkahest and contact exchange for its one storefront, but the charts deploy no
-# second storefront and registry, none of the API-credits and bare-metal services,
-# and no Mailpit, so a scenario that needs any of those cannot pass there. Every
+# Alkahest, contact exchange, and Arkhai payments against the payments lane double
+# for its one storefront, but the charts deploy no second storefront and registry,
+# none of the API-credits and bare-metal services, and no Mailpit, and give the
+# scenario pod no payments credential, so a scenario that needs any of those
+# cannot pass there. Every
 # other pipeline scenario is reported as not run against Helm, never as passed. A
 # scenario joins this list when the Helm deployment serves what it needs, and
 # reads nothing from the checkout that the e2e-tests image does not hold, since

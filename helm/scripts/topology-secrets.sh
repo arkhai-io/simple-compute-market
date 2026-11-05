@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
-# Create or update every out-of-band Secret the local two-release topology reads:
-# release 1's (a deploy's and its Helm tests') and release 2's. Run by
-# `make -C helm topology-secrets`, which passes each input below as the make
-# variable of the same name; re-running it replaces each Secret's contents.
+# Create or update every out-of-band Secret and ConfigMap the local two-release
+# topology reads: release 1's (a deploy's and its Helm tests') and release 2's.
+# Run by `make -C helm topology-secrets`, which passes each input below as the
+# make variable of the same name; re-running it replaces each one's contents.
 #
 # DEVELOPMENT VALUES ONLY, never for a public network. Every key is derived from
 # Foundry's published default mnemonic (`test test ... junk`) at the Anvil
 # account index that values.yaml, local-values.yaml, and
 # bare-metal-release-values.yaml pin the matching principal to, so anyone can
-# reproduce them and none is secret. The one value not derived is provisioning's
-# SSH key: mock provisioning never opens a connection, so it is the committed
-# placeholder the bare-metal Compose lane mounts.
+# reproduce them and none is secret. The values not derived are committed:
+# provisioning's SSH key, the placeholder the bare-metal Compose lane mounts,
+# since mock provisioning never opens a connection; and the payments lane
+# double's lane CA and seller token, from its fixtures, which the storefronts'
+# payments configuration in local-values.yaml and bare-metal-release-values.yaml
+# trusts and authenticates with.
 #
 # Inputs:
 #   NAMESPACE                          the namespace both releases run in, created
@@ -25,6 +28,10 @@
 #   DEV_ACCOUNT_BARE_METAL_PROVISIONING release 2's provisioning signer (9)
 #   PROVISIONING_SSH_KEY_FILE          the file both provisioning services mount
 #                                      as their SSH key
+#   PAYMENTS_LANE_CA_FILE              the payments lane double's committed lane
+#                                      CA, the storefronts' CA bundle
+#   PAYMENTS_LANE_ENV                  the double's lane_env.py, which prints its
+#                                      seller token (`seller-token`)
 #   TEST_VOLUMES                       the PersistentVolumeClaims release 1's deal
 #                                      test mounts (its buyer profile store)
 #   TEST_VOLUME_SIZE                   the storage each requests
@@ -45,18 +52,21 @@ require() {
 
 require NAMESPACE DEV_MNEMONIC DEV_ACCOUNT_PROVISIONING DEV_ACCOUNT_BUYER DEV_ACCOUNT_BOB \
     DEV_ACCOUNT_REGISTRY DEV_ACCOUNT_PROVISIONING_ADMIN DEV_ACCOUNT_BARE_METAL_STOREFRONT \
-    DEV_ACCOUNT_BARE_METAL_PROVISIONING PROVISIONING_SSH_KEY_FILE TEST_VOLUMES TEST_VOLUME_SIZE
+    DEV_ACCOUNT_BARE_METAL_PROVISIONING PROVISIONING_SSH_KEY_FILE PAYMENTS_LANE_CA_FILE \
+    PAYMENTS_LANE_ENV TEST_VOLUMES TEST_VOLUME_SIZE
 
-for tool in cast kubectl; do
+for tool in cast kubectl python3; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "ERROR: $tool is required (cast is Foundry's, which also provides Anvil)" >&2
         exit 1
     fi
 done
-if [ ! -r "$PROVISIONING_SSH_KEY_FILE" ]; then
-    echo "ERROR: PROVISIONING_SSH_KEY_FILE ($PROVISIONING_SSH_KEY_FILE) is not a readable file" >&2
-    exit 1
-fi
+for file in PROVISIONING_SSH_KEY_FILE PAYMENTS_LANE_CA_FILE PAYMENTS_LANE_ENV; do
+    if [ ! -r "${!file}" ]; then
+        echo "ERROR: $file (${!file}) is not a readable file" >&2
+        exit 1
+    fi
+done
 
 key() {
     cast wallet private-key --mnemonic "$DEV_MNEMONIC" --mnemonic-index "$1"
@@ -149,6 +159,21 @@ EOF
 apply arkhai-e2e-credentials "config-e2e-secret.yml=$work/config-e2e-secret.yml"
 echo "  arkhai-e2e-credentials: buyer $DEV_ACCOUNT_BUYER, seller $DEV_ACCOUNT_BOB, provisioning admin $DEV_ACCOUNT_PROVISIONING_ADMIN and service $DEV_ACCOUNT_PROVISIONING"
 credential arkhai-buyer-profile-credential "$DEV_ACCOUNT_BUYER"
+
+# Both releases' storefronts: their payments key, the payments lane double's
+# seller token, and their CA bundle, the double's committed lane CA, which
+# local-values.yaml's double serves under. lane_env.py reads the token from the
+# double's committed account directory, so the Secret cannot drift from it.
+python3 -I "$PAYMENTS_LANE_ENV" seller-token | tr -d '\n' >"$work/seller-payments-key"
+if [ ! -s "$work/seller-payments-key" ]; then
+    echo "ERROR: $PAYMENTS_LANE_ENV seller-token printed no token" >&2
+    exit 1
+fi
+apply seller-payments-key "api-key=$work/seller-payments-key"
+kubectl create configmap payments-ca-bundle --namespace "$NAMESPACE" \
+    "--from-file=ca-bundle.pem=$PAYMENTS_LANE_CA_FILE" \
+    --dry-run=client --output yaml | kubectl apply --namespace "$NAMESPACE" --filename -
+echo "  seller-payments-key, ConfigMap payments-ca-bundle: the payments lane double's seller token and lane CA ($PAYMENTS_LANE_CA_FILE)"
 
 # Release 2: the bare-metal storefront and its own provisioning service.
 credential arkhai-bare-metal-storefront-identity "$DEV_ACCOUNT_BARE_METAL_STOREFRONT"

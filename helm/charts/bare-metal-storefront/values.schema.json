@@ -105,6 +105,46 @@
         }
       }
     },
+    "caBundle": {
+      "description": "A CA bundle from an existing ConfigMap key or Secret key, named by SSL_CERT_FILE; empty names mount none.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "configMapName": {
+          "type": "string"
+        },
+        "secretName": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "paymentsKey": {
+      "description": "An existing Secret key exposed under the variable config's Settlement.arkhai_payments.api_key_env names; an empty secretName exposes none.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "secretName": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "tests": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "paymentsAccount": {
+          "type": "string"
+        }
+      }
+    },
     "internalRegistryTrust": {
       "anyOf": [
         {

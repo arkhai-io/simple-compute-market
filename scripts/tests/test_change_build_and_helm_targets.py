@@ -502,10 +502,12 @@ def test_topology_secrets_creates_the_namespace_only_when_absent(tmp_path: Path,
     assert calls[0] == f"get namespace {NAMESPACE}"
     namespace_created = [call for call in calls if call == f"create namespace {NAMESPACE}"]
     assert namespace_created == ([] if exists else [calls[1]])
-    # Each Secret is rendered and applied in the namespace, and so is the deal
-    # test's buyer-profile volume, created when absent.
+    # Each Secret and ConfigMap is rendered and applied in the namespace, and so is
+    # the deal test's buyer-profile volume, created when absent.
     secrets = [call for call in calls if call.startswith("create secret")]
+    configmaps = [call for call in calls if call.startswith("create configmap")]
     applied = [call for call in calls if call.startswith("apply")]
-    assert secrets and len(applied) == len(secrets) + 1
-    assert all(f"--namespace {NAMESPACE}" in call for call in secrets + applied)
+    assert secrets and len(applied) == len(secrets) + len(configmaps) + 1
+    assert [call.split()[2] for call in configmaps] == ["payments-ca-bundle"]
+    assert all(f"--namespace {NAMESPACE}" in call for call in secrets + configmaps + applied)
     assert f"get pvc arkhai-buyer-profiles --namespace {NAMESPACE}" in calls

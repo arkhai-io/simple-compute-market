@@ -440,3 +440,20 @@ e2e-tests:
   # carries no private key values even for deterministic local-chain profiles.
   createSecret: false
   secretName: arkhai-e2e-credentials
+
+# ---------------------------------------------------------------------------
+# payments-lane-double subchart
+# An in-memory double of the arkhai.payments.v1 payments service, for a local
+# release only: helm/local-values.yaml enables it, and no release values do. Its
+# Service is `payments-double` in every release, so a namespace runs one.
+# ---------------------------------------------------------------------------
+payments-lane-double:
+  enabled: false
+  # Restated from the subchart's defaults so that every image tag the release can
+  # deploy is set here, where a change's validation suffixes each one.
+  image:
+    repository: ""
+    name: arkhai
+    tag: payments-lane-double
+    digest: ""
+    pullPolicy: IfNotPresent
