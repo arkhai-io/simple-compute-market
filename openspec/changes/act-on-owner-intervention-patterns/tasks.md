@@ -960,26 +960,46 @@ under `scripts/tests/`, and `openspec/specs/README.md`.
 
 Delivers the guidance edits the skills in sections 9 and 10 cite. Implements D5, D6,
 D8, D9, D10, D11, D12, D22's criteria, D23, and D24's description for contributors.
-Touches `AGENTS.md`, `docs/agents/issue-tracker.md` and `docs/agents/triage-labels.md`
+Touches `AGENTS.md`, `issue-tracker.md` and `triage-labels.md` under `docs/agents/`
 (deleted), `docs/agents/domain.md`, `openspec/README.md`,
 `docs/agents/change-workflow.md`, and `docs/development/ARCHITECTURE.md`.
 
-- [ ] 7.1 `AGENTS.md`: replace "Issue tracker" and "Triage labels" with "Deferred
+- [x] 7.1 `AGENTS.md`: replace "Issue tracker" and "Triage labels" with "Deferred
   work" in D5's wording; remove the ADR sentence from "Domain docs" (D23); add "Amend a
-  rule or comply" under "Working model" (D9). Delete `docs/agents/issue-tracker.md`
-  and `docs/agents/triage-labels.md` with `git rm` (D5). Verify: `git grep -n
+  rule or comply" under "Working model" (D9). Delete `issue-tracker.md` and
+  `triage-labels.md` under `docs/agents/` with `git rm` (D5). Verify: `git grep -n
   "issue-tracker.md\|triage-labels.md\|docs/adr"` finds no citation outside
   `openspec/changes/`.
-- [ ] 7.2 Rewrite `docs/agents/domain.md` to name the vocabulary's homes and state the
+  Done: "Deferred work" in D5's wording; "Amend a rule or comply" a `###` of its own
+  after "Asking the owner", in D9's wording, the testing levels its example. "Domain
+  docs" lost its ADR sentence and, beyond the task's letter, its "Multi-context: one
+  platform context over `core/`…" sentence, which described the directory-drawn
+  contexts D11 removes from `domain.md`; it now names the three homes and points to
+  `domain.md`. Both documents removed with `git rm`. The `git grep` prints nothing.
+  Outside the plan: the change's own `design.md`, `proposal.md` and this file cited
+  the two deleted paths, which `check-doc-citations` then reported as missing (7.6
+  expected only section 8's skill); each now names them as `issue-tracker.md` and
+  `triage-labels.md` under `docs/agents/`, a form the check does not read as a path,
+  so closeout's scoped check (11.10) passes on them too. No decision's wording
+  changed.
+- [x] 7.2 Rewrite `docs/agents/domain.md` to name the vocabulary's homes and state the
   rule for terms, without `CONTEXT.md`, `CONTEXT-MAP.md`, `/domain-modeling` or ADRs
   (D11, D23). Verify: the document holds D11's table and rule and none of the removed
   references.
-- [ ] 7.3 `openspec/README.md`: add a "Defects found during a change" section after
+  Done: D11's table, each home linked, "A subsystem's definition wins inside that
+  subsystem", and the rule as three bullets, the synonym clause citing
+  `ARCHITECTURE.md`'s "One name per concept". `git grep` finds no `CONTEXT.md`,
+  `CONTEXT-MAP`, `domain-modeling` or `docs/adr` outside `openspec/changes/`.
+- [x] 7.3 `openspec/README.md`: add a "Defects found during a change" section after
   "Plan closeout requirements" in D6's wording, so skills cite a stable heading, and
   replace the scope-creep sentence with D6's (D6). Verify: the section's anchor,
   `openspec/README.md#defects-found-during-a-change`, resolves for the skills of
   sections 9 and 10 to cite.
-- [ ] 7.4 `docs/agents/change-workflow.md`: under "Reviews", default acceptance, the
+  Done: `## Defects found during a change` after the promotion record, before
+  "Implementation completion checklist", D6's paragraph verbatim with its
+  `ARCHITECTURE.md` reference linked; the scope-creep sentence is D6's and links the
+  new section. The heading's anchor is `#defects-found-during-a-change`.
+- [x] 7.4 `docs/agents/change-workflow.md`: under "Reviews", default acceptance, the
   table and the classification (D1–D3, D17, D18); under "Orchestrating a change",
   interrupting a step and revisiting a default acceptance (D15, D16); a new "Waivers"
   section with D22's criteria; under "The ledger", the revisit marker and recommended
@@ -989,14 +1009,65 @@ Touches `AGENTS.md`, `docs/agents/issue-tracker.md` and `docs/agents/triage-labe
   engine's operations as dev does, `scripts/change-workflow stop` and
   `scripts/change-workflow note … --resumes <seq>`. Verify: every command the document
   names exists as sections 1, 2 and 6 built it and the merge placed it.
-- [ ] 7.5 `docs/development/ARCHITECTURE.md`: add an "Implementation rules" section
+  Done: "Reviews" gains the `Alternatives:` field's two forms and triage assigning it
+  for a pasted review (D17), and a `### Default acceptance` with Rule E's five
+  conditions citing CW-d5ac, discussed findings disposed of only by the owner's word,
+  the `Classification:` line and the table with D18's and D1's examples, the table
+  riding on the last question, and the advancing default (D1–D3, D18); the "Skills"
+  paragraph on the order of steps now says a triage recommending advancing takes it
+  without asking. "Orchestrating a change" gains **Interrupting a running step** and
+  **Revisiting a default acceptance**, the revisit's four steps in section 2's
+  handoff order (stop, `note --resumes`, `resume --seq --answer`, then
+  `--resolves`), with the direction's refusals. A new `## Waivers` before "The
+  ledger", D22's criteria verbatim; the merge before closeout keeps its own
+  judgement, as its skill gives it. "The ledger" gains the `revisits default
+  acceptance:` entry with D19's example and the recommended-waiver line. "Skills"
+  lists the five new closing checks with their targets, no exception marker,
+  `CHANGE_BASE` and the `dev` default, then D12's two paragraphs. `stop` joins "The
+  engine's command" list. Commands checked against the code by reading it (the
+  `--help` calls were denied to this step, so `scripts/change_workflow/cli.py`'s
+  parsers were read instead): `stop <change> [--step]`, `note <change> orchestrator
+  --by owner --resumes --decision --reason`, `resume <change> --seq --answer`, and
+  `check_change.py`'s twelve checks in order with `CHANGE_BASE`.
+- [x] 7.5 `docs/development/ARCHITECTURE.md`: add an "Implementation rules" section
   before "Testing strategy", with "No speculative guard code" (D8) and "Prefer an
   existing library" (D10), and its row in the document map. Verify: the document map
   links the new section's anchor.
-- [ ] 7.6 Verification: `make check-doc-citations
+  Done: `## Implementation rules` with the two `###` rules in D8's and D10's terms,
+  kept to a paragraph each (65 O3 found the document's detail too heavy), the
+  library rule's examples the frp grant-admission plugin and gitleaks; the document
+  map's row links `#implementation-rules`.
+- [x] 7.6 Verification: `make check-doc-citations
   CHANGE=act-on-owner-intervention-patterns` reports only the citation of the skill
   section 8 creates; `make check-change CHANGE=act-on-owner-intervention-patterns`
   fails on nothing else. End-to-end: none; no scenario exercises the guidance.
+  Done: `make check-change` fails only on documentation citations, and those only on
+  `.agents/skills/guidance-review/SKILL.md`, cited by `proposal.md` and this file,
+  which section 8 creates. The check reads paths, not headings or anchors, so the new
+  anchors were checked by hand against their headings (`#defects-found-during-a-change`,
+  `#composition-from-above-and-below`, `#shared-vocabulary-and-identities`,
+  `#implementation-rules`, and `frp-grant-admission/spec.md`). `make test` passed, its
+  scripts suite 2366 passed, rewriting no lock. End-to-end confirmed: none. No CI
+  evidence is owed.
+  Fresh-context check: fixed — `ARCHITECTURE.md`'s guard rule had loosened D8 to
+  "a test" and the library rule added "maintained" to D10; the "Waivers" section said
+  no step recommends without a criterion, which the merge's own judgement contradicts,
+  and that every waiver is a ledger line, which holds only for a recommended one
+  (CW-n6wy); "The ledger" said an accepting disposition never reaches it, against the
+  recommended-waiver line; the proposal's "Knowledge to promote" now names the guide
+  for D2, D3, D17 and D18, its impact list what the guide gained, and 11.9's list
+  follows. Declined, as the plan's accepted order: the guide describes triage and
+  orchestrator behaviour sections 9 and 10 give the skills, and modifies what
+  CW-9pbk, CW-3tvs, CW-j1nv and CW-neua say until the archive; it cites CW-d5ac,
+  whose `spec.md` anchor exists only once archived; and `AGENTS.md` and `domain.md`
+  name `change-workflow`'s "Terms", which 11.9 writes. Declined: "Implementation
+  rules" belonging elsewhere, since D8 and D10 name `ARCHITECTURE.md`.
+  Handoff: for section 9, the guide says triage assigns a pasted external review's
+  `Alternatives:` (D17); no task names it, so 9.1 should state it with Rule E. For
+  sections 9 and 10, cite the guide's `### Default acceptance`, `## Waivers`,
+  **Interrupting a running step** and **Revisiting a default acceptance** rather than
+  restating them in full ("Skills", a skill restating guidance). The heading and
+  "Implements" line above omit D1–D3 and D15–D19, which 7.4 writes into the guide.
 
 ## 8. Guidance reviews have a skill (D20, D21)
 
@@ -1184,7 +1255,7 @@ The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
     does not (`openspec/README.md#plan-closeout-requirements`, part 9).
   - The record names, besides those, the documents sections 4, 5, 7, 8 and 10 wrote:
     `AGENTS.md` (D5, D9), `openspec/README.md` (D6), `docs/agents/domain.md` (D11),
-    `docs/agents/change-workflow.md` (D1, D12, D15, D16, D19, D22, D24),
+    `docs/agents/change-workflow.md` (D1–D3, D12, D15–D19, D22, D24),
     `docs/development/ARCHITECTURE.md` (D8, D10, and D24 item 4 and D29 in brief under
     "Public repository content checks"), `docs/development/BUILD_AND_PACKAGING.md` (D24
     item 7), `docs/development/RELEASING.md`, "Cutting a release" (D29), the comments of

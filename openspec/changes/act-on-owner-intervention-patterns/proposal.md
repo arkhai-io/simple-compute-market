@@ -225,11 +225,12 @@ format version changes.
 - **Guidance.**
   - `AGENTS.md`: "Deferred work" replacing "Issue tracker" and "Triage labels"; "Domain
     docs" without ADRs; a rule for work that conflicts with a written rule.
-  - `docs/agents/issue-tracker.md` and `docs/agents/triage-labels.md`: deleted.
+  - `issue-tracker.md` and `triage-labels.md` under `docs/agents/`: deleted.
   - `docs/agents/domain.md`: rewritten.
-  - `docs/agents/change-workflow.md`: the table, default acceptance, interrupts,
-    revisits, "Waivers", notes and proposals across changes, and skills restating
-    guidance.
+  - `docs/agents/change-workflow.md`: reviewers' alternatives, the table, default
+    acceptance and the advancing default, interrupts, revisits, "Waivers", the
+    ledger's two new entries, notes and proposals across changes, skills restating
+    guidance, and the closing checks `make check-change` runs.
   - `openspec/README.md`: defects found during a change, and the scope-creep sentence.
   - `docs/development/ARCHITECTURE.md`: the guard-code and library rules, and, under
     "Public repository content checks", a paragraph on gitleaks, its installation, the
@@ -272,11 +273,13 @@ format version changes.
 - D1, the table and when it reaches the owner: `openspec/specs/change-workflow/spec.md`
   (`CW-t9bx`), and `docs/agents/change-workflow.md`, "Reviews".
 - D2, the advancing default: `openspec/specs/change-workflow/spec.md` (`CW-9pbk`,
-  `CW-3tvs`), and `openspec/specs/change-workflow/README.md`, "The owner is
-  interrupted only for judgement".
+  `CW-3tvs`), `openspec/specs/change-workflow/README.md`, "The owner is
+  interrupted only for judgement", and `docs/agents/change-workflow.md`, "Default
+  acceptance".
 - D3, the default-acceptance rule: `openspec/specs/change-workflow/spec.md`
-  (`CW-d5ac`, with `CW-j1nv` and `CW-neua`); why the class is accepted by default, and
-  the evidence in summary with Rule E's baseline:
+  (`CW-d5ac`, with `CW-j1nv` and `CW-neua`) and, for contributors,
+  `docs/agents/change-workflow.md`, "Default acceptance"; why the class is accepted
+  by default, and the evidence in summary with Rule E's baseline:
   `openspec/specs/change-workflow/README.md`, "Triage".
 - D4, revisits outside the graph: `openspec/specs/change-workflow/README.md`,
   "Triage".
@@ -300,10 +303,11 @@ format version changes.
 - D16, revisiting a default acceptance: `openspec/specs/change-workflow/spec.md`
   (`CW-r8vz`), `openspec/specs/change-workflow/README.md` ("Triage"), and
   `docs/agents/change-workflow.md`, "Orchestrating a change".
-- D17, reviewers' alternatives: `openspec/specs/change-workflow/spec.md` (`CW-a2lf`)
-  and `openspec/specs/change-workflow/README.md`, "Reviews are files".
+- D17, reviewers' alternatives: `openspec/specs/change-workflow/spec.md` (`CW-a2lf`),
+  `openspec/specs/change-workflow/README.md`, "Reviews are files", and
+  `docs/agents/change-workflow.md`, "Reviews".
 - D18, the classification record: `openspec/specs/change-workflow/spec.md`
-  (`CW-d5ac`).
+  (`CW-d5ac`), and `docs/agents/change-workflow.md`, "Default acceptance".
 - D19, the revisit marker: `openspec/specs/change-workflow/spec.md` (`CW-v1rk`) and
   `docs/agents/change-workflow.md`, "The ledger".
 - D20, guidance reviews: `openspec/specs/change-workflow/spec.md` (`CW-g6ua`) and

@@ -97,8 +97,8 @@ the requirements as they stand after the merge.
 
 - **Issues.** `AGENTS.md` "Issue tracker" says "GitHub Issues handle intake and
   triage through the `gh` CLI". "Triage labels" maps five labels for that tracker.
-  `docs/agents/issue-tracker.md` configures `/triage` and `/wayfinder`, and
-  `docs/agents/triage-labels.md` maps labels "in mattpocock/skills": both come from an
+  `issue-tracker.md` under `docs/agents/` configures `/triage` and `/wayfinder`, and
+  `triage-labels.md` beside it maps labels "in mattpocock/skills": both come from an
   external skill set none of whose skills is installed (`.agents/skills/` holds only
   the `change-*` and `openspec-*` skills). The issue-discovery harness files its own
   issues (`docs/development/ISSUE_DISCOVERY.md`), cites neither document, and is a
@@ -650,7 +650,7 @@ evidence a later review would use to propose waivers taken by default.
 
 ### D5 — The issue-tracker guidance is replaced by where deferred work goes
 
-`docs/agents/issue-tracker.md` and `docs/agents/triage-labels.md` are deleted, and
+`issue-tracker.md` and `triage-labels.md` under `docs/agents/` are deleted, and
 `AGENTS.md`'s "Triage labels" section with them. "Issue tracker" becomes "Deferred
 work":
 

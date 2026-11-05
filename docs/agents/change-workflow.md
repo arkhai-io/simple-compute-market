@@ -115,9 +115,10 @@ lands on; closeout; the
 closeout review and its triage; archive cleanup. A review is not a gate: its triage names its exit among
 those its node declares — the step that advances the change, the plan's next round
 after an implementation round; another review of the same kind; or, before
-closeout, a return to design or planning — asking the owner which once every
-finding is disposed and before any fix; its file's `## Next` records the choice in
-prose, and nothing routes on it. Once the owner confirms a return, what it leads to
+closeout, a return to design or planning. When it recommends advancing it takes
+that exit without asking; otherwise it asks the owner which once every discussed
+finding is disposed and before any fix ("Default acceptance", below). Its file's
+`## Next` records the choice in prose, and nothing routes on it. Once the owner confirms a return, what it leads to
 is implemented and reviewed afresh.
 
 That order is a graph: one table in `scripts/change_workflow/graph.py` declares
@@ -147,16 +148,48 @@ the merge, closeout, and archive cleanup ask the next-step computation as they
 start, and go on only when it names them — archive cleanup also when it names a validation
 before it, which it then checks for your waiver.
 
-`make check-change CHANGE=<change>` runs a step's closing checks — comment hygiene,
-the agent skills, the change's citations and task list, the change index, each
-indexed capability's `spec.md` against its `index.md` with the change's deltas
-counted (`make check-spec-index`), and the pinned strict OpenSpec validation —
-printing only failures and one pass line. `make
-check-tasks CHANGE=<change>` fails when a numbered task sits under another section's
-heading; the steps that act on a task list run it first.
+`make check-change CHANGE=<change> [CHANGE_BASE=<branch>]` runs a step's closing
+checks, printing only failures and one pass line: comment hygiene, the agent
+skills, the change's citations and task list, the change index, each indexed
+capability's `spec.md` against its `index.md` with the change's deltas counted
+(`make check-spec-index`), and the pinned strict OpenSpec validation; then five
+written rules the change's own work keeps:
+
+- each `### D<n>` decision under `design.md`'s `## Decisions` has a bullet starting
+  `D<n>` in `proposal.md`'s "Knowledge to promote", `D<n>: no permanent destination
+  — <reason>` where it has nothing to promote (`make check-decision-destinations`);
+- no comment or docstring line the change's diff adds in a `.py`, `.toml`, `.yml`,
+  or `.yaml` file says "previously", "formerly", "used to", "no longer", "moved
+  from", "was renamed", or "originally" (`make check-history-wording`);
+- each `pyproject.toml` version the diff changes is one SemVer step from its version
+  at the merge-base (`make check-version-bumps`);
+- each import the diff adds inside a function has a comment giving its reason
+  (`make check-local-imports`);
+- every capability with a `spec.md` has a row in `openspec/specs/README.md`, and
+  every row links one (`make check-capability-index`).
+
+None has an exception marker: a false positive is reworded, or the rule amended
+(`AGENTS.md`, "Amend a rule or comply"). The three that read the diff compare with
+its merge-base with the branch the change lands on, `dev` unless `CHANGE_BASE` names
+another; a change branched from another change's branch passes that branch, or the
+other change's commits read as its own. `make check-tasks CHANGE=<change>` fails
+when a numbered task sits under another section's heading; the steps that act on a
+task list run it first.
 
 Ask the owner questions in prose, never through a multiple-choice selector
 (`AGENTS.md`, "Asking the owner").
+
+One change is implemented per branch. Recording an open question or a note in
+another active change's documents, or writing the proposal of a follow-up change,
+on the current branch is not working that change; the edit lands with the current
+change. A *prerequisite* — a change this one must wait for — is proposed from `dev`
+instead (`change-design`, "When the design needs another change first"), since it
+must land first.
+
+A skill that restates a rule from the guidance restates it briefly where its step
+applies it, and cites it; it is never stricter than its source. A step that needs a
+stricter rule proposes amending the guidance (`AGENTS.md`, "Amend a rule or
+comply").
 
 ## The engine's command
 
@@ -167,7 +200,7 @@ the repository imports the package. Its subcommands:
 ```text
 scripts/change-workflow start <step> <change> [--unattended] [--allow …] [--sections …] [--session …] [--arguments …] [--fresh]
 scripts/change-workflow next | record | note | review | find | clone | clone-remove | clone where
-scripts/change-workflow resume | log | watch | denials | round-view | round-done | cost | history | push
+scripts/change-workflow resume | stop | log | watch | denials | round-view | round-done | cost | history | push
 scripts/change-workflow check index | check tasks | check push | check skills | check round-view | check graph
 scripts/change-workflow hook post-compaction | convert
 ```
@@ -270,8 +303,61 @@ not met — design, planning, or implementation of an archived change, the close
 review, its triage, or archive cleanup of one not archived, a triage with nothing
 awaiting it, a validation naming no target, and `done`, which only archive cleanup
 reaches. The waivers of another design review
-and of archive cleanup's validation are such directions. The orchestrating session
+and of archive cleanup's validation are such directions ("Waivers", below). The orchestrating session
 never directs a step of its own accord, and never records a step's exit for it.
+
+**Interrupting a running step.** The orchestrating session stays free while a step
+runs, so you can reach it mid-step, and on your word it stops the run:
+
+```text
+scripts/change-workflow stop <change> [--step <step>]
+```
+
+It signals the process the change's run recorded as it started — the one run, or,
+with validation and a review side by side, the step named — reading the change's
+clone when it has one. A record counts as a run only while the run holds its lock;
+`stop` checks that as it selects the run and again just before the signal, and
+refuses, signalling nothing, when no run is in progress, when two are and no step is
+named, when the record is stale, or when the run ended between the checks. The run
+is logged `stopped` with its session, and the agent or reviewer it started is ended;
+an interrupted review publishes nothing, and a stop commits nothing. A stop that
+arrives after the agent or reviewer has exited ends nothing, and the run logs the
+outcome it reached. The orchestrating session records your interrupt as your
+decision, resolving no run:
+
+```text
+scripts/change-workflow note <change> orchestrator --by owner --decision "interrupt <step>" --reason "<your words>"
+```
+
+It then recovers the stop as you say, as any stop: resumed with your words, rerun,
+or resolved with `--resolves` and the change directed elsewhere.
+
+**Revisiting a default acceptance.** You can revisit a finding a triage accepted by
+default, or the advancing exit it took ("Default acceptance", below): before its
+fixes, in reply to the triage's last question, as an ordinary disposition; or after
+the triage finished. After, the orchestrating session, on your word:
+
+1. stops the step started after the triage, if one is running;
+2. records your direction naming the triage's run:
+
+   ```text
+   scripts/change-workflow note <change> orchestrator --by owner --resumes <triage-seq> --decision "revisits 04 F5" --reason "<your words>"
+   ```
+
+3. resumes that triage with your words, `scripts/change-workflow resume <change>
+   --seq <triage-seq> --answer "<your words>"`: the triage amends its fix in a new
+   commit, logs the revisit in the ledger, and names its exit again, which may be
+   another round or a return, and its outcome governs the reviews it names;
+4. then resolves the stopped step with `--resolves`, rather than resuming it, since
+   its tree moved under it. Resolved before the resume, the computation would name
+   the first triage's exit again until the resumed triage ends.
+
+The direction is refused while a later triage has triaged the same reviews, naming
+it, and for any run that is not a finished triage naming reviews; it takes no
+`--next`, since the resumed triage names the exit, and one resume spends it. No
+other finished run is resumed: without such a direction a finished triage is
+refused as not waiting. A revisit adds no node or edge to the graph. Once archive
+cleanup has reached `done`, a revisit belongs on the pull request.
 
 **Converting a change's records.** A change whose workflow log holds a line without
 the log's format marker, `"format": 2` — written by the tooling from before steps
@@ -548,7 +634,12 @@ from the latest passing validation's `## CI`.
 
 A review run elsewhere — in a browser session, by another tool — is pasted into
 triage, which saves it verbatim as the next record, `NN-<kind>-external.md`, and
-triages it with any other review of the same kind.
+triages it with any other review of the same kind; triage assigns its findings'
+alternatives there, as it assigns their lens, basis, and severity.
+
+A finding's `Alternatives:` field holds `none — <why the fix is evident>`, or each
+option a reasonable owner might choose, with its trade-off. "None" is a statement,
+not an omission, and a review missing the field is not published.
 
 Before an implementation round is triaged the owner reads it:
 `make round-view CHANGE=<change>` shows the round as uncommitted changes over the
@@ -563,6 +654,50 @@ the view and saves the notes. When the round's triage names another implementati
 review as its exit over a fix it committed, the owner reads the fix the same way before the repeat pass is
 triaged: `make round-view CHANGE=<change> BASE=<commit>`, over the commit that
 triage's review read, which the next-step computation names as `base`.
+
+### Default acceptance
+
+Triage states its position on every finding, and accepts by default a finding that
+meets every condition of the default rule (`change-workflow`'s CW-d5ac):
+
+- it comes from a review, not a validation record, the owner's notes, or the
+  orchestrating session's observations;
+- its severity is not `blocking`;
+- the agent agrees, and proposes one `edit` or one `fix`;
+- neither the reviewer's `Alternatives:` field nor the agent lays out an
+  alternative, and the agent names nothing that would change its recommendation;
+- its fix touches no interface or representation, migration or compatibility path,
+  the change's scope, or the validation environment.
+
+Every other finding is discussed, one per message, and is disposed of only by the
+owner's word; silence never disposes of a discussed finding. Each default
+acceptance's triage entry carries a `Classification:` line, written as its position
+is decided and before any finding is presented, stating how it met each condition,
+and its disposition reads "accepted by default":
+
+```markdown
+- **Classification:** accepted by default — from 04-design; should; agree, one edit; no alternative (the heading has one current name), reviewer's none; nothing would change it; touches one citation in design.md
+- **Owner disposition:** accepted by default
+```
+
+The default acceptances reach the owner in one table, under "Accepted by default":
+
+```markdown
+#### Accepted by default
+
+| Finding | Severity | The finding | Outcome |
+|---|---|---|---|
+| 04 F5 | should | design.md cites a ROADMAP heading that was renamed | edit: cite `#goal-8-post-commitment-lifecycle` |
+```
+
+It rides on the triage's last question — its last discussed finding, or whether
+another round is merited — so a revisit there is an ordinary disposition made before
+any fix; a triage that asks nothing gives it in its final report. Its fixes are made
+with the round's other accepted fixes. Advancing is the default exit: a triage
+recommending it takes it without asking and reports it beside the table, while a
+recommendation of another round is argued and asked. A triage with nothing to
+discuss and an advancing recommendation asks nothing. A revisit after the fixes
+resumes the finished triage ("Revisiting a default acceptance", above).
 
 ### The review directory
 
@@ -616,12 +751,38 @@ is listed and not archived; and that every active change directory has exactly o
 row. An archived change needs no row: archived rows may be pruned from the index
 over time.
 
+## Waivers
+
+A step that meets a guard the owner may waive recommends a waiver when a written
+criterion holds, naming the criterion and its evidence in the message it already
+sends the owner: triage when a round's review and validation name different
+commits, design finishing after a return, validation on a known environmental
+failure, and archive cleanup before its validation. The merge before closeout
+judges whether its own validation may be waived, as "The merge before closeout"
+above says. For the others, a waiver may be recommended when:
+
+- the commits the guard would validate differ from validated ones only in paths no
+  part of validation exercises — `openspec/`, `docs/`, the change's records — naming
+  the paths;
+- a failure is a known environmental one, already diagnosed in an earlier
+  validation record of this change, naming that record;
+- a review and a validation name different commits whose difference is records or
+  documentation only;
+- a decision made after a return to design is confined to one requirement's wording,
+  or to a choice the design review already weighed, naming it.
+
+The recommendation names its criterion and its evidence. With no criterion holding,
+the step recommends no waiver. Only the owner waives, and a waiver a step
+recommended is a ledger line whether the owner takes it or not ("The ledger",
+below), so a guidance review counts recommendations and acceptances by criterion.
+
 ## The ledger
 
 `interventions.jsonl`, beside the change's other files and tracked, records each
 time the owner corrected course: decided otherwise than the agent proposed, or
 added context or a condition that changes the work. A disposition that accepts the
-agent's proposal is recorded only in the triage file. One JSON object per line:
+agent's proposal is recorded only in the triage file, except a waiver (below). One
+JSON object per line:
 
 ```json
 {"review": "03-design", "finding": "F2", "section": null, "lens": "consistency", "basis": "evidence", "severity": "blocking", "agent_position": "agree: <reason>", "owner_disposition": "<what the owner decided>", "summary": "<one line>"}
@@ -630,7 +791,20 @@ agent's proposal is recorded only in the triage file. One JSON object per line:
 `review` names the record the finding came from, or `design` for a redirection no
 review raised; `section` is the `tasks.md` section, or `null`. An entry that revises
 an earlier one starts its `owner_disposition` with `revises <review> <finding>:`.
-When the owner waives archive cleanup's validation of a correction outside
+
+A correction of a finding accepted by default, made before its fix or after, is an
+entry whose `owner_disposition` starts `revisits default acceptance:`; a later
+revision of it uses `revises` as any other. Whether it came before or after the fix
+is in the workflow log, where a revisit after it has its `--resumes` direction:
+
+```json
+{"review": "04-design", "finding": "F5", "section": null, "lens": "documentation", "basis": "evidence", "severity": "should", "agent_position": "agree: the heading was renamed; accepted by default", "owner_disposition": "revisits default acceptance: cite the goal's row in ROADMAP's table instead, which survives renames", "summary": "Default-accepted citation fix redirected to a stable target"}
+```
+
+A waiver a step recommended is a line whose `agent_position` names the
+recommendation and its criterion ("Waivers", above); a recommended waiver the owner
+declines is a correction like any other, its `owner_disposition` giving their
+reason. When the owner waives archive cleanup's validation of a correction outside
 `openspec/` and `docs/` — by their direction to archive cleanup — archive cleanup
 records it as a line under the closeout review's record with `"finding":
 "validated"` and the owner's reason. Read together,
