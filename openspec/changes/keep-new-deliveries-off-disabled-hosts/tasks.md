@@ -125,6 +125,44 @@ projection is built from capacity declarations and offers only a usable host",
   bump to 0.13.0 (new constructor parameter and method), raising its bounds to
   `arkhai-kit-resource-pools>=0.9.0` and
   `arkhai-kit-resource-pools-contracts>=0.3.0`; locks refreshed.
+  *Round fix (21 F2, the owner's choice C):* the offered read no longer
+  resolves a pool's backing. It applies the rule where the pool declares a
+  deliverable offering mode (`declared_deliverable_modes`, the fact admission
+  reads), since an unbacked pool must deliver nothing; a missing pool, or one
+  whose modes do not parse, is judged to deliver, so the read still fails
+  closed. `_pool_backing` became `_pool_delivers`, and `resolve_pool_declarations`,
+  `BACKED`, and `CapacityBacking` left the ledger. Design 11 F2 and D8 are
+  amended and "21 F2" records the decision; the site-capacity delta's
+  projection requirement says a pool delivering no mode is judged unbacked,
+  with a scenario for it.
+  *Round fix (21 F1):* the ledger's own-session decision paths — probe,
+  reserve, `resize_reservation`, `assign_settlement_resource`, and
+  `list_offered_resources` — now begin `BEGIN IMMEDIATE` on SQLite through a
+  module-private `_begin_decision_transaction`, after `_expire_stale_holds`
+  (which commits what it lapses) and before any read the decision rests on, so
+  a host disabled through another session commits only after the decision
+  ends. The SQLite driver otherwise begins a transaction only at the first
+  write, and the host authority's writes do not take the ledger's lock. The
+  helper is a private copy of `kit/fulfillment`'s, which `kit/site` cannot
+  import. It skips a connection already in a transaction, which has written
+  and holds the writer slot. Read paths take the writer slot too, because
+  `_expire_stale_holds` can write in them; the cost is that a projection read
+  waits behind another writer, within the 30-second busy timeout.
+  *Evidence:* library integration (`test_ledger_host_requirement.py`, 34
+  passed): on a file-backed database as the service's engine is, a report
+  that tries a write from another connection at each read finds it locked for
+  all five paths, and again after a lapsed hold's commit; a write proceeds
+  once a decision ends. Each test failed with the helper disabled, or with
+  reserve's helper moved ahead of the lapse. The offered-read cases now cover a
+  pool judged by its modes, unparseable modes failing closed, and a backed
+  pool delivering no mode keeping its own `enabled`. `kit/site` 337 passed;
+  the root `make test`, `make check-packaging`, `make check-comment-hygiene`,
+  and `make check-change` passed after `make dist`.
+  The fresh-context check found no defect. Taken from it: the lapse-ordering
+  test, the helper docstring's account of when the guard fires, the
+  missing-pool case in D8, and the delta scenario. Declined: correcting the
+  constructor's older comment that the service engine is a StaticPool, which
+  this change neither wrote nor relies on.
 - [x] 2.4 Library integration (`kit/site/tests/integration/test_ledger_host_requirement.py`,
   with a fake `DeliverableHosts` over a fixed set): probe, reserve, and resize
   refuse a declaration naming a disabled host and one naming an unregistered
@@ -471,7 +509,8 @@ order.
   change. A finding returns the change to implementation.
 - [ ] 6.2 Import placement: confirm the imports the change added
   (`DeliverableHosts`, `declaration_has_usable_host`,
-  `resolve_pool_declarations` in `ledger.py`) sit at module level. One that
+  `declared_deliverable_modes` in `ledger.py`, `sqlite3` in
+  `test_ledger_host_requirement.py`) sit at module level. One that
   should move returns the change to implementation.
 - [ ] 6.3 Documentation compliance: re-check each decision's destination below
   against `openspec/README.md#documentation-placement`.

@@ -140,7 +140,9 @@ usable host as admission judges it, SHALL project as not enabled. That judgement
 SHALL read of hosts only the identifiers of those taking new delivery, as the
 composition supplies them. A declaration in an unbacked pool, or in a pool whose
 provider needs no host, SHALL project its own `enabled` whatever host it names or
-whether it names one. A domain publication view SHALL be built from the
+whether it names one. The site authority SHALL judge a pool that delivers no
+offering mode as unbacked, as admission does, since an unbacked pool delivers
+none, and SHALL NOT read a pool's backing for this judgement. A domain publication view SHALL be built from the
 declaration with this projected `enabled` state, so a view that reports
 availability reports a declaration with no usable host as unavailable.
 
@@ -163,6 +165,15 @@ host.
 - **WHEN** the resource-pool projection is produced
 - **THEN** the declaration appears with its declared capacity, attributes, and
   Physical Resource identity, and is projected not enabled
+
+#### Scenario: A pool delivers no offering mode
+
+- **GIVEN** an enabled capacity declaration in a pool whose provider needs a
+  host and which declares no deliverable offering mode, naming a host not taking
+  new delivery
+- **WHEN** the resource-pool projection is produced
+- **THEN** the declaration projects its own `enabled` state, as an unbacked
+  pool's does
 
 #### Scenario: A declaration names an unregistered host
 

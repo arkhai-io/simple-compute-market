@@ -296,9 +296,10 @@ of an assignment recorded with no host. Dispatch remains the last check.
 
 Admission and scheduling need no backing of their own: a candidate's pool must
 deliver the claim's offering mode, and an unbacked pool delivers nothing. The
-ledger's offered read resolves backing from the pool's declarations through the
-shared resolver in `kit/resource-pools-contracts`, which the ledger already
-imports for offering modes; no projection builder resolves it for this rule.
+ledger's offered read reads no backing either (21 F2): it applies the rule where
+the pool declares a deliverable offering mode, the fact admission reads, and a
+missing pool, or one whose modes do not parse, is judged to deliver. No projection builder
+resolves backing for this rule.
 
 *Rejected.* A distinct refusal reason ("host unavailable"): it would change the
 wire and tell a storefront which physical resource backs a claim, which "Capacity
@@ -353,21 +354,21 @@ say so, since both otherwise forbid any host fact from reaching a projection
 
 The ledger gains one read returning every declaration with its offered `enabled`:
 its own `enabled` and the usable-host rule (D3/D12), judged with
-`declaration_has_usable_host` against the deliverable-host set and the pool's
-resolved backing, all read in one serialized session. The capacity-bucket
+`declaration_has_usable_host` against the deliverable-host set and whether the
+pool delivers an offering mode (21 F2), all read in one transaction. The capacity-bucket
 projection and `snapshot()` are built from it, and the compute service passes it,
 in place of `list_resources()`, as the provisioning resource-pool builder's input,
 so the domain views the builder builds, the bare-metal view's `available` among
 them, receive the offered declaration. The administrative listing keeps
-`list_resources()` and the stored `enabled`. A pool whose declarations do not
-resolve, which the service refuses to start with and every write refuses, is
-judged as backed, so the read fails closed for it: the convention
+`list_resources()` and the stored `enabled`. A pool whose deliverable modes do
+not parse, which the service refuses to start with and every write refuses, is
+judged to deliver, so the read fails closed for it: the convention
 `pool_needs_host` follows for a provider the requirement does not name, the case
 a guess would get wrong silently.
 
 *Rationale.* Every projection is a view of the ledger's declarations, and the
 ledger already holds the deliverable-host report (D2), the host requirement, and
-the backing resolver it uses for offering modes. One application of the rule, in
+the deliverable offering modes it reads for admission. One application of the rule, in
 the session that reads the rows it judges, leaves one path to every projection's
 input, so the bare-metal view cannot drift from the capacity-bucket projection,
 and the provisioning builder reads no host.
@@ -381,6 +382,31 @@ projection and the snapshot, and the provisioning builder by reading the
 deliverable set in its pool-context session and overwriting `enabled` on each
 declaration before building views. It calls the rule from two places and reads
 hosts in a session apart from the declarations, for no gain.
+
+### 21 F2. The offered read judges a pool by its deliverable modes, not its backing
+
+The offered read applies the usable-host rule to a declaration only where its
+pool declares a deliverable offering mode; a pool declaring none keeps its
+declarations' own `enabled`. The ledger reads no pool's backing.
+
+*Rationale.* `ARCHITECTURE.md` asks that no new site read of pool state be added
+while the ledger's dependency on the pool authority stands, and
+`inject-site-pool-authority` is to land before any such read. The offered read
+needs only to tell an unbacked pool from a backed one, and the pool declarations
+already settle that through the fact admission reads: an unbacked pool must
+deliver nothing, which their resolution enforces, and admission already judges
+unbacked supply by its empty deliverable set rather than by its backing. The
+offered read so judges a pool as admission does. A backed pool delivering no mode
+may advertise only what it delivers, so nothing of it can be listed or admitted,
+and its declarations keeping their own `enabled` offers nothing a storefront could
+sell.
+
+*Rejected.* Resolving the pool's backing in the ledger, recorded as a further read
+on the divergent edge: a new pool fact the injected pool port would then have to
+carry, against the ordering the change index sets. A backing seam supplied by the
+composition: another seam for one fact, whose shape the port's design has left
+open and would likely redo, while the ledger still reads provider and modes
+directly.
 
 ## Implementation cadence
 

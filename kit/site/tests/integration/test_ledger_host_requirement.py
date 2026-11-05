@@ -9,6 +9,8 @@ whose provider needs one, and is not offered by the projections' read.
 
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
 from sqlalchemy import create_engine
@@ -18,7 +20,11 @@ from sqlalchemy.pool import StaticPool
 from market_resource_pools.db import Base as ResourcePoolBase
 from market_resource_pools.db import DEFAULT_POOL_ID, ResourcePool
 from market_site.db import Base
-from market_site.ledger import CapacityConflictError, CapacityLedgerService
+from market_site.ledger import (
+    CapacityConflictError,
+    CapacityLedgerService,
+    UndeclaredOfferingModeError,
+)
 from market_site.projections import SiteProjectionService
 
 BACKED_POOL_TAGS = {
@@ -46,12 +52,48 @@ class FakeDeliverableHosts:
         return frozenset(self.host_ids)
 
 
-def _make_ledger(*, host_requirement, deliverable_hosts=None, pool_tags=None):
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+class WriteProbingDeliverableHosts(FakeDeliverableHosts):
+    """A report that, each time it is read, tries a write on another
+    connection to the same database file, as a host disable would, and records
+    whether the write was held off."""
+
+    def __init__(self, path, host_ids=()) -> None:
+        super().__init__(host_ids)
+        self.path = path
+        self.writes_held_off: list[bool] = []
+
+    def deliverable_host_ids(self, db: Session) -> frozenset[str]:
+        answer = super().deliverable_host_ids(db)
+        # Autocommit and no busy wait, so the write either commits at once or
+        # is refused at once.
+        other = sqlite3.connect(self.path, timeout=0, isolation_level=None)
+        try:
+            other.execute("UPDATE resource_pools SET label = label")
+            self.writes_held_off.append(False)
+        except sqlite3.OperationalError as exc:
+            assert "locked" in str(exc)
+            self.writes_held_off.append(True)
+        finally:
+            other.close()
+        return answer
+
+
+def _make_ledger(
+    *, host_requirement, deliverable_hosts=None, pool_tags=None, database_path=None
+):
+    if database_path is None:
+        engine = create_engine(
+            "sqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+    else:
+        # As the compute service's engine is: file-backed, one connection per
+        # session.
+        engine = create_engine(
+            f"sqlite:///{database_path}",
+            connect_args={"check_same_thread": False, "timeout": 30},
+        )
     Base.metadata.create_all(bind=engine)
     ResourcePoolBase.metadata.create_all(bind=engine)
     session_factory = sessionmaker(bind=engine)
@@ -433,8 +475,9 @@ def test_an_unbacked_pools_declaration_keeps_its_own_enabled(host_id):
     assert _offered(ledger)["introduction"]["enabled"] is True
 
 
-def test_a_pool_whose_declarations_do_not_resolve_is_judged_backed():
-    """Startup and every write refuse such a pool; the offered read fails closed."""
+def test_a_pool_delivering_a_mode_is_judged_by_its_modes_not_its_backing_label():
+    """The site reads no backing: delivering a mode is what puts a pool under
+    the rule, as it is what lets admission reach it."""
     ledger = _make_ledger(
         host_requirement={"test": True},
         deliverable_hosts=FakeDeliverableHosts(),
@@ -443,6 +486,38 @@ def test_a_pool_whose_declarations_do_not_resolve_is_judged_backed():
     _declare(ledger, "named", host_id="kvm1")
 
     assert _offered(ledger)["named"]["enabled"] is False
+
+
+def test_a_pool_whose_deliverable_modes_do_not_parse_is_judged_to_deliver():
+    """Startup and every write refuse such a pool; the offered read fails closed."""
+    ledger = _make_ledger(
+        host_requirement={"test": True},
+        deliverable_hosts=FakeDeliverableHosts(),
+        pool_tags={**BACKED_POOL_TAGS, "deliverable_modes": "vm"},
+    )
+    _declare(ledger, "named", host_id="kvm1")
+
+    assert _offered(ledger)["named"]["enabled"] is False
+
+
+def test_a_pool_delivering_no_mode_keeps_its_declarations_own_enabled():
+    """Such a backed pool may advertise only what it delivers, so nothing of
+    it can be listed or admitted; its declarations are judged as an unbacked
+    pool's are."""
+    ledger = _make_ledger(
+        host_requirement={"test": True},
+        deliverable_hosts=FakeDeliverableHosts(),
+        pool_tags={
+            "deliverable_modes": [],
+            "advertisable_modes": [],
+            "capacity_backing": "backed",
+        },
+    )
+    _declare(ledger, "named", host_id="kvm1")
+
+    assert _offered(ledger)["named"]["enabled"] is True
+    with pytest.raises(UndeclaredOfferingModeError):
+        ledger.probe(claim=VM_CLAIM)
 
 
 def test_with_no_requirement_the_offered_read_is_the_stored_one():
@@ -456,3 +531,66 @@ def test_with_no_requirement_the_offered_read_is_the_stored_one():
     _declare(ledger, "off", host_id="kvm2", enabled=False)
 
     assert ledger.list_offered_resources() == ledger.list_resources()
+
+
+def _file_backed_ledger(tmp_path):
+    path = tmp_path / "site.db"
+    hosts = WriteProbingDeliverableHosts(path, {"kvm1", "kvm2"})
+    ledger = _make_ledger(
+        host_requirement={"test": True},
+        deliverable_hosts=hosts,
+        pool_tags=BACKED_POOL_TAGS,
+        database_path=path,
+    )
+    _declare(ledger, "hosted", host_id="kvm1", units=2)
+    _declare(ledger, "other", host_id="kvm2", units=8)
+    return ledger, hosts
+
+
+def test_no_write_commits_between_a_decisions_host_read_and_its_end(tmp_path):
+    """A host disabled while a decision runs commits only after it, so no
+    decision acts on a host state it no longer has."""
+    ledger, hosts = _file_backed_ledger(tmp_path)
+
+    ledger.probe(claim=VM_CLAIM)
+    reserved = ledger.reserve(claim=VM_CLAIM, deal_ref={})
+    ledger.resize_reservation(
+        old_capacity_reservation_id=reserved["capacity_reservation_id"],
+        new_claim={"offering_mode": "vm", "gpu_count": 4},
+    )
+    second = ledger.reserve(claim=VM_CLAIM, deal_ref={})
+    ledger.assign_settlement_resource(
+        capacity_reservation_id=second["capacity_reservation_id"],
+        settlement_resource_id="other",
+    )
+    ledger.list_offered_resources()
+
+    assert hosts.writes_held_off == [True] * 6
+
+
+def test_a_decision_holds_writes_off_after_lapsing_an_expired_hold(tmp_path):
+    """Lapsing commits, so the decision's transaction begins after it."""
+    ledger, hosts = _file_backed_ledger(tmp_path)
+    lapsing = ledger.reserve(claim=VM_CLAIM, deal_ref={}, ttl_seconds=-1)
+    hosts.writes_held_off.clear()
+
+    reserved = ledger.reserve(claim=VM_CLAIM, deal_ref={})
+
+    assert ledger.get_reservation(lapsing["capacity_reservation_id"])["state"] == (
+        "released"
+    )
+    assert reserved is not None
+    assert hosts.writes_held_off == [True]
+
+
+def test_a_write_is_not_held_off_once_the_decision_ends(tmp_path):
+    """A decision holds other writers off only while it runs: once it ends,
+    another session's write proceeds."""
+    ledger, hosts = _file_backed_ledger(tmp_path)
+    ledger.probe(claim=VM_CLAIM)
+
+    other = sqlite3.connect(hosts.path, timeout=0, isolation_level=None)
+    try:
+        other.execute("UPDATE resource_pools SET label = label")
+    finally:
+        other.close()
