@@ -198,7 +198,9 @@ For an implementation round, also take:
   severity `blocking`. Check each diagnosis against the logs it cites, under
   `.snapshot/`, rather than trusting it. Its `## Environment` entries and an
   `inconclusive` part are missing evidence, never findings: say what evidence is
-  missing and whether the round can be judged without it. A waiver the validation
+  missing and whether the round can be judged without it. A `waived` part is the
+  owner's omission of that evidence: name it, and the decision the record cites,
+  but it is neither a finding nor missing evidence to raise. A waiver the validation
   recommended, which its `## Environment` records with its criterion, is a ledger
   line you append (step 4), taken or declined. Observations it records
   about other changes or about the validation tooling are presented, not triaged as

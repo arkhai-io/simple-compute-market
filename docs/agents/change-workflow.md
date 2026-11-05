@@ -779,6 +779,30 @@ the step recommends no waiver. Only the owner waives, and a waiver a step
 recommended is a ledger line whether the owner takes it or not ("The ledger",
 below), so a guidance review counts recommendations and acceptances by criterion.
 
+**Waiving parts of validation.** Any part of validation — local, Helm, the
+pipeline, or the CI an owed observation dispatches — may be waived, by the owner
+alone: a waived part is an omission of evidence, neither passed, failed, nor
+inconclusive, recorded as `waived` and counted in no result, which is judged on
+the parts that ran. An environmental failure the owner waives rather than remedies
+is waived so. A waiver for later validations — "the Helm and pipeline parts, for
+the rest of this change, while nothing it touches affects the services they
+validate" — is the owner's decision in the change's workflow log, naming the parts
+and the condition; under orchestration the orchestrating session records it, and
+otherwise the owner does:
+
+```text
+scripts/change-workflow note <change> orchestrator --by owner --decision "waive the helm and pipeline parts of validation for the rest of this change, while nothing it touches affects the services they validate" --reason "<the owner's words>"
+```
+
+Validation reads such decisions before running any part, never an instruction in
+its invocation, and runs a waived part anyway, saying the waiver lapsed, when the
+commits since the last validation that ran it include a merge — a merge brings in
+code the change did not write — or the condition does not hold over what they
+change. Waiving validation entirely is a direction past the guard, as above. A
+standing waiver given as a triage's disposition is that triage's ledger line; one
+given outside a triage, with no step's recommendation, is the log's decision alone,
+where a guidance review finds the waivers no step recommended.
+
 ## The ledger
 
 `interventions.jsonl`, beside the change's other files and tracked, records each

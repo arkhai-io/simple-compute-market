@@ -79,7 +79,10 @@ between sessions, where no other agent or person sees them.
   guidance edits for the owner to pick.
 - **Steps recommend waivers** (D22). A step meeting a waivable guard recommends a
   waiver when a written criterion holds; only the owner waives, and recommendations
-  and their acceptance are counted.
+  and their acceptance are counted. Any part of validation may be waived, and a
+  waived part is recorded as an omission of evidence counted in no result; a waiver
+  for later validations is the owner's decision in the workflow log, which
+  validation reads, and lapses at a merge or when its condition breaks.
 
 ### The guidance says what the owner actually does
 
@@ -177,7 +180,8 @@ format version changes.
   `CW-h7lq` and `CW-w4ne` (the interrupt), `CW-r8vz` (the revisit), `CW-q3dm`
   (waivers), `CW-g6ua` (guidance reviews), `CW-d5ac` and `CW-t9bx` (default acceptance
   and its table), `CW-a2lf` (alternatives), and `CW-v1rk` and `CW-n6wy` (the ledger's
-  new entries); modifies `CW-9pbk`, `CW-3tvs`, `CW-j1nv` and `CW-neua`; and gains a
+  new entries); modifies `CW-9pbk`, `CW-3tvs`, `CW-j1nv` and `CW-neua`, and `CW-zkhs`
+  and `CW-e7lm` (a waived part of validation); and gains a
   `## Terms` section at closeout. `openspec/specs/market-change-workflow/spec.md` adds
   `MCW-c4ek` (the closing checks), `MCW-s8gk` (the secret scan), `MCW-u2dt` (the
   audit), and `MCW-l5rv` (the lock revision). Both capabilities' `index.md` list the
@@ -314,8 +318,9 @@ format version changes.
   `openspec/specs/change-workflow/README.md`, "Triage".
 - D21, how the revisit rate is read: `openspec/specs/change-workflow/README.md`,
   "Triage".
-- D22, waiver recommendations and their criteria: `openspec/specs/change-workflow/spec.md`
-  (`CW-q3dm`, `CW-n6wy`) and `docs/agents/change-workflow.md`, "Waivers".
+- D22, waiver recommendations and their criteria, and waived parts of validation:
+  `openspec/specs/change-workflow/spec.md` (`CW-q3dm`, `CW-n6wy`, `CW-zkhs`, `CW-e7lm`) and
+  `docs/agents/change-workflow.md`, "Waivers".
 - D23: no permanent destination — guidance is removed.
 - D24, the seven checks: `openspec/specs/market-change-workflow/spec.md` (`MCW-c4ek`,
   `MCW-s8gk`, `MCW-l5rv`) and `docs/agents/change-workflow.md`, "Skills"; for the

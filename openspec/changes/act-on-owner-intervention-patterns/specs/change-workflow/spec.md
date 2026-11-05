@@ -306,3 +306,58 @@ default acceptance CW-d5ac defines.
 - **WHEN** the owner asks about one finding and says nothing of another
 - **THEN** the other has no disposition, and is presented again before another
   round is asked about
+
+### Requirement: CW-zkhs Validation's parts are the repository's
+
+Validation MUST run the repository's validation parts but those the owner waived
+(CW-e7lm), and each part's evidence MUST come from the commit under validation,
+never from another commit's build, run, or state.
+
+#### Scenario: A part finds only another commit's evidence
+
+- **WHEN** a validation part finds a finished run of its evidence only for an earlier
+  commit of the branch
+- **THEN** it does not report that run as evidence of the validated commit
+
+### Requirement: CW-e7lm Validation's result is passed, failed, or inconclusive
+
+A validation's result MUST be `passed`; `failed`, for a failure caused by the commit
+or of unknown cause; or `inconclusive`, when no failure is caused by the commit but
+a part produced no evidence for an environmental reason. Any part MAY be waived, and
+only by the owner. A waived part MUST be recorded as `waived`: an omission of
+evidence, neither passed, failed, nor inconclusive, counted in no result, which is
+judged on the parts that ran; a requirement that validation run a part, dispatch
+its workflows, or judge its evidence applies only to the parts not waived. A
+validation with every part waived MUST NOT be recorded: waiving validation entirely
+is the owner's direction past the guard it remedies. A waiver for later validations
+MUST be the owner's decision in the change's workflow log, naming the parts and the
+condition they are waived on; validation MUST read it before running any part, and
+MUST run a waived part, saying in the record that the waiver lapsed and why, when
+the condition does not hold over the commits since the last validation that ran
+that part, or when those commits include a merge.
+
+#### Scenario: A part produces no evidence for an environmental reason
+
+- **WHEN** no failure is caused by the commit, and one part produced no evidence
+  because its environment was unavailable
+- **THEN** the result is `inconclusive`, neither `passed` nor `failed`
+
+#### Scenario: Parts are waived for the rest of the change
+
+- **WHEN** the change's log holds the owner's decision waiving the Helm and pipeline
+  parts on a condition that holds over the commits since those parts last ran
+- **THEN** validation runs neither, records both as `waived` naming the decision, and
+  judges the result on the local and CI parts
+
+#### Scenario: A standing waiver lapses at a merge
+
+- **WHEN** the commits since the pipeline last ran include a merge
+- **THEN** validation runs the pipeline despite the owner's waiver of it, and the
+  record says the waiver lapsed at the merge
+
+#### Scenario: The owner waives an environmental failure
+
+- **WHEN** a part fails for an environmental reason and the owner waives it rather
+  than remedy it
+- **THEN** the part is recorded as `waived`, and the result is judged on the other
+  parts rather than being `inconclusive` for it

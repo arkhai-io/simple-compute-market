@@ -277,8 +277,9 @@ with proper shell quoting or structured command arguments.
 
 ### The owner's directions
 
-Every direction is the owner's: a confirmed return, a repeat review, a waiver, and
-an intervention sending the change to any node of the graph. Record one only on
+Every direction is the owner's: a confirmed return, a repeat review, a waiver of a
+step, and an intervention sending the change to any node of the graph; a waiver of
+parts of validation is a decision with no target (below). Record one only on
 their word, `--by owner`, its target as `--next <step>`, with `--kind <kind>` for
 a review or a triage (the kind of review it triages), `--sections '1,2;3'` for
 sections out of the plan's order, and `--target <step>` — itself qualified by
@@ -337,6 +338,18 @@ the owner may waive that validation, judging the paths its reason names. Only on
 the owner's word, record `--by owner --next archive-cleanup` with no `resolves`,
 the paths in its reason; archive cleanup finds the direction in the log and writes
 the waiver to the ledger.
+
+When the owner waives parts of validation for later validations — "skip Helm and
+the pipeline for the rest of this change" — record their decision with no `--next`,
+naming the parts and the condition they are waived on, so validation finds it in the
+log ("Waivers" in the guide, "Waiving parts of validation"):
+
+```text
+scripts/change-workflow note <change> orchestrator --by owner --decision "waive the helm and pipeline parts of validation for the rest of this change, while <the condition>" --reason <the owner's words>
+```
+
+Never pass a waiver in a validation's `ARGUMENTS`: validation reads waivers only
+from the log, where every later validation, by hand or orchestrated, finds them.
 
 After the pre-closeout triage, the merge step brings the branch the change lands on
 into the change's branch and proposes what follows it. `make merge` merges the

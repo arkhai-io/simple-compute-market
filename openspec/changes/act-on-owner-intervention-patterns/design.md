@@ -34,7 +34,7 @@ convention of one rule per requirement, each with an id: the engine's —
 interrupts, revisits, waivers, guidance reviews, default acceptance, the table,
 reviewers' alternatives, and the ledger's two new entries — in `change-workflow`, with
 `CW-9pbk`, `CW-3tvs`, `CW-j1nv` and `CW-neua` modified where default acceptance
-contradicts them; this repository's — the closing checks, the secret scan and its
+contradicts them, and `CW-zkhs` and `CW-e7lm` for a waived part of validation (D22); this repository's — the closing checks, the secret scan and its
 audit, and the lock revision — in `market-change-workflow`. Their `index.md` entries
 are written with the deltas, since the index check fails a change whose delta adds an
 id its index omits. Destinations that named `change-workflow`'s `architecture.md` name
@@ -654,6 +654,39 @@ evidence a later review would use to propose waivers taken by default.
   measured, a wrong default costs a broken pipeline found later.
 - **Rejected: criteria without recommendations.** The owner would still spot every
   waiver.
+
+Under 84 O1, the owner's waiver of the Helm and pipeline parts "for the remainder of
+this change" (66 V1) reached no validation: nothing carried a standing waiver to the
+step, which knew only a waiver of an environmental failure, and recorded that part as
+`inconclusive`, sending every validation back to the owner. The owner chose that
+validation read the waiver from the log and that the waivable parts be formalized:
+
+- **Any part may be waived** — local, Helm, the pipeline, an owed CI run — by the
+  owner alone. The owner can already waive validation entirely; forbidding a part
+  would only push them to that when a part blocks them. The local part's `make test`
+  is broader than a change confined to the workflow's scripts needs, kept whole only
+  because the step table admits it more simply than each suite.
+- **A waived part is an omission of evidence**, recorded as `waived`, neither passed,
+  failed, nor inconclusive, and counted in no result; an environmental failure the
+  owner waives is recorded so too (`CW-e7lm`).
+- **A waiver for later validations is the owner's decision in the workflow log**,
+  naming the parts and the condition, which validation reads before running any part;
+  an instruction in its invocation is not a waiver. It lapses, and the part runs,
+  when the commits since the part last ran include a merge or break the condition —
+  validation 85, the first after the merge of dev, showed the waived pipeline's value
+  there. Validating with every part waived is no validation; that is the owner's
+  direction past the guard.
+- **Its record.** A standing waiver given as a triage's disposition is that triage's
+  ledger line, as 66 V1's is; one given outside a triage, with no step's
+  recommendation, is the owner's decision in the workflow log alone, where a guidance
+  review finds the waivers no step recommended.
+
+- **Rejected: the orchestrating session passes the waiver in `ARGUMENTS`.** It had
+  been done so, unofficially; a validation started by hand misses it, and two places
+  must remember it.
+- **Rejected: a waived part is `inconclusive`.** Every validation would stop for a
+  ruling the owner already gave, as seq 101 did.
+- **Rejected: deferring it.** Each later validation would run every part.
 
 ### Guidance
 

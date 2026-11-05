@@ -18,8 +18,7 @@ whose comments the rule covers. A string line that trips the check is reworded.
 Run by `make check-change`, against the merge-base with the branch the change
 lands on. Usage: `check_history_wording.py [--base <branch>]`.
 
-Contract: openspec/specs/change-workflow/spec.md, "A change's closing checks
-enforce written rules".
+Contract: openspec/specs/market-change-workflow/spec.md, MCW-c4ek.
 """
 
 from __future__ import annotations

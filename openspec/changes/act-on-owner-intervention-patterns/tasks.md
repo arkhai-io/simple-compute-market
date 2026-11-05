@@ -955,6 +955,13 @@ under `scripts/tests/`, and `openspec/specs/README.md`.
   `test_a_hash_line_in_a_block_scalar_or_multi_line_string_is_read_as_a_comment` (unit,
   over a real Git repository) pins a `run: |` block and a TOML multi-line string.
   `design.md` D24 item 2 records it. Evidence: as section 1's round 1 note records.
+- Round 2 triage fix (83 F1): the six closing checks' docstrings
+  (`change_diff.py`, `check_decision_destinations.py`, `check_history_wording.py`,
+  `check_version_bumps.py`, `check_local_imports.py`, `check_capability_index.py`)
+  cited "A change's closing checks enforce written rules" in `change-workflow`,
+  where the re-plan no longer puts it; each now cites
+  `openspec/specs/market-change-workflow/spec.md, MCW-c4ek`. Evidence: as section
+  10's round 2 note records.
 
 ## 7. The guidance says what the owner does (D5, D6, D8–D12, D22, D23, D24)
 
@@ -1432,6 +1439,42 @@ skills.
   recommended waiver's line, now in the guide's "Waivers". Section 9's commit was
   not pushed on its own: the guarded push refused while this section's edits were
   uncommitted and `git stash` was denied, so both commits went out together.
+- Round 2 triage fix (84 O1, the owner chose A and formalized the waivable parts):
+  the owner's waiver of the Helm and pipeline parts for the rest of the change (66 V1)
+  reached neither validation 67 nor 85, since no step read a standing waiver and a
+  waived part was `inconclusive`. Now any part may be waived, by the owner alone; a
+  waived part is `waived`, an omission of evidence counted in no result; a waiver for
+  later validations is the owner's decision in the workflow log, naming the parts and
+  the condition, which validation reads at its step 1 and which lapses when the
+  commits since the part last ran include a merge or break the condition; every part
+  waived is no validation but the owner's direction past the guard. Delta spec:
+  `CW-zkhs` and `CW-e7lm` modified, with three scenarios; their `index.md` lines
+  revised. `change-validate` (step 1's "Waivers", steps 2, 5, 7 and 8, its
+  description), `change-orchestrate` (recording a standing waiver as a decision with
+  no target, never in `ARGUMENTS`), `change-triage` (a `waived` part is neither a
+  finding nor missing evidence), the guide's "Waivers" ("Waiving parts of
+  validation"), D22 in `design.md`, the proposal, and 11.9's README and index items.
+  Outside the plan's file list: `change-triage/SKILL.md`, `openspec/specs/change-workflow/index.md`.
+  - Evidence: `make check-agent-skills` passed; the roles and history-wording suites
+    (`test_change_workflow_assumptions.py`, `test_check_history_wording.py`; unit, the
+    latter over a real Git repository) 35 passed; `make check-packaging` passed;
+    `make test` passed, its scripts suite 2367 passed, rewriting no lock (run before
+    the fresh-context fixes, which touched only Markdown; the cheap checks were rerun
+    after them); `make check-change` passes all twelve checks. End-to-end: none
+    exercises the skills.
+  - Fresh-context check: fixed — the record never said a waiver lapsed, which the
+    spec requires (step 1 and the record's `Waiver lapsed:` line); "every validation
+    dispatches" the owed workflows contradicted a waived `ci` part; every part waived
+    would read as `passed` (now no record, the owner's direction past the guard); an
+    environmental failure's waived section dropped its attempts, against CW-a1nz; the
+    `ci` result list, the skill's description and step 8 omitted `waived`;
+    orchestrate called every waiver a direction with a target; triage said nothing of
+    a `waived` part; no record said where a standing waiver given outside a triage is
+    kept (the log alone; D22 and the guide); `CW-zkhs` still required every part to
+    run (modified; `CW-e7lm` now says a requirement to run, dispatch or judge a part
+    binds only parts not waived, which covers `MCW-3i99` and `MCW-7hr1`); the README's
+    account of validation and the two index lines were not in 11.9; D22's own rejected
+    alternatives read as 84 O1's.
 
 ## 11. Closeout
 
@@ -1474,9 +1517,11 @@ The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
     finding, discussed or in the table); "The owner is interrupted only for judgement"
     (D2, the advancing default); "The orchestrator relays and routes" (D14's principle
     that the owner can always reach a running step, and D15); "Reviews are files"
-    (D17); "Triage" (D3's rationale and Rule E's baseline, D4, D16, D20, D21); and "The
+    (D17); "Triage" (D3's rationale and Rule E's baseline, D4, D16, D20, D21); "The
     intervention ledger" where its account of what is logged no longer holds (D19,
-    D22). Its sections follow `index.md`'s parts, so a new group of the index —
+    D22); and its account of validation's parts and result, which must say a part the
+    owner waived is `waived`, counted in no result, and how a standing waiver lapses
+    (D22, `CW-zkhs`, `CW-e7lm`; 84 O1). Its sections follow `index.md`'s parts, so a new group of the index —
     "Guidance reviews", under "Reviews and triage" — has its paragraphs under that
     part.
   - `openspec/specs/market-change-workflow/README.md`: a section for its index's part
@@ -1486,7 +1531,8 @@ The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
   - Both capabilities' `index.md`: the entries for the ids the deltas add were written
     with the re-targeted deltas, before implementation, since the index check fails a
     change whose delta adds an id its index omits; and the summary lines of `CW-9pbk`,
-    `CW-3tvs`, `CW-j1nv` and `CW-neua` were revised then. Confirm each entry's group
+    `CW-3tvs`, `CW-j1nv` and `CW-neua` were revised then, and of `CW-zkhs` and
+    `CW-e7lm` by round 2's triage (84 O1). Confirm each entry's group
     and summary still hold for the requirement as implemented, and revise any that
     does not (`openspec/README.md#plan-closeout-requirements`, part 9).
   - The record names, besides those, the documents sections 4, 5, 7, 8 and 10 wrote:

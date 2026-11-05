@@ -13,8 +13,7 @@ examples, not decisions.
 
 Run by `make check-change`. Usage: `check_decision_destinations.py <change>`.
 
-Contract: openspec/specs/change-workflow/spec.md, "A change's closing checks
-enforce written rules".
+Contract: openspec/specs/market-change-workflow/spec.md, MCW-c4ek.
 """
 
 from __future__ import annotations

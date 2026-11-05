@@ -12,8 +12,7 @@ a package that did not exist at the merge-base.
 
 Run by `make check-change`. Usage: `check_version_bumps.py [--base <branch>]`.
 
-Contract: openspec/specs/change-workflow/spec.md, "A change's closing checks
-enforce written rules".
+Contract: openspec/specs/market-change-workflow/spec.md, MCW-c4ek.
 """
 
 from __future__ import annotations

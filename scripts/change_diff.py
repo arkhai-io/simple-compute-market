@@ -13,8 +13,7 @@ of these copies may lag the one the change last merged, and a merge-base with a
 lagging copy would count the merged commits as the change's, so the newest
 merge-base among them is the one read.
 
-Contract: openspec/specs/change-workflow/spec.md, "A change's closing checks
-enforce written rules".
+Contract: openspec/specs/market-change-workflow/spec.md, MCW-c4ek.
 """
 
 from __future__ import annotations

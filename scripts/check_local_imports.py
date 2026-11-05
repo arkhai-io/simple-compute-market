@@ -12,8 +12,7 @@ line above. A comment that is only a tool's directive (`noqa`, `type:`,
 Run by `make check-change`, against the merge-base with the branch the change
 lands on. Usage: `check_local_imports.py [--base <branch>]`.
 
-Contract: openspec/specs/change-workflow/spec.md, "A change's closing checks
-enforce written rules".
+Contract: openspec/specs/market-change-workflow/spec.md, MCW-c4ek.
 """
 
 from __future__ import annotations
