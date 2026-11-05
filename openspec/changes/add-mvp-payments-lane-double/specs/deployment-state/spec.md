@@ -40,7 +40,7 @@ The storefront and bare-metal storefront charts MUST offer an option naming a Se
 
 ### Requirement: The local release rehearses a deployment's payments interface
 
-The local Helm release MUST configure payments through the same values a deployment supplies — the agent's payments configuration, the payments key Secret and the CA bundle ConfigMap — and MUST NOT use `development_auth`. Its deploy target MUST enable the payments double's subchart, which release values never enable, and MUST supply the key Secret and CA ConfigMap from the committed development fixtures by default. The subchart MUST take its server certificate and key from a named existing Secret when one is given.
+The local Helm release MUST configure payments through the same values a deployment supplies — the agent's payments configuration, the payments key Secret and the CA bundle ConfigMap — and MUST NOT use `development_auth`. Its deploy target MUST enable the payments double's subchart, which release values never enable, once per namespace, and the local deployment MUST supply the key Secret and CA ConfigMap from the committed development fixtures by default, through its out-of-band step for local Secrets rather than through chart values. The subchart MUST take its server certificate and key from a named existing Secret when one is given.
 
 #### Scenario: The local release is deployed
 

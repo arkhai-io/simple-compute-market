@@ -107,7 +107,8 @@ keep their authority").
 | `e2e_vm_payment_deal` stages 1–2 | run on the double, proving the VM wiring |
 | `e2e_vm_payment_deal` stages 3–4 | blocked skip naming the missing mediation target |
 
-Stages 3–4 gain a mediation prerequisite, a separate setting from `PAYMENTS`, until a
+Stages 3–4 gain a mediation prerequisite, a separate setting from `PAYMENTS`
+(`MEDIATION.SERVICE_URL`, blank by default, which blocks them by name), until a
 mediation double supplies one. The VM module's existing resource release frees capacity;
 its unrefunded hold lives only in the double's memory and ends with the lane.
 
@@ -159,7 +160,18 @@ In Helm:
   when one is named, and otherwise from the committed files.
 
 A fixed service name means two local releases in one namespace collide; validation uses
-one release per namespace.
+one release per namespace. In the local two-release topology the double runs in the first
+release only: the bare-metal release's values disable its subchart, and its storefront
+reaches the first release's `payments-double` in the same namespace.
+
+The committed fixtures — TLS files, accounts, tokens and the buyer's seed balance — are
+built into the double's image at a fixed path, so Compose runs it without mounts and the
+subchart's "committed files" are the image's own. The charts follow the repository's rule
+that a chart accepts only names of existing Secrets and never reads credential files into
+values (`helm/Makefile`): the local key Secret and CA ConfigMap are created from the
+committed fixtures by the local out-of-band step that creates every other local Secret,
+`make -C helm topology-secrets` (`helm/scripts/topology-secrets.sh`), and the local deploy
+target checks for them before installing.
 
 **Rejected:**
 
@@ -345,8 +357,9 @@ The local release is where the external round's deployment shape is rehearsed:
   `seller-payments-key` / `api-key`.
 - **Deployment values only.** The local release configures payments through the same
   values a deployment uses — `[Settlement.arkhai_payments]` in agent configuration, the
-  key Secret, the CA ConfigMap — never `development_auth`. Its deploy target creates the
-  key Secret and the CA ConfigMap from the committed fixtures.
+  key Secret, the CA ConfigMap — never `development_auth`. The local out-of-band step
+  creates the key Secret and the CA ConfigMap from the committed fixtures, and the deploy
+  target checks for them (D3).
 - **The double.** The `payments-lane-double` subchart is enabled by the local deploy
   target, never in release values, as `dev-env` is.
 - **A rerunnable check.** A `helm test` pod runs D12's `check-payments`, reading the
@@ -366,7 +379,10 @@ variable and `service_url` together.
 
 Both storefront CLIs gain `check-payments --account <id>` (`market-storefront
 check-payments`, `bare-metal-storefront check-payments`), beside the existing operator
-command `bare-metal-storefront redeliver-introduction`. Each loads the storefront's
+command `bare-metal-storefront redeliver-introduction`. The API-credit storefront's CLI,
+`apicredits-storefront`, gains the same subcommand over the same kit function, since D6
+has every lane's setup run the check and D2 brings the API-credit lane in; it has no
+chart, so it has no Helm test. Each loads the storefront's
 configuration exactly as `serve` does and calls one function in `kit/arkhai-payments`,
 which builds the client through `payments_client_for_owner`, calls `get_balance`, and
 returns the outcome or the failing step: `configuration`, `credential`, `transport`, or
