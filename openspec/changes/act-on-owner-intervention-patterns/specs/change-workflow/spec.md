@@ -1,22 +1,14 @@
 ## ADDED Requirements
 
-### Requirement: The owner interrupts a running step
+### Requirement: CW-k2rv The owner stops a running step through the command
 
 The orchestrating session MUST, on the owner's word, be able to stop a running
 unattended step of its change through a command that signals the process the run
 recorded as it started, so that the run is logged `stopped` with its session and any
-process the run started is ended; when two
-runs of the change are in progress, the command MUST name the step it stops, and it
-MUST refuse, stopping nothing, when no run of the change is in progress. The command
-MUST verify that the recorded run still holds its record, when it selects the run and
-again immediately before the signal, and MUST refuse, signalling nothing, a record
-whose run no longer holds it at either check. The owner's
-interrupt MUST be recorded as an owner's decision that resolves no run. A stopped run
-MUST then be recovered as any stop is: resumed with the owner's words, rerun, or
-resolved by the owner's decision. A stop MUST commit nothing, and an interrupted
-review MUST publish nothing. A run MUST end with its line however a stop reaches it:
-a stop that arrives after the run's agent or reviewer has exited MUST end nothing,
-and the run MUST log the outcome it reached.
+process the run started is ended. When two runs of the change are in progress, the
+command MUST name the step it stops; it MUST refuse, stopping nothing, when no run of
+the change is in progress. The owner's interrupt MUST be recorded as an owner's
+decision that resolves no run.
 
 #### Scenario: The owner interrupts a running validation
 
@@ -34,6 +26,17 @@ and the run MUST log the outcome it reached.
   `stopped`, its reviewer process is ended, and the review publishes nothing and is
   rerun
 
+#### Scenario: Nothing is running
+
+- **WHEN** the stop command is given for a change with no run in progress
+- **THEN** it refuses, saying no run is in progress, and stops nothing
+
+### Requirement: CW-h7lq A stop signals only a run that still holds its record
+
+The stop command MUST verify that the recorded run still holds its record, when it
+selects the run and again immediately before the signal, and MUST refuse, signalling
+nothing, a record whose run no longer holds it at either check.
+
 #### Scenario: A run record outlives its run
 
 - **WHEN** the stop command finds a record whose run is no longer holding it
@@ -45,6 +48,14 @@ and the run MUST log the outcome it reached.
   the signal
 - **THEN** the command refuses and signals nothing
 
+### Requirement: CW-w4ne A stopped run is recovered as any stop, and a late stop ends nothing
+
+A run the owner stopped MUST be recovered as any stop is: resumed with the owner's
+words, rerun, or resolved by the owner's decision. A stop MUST commit nothing, and an
+interrupted review MUST publish nothing. A run MUST end with its line however a stop
+reaches it: a stop that arrives after the run's agent or reviewer has exited MUST end
+nothing, and the run MUST log the outcome it reached.
+
 #### Scenario: A stop arrives as the run writes its line
 
 - **WHEN** the stop command signals a review whose reviewer has exited and whose record
@@ -52,12 +63,7 @@ and the run MUST log the outcome it reached.
 - **THEN** the run is not killed, its line records the outcome it reached, `finished`
   naming the record, and the owner's interrupt resolves no run
 
-#### Scenario: Nothing is running
-
-- **WHEN** the stop command is given for a change with no run in progress
-- **THEN** it refuses, saying no run is in progress, and stops nothing
-
-### Requirement: The owner revisits a default acceptance
+### Requirement: CW-r8vz The owner revisits a default acceptance
 
 The owner MAY revisit a finding a triage accepted by default, or the advancing exit it
 took, after that triage finished. On the owner's direction naming that triage's run,
@@ -87,7 +93,7 @@ MUST govern the reviews it names.
   already triaged again
 - **THEN** the direction is refused, naming the later triage
 
-### Requirement: Waivers are recommended and the owner's to take
+### Requirement: CW-q3dm Waivers are recommended and the owner's to take
 
 A step that meets a guard the owner may waive MAY recommend a waiver only when a
 written criterion holds — the commits differ from validated ones only in paths no part
@@ -109,7 +115,7 @@ recommendation MUST name its criterion and evidence. Only the owner's word MUST 
 - **WHEN** a guard's remedy is pending and no written criterion holds
 - **THEN** the step recommends no waiver
 
-### Requirement: Guidance reviews
+### Requirement: CW-g6ua Guidance reviews
 
 A guidance review MUST be run by the owner, interactively, outside any change's steps,
 over the records of every change since the previous guidance review. It MUST report
@@ -137,345 +143,17 @@ review MUST start where the last recorded period ended.
 - **THEN** no proposal is written, the review's period is recorded with no proposal,
   and the next guidance review starts where that period ended
 
-### Requirement: A change's closing checks enforce written rules
-
-A change's closing checks MUST fail when a decision headed `D<n>` under its design's
-`## Decisions` has no bullet starting `D<n>` in its proposal's knowledge to promote;
-when a comment or docstring line its diff adds uses history wording on the check's
-list; when a package version differs from its version at the merge-base with the
-branch the change lands on by more than one SemVer step; when an import its diff adds
-inside a function has no comment giving its reason; or when a capability with a
-specification has no row in the capability index, or a row links no capability. The
-public-content checks MUST refuse a private key, or a credential in a format one of the
-scanner's provider-specific rules recognizes, in added content, a merge's own
-resolution included, through a maintained secret scanner at a pinned release, whether
-a key is wrapped at any length or written as one escaped string, reporting its
-location without its content; they MUST pass a key block whose short body holds no key
-material, however many such blocks share a file, and MUST pass the repository's
-development fixtures: published development keys, public contract addresses, and code
-that names a key. An audit run on demand MUST report, by rule, file and line without
-content, what every rule of the pinned scanner but its default private-key rule finds
-in the tracked tree, and MUST gate nothing. The packaging
-checks MUST fail when a committed lock carries a lock revision other than the one the
-repository's minimum uv writes, and every command the repository provides to relock a
-project or refresh its environment MUST first refuse a uv older than that minimum; a
-plain `uv run` that relocks a changed project is not guarded, and the revision check
-fails on what it writes before it lands.
-
-#### Scenario: A decision names no destination
-
-- **WHEN** a design records `### D7` and the proposal's knowledge to promote has no
-  bullet starting `D7`
-- **THEN** the closing checks fail, naming D7
-
-#### Scenario: A comment describes history
-
-- **WHEN** a change's diff adds the comment "# previously read from the pool table"
-- **THEN** the closing checks fail, naming the file and line
-
-#### Scenario: A package is bumped twice
-
-- **WHEN** a package at 0.4.0 on the merge-base is at 0.4.2 on the change's branch
-- **THEN** the closing checks fail, naming the package and both versions
-
-#### Scenario: A larger bump replaces a smaller one
-
-- **WHEN** a package at 0.4.0 on the merge-base, bumped to 0.4.1 for a fix, is bumped
-  to 0.5.0 for an incompatible edit
-- **THEN** the version check passes
-
-#### Scenario: A local import has no reason
-
-- **WHEN** a change's diff adds an import inside a function with no comment beside or
-  above it
-- **THEN** the closing checks fail, naming the file and line
-
-#### Scenario: A capability has no index row
-
-- **WHEN** `openspec/specs/<capability>/spec.md` exists and the capability index has
-  no row linking it
-- **THEN** the closing checks fail, naming the capability
-
-#### Scenario: A key fixture carries no key material
-
-- **WHEN** a test fixture holds a private-key block whose body is the word `fixture`
-- **THEN** the public-content checks pass it
-
-#### Scenario: Two key fixtures share a file
-
-- **WHEN** an added file holds two private-key blocks, each with a short fixture body,
-  one after the other
-- **THEN** the public-content checks pass it, reading neither block as running into
-  the other
-
-#### Scenario: A key is added in a merge resolution
-
-- **WHEN** an outgoing merge commit adds a private-key block with key material that
-  neither of its parents holds
-- **THEN** the public-content checks refuse it, naming the file and line without
-  echoing the key
-
-#### Scenario: A real key is staged
-
-- **WHEN** a staged addition holds a private-key block with base64 key lines, wrapped
-  at any length
-- **THEN** the public-content checks refuse it, naming the file and line without
-  echoing the key
-
-#### Scenario: A key is embedded as one escaped string
-
-- **WHEN** an added source line holds a private-key block as one string, its line
-  breaks written as `\n` escapes, with key material for a body
-- **THEN** the public-content checks refuse it, naming the file and line without
-  echoing the key
-
-#### Scenario: A provider token is staged
-
-- **WHEN** a staged addition holds a token in a provider's published format, such as a
-  GitHub personal access token
-- **THEN** the public-content checks refuse it, naming the file and line without
-  echoing the token
-
-#### Scenario: A development fixture is added
-
-- **WHEN** an added line holds one of Anvil's published development keys, a contract
-  address, or the annotation `private_key: Ed25519PrivateKey`
-- **THEN** the public-content checks pass it
-
-#### Scenario: The audit reports what the gate passes
-
-- **WHEN** the tracked tree holds a random 40-character password with no provider
-  format, and the owner runs the audit
-- **THEN** the audit reports its rule, file and line without echoing it, exits
-  successfully, and the public-content checks still pass the line
-
-#### Scenario: A lock is written by another uv release
-
-- **WHEN** a committed `uv.lock` carries a lock revision other than the one the
-  repository's minimum uv writes
-- **THEN** the packaging checks fail, naming the lock and both revisions
-
-#### Scenario: A lock is rewritten with an older uv
-
-- **WHEN** a project is relocked, or a package's environment is refreshed, which may
-  rewrite its lock, with a uv older than the repository's minimum
-- **THEN** the command refuses before running uv, naming both versions
-
-## MODIFIED Requirements
-
-### Requirement: Phases and owner touchpoints
-
-A change MUST move through design, planning, implementation, and closeout, in that
-order, except where the owner directs a step, as the requirement on the owner's
-directions allows; no direction crosses the archive. The design phase MUST end with a design review, the implementation phase
-with a pre-closeout review, and the closeout phase with a closeout review; a phase
-ending in a review MUST NOT be treated as finished until that review has been
-triaged and its triage's outcome names, as its exit, a step of the next phase — for
-the implementation phase, the merge that precedes closeout. Once the pre-closeout
-review's triage advances the change, a merge step MUST bring the branch the change
-lands on — the branch it was branched from, `dev` unless the owner names another —
-into the change's branch, resolve its conflicts, and reconcile the change's own code
-with what that branch changed even where the merge reported no conflict, before closeout
-starts; closeout MUST NOT start until a validation of the merged `HEAD` passed,
-unless the owner waives it. The merge MUST judge whether its resolutions merit
-another pre-closeout review and whether its validation may be waived, and MUST
-take either only on the owner's confirmation; without either, it MUST advance to
-closeout without waiting for the owner. The
-repository owner MUST be consulted for the design discussion's questions, for their
-notes on each implementation round before its triage, for the disposition of every
-finding the triage does not accept by default, and, when the triage recommends another
-review round, for whether the dispositions merit one, which triage MUST ask once every
-discussed finding is disposed and before any fix is made; when the triage recommends
-advancing, it MUST take the advancing exit without asking, and a triage with no finding
-to discuss and no point of the owner's notes to dispose of MAY finish without the
-owner. Every other transition MUST proceed without waiting for
-the owner, unless a step raises a question only the owner can answer.
-Closeout MUST archive the change, merging its specification deltas into the
-permanent specifications, before its closeout review, and that review MUST read the
-archived change and the permanent documents as archived; the archive is cleaned up,
-and the change is `archived`, only once that review's triage records that the
-change advances and, when `HEAD` differs from the commit that review read in a path
-outside `openspec/` and `docs/`, the latest validation passed for `HEAD` or for an
-ancestor it differs from only in records, unless the owner waives that validation,
-judging the paths named, and the waiver is recorded in the intervention ledger.
-Closeout MUST change documentation only; a closeout part that would need a code
-change MUST return
-the change to implementation. The steps that follow the archive — the closeout
-review and its triage, validation, the round view, the scoped citation check, and
-archive cleanup — MUST find an archived change by its name; design, planning, and
-implementation MUST refuse a change that is archived.
-Planning MUST NOT begin before the design review's triage records that the change
-advances. A design decision made after that, such as one planning exposes, MUST
-return the change to design; the owner MAY waive another design review for it, and a
-waiver MUST be recorded in the intervention ledger. Every review —
-design, implementation, pre-closeout, and closeout — MUST stop for the owner's
-disposition of each discussed finding before any finding is acted on. An agent MUST
-NOT treat its own or another agent's agreement with a finding as a disposition, except
-as the default acceptance the requirement on triage of every finding defines.
-
-#### Scenario: A reviewer and the implementing agent agree
-
-- **WHEN** a reviewer raises a finding the default-acceptance rule does not admit and
-  the implementing agent agrees with it
-- **THEN** nothing is changed until the owner has recorded a disposition for it
-
-#### Scenario: A triage recommends advancing
-
-- **WHEN** every discussed finding of a triage is disposed and the agent recommends
-  advancing
-- **THEN** the triage takes the advancing exit without asking whether another round is
-  merited, and reports it beside the table of default acceptances
-
-#### Scenario: Planning exposes an unanswered design question
-
-- **WHEN** planning finds a question the reviewed design did not answer
-- **THEN** planning stops, the change returns to design, the owner's decision is
-  recorded in the design, and planning resumes only after another design review's
-  triage records that the change advances, or the owner's waiver of that review is
-  recorded
-
-#### Scenario: The closeout review reads the synchronized specifications
-
-- **WHEN** a change's closeout review runs
-- **THEN** the change is already archived, its deltas merged into
-  `openspec/specs/`, and the review and its triage find the change and its records
-  by name under the archive
-
-#### Scenario: An archived change is given to implementation
-
-- **WHEN** the owner asks to implement a change whose directory is under the
-  archive
-- **THEN** the request is refused, naming the archived directory
-
-#### Scenario: A closeout review finds a code defect
-
-- **WHEN** a closeout review's finding can only be fixed by changing code
-- **THEN** the triage makes no code change and stops for the owner, and any
-  correction the owner directs in that session is validated before archive cleanup
-
-#### Scenario: The owner waives archive cleanup's validation
-
-- **WHEN** the only path outside `openspec/` and `docs/` changed since the closeout
-  review's commit is another change's, on a branch the two changes share, and the
-  owner judges it harmless
-- **THEN** archive cleanup records the waiver as a line of the change's intervention
-  ledger and goes on without a validation of `HEAD`
-
-#### Scenario: The owner waives archive cleanup's validation under orchestration
-
-- **WHEN** the next-step computation names validation before archive cleanup and
-  the owner tells the orchestrating session they waive it, judging the paths named
-- **THEN** the owner's word is recorded in the workflow log as a decision directing
-  archive cleanup, the computation names archive cleanup until it has run, and
-  archive cleanup's own check finds the direction in the log and records the waiver
-  in the ledger, without asking the owner again
-
-#### Scenario: Closeout finds a comment that needs rewriting
-
-- **WHEN** closeout's comment hygiene part finds a comment the change added that
-  describes its history
-- **THEN** closeout stops without editing it and the change returns to
-  implementation for a fix round
-
-#### Scenario: A design review accepts a blocking finding
-
-- **WHEN** the owner accepts a `blocking` finding in a design review
-- **THEN** the change remains in design until the fix lands, and planning does not
-  begin before the triage records that the change advances
-
-#### Scenario: Another round is decided before the fixes
-
-- **WHEN** the owner has disposed of every discussed finding of an implementation round
-  and the agent recommends another review round
-- **THEN** triage asks whether the accepted fixes merit it and records the owner's
-  answer before making any fix
-
-### Requirement: Review records
-
-Each review of a change MUST be written as one Markdown file in that change's
-`reviews/` directory, numbered in the order reviews are produced, and that file MUST
-be the only record of its findings. The order of the records MUST be establishable —
-by number, or, where two records of different kinds share a number, by their file
-times — and a record MUST NOT be overwritten. Each finding MUST state its lens, its
-basis, its severity, its alternatives — each option a reasonable owner might choose,
-with its trade-off, or none and why the fix is evident — and the evidence it cites. A
-later review MUST obtain earlier
-findings and their dispositions from these files rather than from session memory; a
-review of the same kind as an earlier one MAY continue the reviewer session that
-wrote it, so the reviewer keeps the context behind its findings, but MUST still read
-the triage and dispositions from the records. The `reviews/` directory MUST NOT be
-tracked by version control and MUST NOT be cited by permanent documentation;
-anything durable in it MUST reach permanent documentation through the ordinary
-promotion path at closeout.
-
-#### Scenario: A pre-closeout review asks whether feedback was addressed
-
-- **WHEN** a pre-closeout review runs in a session that produced none of the
-  change's earlier reviews
-- **THEN** it reads the earlier reviews and their triage from `reviews/` and
-  answers for every earlier finding
-
-A review's raw session MAY be kept as a transcript under the change's
-`reviews/transcripts/`, untracked like the records. A transcript is not a record of
-findings: no review or triage step SHALL read one. A reviewer's output SHALL be
-published as a review record only after it is checked to have the review format, so
-an error message or a truncated answer never becomes review history.
-
-#### Scenario: A later review runs beside a transcript
-
-- **WHEN** a pre-closeout review runs for a change whose earlier review left a
-  transcript
-- **THEN** it reads the earlier review's Markdown record and triage, and not the
-  transcript
-
-#### Scenario: The reviewer returns an error instead of a review
-
-- **WHEN** the reviewing agent's final output is an error message rather than a
-  review
-- **THEN** no review record is published, and the output is kept beside the
-  transcript
-
-#### Scenario: A review finding changes the design
-
-- **WHEN** a review finding leads to an accepted design decision
-- **THEN** the decision is recorded in the change's `design.md` and promoted at
-  closeout, and nothing permanent cites the review file
-
-#### Scenario: A finding states no alternatives
-
-- **WHEN** a reviewer's finding has no alternatives field
-- **THEN** the review is not published, and the output is kept beside the transcript
-
-#### Scenario: A finding has one evident fix
-
-- **WHEN** a finding's fix has no alternative a reasonable owner might choose
-- **THEN** its alternatives state none and why the fix is evident
-
-### Requirement: Triage of every finding
-
-The implementing agent MUST record, for every finding in a review, its own position
-— agree, disagree, or partly — with the evidence for it and a proposed action, and a
-position of agreement MUST state its reason as a disagreement does. A finding MUST be
-accepted by default when, and only when, it comes from a review rather than a
-validation record, the owner's notes, or the orchestrating session's observations; its
-severity is not `blocking`; the agent agrees and proposes one edit or one fix; neither
-the reviewer nor the agent lays out an alternative and the agent names nothing that
-would change its recommendation; and its fix touches no interface or representation,
-migration or compatibility path, the change's scope, or validation environment. The
-triage record MUST state, for each default acceptance, how the finding met each
-condition, written before any finding is presented, and MUST record it as accepted by
-default rather than as a disposition the owner stated. Every other finding MUST be
-presented to the owner, none withheld for being minor or uncontested, and MUST be
-treated as disposed of only when the owner states a disposition for it. Default
-acceptances MUST be reported to the owner in one table, giving each finding's label,
-severity, the finding in one line, and its outcome, with the triage's last question
-when it asks one and otherwise with its final report.
-
-#### Scenario: A minor finding the agent agrees with
-
-- **WHEN** a review contains a `minor` finding the implementing agent agrees with, and
-  the reviewer lays out alternatives
-- **THEN** it is presented to the owner with the agent's reason
+### Requirement: CW-d5ac A review finding the default rule admits is accepted by default
+
+A finding MUST be accepted by default when, and only when, it comes from a review
+rather than a validation record, the owner's notes, or the orchestrating session's
+observations; its severity is not `blocking`; the agent agrees and proposes one edit or
+one fix; neither the reviewer nor the agent lays out an alternative and the agent names
+nothing that would change its recommendation; and its fix touches no interface or
+representation, migration or compatibility path, the change's scope, or validation
+environment. The triage record MUST state, for each default acceptance, how the finding
+met each condition, written before any finding is presented, and MUST record it as
+accepted by default rather than as a disposition the owner stated.
 
 #### Scenario: A finding is accepted by default
 
@@ -489,49 +167,39 @@ when it asks one and otherwise with its final report.
 - **WHEN** the agent agrees with a `blocking` finding and proposes one edit
 - **THEN** it is presented to the owner and disposed of only by the owner's word
 
+### Requirement: CW-t9bx Default acceptances are reported in one table
+
+A triage's default acceptances MUST be reported to the owner in one table, giving each
+finding's label, severity, the finding in one line, and its outcome, with the triage's
+last question when it asks one and otherwise with its final report.
+
 #### Scenario: The table rides on the last question
 
 - **WHEN** a triage has findings to discuss and findings accepted by default
 - **THEN** the table of default acceptances is shown with its last question, before
   any fix is made
 
-#### Scenario: A validation failure the agent agrees with
+### Requirement: CW-a2lf Each finding states its alternatives
 
-- **WHEN** a validation record's failure has one evident fix the agent agrees with
-- **THEN** it is presented to the owner, since it does not come from a review
+Each finding MUST state its alternatives: each option a reasonable owner might choose,
+with its trade-off, or none and why the fix is evident. A reviewer's output with a
+finding that states no alternatives MUST NOT be published as a review.
 
-#### Scenario: The owner discusses one finding and not another
+#### Scenario: A finding states no alternatives
 
-- **WHEN** the owner asks about one finding and says nothing of another
-- **THEN** the other has no disposition, and is presented again before another
-  round is asked about
+- **WHEN** a reviewer's finding has no alternatives field
+- **THEN** the review is not published, and the output is kept beside the transcript
 
-### Requirement: Intervention ledger
+#### Scenario: A finding has one evident fix
 
-Each disposition by which the owner corrects course — deciding otherwise than the
-implementing agent proposed, or adding context or a condition that changes the work —
-MUST be appended as one entry to the change's `interventions.jsonl`, stating the
-review, the `tasks.md` section the finding concerns when it concerns one, the
-finding's lens, basis, and severity, the implementing agent's position, the owner's
-disposition, and a one-line summary. A disposition that accepts the agent's proposal
-as it stands MUST NOT be logged; the triage record holds every disposition. A
-correction of a finding accepted by default, made before its fix or after, MUST be
-logged in the same shape, its disposition beginning `revisits default acceptance:`. A
-waiver a step recommended MUST be logged with the recommendation and its criterion as
-the agent's position, and a recommended waiver the owner declines is a correction.
-The ledger MUST be tracked by version control, MUST remain in the change directory,
-and MUST be archived with the change.
+- **WHEN** a finding's fix has no alternative a reasonable owner might choose
+- **THEN** its alternatives state none and why the fix is evident
 
-Each time the owner changes or reverses the agent's recommendation during a design
-discussion, an entry MUST be appended in the same shape, with `review` set to
-`design`, the decision as `finding`, lens `direction`, basis `judgement`, and a null
-severity. A recommendation the owner accepts MUST NOT be logged.
+### Requirement: CW-v1rk A revisited default acceptance is logged and marked
 
-#### Scenario: The owner accepts a finding as proposed
-
-- **WHEN** the owner disposes of a finding by accepting the agent's proposed
-  outcome without adding to it
-- **THEN** the triage record holds the disposition and the ledger gains no entry
+A correction of a finding accepted by default, made before its fix or after, MUST be
+logged to the ledger in the shape of any course correction, its disposition beginning
+`revisits default acceptance:`.
 
 #### Scenario: The owner revisits a default acceptance
 
@@ -539,37 +207,53 @@ severity. A recommendation the owner accepts MUST NOT be logged.
 - **THEN** one ledger entry records it under the finding's review and label, its
   disposition beginning `revisits default acceptance:`
 
+### Requirement: CW-n6wy A recommended waiver is logged with its criterion
+
+A waiver a step recommended MUST be logged to the ledger with the recommendation and
+its criterion as the agent's position, and a recommended waiver the owner declines is a
+course correction.
+
 #### Scenario: The owner declines a recommended waiver
 
 - **WHEN** a step recommends a waiver and the owner declines it
 - **THEN** one ledger entry records the recommendation, its criterion, and the owner's
   reason
 
-#### Scenario: The owner reverses a design recommendation
+## MODIFIED Requirements
 
-- **WHEN** the owner chooses a different option than the one the agent recommended
-  for a design decision
-- **THEN** one ledger entry records the decision, the agent's recommendation, and
-  what the owner chose and why
+### Requirement: CW-9pbk The owner is consulted at fixed touchpoints
 
-#### Scenario: A reviewed change's archive is cleaned up
+The owner MUST be consulted for the design discussion's questions, for their notes
+on each implementation round before its triage, for the disposition of every
+finding the triage does not accept by default (CW-d5ac), and, when the triage
+recommends another review round, for whether the dispositions merit one, which triage
+MUST ask once every discussed finding is disposed of and before any fix is made. When
+the triage recommends advancing, it MUST take the advancing exit without asking.
+Every other transition MUST proceed without waiting for the owner, unless a step
+raises a question only the owner can answer.
 
-- **WHEN** a change whose findings were dispositioned is cleaned up after its
-  closeout review's triage advanced it
-- **THEN** its intervention ledger is in the archived change directory, and its
-  `reviews/` directory stays there, untracked, until an export flow exists
+#### Scenario: Another round is decided before the fixes
 
-### Requirement: Discussion steps stay conversations with the owner
+- **WHEN** the owner has disposed of every discussed finding of an implementation round
+  and the agent recommends another review round
+- **THEN** triage asks whether the accepted fixes merit it and records the owner's
+  answer before making any fix
+
+#### Scenario: A triage recommends advancing
+
+- **WHEN** every discussed finding of a triage is disposed and the agent recommends
+  advancing
+- **THEN** the triage takes the advancing exit without asking whether another round is
+  merited, and reports it beside the table of default acceptances
+
+### Requirement: CW-3tvs Design and triage are conversations with the owner
 
 Design MUST NOT run without the owner. Triage MUST bring every finding it does not
 accept by default, and every point of the owner's notes, to the owner, and MAY finish
 without the owner only when there is none and it recommends advancing. When
 orchestrated, each MUST run as its own resumable session, presenting one decision or
-discussed finding per turn, and each
-of its messages MUST be shown to the owner in the orchestrating session, with the
-owner's reply resuming that session. Planning MUST NOT ask the owner to accept the
-plan; a plan that needs a decision the design does not make MUST return the change
-to design.
+discussed finding per turn, each of its messages shown to the owner in the
+orchestrating session and the owner's reply resuming that session.
 
 #### Scenario: A triage finding is presented
 
@@ -583,3 +267,42 @@ to design.
   agent recommends advancing
 - **THEN** the triage asks nothing, and its final report, with the table and the exit,
   is shown to the owner in the orchestrating session
+
+### Requirement: CW-j1nv Triage states a position on every finding and presents every one
+
+The implementing agent MUST record, for every finding in a review, its own position
+(agree, disagree, or partly) with the evidence for it and a proposed action, and a
+position of agreement MUST state its reason as a disagreement does. Every finding not
+accepted by default (CW-d5ac) MUST be presented to the owner, none withheld for being
+minor or uncontested.
+
+#### Scenario: A minor finding the agent agrees with
+
+- **WHEN** a review contains a `minor` finding the implementing agent agrees with, and
+  the reviewer lays out alternatives
+- **THEN** it is presented to the owner with the agent's reason
+
+#### Scenario: A validation failure the agent agrees with
+
+- **WHEN** a validation record's failure has one evident fix the agent agrees with
+- **THEN** it is presented to the owner, since it does not come from a review
+
+### Requirement: CW-neua A finding is disposed of only by the owner
+
+Every review MUST stop for the owner's disposition of each finding it does not accept
+by default before any finding is acted on, and such a finding MUST be treated as
+disposed of only when the owner states a disposition for it. An agent MUST NOT treat
+its own or another agent's agreement with a finding as a disposition, except as the
+default acceptance CW-d5ac defines.
+
+#### Scenario: A reviewer and the implementing agent agree
+
+- **WHEN** a reviewer raises a finding the default rule does not admit and the
+  implementing agent agrees with it
+- **THEN** nothing is changed until the owner has recorded a disposition for it
+
+#### Scenario: The owner discusses one finding and not another
+
+- **WHEN** the owner asks about one finding and says nothing of another
+- **THEN** the other has no disposition, and is presented again before another
+  round is asked about

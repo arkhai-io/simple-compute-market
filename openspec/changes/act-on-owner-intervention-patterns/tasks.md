@@ -10,13 +10,31 @@ owed: they run on a developer's machine and in CI, not in the deployed stack. Th
 pipeline still runs on every validation, and for section 4 its result is evidence that
 the raised uv builds and runs the stack.
 
+Replanned after round 1, on the owner's direction once `dev` was merged in
+(`ed68f99ad`): sections 7–11, none of whose tasks was checked, are amended against
+dev's restructured workflow, which `design.md`'s status note describes. The
+completed sections' notes keep what they record, with the paths the merge renamed
+written at their current places so their citations resolve: the script
+`run_change_step.py` is the `scripts/change-workflow` command; the scripts
+`round_view.py`, `change_clone.py` and `change_next_step.py`, and the guarded push of
+`check_push_ready.py`, are `scripts/change_workflow/round_view.py`, `clone.py`,
+`next_step.py` and `push.py`; the cases of the test file `test_run_change_step.py` are
+in `scripts/tests/test_change_workflow_cli_steps.py`, its `make -n` case in dev's
+Makefile table; and `change-workflow`'s companion, `architecture.md`, is
+`openspec/specs/change-workflow/README.md`, its "Secret scanning" section in
+`openspec/specs/market-change-workflow/README.md`. Where a completed note names
+`test_run_change_step.py` or `run_change_step.py`, it means these. The
+delta requirements the sections implement are named by the ids the re-targeted deltas
+give them.
+
 ## 1. A running step can be stopped (D15)
 
 Delivers the `stop` command, the run's identity as a held lock, and SIGTERM handling
 in the review runner. Implements D15 and the delta requirement "The owner interrupts a
 running step". Touches `scripts/change_workflow/running.py`, `wrapper.py`,
-`review.py`, `harness.py`, `cli.py`, `scripts/run_change_step.py`, and the run
-records' readers `scripts/round_view.py` and `scripts/change_clone.py`.
+`review.py`, `harness.py`, `cli.py`, the `scripts/change-workflow` command, and the run
+records' readers `scripts/change_workflow/round_view.py` and
+`scripts/change_workflow/clone.py`.
 
 - [x] 1.1 Make each run hold an exclusive `fcntl` lock on its record file for as long
   as it runs, opened without inheritance by the run's children, and make a record
@@ -42,12 +60,12 @@ records' readers `scripts/round_view.py` and `scripts/change_clone.py`.
   and reads as no run); `test_round_view.py`
   `test_a_held_record_refuses_the_view_and_a_stale_one_does_not` (a real Git checkout's
   records). `test_change_clone.py`'s run-in-progress case passes, now through the lock.
-- [x] 1.2 Add `python3 scripts/run_change_step.py stop <change> [--step <step>]` (D15):
+- [x] 1.2 Add `scripts/change-workflow stop <change> [--step <step>]` (D15):
   it selects the change's live run, or the run of the named step when two are live,
   checks the lock again immediately before sending SIGTERM, and refuses, signalling
   nothing, when no run is live, when two are live and no step is named, when the
   record is stale, or when the run ended before the second check. Verify: unit tests
-  in `scripts/tests/test_run_change_step.py` for each refusal and for a signal reaching
+  in `scripts/tests/test_change_workflow_cli_steps.py` for each refusal and for a signal reaching
   a live run; a library-integration test that starts a real child process holding a
   record, stops it, and finds it ended; the delta scenarios "Nothing is running", "A
   run record outlives its run", and "A run ends while it is being stopped" each map to
@@ -94,7 +112,7 @@ records' readers `scripts/round_view.py` and `scripts/change_clone.py`.
   reviewer, and leaves the validation, its agent, and its live record untouched).
 - [x] 1.4 Verification: `pytest -q scripts/tests/test_change_workflow_wrapper.py
   scripts/tests/test_change_workflow_review.py scripts/tests/test_change_workflow_harness.py
-  scripts/tests/test_run_change_step.py scripts/tests/test_round_view.py
+  scripts/tests/test_change_workflow_cli_steps.py scripts/tests/test_round_view.py
   scripts/tests/test_change_clone.py` (unit, and library integration where a real
   process or Git repository is used) passes; `make test` passes.
   End-to-end: none; no scenario exercises the workflow tooling.
@@ -156,7 +174,7 @@ records' readers `scripts/round_view.py` and `scripts/change_clone.py`.
 Delivers the owner's `--resumes` direction and the wrapper's resume of a finished
 triage under it. Implements D16, D4, and the delta requirement "The owner revisits a
 default acceptance". Touches `scripts/change_workflow/cli.py`, `log.py`, `wrapper.py`,
-and `scripts/change_next_step.py`; no node or exit of `scripts/change_workflow/graph.py`
+and `scripts/change_workflow/next_step.py`; no node or exit of `scripts/change_workflow/graph.py`
 changes (D4).
 
 - [x] 2.1 Add `--resumes <seq>` to `run_change_step.py note`, accepted only with
@@ -210,7 +228,7 @@ changes (D4).
   first's (the next round). `graph.py` and its test are unchanged.
 - [x] 2.4 Verification: `pytest -q scripts/tests/test_change_workflow_log.py
   scripts/tests/test_change_workflow_wrapper.py scripts/tests/test_change_next_step.py
-  scripts/tests/test_change_workflow_graph.py scripts/tests/test_run_change_step.py`
+  scripts/tests/test_change_workflow_graph.py scripts/tests/test_change_workflow_cli_steps.py`
   (unit) passes; `make test` passes. End-to-end: none; no scenario exercises the
   workflow tooling.
   Done: the five suites, 541 passed; `make test-release-tooling` 1923 passed. `make
@@ -224,7 +242,7 @@ changes (D4).
   skill. Order the procedure stop, `note --by owner --resumes`, resume the triage, then
   resolve the stopped step: resolved before the resume, the computation names the old
   triage's exit again until the resumed triage ends. At closeout,
-  `openspec/specs/change-workflow/architecture.md` still says the wrapper refuses any
+  `openspec/specs/change-workflow/README.md` still says the wrapper refuses any
   run not waiting; D16's promotion there covers the revisit.
 
 ## 3. Reviewers state alternatives on every finding (D17)
@@ -418,7 +436,7 @@ staged", "A development fixture is added", and "The audit reports what the gate
 passes". Touches `domains/vms/provisioning/iac/README.md`, `.gitleaks.toml`, a new
 `scripts/gitleaks-audit.toml`, `scripts/check_secrets.py` and
 `scripts/tests/test_check_secrets.py`, `scripts/hooks/pre-commit`,
-`scripts/hooks/pre-push`, `scripts/check_push_ready.py` and its tests, the `Makefile`'s
+`scripts/hooks/pre-push`, the guarded push (`scripts/change_workflow/push.py`) and its tests, the `Makefile`'s
 `check-public-content` and new `check-secrets` and `audit-secrets` targets,
 `.github/workflows/public-content.yml`, `.github/workflows/tests.yml`,
 `docs/development/ARCHITECTURE.md`, "Public repository content checks", and
@@ -595,7 +613,7 @@ redone.
 - [x] 5.4 Run the gate wherever `check_public_content.py` runs (D24 item 4):
   `scripts/hooks/pre-commit` on staged additions and `scripts/hooks/pre-push` on each
   pushed ref's commits, each running both checks and failing when either does;
-  `scripts/check_push_ready.py` on every outgoing commit; `make check-public-content`,
+  the guarded push (`scripts/change_workflow/push.py`) on every outgoing commit; `make check-public-content`,
   running both; a new `make check-secrets` running the gate over staged additions, and
   a new `make audit-secrets` running `--audit`; `.github/workflows/public-content.yml`
   on every commit since its base; and `tests.yml`'s `test-deployment-packaging` job
@@ -756,7 +774,8 @@ gitleaks' other default rules. No task above is checked.
   - 65 O3: `docs/development/ARCHITECTURE.md`'s "Secret scanning through gitleaks"
     subsection is now one paragraph under "Public repository content checks" — the
     pinned release and its install, the gate, the audit — linking to a new "Secret
-    scanning" section of `openspec/specs/change-workflow/architecture.md`, which holds
+    scanning" section of `change-workflow`'s companion, which the merge of dev moved to
+    `openspec/specs/market-change-workflow/README.md`, and which holds
     the key rule, why the provider rules stay, the tree test, the audit and the gate's
     blind spots, and points to `.gitleaks.toml` for the disabled rules' reasons.
     `.gitleaks.toml`, `scripts/gitleaks-audit.toml` and `scripts/check_secrets.py`
@@ -965,9 +984,11 @@ Touches `AGENTS.md`, `docs/agents/issue-tracker.md` and `docs/agents/triage-labe
   interrupting a step and revisiting a default acceptance (D15, D16); a new "Waivers"
   section with D22's criteria; under "The ledger", the revisit marker and recommended
   waivers (D19, D22); under "Skills", notes and proposals across changes, a skill
-  restating guidance only to cite it, and the checks `make check-change` now runs (D12,
-  D24). Verify: every command the document names exists as sections 1, 2 and 6 built
-  it.
+  restating guidance only to cite it, and the checks `make check-change` now runs, with
+  `CHANGE_BASE` and the diff checks' default of `dev` (D12, D24). The guide names the
+  engine's operations as dev does, `scripts/change-workflow stop` and
+  `scripts/change-workflow note … --resumes <seq>`. Verify: every command the document
+  names exists as sections 1, 2 and 6 built it and the merge placed it.
 - [ ] 7.5 `docs/development/ARCHITECTURE.md`: add an "Implementation rules" section
   before "Testing strategy", with "No speculative guard code" (D8) and "Prefer an
   existing library" (D10), and its row in the document map. Verify: the document map
@@ -980,8 +1001,10 @@ Touches `AGENTS.md`, `docs/agents/issue-tracker.md` and `docs/agents/triage-labe
 ## 8. Guidance reviews have a skill (D20, D21)
 
 Delivers `guidance-review` and its period ledger. Implements D20, D21, and the delta
-requirement "Guidance reviews". Touches a new `.agents/skills/guidance-review/SKILL.md`,
-its links under `.claude/skills/` and `.codex/skills/`, and `.gitignore`.
+requirement `CW-g6ua`. Touches a new `.agents/skills/guidance-review/SKILL.md`, its
+links under `.claude/skills/` and `.codex/skills/`, `.gitignore`, and, for the roles
+test, `openspec/specs/market-change-workflow/README.md`, "How this repository provides
+the workflow's roles".
 
 - [ ] 8.1 Write `.agents/skills/guidance-review/SKILL.md`: run interactively by the
   owner in their workspace, outside any change's steps; read every ledger, triage
@@ -995,8 +1018,10 @@ its links under `.claude/skills/` and `.codex/skills/`, and `.gitignore`.
   Rule E and whether a waiver criterion has earned acceptance by default; on the
   owner's word write a change's proposal stating its period; and append one line to
   the period ledger whatever the owner picks. The method is `design.md`'s "Evidence"
-  sections, under `AGENTS.md`'s public-repository rules (D20, D21). Verify: the skill
-  states each of D20's six steps and the period ledger's path and line fields.
+  sections, under `AGENTS.md`'s public-repository rules (D20, D21). It finds each
+  change's records through `scripts/change-workflow find --records <change>`, as every
+  skill does since the merge. Verify: the skill states each of D20's six steps and the
+  period ledger's path and line fields.
 - [ ] 8.2 Link the skill from `.claude/skills/guidance-review` and
   `.codex/skills/guidance-review`, and add `openspec/changes/archive/guidance-reviews.jsonl`
   to `.gitignore` (D20). Every step is denied edits under `.claude/`, so the
@@ -1004,18 +1029,26 @@ its links under `.claude/skills/` and `.codex/skills/`, and `.gitignore`.
   before this section's session starts; the session makes the `.codex/` link, checks
   both resolve, and commits them with the section. Verify: `make check-agent-skills` passes; `git check-ignore`
   reports the ledger path ignored.
-- [ ] 8.3 Verification: `make check-agent-skills` passes; `make check-change
-  CHANGE=act-on-owner-intervention-patterns` passes every check, the citation of the
-  new skill now resolving. End-to-end: none; no scenario exercises the skills.
+- [ ] 8.3 Keep the roles statement whole (`MCW-5tgp`): every make target and repository
+  path the new skill names in code spans or fenced blocks — the period ledger's path
+  among them — is listed in `openspec/specs/market-change-workflow/README.md`'s tables,
+  the period ledger beside the changes' archive in "The engine's own assumptions"; no
+  new role is added, since the ledger lives in the archive the engine already assumes.
+  Verify: `pytest -q scripts/tests/test_change_workflow_assumptions.py` (unit) passes.
+- [ ] 8.4 Verification: `make check-agent-skills` passes;
+  `pytest -q scripts/tests/test_change_workflow_assumptions.py` passes; `make
+  check-change CHANGE=act-on-owner-intervention-patterns` passes every check, the
+  citation of the new skill now resolving. End-to-end: none; no scenario exercises the
+  skills.
 
 ## 9. Triage accepts uncontested findings by default (D1–D3, D6, D16, D18, D19, D22)
 
 Delivers the triage skill's default acceptance. Implements D1, D2, D3, D16, D18, D19,
 D6's triage outcomes, D22 at a review and validation of different commits, and the
-delta requirements "Triage of every finding", "Phases and owner touchpoints",
-"Intervention ledger", "Discussion steps stay conversations with the owner", "The
-owner revisits a default acceptance", and "Waivers are recommended and the owner's to
-take". Touches `.agents/skills/change-triage/SKILL.md`.
+delta requirements `CW-d5ac`, `CW-t9bx`, `CW-j1nv`, `CW-neua`, `CW-9pbk`, `CW-3tvs`,
+`CW-v1rk`, `CW-n6wy`, `CW-r8vz` and `CW-q3dm`. Touches
+`.agents/skills/change-triage/SKILL.md`, and, for the roles test,
+`openspec/specs/market-change-workflow/README.md`.
 
 - [ ] 9.1 Write Rule E into step 2 as the classification each finding receives with its
   position, reading the reviewer's `Alternatives:` field, and the `Classification:`
@@ -1041,11 +1074,13 @@ take". Touches `.agents/skills/change-triage/SKILL.md`.
   "Deferred work" says; and recommend a waiver at a review and validation of different
   commits when a criterion of `docs/agents/change-workflow.md`'s "Waivers" holds (D6,
   D22). Verify: `make check-agent-skills` passes.
-- [ ] 9.5 Verification: `make check-agent-skills` passes; `make check-change
-  CHANGE=act-on-owner-intervention-patterns` passes; a read of the skill against the
-  delta's scenarios for "Triage of every finding" and "Discussion steps stay
-  conversations with the owner" finds each one stated. End-to-end: none; no scenario
-  exercises the skills.
+- [ ] 9.5 Verification: `make check-agent-skills` passes;
+  `pytest -q scripts/tests/test_change_workflow_assumptions.py` (unit) passes, any make
+  target or repository path the skill newly names listed in
+  `openspec/specs/market-change-workflow/README.md`'s tables (`MCW-5tgp`); `make
+  check-change CHANGE=act-on-owner-intervention-patterns` passes; a read of the skill
+  against the scenarios of `CW-d5ac`, `CW-t9bx`, `CW-j1nv`, `CW-neua`, `CW-9pbk` and
+  `CW-3tvs` finds each one stated. End-to-end: none; no scenario exercises the skills.
 
 ## 10. The other skills interrupt, route revisits, recommend waivers, and fix found defects (D6, D12, D15, D16, D22, D24 item 1)
 
@@ -1055,15 +1090,21 @@ alignments. Implements D15 and D16 in `change-orchestrate`, D6 in `change-review
 decision headings in `change-design`, and D22 in `change-design`, `change-validate`
 and `change-archive-cleanup`. Touches `.agents/skills/change-orchestrate/SKILL.md`,
 `change-review/SKILL.md`, `change-implement/SKILL.md`, `change-design/SKILL.md`,
-`change-validate/SKILL.md`, and `change-archive-cleanup/SKILL.md`.
+`change-validate/SKILL.md`, and `change-archive-cleanup/SKILL.md`, and, for the roles
+test, `openspec/specs/market-change-workflow/README.md`. Implements the delta
+requirements `CW-k2rv`, `CW-h7lq`, `CW-w4ne`, `CW-r8vz`, `CW-q3dm` and `CW-n6wy` in the
+skills.
 
 - [ ] 10.1 `change-orchestrate`: relay the table and an advancing exit as any message;
-  on the owner's word, interrupt a running step with `run_change_step.py stop` and
-  record the interrupt as an owner's decision resolving nothing, then recover the stop
-  as the owner says; route a revisit by stopping the step running after the triage,
-  recording `note --by owner --resumes <seq>`, resuming the triage with the owner's
-  words, and resolving the stopped step (D15, D16). Verify: the skill names each
-  command as sections 1 and 2 implemented it.
+  on the owner's word, interrupt a running step with `scripts/change-workflow stop
+  <change> [--step <step>]` and record the interrupt as an owner's decision resolving
+  nothing (`scripts/change-workflow note <change> orchestrator --by owner …`), then
+  recover the stop as the owner says; route a revisit in the order section 2's handoff
+  gives — stop the step running after the triage, record `scripts/change-workflow note
+  <change> orchestrator --by owner --resumes <seq> …`, resume the triage with the
+  owner's words, then resolve the stopped step (D15, D16). Verify: the skill names each
+  command as sections 1 and 2 implemented it and the merge placed it under
+  `scripts/change-workflow`.
 - [ ] 10.2 `change-review`: the design and pre-closeout scope lenses ask whether new
   scope is a small understood fix, kept, or large or vague work, split, and the
   implementation consistency lens admits a found defect the notes record, each citing
@@ -1078,9 +1119,12 @@ and `change-archive-cleanup`. Touches `.agents/skills/change-orchestrate/SKILL.m
   (D22). `change-validate` recommends a waiver on a known environmental failure, and
   `change-archive-cleanup` before its validation, when a criterion holds (D22).
   Verify: `make check-agent-skills` passes.
-- [ ] 10.4 Verification: `make check-agent-skills` passes; `make check-change
-  CHANGE=act-on-owner-intervention-patterns` passes. End-to-end: none; no scenario
-  exercises the skills.
+- [ ] 10.4 Verification: `make check-agent-skills` passes;
+  `pytest -q scripts/tests/test_change_workflow_assumptions.py` (unit) passes, any make
+  target or repository path the skills newly name listed in
+  `openspec/specs/market-change-workflow/README.md`'s tables (`MCW-5tgp`); `make
+  check-change CHANGE=act-on-owner-intervention-patterns` passes. End-to-end: none; no
+  scenario exercises the skills.
 
 ## 11. Closeout
 
@@ -1093,7 +1137,11 @@ The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
   carries its reason, which the local-import check (section 6) reports; one that should
   move returns the change to implementation.
 - [ ] 11.3 Documentation compliance: re-check D1–D30 against `openspec/README.md`'s
-  placement rules and the destinations named in 11.9 (D30, 55 F2).
+  placement rules and the destinations named in 11.9 (D30, 55 F2), each rule in the
+  capability that owns it — the engine's in `change-workflow`, this repository's in
+  `market-change-workflow`; and confirm the proposal's "Public interfaces of the
+  workflow's engine" still names every public interface the change altered, and
+  whether each is compatible (`CW-c2tw`).
 - [ ] 11.4 Narrative compression: shorten completed task notes to final behaviour,
   material evidence (the uv release of 4.1, the gitleaks release, the nested
   extension, and the tree counts of 5.2, the active changes 6.1 listed), and
@@ -1115,29 +1163,43 @@ The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
   - `openspec/specs/change-workflow/spec.md`, a `## Terms` section by hand, with round,
     round view, pass, exit, direction, guard, join, record, waiver, default acceptance,
     revisit, and interrupt (D11); its requirements arrive by the archive in 11.11.
-  - `openspec/specs/change-workflow/architecture.md`: "What the workflow is for" (the
-    owner reads every finding, discussed or in the table); "The owner is interrupted
-    only for judgement" (D2, the advancing default); "The orchestrator relays and
-    routes" (D14's principle that the owner can always reach a running step, and D15);
-    "Reviews are files" (D17); "Triage" (D3's rationale and Rule E's baseline, D4, D16,
-    D20, D21).
+  - `openspec/specs/change-workflow/README.md`: its opening (the owner reads every
+    finding, discussed or in the table); "The owner is interrupted only for judgement"
+    (D2, the advancing default); "The orchestrator relays and routes" (D14's principle
+    that the owner can always reach a running step, and D15); "Reviews are files"
+    (D17); "Triage" (D3's rationale and Rule E's baseline, D4, D16, D20, D21); and "The
+    intervention ledger" where its account of what is logged no longer holds (D19,
+    D22). Its sections follow `index.md`'s parts, so a new group of the index —
+    "Guidance reviews", under "Reviews and triage" — has its paragraphs under that
+    part.
+  - `openspec/specs/market-change-workflow/README.md`: a section for its index's part
+    "This repository's checks", holding "Secret scanning" as the merge placed it (D24
+    item 4, D26, D28, D29; 65 O3) beside the closing checks and the lock revision in
+    brief, each pointing to the document that details it.
+  - Both capabilities' `index.md`: the entries for the ids the deltas add were written
+    with the re-targeted deltas, before implementation, since the index check fails a
+    change whose delta adds an id its index omits; and the summary lines of `CW-9pbk`,
+    `CW-3tvs`, `CW-j1nv` and `CW-neua` were revised then. Confirm each entry's group
+    and summary still hold for the requirement as implemented, and revise any that
+    does not (`openspec/README.md#plan-closeout-requirements`, part 9).
   - The record names, besides those, the documents sections 4, 5, 7, 8 and 10 wrote:
     `AGENTS.md` (D5, D9), `openspec/README.md` (D6), `docs/agents/domain.md` (D11),
     `docs/agents/change-workflow.md` (D1, D12, D15, D16, D19, D22, D24),
     `docs/development/ARCHITECTURE.md` (D8, D10, and D24 item 4 and D29 in brief under
-    "Public repository content checks"), `openspec/specs/change-workflow/architecture.md`,
-    "Secret scanning" (D24 item 4, D26, D28, D29; 65 O3), `docs/development/BUILD_AND_PACKAGING.md` (D24
+    "Public repository content checks"), `docs/development/BUILD_AND_PACKAGING.md` (D24
     item 7), `docs/development/RELEASING.md`, "Cutting a release" (D29), the comments of
     `.gitleaks.toml` (D26), `.agents/skills/change-design/SKILL.md` (D12),
     `.agents/skills/guidance-review/SKILL.md` (D20), and D7, D13, D23, D25 and D30 as
     having no permanent destination.
-  - D27 and D29's requirement arrive in `openspec/specs/change-workflow/spec.md`, "A
-    change's closing checks enforce written rules", by the archive in 11.11; confirm
-    the requirement's public-content and audit clauses and their three new scenarios
-    are there afterwards.
+  - The engine's requirements (D1–D3, D15–D20, D22) arrive in
+    `openspec/specs/change-workflow/spec.md`, and this repository's (D24, D27, D29) in
+    `openspec/specs/market-change-workflow/spec.md`, by the archive in 11.11; confirm
+    afterwards that every id the deltas add is there, `MCW-s8gk` and `MCW-u2dt` with
+    their scenarios among them, and that `make check-spec-index` passes unscoped.
 - [ ] 11.10 Documentation citations: run `make check-doc-citations
   CHANGE=act-on-owner-intervention-patterns` and resolve every match, then
   `openspec validate act-on-owner-intervention-patterns --strict`.
 - [ ] 11.11 Archival: `openspec archive act-on-owner-intervention-patterns -y`, merging
-  the `change-workflow` delta into `openspec/specs/change-workflow/spec.md` (no
-  `--skip-specs`); the row then links the archived directory.
+  the `change-workflow` delta into `openspec/specs/change-workflow/spec.md` and the
+  `market-change-workflow` delta into `openspec/specs/market-change-workflow/spec.md`
+  (no `--skip-specs`); the row then links the archived directory.

@@ -141,33 +141,59 @@ None.
 
 ### Modified Capabilities
 
-- `change-workflow`: default acceptance and its report in triage, the advancing
-  default, reviewers' alternatives, the owner's interrupt of a running step, revisiting
-  a default acceptance, the ledger's marking of revisits and recommended waivers,
-  waiver recommendations, guidance reviews, and the checks a change's closing checks
-  run.
+- `change-workflow`, the engine: default acceptance and its report in triage, the
+  advancing default, reviewers' alternatives, the owner's interrupt of a running step,
+  revisiting a default acceptance, the ledger's marking of revisits and recommended
+  waivers, waiver recommendations, and guidance reviews.
+- `market-change-workflow`, this repository's part: the rules a change's closing
+  checks enforce, the secret scan and its audit, and the lock revision.
+
+### Public interfaces of the workflow's engine
+
+As `CW-c2tw` asks of a workflow change, each public interface (`CW-5qne`) this change
+changes, and whether the change is compatible:
+
+- `scripts/change-workflow stop <change> [--step <step>]`: a new subcommand —
+  compatible.
+- `scripts/change-workflow note --resumes <seq>`: a new flag, and the `resumes` field
+  it writes on the log line — compatible; the field is new and optional.
+- `scripts/change-workflow start`'s resume of a `finished` triage run, now accepted
+  under such a direction and refused as before without one — compatible.
+- A review record's finding gains a required `Alternatives` field — incompatible for a
+  reviewer writing the earlier format, whose review is now refused at publication;
+  records already published are not read again. Counted minor while the major version
+  is 0.
+- The `guidance-review` skill: a new skill — compatible.
+- The `change-triage`, `change-orchestrate`, `change-review`, `change-design`,
+  `change-implement`, `change-validate` and `change-archive-cleanup` skills change
+  what they do, not their names or argument forms — compatible.
+
+No graph node, review kind, role an adopting repository provides, or record set's
+format version changes.
 
 ## Impact
 
-- **Specification.** `openspec/specs/change-workflow/spec.md` modifies "Phases and
-  owner touchpoints", "Review records", "Triage of every finding", "Intervention
-  ledger", and "Discussion steps stay conversations with the owner"; adds "The owner
-  interrupts a running step", "The owner revisits a default acceptance", "Waivers are
-  recommended and the owner's to take", "Guidance reviews", and "A change's closing
-  checks enforce written rules"; and gains a `## Terms` section at closeout.
-  `openspec/specs/change-workflow/architecture.md` changes "What the workflow is for",
-  "The owner is interrupted only for judgement", "The orchestrator relays and routes",
-  "Reviews are files", and "Triage".
+- **Specification.** `openspec/specs/change-workflow/spec.md` adds `CW-k2rv`,
+  `CW-h7lq` and `CW-w4ne` (the interrupt), `CW-r8vz` (the revisit), `CW-q3dm`
+  (waivers), `CW-g6ua` (guidance reviews), `CW-d5ac` and `CW-t9bx` (default acceptance
+  and its table), `CW-a2lf` (alternatives), and `CW-v1rk` and `CW-n6wy` (the ledger's
+  new entries); modifies `CW-9pbk`, `CW-3tvs`, `CW-j1nv` and `CW-neua`; and gains a
+  `## Terms` section at closeout. `openspec/specs/market-change-workflow/spec.md` adds
+  `MCW-c4ek` (the closing checks), `MCW-s8gk` (the secret scan), `MCW-u2dt` (the
+  audit), and `MCW-l5rv` (the lock revision). Both capabilities' `index.md` list the
+  new ids. `openspec/specs/change-workflow/README.md` changes its opening, "The owner
+  is interrupted only for judgement", "The orchestrator relays and routes", "Reviews
+  are files", and "Triage".
 - **Tooling.**
-  - `scripts/run_change_step.py` and `scripts/change_workflow/` (`cli.py`,
-    `wrapper.py`, `running.py`, `log.py`): the `stop` command, the `--resumes`
-    direction, and resuming a finished triage under it.
+  - `scripts/change_workflow/` (`cli.py`, `wrapper.py`, `running.py`, `log.py`,
+    `review.py`, `harness.py`), reached through `scripts/change-workflow`: the `stop`
+    command, the `--resumes` direction, and resuming a finished triage under it.
   - `scripts/change_workflow/review.py`: the `Alternatives` field.
   - `scripts/check_change.py` and new check scripts under `scripts/`: destinations,
     history wording, version bumps, local imports, the capability index.
   - Private keys: a pinned gitleaks beside `scripts/check_public_content.py`, in
     `scripts/hooks/pre-commit`, `scripts/hooks/pre-push`, the guarded push
-    (`scripts/check_push_ready.py`), `make check-public-content`, and
+    (`scripts/change_workflow/push.py`'s pre-push checks), `make check-public-content`, and
     `.github/workflows/public-content.yml`, its commit scans reading merge patches; a
     new `.gitleaks.toml`, the gate, extending a new `scripts/gitleaks-audit.toml`, the
     audit, which replaces the default private-key rule with one that cannot join two
@@ -180,8 +206,8 @@ None.
     raised minimum. `scripts/uv_project.py`: `lock` and `reinit` check the uv version.
     `.github/workflows/tests.yml` and `e2e.yml`: the uv they install. The `uv.lock`
     files still at the older revision: relocked.
-  - `scripts/change_next_step.py`: a resumed triage's later outcome governs; no new
-    node or exit.
+  - `scripts/change_workflow/next_step.py`: a resumed triage's later outcome governs;
+    no new node or exit.
 - **Skills.**
   - `.agents/skills/change-triage/SKILL.md`: the rule, the classification, the table,
     the advancing default, revisits, waiver recommendations, and the defect outcome.
@@ -208,7 +234,7 @@ None.
   - `docs/development/ARCHITECTURE.md`: the guard-code and library rules, and, under
     "Public repository content checks", a paragraph on gitleaks, its installation, the
     gate and the audit.
-  - `openspec/specs/change-workflow/architecture.md`, "Secret scanning": the
+  - `openspec/specs/market-change-workflow/README.md`, "Secret scanning": the
     repository's key rule and why it replaces the default, why the provider rules
     stay, the tree test, the audit, and the two things the gate cannot see: an edit
     beneath an existing key header, and a random credential in no provider's format
@@ -216,6 +242,10 @@ None.
   - `docs/development/RELEASING.md`, "Cutting a release": run `make audit-secrets`
     and read its findings before an official build ships.
   - `openspec/specs/README.md`: the `contact-exchange-settlement` row.
+  - `openspec/specs/market-change-workflow/README.md`, "How this repository provides
+    the workflow's roles": any make target or repository path the changed skills name
+    that its tables do not yet list, as `scripts/tests/test_change_workflow_assumptions.py`
+    requires.
   - `docs/development/BUILD_AND_PACKAGING.md`: the raised uv minimum, the lock-revision
     check, and drift in both directions.
 - **Coordination.**
@@ -240,14 +270,15 @@ None.
 ### Knowledge to promote
 
 - D1, the table and when it reaches the owner: `openspec/specs/change-workflow/spec.md`
-  ("Triage of every finding"), and `docs/agents/change-workflow.md`.
-- D2, the advancing default: `openspec/specs/change-workflow/spec.md` ("Phases and
-  owner touchpoints"), and `architecture.md`, "The owner is interrupted only for
-  judgement".
-- D3, the default-acceptance rule: `openspec/specs/change-workflow/spec.md`; why the
-  class is accepted by default, and the evidence in summary with Rule E's baseline:
-  `openspec/specs/change-workflow/architecture.md`, "Triage".
-- D4, revisits outside the graph: `openspec/specs/change-workflow/architecture.md`,
+  (`CW-t9bx`), and `docs/agents/change-workflow.md`, "Reviews".
+- D2, the advancing default: `openspec/specs/change-workflow/spec.md` (`CW-9pbk`,
+  `CW-3tvs`), and `openspec/specs/change-workflow/README.md`, "The owner is
+  interrupted only for judgement".
+- D3, the default-acceptance rule: `openspec/specs/change-workflow/spec.md`
+  (`CW-d5ac`, with `CW-j1nv` and `CW-neua`); why the class is accepted by default, and
+  the evidence in summary with Rule E's baseline:
+  `openspec/specs/change-workflow/README.md`, "Triage".
+- D4, revisits outside the graph: `openspec/specs/change-workflow/README.md`,
   "Triage".
 - D5, deferred work: `AGENTS.md`.
 - D6, defects found during a change: `openspec/README.md`.
@@ -261,40 +292,42 @@ None.
   and proposals across changes) and `.agents/skills/change-design/SKILL.md`.
 - D13: no permanent destination — the existing rule stays as written.
 - D14, the one promoted principle, that the owner can always reach a running step:
-  `openspec/specs/change-workflow/architecture.md`, "The orchestrator relays and
-  routes".
-- D15, interrupting a running step: `openspec/specs/change-workflow/spec.md`,
-  `architecture.md` ("The orchestrator relays and routes"), and
-  `docs/agents/change-workflow.md`.
-- D16, revisiting a default acceptance: `openspec/specs/change-workflow/spec.md`,
-  `architecture.md` ("Triage"), and `docs/agents/change-workflow.md`.
-- D17, reviewers' alternatives: `openspec/specs/change-workflow/spec.md` ("Review
-  records") and `architecture.md`, "Reviews are files".
-- D18, the classification record: `openspec/specs/change-workflow/spec.md` ("Triage of
-  every finding").
-- D19, the revisit marker: `openspec/specs/change-workflow/spec.md` ("Intervention
-  ledger") and `docs/agents/change-workflow.md`, "The ledger".
-- D20, guidance reviews: `openspec/specs/change-workflow/spec.md` ("Guidance reviews")
-  and `architecture.md`, "Triage".
-- D21, how the revisit rate is read: `openspec/specs/change-workflow/architecture.md`,
+  `openspec/specs/change-workflow/README.md`, "The orchestrator relays and routes".
+- D15, interrupting a running step: `openspec/specs/change-workflow/spec.md`
+  (`CW-k2rv`, `CW-h7lq`, `CW-w4ne`), `openspec/specs/change-workflow/README.md` ("The
+  orchestrator relays and routes"), and `docs/agents/change-workflow.md`,
+  "Orchestrating a change".
+- D16, revisiting a default acceptance: `openspec/specs/change-workflow/spec.md`
+  (`CW-r8vz`), `openspec/specs/change-workflow/README.md` ("Triage"), and
+  `docs/agents/change-workflow.md`, "Orchestrating a change".
+- D17, reviewers' alternatives: `openspec/specs/change-workflow/spec.md` (`CW-a2lf`)
+  and `openspec/specs/change-workflow/README.md`, "Reviews are files".
+- D18, the classification record: `openspec/specs/change-workflow/spec.md`
+  (`CW-d5ac`).
+- D19, the revisit marker: `openspec/specs/change-workflow/spec.md` (`CW-v1rk`) and
+  `docs/agents/change-workflow.md`, "The ledger".
+- D20, guidance reviews: `openspec/specs/change-workflow/spec.md` (`CW-g6ua`) and
+  `openspec/specs/change-workflow/README.md`, "Triage".
+- D21, how the revisit rate is read: `openspec/specs/change-workflow/README.md`,
   "Triage".
 - D22, waiver recommendations and their criteria: `openspec/specs/change-workflow/spec.md`
-  and `docs/agents/change-workflow.md`, "Waivers".
+  (`CW-q3dm`, `CW-n6wy`) and `docs/agents/change-workflow.md`, "Waivers".
 - D23: no permanent destination — guidance is removed.
-- D24, the seven checks: `openspec/specs/change-workflow/spec.md` ("A change's closing
-  checks enforce written rules"), `docs/agents/change-workflow.md`; for the private-key
-  check, `docs/development/ARCHITECTURE.md`, "Public repository content checks", in
-  brief, and `openspec/specs/change-workflow/architecture.md`, "Secret scanning"; and,
-  for the lock revision and the uv minimum, `docs/development/BUILD_AND_PACKAGING.md`.
+- D24, the seven checks: `openspec/specs/market-change-workflow/spec.md` (`MCW-c4ek`,
+  `MCW-s8gk`, `MCW-l5rv`) and `docs/agents/change-workflow.md`, "Skills"; for the
+  private-key check, `docs/development/ARCHITECTURE.md`, "Public repository content
+  checks", in brief, and `openspec/specs/market-change-workflow/README.md`, "Secret
+  scanning"; and, for the lock revision and the uv minimum,
+  `docs/development/BUILD_AND_PACKAGING.md`.
 - D25: no permanent destination — a defect fixed in place.
 - D26, the gate's rules and what it leaves to review and the audit:
-  `openspec/specs/change-workflow/architecture.md`, "Secret scanning", and the
+  `openspec/specs/market-change-workflow/README.md`, "Secret scanning", and the
   comments of `.gitleaks.toml`.
-- D27, what the gate refuses and passes: `openspec/specs/change-workflow/spec.md`
-  ("A change's closing checks enforce written rules").
+- D27, what the gate refuses and passes: `openspec/specs/market-change-workflow/spec.md`
+  (`MCW-s8gk`).
 - D28, the tree test as the guard on a gitleaks upgrade:
-  `openspec/specs/change-workflow/architecture.md`, "Secret scanning".
-- D29, the audit: `openspec/specs/change-workflow/spec.md` ("A change's closing checks
-  enforce written rules"), `openspec/specs/change-workflow/architecture.md`, "Secret
-  scanning", and `docs/development/RELEASING.md`, "Cutting a release".
+  `openspec/specs/market-change-workflow/README.md`, "Secret scanning".
+- D29, the audit: `openspec/specs/market-change-workflow/spec.md` (`MCW-u2dt`),
+  `openspec/specs/market-change-workflow/README.md`, "Secret scanning", and
+  `docs/development/RELEASING.md`, "Cutting a release".
 - D30: no permanent destination — the change's own cadence.

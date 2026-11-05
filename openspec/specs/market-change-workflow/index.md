@@ -47,6 +47,13 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [MCW-y37w](spec.md#requirement-mcw-y37w-the-step-table-names-no-fable-or-astra-model) — Fable and Astra models are forbidden; the step table names none and the wrapper refuses one.
 - [MCW-uqlq](spec.md#requirement-mcw-uqlq-a-clones-bootstrap-is-make-init) — a clone's bootstrap is `make init`, run as the clone is made; implementation and validation wait on it.
 
+## 5. This repository's checks
+
+- [MCW-c4ek](spec.md#requirement-mcw-c4ek-a-changes-closing-checks-enforce-written-rules) — the closing checks fail on a decision with no destination, history wording, a double version bump, an unexplained local import, or a capability index gap.
+- [MCW-s8gk](spec.md#requirement-mcw-s8gk-the-public-content-checks-refuse-private-keys-and-provider-credentials) — the public-content checks refuse private keys and provider-format credentials through a pinned scanner, passing development fixtures.
+- [MCW-u2dt](spec.md#requirement-mcw-u2dt-an-audit-reports-every-scanner-rule-and-gates-nothing) — an on-demand audit reports what every scanner rule but the default key rule finds in the tracked tree, gating nothing.
+- [MCW-l5rv](spec.md#requirement-mcw-l5rv-every-lock-carries-the-lock-revision-the-minimum-uv-writes) — every committed lock carries the minimum uv's lock revision, and the repository's relock and refresh commands refuse an older uv.
+
 ## Retired ids
 
 None.

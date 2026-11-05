@@ -22,30 +22,49 @@ by hand before an official build ships. The triage of design review 55 narrowed 
 item 7's guard to the repository's relock and refresh commands, a plain `uv run` left
 to the revision check, and made D30 carry D25–D29 into the closeout task.
 
+After round 1, `dev` was merged in, bringing a restructured workflow: one command,
+`scripts/change-workflow`, over the `scripts/change_workflow/` package; the workflow's
+specification split into `change-workflow`, the engine any adopting repository runs
+(prefix `CW`), and `market-change-workflow`, how this repository runs it (prefix
+`MCW`), each organized by an `index.md` of requirement ids; and each capability's
+companion renamed from `architecture.md` to `README.md`
+(`openspec/README.md#a-capability-organized-by-an-index`). Planning then re-targeted
+this change without changing what it decides. The delta's rules now follow dev's
+convention of one rule per requirement, each with an id: the engine's —
+interrupts, revisits, waivers, guidance reviews, default acceptance, the table,
+reviewers' alternatives, and the ledger's two new entries — in `change-workflow`, with
+`CW-9pbk`, `CW-3tvs`, `CW-j1nv` and `CW-neua` modified where default acceptance
+contradicts them; this repository's — the closing checks, the secret scan and its
+audit, and the lock revision — in `market-change-workflow`. Their `index.md` entries
+are written with the deltas, since the index check fails a change whose delta adds an
+id its index omits. Destinations that named `change-workflow`'s `architecture.md` name
+its `README.md`, under the same headings; the "Secret scanning" section lives in
+`market-change-workflow`'s `README.md`, as the merge placed it. The context below names
+the requirements as they stand after the merge.
+
 ## Context
 
 ### Triage
 
-- **Every finding reaches the owner, one per message.** "Triage of every finding" in
-  `openspec/specs/change-workflow/spec.md` requires every finding to be presented,
-  none withheld for being minor or uncontested, and disposed of only when the owner
-  states a disposition. "Discussion steps stay conversations with the owner" requires
-  an orchestrated triage to present one decision or finding per turn. "Phases and
-  owner touchpoints" requires the owner's disposition of each finding before any is
-  acted on, and its scenario "A reviewer and the implementing agent agree" says so
-  outright.
+- **Every finding reaches the owner, one per message.** In
+  `openspec/specs/change-workflow/spec.md`, `CW-j1nv` requires every finding to be
+  presented, none withheld for being minor or uncontested, and `CW-neua` disposes of
+  one only when the owner states a disposition. `CW-3tvs` requires an orchestrated
+  triage to present one decision or finding per turn. `CW-neua` requires the owner's
+  disposition of each finding before any is acted on, and its scenario "A reviewer and
+  the implementing agent agree" says so outright.
 - **The skill forbids proposing a batch.** `.agents/skills/change-triage/SKILL.md`
   section 3 orders findings most severe first, after any decision that could change
   them. The owner may answer several at once, but the agent never proposes it.
-- **The reason is recorded.** `openspec/specs/change-workflow/architecture.md`,
-  "Triage", says a summary up front invites dispositions before the arguments are
-  read, and that a question about one finding is not acceptance of another. "The
-  owner is interrupted only for judgement" lists each finding's disposition and the
-  another-round question among the owner's moments, and "What the workflow is for"
-  says the owner reads every finding. A default-accepted finding is still read, in a
+- **The reason is recorded.** `openspec/specs/change-workflow/README.md`, "Triage",
+  says a summary up front invites dispositions before the arguments are read, and
+  that a question about one finding is not acceptance of another. "The owner is
+  interrupted only for judgement" lists each finding's disposition and the
+  another-round question among the owner's moments, and the document's opening says
+  the owner reads every finding. A default-accepted finding is still read, in a
   table, but is never presented as a summary inviting a disposition, and silence
   never disposes of a discussed finding.
-- **The gate question is asked every round.** "Phases and owner touchpoints" requires
+- **The gate question is asked every round.** `CW-9pbk` requires
   triage to ask whether the dispositions merit another review round before any fix.
 - **A message reaches the owner only at a turn's end.** An unattended triage's
   `question` waits for the owner's reply; its `finished` outcome comes after its
@@ -67,9 +86,9 @@ to the revision check, and made D30 carry D25–D29 into the closeout task.
   findings. The publishing check requires Lens, Basis, Severity and Evidence
   (`scripts/change_workflow/review.py`, `FIELDS`). A triage that thinks the suggested
   action is not the best fix says `partly`.
-- **The spec lets the agent decline a `minor` finding** ("Finding lens, basis, and
-  severity"). A decline is a disagreement, so it is still presented.
-- **Revisions already have a ledger form.** "Intervention ledger" logs only
+- **The spec lets the agent decline a `minor` finding** (`CW-7d5f`). A decline is a
+  disagreement, so it is still presented.
+- **Revisions already have a ledger form.** The ledger (`CW-zidp`) logs only
   corrections. An entry that revises an earlier one starts its `owner_disposition`
   with `revises <review> <finding>:` (`docs/agents/change-workflow.md`, "The ledger").
   A default acceptance writes no ledger entry, so nothing for `revises` to point at.
@@ -250,7 +269,7 @@ stated in the workflow's own terms rather than fitted.
   - The 63 triaged findings whose basis is written guidance, each with the reviewer's
     own text naming the rule.
   - The 53 whose basis is the reviewer's judgement.
-- **Two kinds of signal**, as `openspec/specs/change-workflow/architecture.md` frames
+- **Two kinds of signal**, as `openspec/specs/change-workflow/README.md` frames
   them:
   - A guidance finding that reached a review means a written rule was not followed or
     not enforced.
@@ -375,7 +394,7 @@ them into the graph is a later change, which a guidance review proposes (D21).
 ### D15 — The owner can interrupt a running step
 
 The orchestrating session is free while a step runs a long task, so the owner can
-reach it mid-step. `python3 scripts/run_change_step.py stop <change> [--step <step>]`
+reach it mid-step. `scripts/change-workflow stop <change> [--step <step>]`
 reads the change's run records and sends SIGTERM to the recorded process: the one
 run, or, with validation and a review side by side, the step named. The wrapper's
 existing handler logs the run `stopped` with its session. The review runner gains the
@@ -451,7 +470,7 @@ triage finished, the orchestrating session stops the step running after it (D15)
 then records the owner's direction naming the triage's run:
 
 ```text
-python3 scripts/run_change_step.py note <change> orchestrator --by owner \
+scripts/change-workflow note <change> orchestrator --by owner \
   --resumes <triage-seq> --decision "revisits 04 F5" --reason "<the owner's words>"
 ```
 
@@ -565,7 +584,7 @@ node, no step-table row, no outcome. It:
 The period ledger is an untracked file in the owner's workspace beside the cleaned-up
 change records it measures: `openspec/changes/archive/guidance-reviews.jsonl`, one JSON
 object per line, ignored by a `.gitignore` entry this change adds. The archive's
-readers take only directories as archived changes (`scripts/find_change.py`,
+readers take only directories as archived changes (`scripts/change_workflow/find.py`,
 `scripts/check_comment_hygiene.py`), so a file there is read by none of them, and the
 `openspec/changes/**/reviews/` ignore rule does not reach it, hence its own entry. A
 review that picks nothing stays
