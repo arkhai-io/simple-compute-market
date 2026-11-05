@@ -733,6 +733,57 @@ it stays on a change branch. A pushed change branch starts nothing by itself: th
 pipeline runs on dispatch and nightly, and `tests.yml` on `dev`, `staging`, and pull
 requests into them.
 
+## Secret scanning
+
+The public-content checks — the hooks, the guarded push, and the Public content
+workflow ([`ARCHITECTURE.md`, "Public repository content checks"](../../../docs/development/ARCHITECTURE.md#public-repository-content-checks))
+— refuse private keys and provider credentials through gitleaks rather than rules
+of the repository's own: a maintained scanner knows far more credential formats
+than the repository could keep current. Every check runs one release, pinned with
+each platform's sha256 in `scripts/gitleaks-pins.toml`, so a finding means the same
+on every machine and in CI. Findings are redacted to rule, file, line and commit.
+`gitleaks:allow` comments are ignored, since the repository keeps no exception
+markers. Commit ranges are read with merges compared with each parent
+(`--diff-merges=separate`): gitleaks reads commits through `git log -p`, which
+otherwise prints no patch for a merge, so a key written only in a merge resolution
+would go unseen.
+
+The gate, `.gitleaks.toml`, is gitleaks' default rules but four. Gitleaks'
+`private-key` rule accepts any 64 or more characters between a `BEGIN … PRIVATE
+KEY-----` header and the next `KEY-----`, so a short test fixture's own END marker
+comes too soon to end a match, which runs on into the next block and reads two
+fixtures in one file as one key. The repository replaces it with
+`private-key-block`, which keeps the 64-character minimum body but admits no run of
+five dashes in it, so a match ends at its own block's END marker: a real key's body,
+wrapped at any length or written as one string of `\n` escapes, is refused, and a
+fixture whose body is a word passes however many share a file. The three other
+rules turned off — `generic-api-key`, `jwt`, `curl-auth-header` — match the
+repository's own fixtures and code as readily as secrets; `.gitleaks.toml` gives
+the reason for each beside the list. The provider-specific rules stay, because
+they match fixed formats that almost never misfire. A later fixture that trips one
+is another entry in the gate's list, never a marker beside the fixture.
+
+`scripts/tests/test_check_secrets.py` scans the whole tracked tree under the gate
+and asserts it finds nothing, under any rule. A gitleaks release whose new rule the
+tree trips therefore fails that test when the pin moves, rather than at someone's
+commit, and a release is changed only with it passing.
+
+The audit, `make audit-secrets`, runs the configuration the gate extends,
+`scripts/gitleaks-audit.toml`: every default rule but `private-key`, and the
+repository's key rule. It scans `HEAD`'s tracked tree, read as one parentless
+commit of `HEAD^{tree}` in a temporary clone, so nothing untracked or ignored is
+read. It refuses nothing and keeps no baseline: most of what it lists is the
+development fixtures the gate passes, and a baseline would have to be kept in step
+with them. It is run by hand before an official build ships
+([`RELEASING.md`, "Cutting a release"](../../../docs/development/RELEASING.md#cutting-a-release)).
+
+The gate cannot see two things, and review remains the safeguard for both. A key
+body edited beneath an unchanged header is invisible to a scanner reading the
+change's patch, which holds no header. A random credential in no provider's format
+— a generated password, say — has the character class of the identifiers
+`generic-api-key` matched, so the gate does not look for it; the audit reports that
+class across the whole tree.
+
 ## A change is worked in its own clone
 
 A change can be worked in a clone of the owner's workspace of its own, a sibling

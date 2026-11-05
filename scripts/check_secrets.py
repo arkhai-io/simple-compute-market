@@ -20,7 +20,7 @@ commit only, never with its content. A `gitleaks:allow` comment silences nothing
 the repository keeps no exception markers, and a fixture passes because no rule of
 the gate matches it, not because it is marked.
 
-See docs/development/ARCHITECTURE.md, "Public repository content checks".
+See openspec/specs/change-workflow/architecture.md, "Secret scanning".
 """
 
 from __future__ import annotations

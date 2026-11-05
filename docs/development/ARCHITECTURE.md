@@ -1248,64 +1248,13 @@ rules only. Fetch the target remote before checking outgoing commits. Use
 `python3 scripts/check_public_content.py --base <commit>` to inspect a known
 committed range; this is not a complete historical secret audit.
 
-#### Secret scanning through gitleaks
-
 Private keys and provider credentials are recognized by
-[gitleaks](https://github.com/gitleaks/gitleaks), a maintained MIT-licensed secret
-scanner, rather than by rules of the repository's own. Every check runs one release,
-pinned with each platform's archive and sha256 in `scripts/gitleaks-pins.toml`
-(8.30.1). `make install-gitleaks` downloads the running platform's archive, refuses
-it unless its sha256 is the pinned one, and installs the binary into `~/.local/bin`
-(`GITLEAKS_INSTALL_DIR=<dir>` names another directory), needing no root; CI installs
-it the same way. A check that finds no gitleaks, or another release, refuses and
-names that command. Findings are redacted: a check reports rule, file, line and, for
-a commit, the commit, never the matched content. `gitleaks:allow` comments are
-ignored, since the repository keeps no exception markers. Commit ranges are read
-with merges compared with each parent (`--diff-merges=separate`), as
-`check_public_content.py` compares them; gitleaks reads commits through `git log -p`,
-which otherwise prints no patch for a merge, so a key written only in a merge
-resolution would go unseen.
-
-The gate the hooks, the guarded push and the workflow run is `.gitleaks.toml`:
-gitleaks' default rules but four.
-
-- **`private-key`** is replaced by the repository's `private-key-block` rule. The
-  default accepts any 64 or more characters between a `BEGIN … PRIVATE KEY-----`
-  header and the next `KEY-----`, so a short fixture's own END marker comes too soon
-  to end a match, which runs on into the next block and reads two fixtures in one
-  file as one key. The repository's rule keeps the 64-character minimum body but
-  admits no run of five dashes in it, so a match ends at its own block's END marker.
-  A real key's body, wrapped at any length or written as one string of `\n` escapes,
-  is refused; a test fixture whose body is a word such as `fixture` passes however
-  many share a file.
-- **`generic-api-key`**, a keyword-and-entropy heuristic, matches identifiers and
-  type annotations, public contract and token addresses, and Anvil's published
-  development keys as readily as secrets.
-- **`jwt`** matches the frp grant test vector's tokens, which are signed with
-  RFC 8032's published test keys.
-- **`curl-auth-header`** matches documented placeholder headers in curl examples.
-
-The provider-specific rules — cloud keys, source-host tokens, chat and payment
-tokens — stay: they match fixed formats that almost never misfire. A later fixture
-that trips one is another entry in the gate's rule list, never a marker beside the
-fixture. `scripts/tests/test_check_secrets.py` scans the repository's whole tracked
-tree under the gate and asserts it finds nothing, under any rule, so a gitleaks
-release whose new rule the tree trips fails that test when the pin moves rather than
-at someone's commit; a release is changed only with that test passing.
-
-The audit, `make audit-secrets`, runs the configuration the gate extends,
-`scripts/gitleaks-audit.toml`: every default rule but `private-key`, and the
-repository's key rule. It scans `HEAD`'s tracked tree, read as one parentless commit
-of `HEAD^{tree}` in a temporary clone, so nothing untracked or ignored is read, and
-lists each finding by file, line and rule. It refuses nothing and exits successfully
-whenever it ran, failing only when gitleaks could not; most of what it lists is the
-development fixtures the gate passes, and it keeps no baseline of them. No hook,
-push or CI job runs it: it is run by hand before an official build ships
-([`RELEASING.md`, "Cutting a release"](RELEASING.md#cutting-a-release)).
-
-The gate cannot see two things, and review remains the safeguard for both. A key
-body edited beneath an unchanged header is invisible to a scanner reading the
-change's patch, which holds no header. A random credential in no provider's format —
-a generated password, say — has the character class of the identifiers
-`generic-api-key` matched, so the gate does not look for it; the audit reports that
-class across the whole tree.
+[gitleaks](https://github.com/gitleaks/gitleaks) at the release
+`scripts/gitleaks-pins.toml` pins; `make install-gitleaks` installs it, refusing an
+archive whose sha256 is not the pinned one, and a check that finds no gitleaks, or
+another release, refuses and names that command. The gate, `.gitleaks.toml`, runs
+wherever `check_public_content.py` runs and reports locations, never content.
+`make audit-secrets` runs the gate's rules and the three default rules it turns off
+over the tracked tree, gates nothing, and is run before a release ships ([`RELEASING.md`, "Cutting a release"](RELEASING.md#cutting-a-release)).
+The gate's rules, the audit, and what both leave to review:
+[`openspec/specs/change-workflow/architecture.md`, "Secret scanning"](../../openspec/specs/change-workflow/architecture.md#secret-scanning).

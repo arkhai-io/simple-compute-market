@@ -411,6 +411,22 @@ the stop and direct the change elsewhere, as it recovers any stop. An interrupte
 review publishes nothing and is rerun. A stop commits nothing, so the stopped step's
 work waits uncommitted for its resume.
 
+A run holds its record from before its agent or reviewer starts until after its line
+is written, so a stop can reach it outside the time that process runs (64 F1). The
+signal ends the run only while the process runs. For the rest of the time the record
+is held, the run holds the signal: one held before the process starts ends the run as
+it would start, and one held after the process has exited ends nothing, so the run
+logs the outcome it reached — a published review `finished`, a step's own outcome —
+and the owner's interrupt, recorded as their decision, resolves no run. Killing the
+run there would leave no line for work already done.
+
+- **Rejected: a stop at any moment logs `stopped`** (64 F1). After the reviewer or
+  agent has exited, that means deleting a published review, or logging `stopped` over
+  a step whose outcome, commits included, is reached.
+- **Rejected: an ending state that `stop` refuses** (64 F1). The run can still begin
+  ending between the stop's last check and its signal, so the signal must be held
+  anyway; the state adds a record rewrite and a refusal for a clearer message.
+
 - **Rejected: the harness's own stop of the background command.** Whether SIGTERM
   reaches the wrapper through make is not the workflow's to guarantee; a SIGKILL
   leaves no log line.
@@ -780,7 +796,14 @@ every step that commits already runs:
    `.toml`, `.yml` or `.yaml` file must not use "previously", "formerly", "used to",
    "no longer", "moved from", "was renamed" or "originally". "Now" and "legacy" stay
    off the list, since current-state comments and fixtures use them. A false positive
-   is reworded; there is no exception marker (D9).
+   is reworded; there is no exception marker (D9). A TOML or YAML line is read alone,
+   so a `#` line inside a YAML block scalar or a TOML multi-line string is read as a
+   comment (64 F3): such blocks here hold embedded shell or configuration — a
+   workflow's `run:`, a chart's config file — whose comments the rule covers, and a
+   string line that trips the check is reworded. Rejected: excluding block content,
+   which would stop checking every embedded comment to spare a rare string; and
+   excluding it except under `run:`, which ties a repository-wide check to GitHub
+   Actions' key name and still misses embedded configuration.
 3. **One version bump.** Each `pyproject.toml` version that differs from the
    merge-base is exactly one SemVer step from it — next patch, minor or major, lower
    parts reset — which admits a larger bump replacing a smaller one

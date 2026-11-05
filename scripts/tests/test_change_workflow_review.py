@@ -3,8 +3,10 @@ a review, and its outcome is logged."""
 
 from __future__ import annotations
 
+import json
 import os
 import signal
+from datetime import datetime
 from pathlib import Path
 from typing import Sequence
 
@@ -700,7 +702,8 @@ def test_a_file_the_reviewer_cannot_find_is_no_unavailability(tmp_path: Path,
 
     assert line["outcome"] == "stopped"
     assert line["reason"].startswith("the review did not finish: FileNotFoundError")
-    assert "unavailable" not in line
+    assert [entry["harness"] for entry in line.get("unavailable", [])] == (
+        [] if lost == "codex" else ["codex"])
     assert claude.commands == []
 
 
@@ -755,7 +758,8 @@ def test_a_failed_review_beside_an_earlier_record_is_logged_stopped(tmp_path: Pa
     line = review_and_log(CHANGE, "design", root=root, clock=clock,
                           runner=writing("ERROR: refused\n"), head=lambda _: HEAD)
 
-    assert (line["outcome"], line["commit"], line["session"]) == ("stopped", HEAD, None)
+    # The run's own session, never the earlier record's.
+    assert (line["outcome"], line["commit"], line["session"]) == ("stopped", HEAD, "codex:s-1")
     assert line["reason"].startswith("the reviewer produced no review")
     assert "record" not in line
 
@@ -806,6 +810,8 @@ def test_a_review_signalled_mid_run_is_logged_stopped_and_publishes_nothing(
 
     def signalled(command, log: Path) -> int:
         writing(review_text())(command, log)
+        with log.open("a", encoding="utf-8") as stream:
+            stream.write("tokens used\n1,234\n")
         os.kill(os.getpid(), signal.SIGTERM)
         raise AssertionError("SIGTERM did not end the review")
 
@@ -816,9 +822,88 @@ def test_a_review_signalled_mid_run_is_logged_stopped_and_publishes_nothing(
     line = read_log(log_path(root, CHANGE))[-1]
     assert (line["step"], line["outcome"], line["reason"]) == (
         "review", "stopped", "the review did not finish: Terminated: received SIGTERM")
+    # The session the reviewer had reported, read back from its transcript, and
+    # what it spent, as a rejected review's line records them.
+    assert (line["session"], line["cost"]) == ("codex:s-1", {"tokens": 1234})
     assert not list(reviews_of(root).glob("[0-9]*.md"))
     assert list(runs.iterdir()) == []
     # The handler is the review's only while its reviewer runs.
+    assert signal.getsignal(signal.SIGTERM) is previous
+
+
+def test_a_claude_review_signalled_mid_run_is_logged_with_its_session(
+        tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    runs = tmp_path / "git" / "change-runs"
+    previous = signal.getsignal(signal.SIGTERM)
+
+    def signalled(command, cwd: Path, feed) -> int:
+        feed(json.dumps({"type": "system", "subtype": "init", "session_id": "c-1"}) + "\n")
+        os.kill(os.getpid(), signal.SIGTERM)
+        raise AssertionError("SIGTERM did not end the review")
+
+    with pytest.raises(Terminated):
+        review_and_log(CHANGE, "design", root=root, clock=clock, runner=codex_missing,
+                       claude=signalled, head=lambda _: HEAD, echo=None, runs=lambda _: runs)
+
+    line = read_log(log_path(root, CHANGE))[-1]
+    assert (line["outcome"], line["session"]) == ("stopped", "claude:c-1")
+    assert list(runs.iterdir()) == []
+    assert signal.getsignal(signal.SIGTERM) is previous
+
+
+def test_a_stop_before_the_reviewer_starts_ends_the_review_as_it_would_start(
+        tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    runs = tmp_path / "git" / "change-runs"
+    calls: list[list[str]] = []
+    signalled: list[bool] = []
+
+    def signalling_clock() -> datetime:
+        # First read as the run's record is written, before the reviewer starts.
+        if not signalled:
+            signalled.append(True)
+            os.kill(os.getpid(), signal.SIGTERM)
+        return clock()
+
+    with pytest.raises(Terminated):
+        review_and_log(CHANGE, "design", root=root, clock=signalling_clock,
+                       runner=writing(review_text(), calls=calls), head=lambda _: HEAD,
+                       runs=lambda _: runs)
+
+    assert calls == []
+    line = read_log(log_path(root, CHANGE))[-1]
+    assert (line["outcome"], line["reason"]) == (
+        "stopped", "the review did not finish: Terminated: received SIGTERM")
+    assert not list(reviews_of(root).glob("[0-9]*.md"))
+
+
+def test_a_stop_after_the_review_is_published_ends_nothing_and_it_is_logged_finished(
+        tmp_path: Path) -> None:
+    """The record is held until the line is written, so a stop can reach a review
+    after its record is published; killed there, it would leave no line."""
+    root = repository(tmp_path)
+    kind = "design"
+    published = reviews_of(root) / f"01-{kind}.md"
+    runs = tmp_path / "git" / "change-runs"
+    previous = signal.getsignal(signal.SIGTERM)
+    signalled: list[bool] = []
+
+    def signalling_clock() -> datetime:
+        # Read as the line is written, once the review is published.
+        if not signalled and published.is_file():
+            signalled.append(True)
+            os.kill(os.getpid(), signal.SIGTERM)
+        return clock()
+
+    line = review_and_log(CHANGE, kind, root=root, clock=signalling_clock,
+                          runner=writing(review_text()), head=lambda _: HEAD,
+                          runs=lambda _: runs)
+
+    assert signalled
+    assert (line["outcome"], line["record"]) == ("finished", published.name)
+    assert published.is_file()
+    assert list(runs.iterdir()) == []
     assert signal.getsignal(signal.SIGTERM) is previous
 
 

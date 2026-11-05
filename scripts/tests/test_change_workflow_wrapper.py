@@ -9,6 +9,8 @@ import signal
 import subprocess
 import sys
 import uuid
+from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -437,6 +439,53 @@ def test_a_run_whose_wrapper_is_terminated_is_logged_stopped_naming_the_signal(
     assert line["session"] == SESSION
     # The handler is the wrapper's only while a run goes on.
     assert signal.getsignal(signal.SIGTERM) is previous
+
+
+def test_a_stop_after_the_agent_has_exited_ends_nothing_and_the_outcome_is_logged(
+    tmp_path: Path,
+) -> None:
+    """The record is held until the line is written, so a stop can reach a run
+    as it ends; killed there, it would leave no line for work already done."""
+    def signalling_head(_root: Path) -> str:
+        # Read as the line is written, after the agent's process has ended.
+        os.kill(os.getpid(), signal.SIGTERM)
+        return COMMIT
+
+    previous = signal.getsignal(signal.SIGTERM)
+    runs = tmp_path / "git" / "change-runs"
+    wrapper = replace(make_wrapper(tmp_path, FakeClaude((event_lines(VALID["finished"]), 0))),
+                      head=signalling_head, runs=lambda _: runs)
+    line = wrapper.run("implement", CHANGE)
+
+    assert (line["outcome"], line["commit"]) == ("finished", COMMIT)
+    assert read_log(log_path(tmp_path, CHANGE)) == [line]
+    assert list(runs.iterdir()) == []
+    assert signal.getsignal(signal.SIGTERM) is previous
+
+
+def test_a_stop_before_the_agent_starts_ends_the_run_as_it_would_start(
+    tmp_path: Path,
+) -> None:
+    signalled: list[bool] = []
+
+    def signalling_clock() -> datetime:
+        # First read as the run's record is written, before the agent starts.
+        if not signalled:
+            signalled.append(True)
+            os.kill(os.getpid(), signal.SIGTERM)
+        return clock()
+
+    claude = FakeClaude((event_lines(VALID["finished"]), 0))
+    runs = tmp_path / "git" / "change-runs"
+    wrapper = replace(make_wrapper(tmp_path, claude), clock=signalling_clock,
+                      runs=lambda _: runs)
+    with pytest.raises(Terminated):
+        wrapper.run("implement", CHANGE)
+
+    assert claude.commands == []
+    (line,) = read_log(log_path(tmp_path, CHANGE))
+    assert (line["outcome"], line["reason"]) == (
+        "stopped", "the run did not finish: Terminated: received SIGTERM")
 
 
 def test_a_file_the_run_cannot_find_is_no_unavailability(tmp_path: Path) -> None:

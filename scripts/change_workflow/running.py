@@ -22,8 +22,11 @@ release the run's lock.
 `stop` signals a run on the owner's word: it checks the lock when it selects the
 run and again immediately before it sends SIGTERM, which every run — a step's in
 the wrapper, a review's in its runner — turns into its `stopped` line through
-`termination_ends_the_run`. The two checks and the signal are separate system calls, so a run
-ending between the last check and the signal leaves its id to be signalled; that
+`termination_ends_the_run` while its agent or reviewer runs. For the rest of the
+time it holds its record, `termination_deferred` holds the signal, so a run is
+never killed before its line is written. The two checks and the signal are
+separate system calls, so a run ending between the last check and the signal
+leaves its id to be signalled; that
 reaches another process only if the kernel hands out its whole process-id range in
 between, to a process of the same user. No test can make that happen, so nothing
 guards it.
@@ -69,17 +72,55 @@ class Terminated(BaseException):
     """The run was told to stop by a signal while it went on."""
 
 
+# The signals `termination_deferred` has held for the run in progress.
+_held: list[str] = []
+
+
+@contextmanager
+def termination_deferred() -> Iterator[None]:
+    """Hold SIGTERM for as long as a run holds its record, outside the stretch
+    `termination_ends_the_run` covers.
+
+    A signal held before the run's agent or reviewer starts ends the run as it
+    would start, so a stop given early still stops it. A signal held after that
+    process has ended ends nothing: the run goes on to log the outcome it
+    reached. Killing it there would leave no line, and the work it logs — a
+    published review, a pushed commit — is done whether or not the line is
+    written. A handler rather than SIG_IGN, since an ignored signal stays
+    ignored in every program the run executes. Signal handlers can be set only
+    on the main thread; elsewhere nothing changes.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    def hold(signum: int, _frame: Any) -> None:
+        _held.append(signal.Signals(signum).name)
+
+    _held.clear()
+    previous = signal.getsignal(signal.SIGTERM)
+    # Set inside the `try`, so the handler is restored even when a signal that
+    # was already pending arrives as it is set.
+    try:
+        signal.signal(signal.SIGTERM, hold)
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+        _held.clear()
+
+
 @contextmanager
 def termination_ends_the_run() -> Iterator[None]:
-    """Turn SIGTERM into `Terminated` while a run goes on.
+    """Turn SIGTERM into `Terminated` while a run's agent or reviewer runs.
 
     A process killed by SIGTERM's default action writes nothing, and a log whose
     last line is a run's question cannot tell a run still going from one that
     died. Raised in the run, the signal ends it as any interruption does: the
     runner stops the process it started, and the run is logged
-    `stopped`, naming the signal. SIGKILL cannot be caught, so a run killed that
-    way still leaves no line. Signal handlers can be set only on the main thread;
-    elsewhere nothing changes.
+    `stopped`, naming the signal. A signal `termination_deferred` held before
+    this began is raised as it begins. SIGKILL cannot be caught, so a run killed
+    that way still leaves no line. Signal handlers can be set only on the main
+    thread; elsewhere nothing changes.
     """
     if threading.current_thread() is not threading.main_thread():
         yield
@@ -88,8 +129,11 @@ def termination_ends_the_run() -> Iterator[None]:
     def stop(signum: int, _frame: Any) -> None:
         raise Terminated(f"received {signal.Signals(signum).name}")
 
-    previous = signal.signal(signal.SIGTERM, stop)
+    previous = signal.getsignal(signal.SIGTERM)
     try:
+        signal.signal(signal.SIGTERM, stop)
+        if _held:
+            raise Terminated(f"received {_held[0]}")
         yield
     finally:
         signal.signal(signal.SIGTERM, previous)

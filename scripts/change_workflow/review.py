@@ -28,10 +28,12 @@ naming the record this run published and, as its exit, the triage of its kind, o
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
@@ -44,7 +46,8 @@ from change_workflow.log import LOG, log_path, read_log, record_outcome, unused_
 from change_workflow.records import (TRANSCRIPTS, ChangedSince, changed_since,
                                      is_documentation, is_record, next_number,
                                      validation_problem)
-from change_workflow.running import recorded_run, runs_directory, termination_ends_the_run
+from change_workflow.running import (recorded_run, runs_directory, termination_deferred,
+                                     termination_ends_the_run)
 from change_workflow.steps import HARNESSES, STEP_TABLE, Model, StepRules, load_steps
 from change_workflow.stream import Stream, transcript_denials
 from find_change import ChangeNotFound, change_directory, is_archived
@@ -89,7 +92,8 @@ class ReviewError(StepError):
     """The review could not be started or produced no review.
 
     `record` holds what the log line records of the run beside its reason: the
-    models passed over, and a Claude attempt's denials and transcript.
+    models passed over, a Claude attempt's denials and transcript, and, once a
+    reviewer ran, its session and what it spent.
     """
 
     def __init__(self, message: str, record: Entry | None = None) -> None:
@@ -259,7 +263,8 @@ def _codex_attempt(model: Model, prompt: str, continuing: str | None, draft: Pat
                else codex_command(prompt, draft, root, model.model, model.effort))
     start = log.stat().st_size if log.is_file() else 0
     try:
-        status = runner(command, log)
+        with termination_ends_the_run():
+            status = runner(command, log)
     except FileNotFoundError as exc:
         if not missing_program(exc, command):
             raise
@@ -283,7 +288,8 @@ def _claude_attempt(model: Model, prompt: str, continuing: str | None, draft: Pa
     command = claude_command(prompt, rules, None, model, root=root, session=continuing,
                              system=REVIEW_UNATTENDED)
     try:
-        status = runner(command, root, stream.feed)
+        with termination_ends_the_run():
+            status = runner(command, root, stream.feed)
     except FileNotFoundError as exc:
         if not missing_program(exc, command):
             raise
@@ -294,6 +300,41 @@ def _claude_attempt(model: Model, prompt: str, continuing: str | None, draft: Pa
     if not stream.failure_text(status) and isinstance(final, str):
         draft.write_text(final, "utf-8")
     return status, unreachable(stream.failure_text(status)), stream.session
+
+
+def _transcript_session(log: Path, harness: str, start: int) -> str | None:
+    """The session a reviewer that never returned had reported, read from its
+    attempt's output, from `start` on: an earlier attempt's session is not its own."""
+    said = log.read_bytes()[start:].decode("utf-8", "replace") if log.is_file() else ""
+    if harness != "claude":
+        sessions = _SESSION_LINE.findall(said)
+        return sessions[-1] if sessions else None
+    session = None
+    for line in said.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(event, dict) and isinstance(event.get("session_id"), str):
+            session = event["session_id"]
+    return session
+
+
+def _unpublished_record(log: Path, reviews: Path, ran: Model | None, session: str | None,
+                        passed_over: list[Entry], claude_ran: bool, spent: bool,
+                        started: datetime) -> Entry:
+    """What the line of a run that published nothing records beside its reason."""
+    record: Entry = {"unavailable": passed_over} if passed_over else {}
+    if claude_ran and log.is_file():
+        record["transcript"] = log.relative_to(reviews).as_posix()
+        record["denials"] = transcript_denials(log)
+    if ran is not None and spent:
+        tagged = f"{ran.harness}:{session}" if session else None
+        if tagged:
+            record["session"] = tagged
+        # The reviewer ran, and what it spent is spent whatever it produced.
+        record.update(review_cost(log, reviews / LOG, tagged, ran.harness, started))
+    return record
 
 
 def _marker_text(text: str) -> str:
@@ -308,12 +349,15 @@ def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str |
                changed_since: ChangedSince = changed_since, steps_path: Path = STEP_TABLE,
                clock: Clock = utc_now,
                echo: Callable[[str], None] | None = lambda shown: print(
-                   shown, file=sys.stderr, flush=True)) -> Path:
+                   shown, file=sys.stderr, flush=True),
+               interrupted: Callable[[Entry], None] = lambda _: None) -> Path:
     """Run the review on the first available of its row's models, and publish it.
 
     A review continues the previous reviewer's session only on the same harness,
     since a session cannot move between harnesses; on another it starts fresh. The
     record names the reviewer's harness and model, and each model passed over.
+    A reviewer interrupted, or whose runner failed, is passed on as it was raised,
+    once `interrupted` is given what its log line records beside its reason.
     """
     started = clock()
     if kind not in KINDS:
@@ -361,13 +405,20 @@ def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str |
     ran: Model | None = None
     claude_ran = False
     finished = False
+    interruption: BaseException | None = None
+    # Where the latest attempt's output starts in the transcript.
+    attempt_start = 0
     try:
+        # A stop's SIGTERM ends the review as an interrupt does while a reviewer
+        # runs (each attempt's runner call): the reviewer's process is ended, and
+        # nothing is published.
         for ran in review_models(steps["review"], model, effort):
             continuing = prior[1] if prior and prior[0] == ran.harness else None
             prompt = (continuation_prompt(kind, change, base, prior[2]) if prior and continuing
                       else review_prompt(kind, change, base))
             for attempt in range(NETWORK_RETRIES + 1):
                 draft.unlink(missing_ok=True)
+                attempt_start = log.stat().st_size if log.is_file() else 0
                 if ran.harness == "codex":
                     status, reached, session = _codex_attempt(ran, prompt, continuing, draft, log,
                                                               root, runner)
@@ -382,6 +433,8 @@ def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str |
                 break
             passed_over.append({**ran.entry(), "reason": reached[1]})
         finished = True
+    except BaseException as exc:
+        interruption = exc
     finally:
         # Numbered now, after every record written while the reviewer ran; an
         # interrupted run keeps its number too, through its transcript, and
@@ -395,6 +448,18 @@ def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str |
             draft = draft.rename(transcripts / output.with_suffix(".rejected.md").name)
         if not finished:
             output.unlink()
+    if interruption is not None:
+        # The reviewer never returned its session, so it is read back from what
+        # its attempt had written to the transcript. Whatever reading the record
+        # meets, the interruption is passed on.
+        try:
+            interrupted(_unpublished_record(
+                log, reviews, ran,
+                _transcript_session(log, ran.harness, attempt_start) if ran else None,
+                passed_over, claude_ran, ran is not None, started))
+        except Exception:
+            interrupted({})
+        raise interruption
     text = draft.read_text("utf-8") if draft.is_file() else ""
     if reached is not None and reached[0] == "unavailable":
         problems = ["no reviewer is available: " + "; ".join(
@@ -412,15 +477,8 @@ def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str |
         output.unlink()
         if not text.strip():
             draft.unlink(missing_ok=True)
-        record: Entry = {"unavailable": passed_over} if passed_over else {}
-        if claude_ran and log.is_file():
-            record["transcript"] = log.relative_to(reviews).as_posix()
-            record["denials"] = transcript_denials(log)
-        if ran is not None and (reached is None or reached[0] == "network"):
-            # The reviewer ran, and what it spent is spent whatever it produced.
-            record.update(review_cost(log, reviews / LOG,
-                                      f"{ran.harness}:{session}" if session else None,
-                                      ran.harness, started))
+        record = _unpublished_record(log, reviews, ran, session, passed_over, claude_ran,
+                                     reached is None or reached[0] == "network", started)
         raise ReviewError("the reviewer produced no review: " + "; ".join(problems)
                           + (f"; see {log.relative_to(root)}" if log.is_file() else ""),
                           record)
@@ -485,10 +543,12 @@ def review_and_log(change: str, kind: str, *, root: Path = ROOT, clock: Clock = 
 
     It is `finished` only when this run published its own record, named with the
     commit it reviewed; any other end is `stopped` with the runner's reason, so an
-    earlier record of the same kind never stands in for this run's.
+    earlier record of the same kind never stands in for this run's. A stop's
+    SIGTERM is held for as long as the run is recorded and ends it only while its
+    reviewer runs, so a review published before the signal is logged `finished`.
     """
     runs = options.pop("runs", runs_directory)
-    with recorded_run(runs(root), "review", change, clock=clock):
+    with termination_deferred(), recorded_run(runs(root), "review", change, clock=clock):
         return _review_and_log(change, kind, root=root, clock=clock, **options)
 
 
@@ -507,23 +567,25 @@ def _review_and_log(change: str, kind: str, *, root: Path, clock: Clock,
             commit = None
         record = {**(record or {}), **override}
         denials = record.pop("denials", [])
+        session = record.pop("session", None)
         return record_outcome(log, "review", {"outcome": "stopped", "message": reason,
                                               "reason": reason, "denials": denials},
-                              session=None, commit=commit, extra={"kind": kind, **record},
+                              session=session, commit=commit, extra={"kind": kind, **record},
                               clock=clock)
 
+    interrupted: list[Entry] = []
     try:
-        # A stop's SIGTERM ends the review as an interrupt does: the reviewer's
-        # process is ended, nothing is published, and the run is logged `stopped`.
-        with termination_ends_the_run():
-            path = run_review(change, kind, root=root, clock=clock, **options)
+        path = run_review(change, kind, root=root, clock=clock,
+                          interrupted=interrupted.append, **options)
     except ReviewError as exc:
         return stopped(str(exc), exc.record)
     except BaseException as exc:
         # A reviewer that could not start, or was interrupted, still ends with a
-        # line; an interrupt is passed on once it is written.
+        # line, recording what the reviewer had reported; an interrupt is passed
+        # on once it is written.
         line = stopped(f"the review did not finish: {type(exc).__name__}"
-                       + (f": {exc}" if str(exc) else ""))
+                       + (f": {exc}" if str(exc) else ""),
+                       interrupted[0] if interrupted else None)
         if not isinstance(exc, Exception):
             raise
         return line

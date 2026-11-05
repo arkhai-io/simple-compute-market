@@ -17,11 +17,11 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: test-release-tooling test-deployment-packaging test-registry-client test-provisioning-adapter test-e2e-unit
 .PHONY: test-frp-grant-admission test-frp-grant-admission-frp test-frp-grant-admission-floor build-frp-grant-admission
 .PHONY: dist-arkhai-core-registry
-.PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits test-provisioning-iac-native
+.PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits test-provisioning-iac-native test-bare-metal-iac test-bare-metal-iac-native
 .PHONY: dist-bare-metal-buyer
 .PHONY: run-e2e run-ci fetch-e2e-logs
 .PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
-.PHONY: check-agent-skills review design-review design orchestrate plan implement validate-local validate-ci validate-helm validate-parallel check-push-ready push-branch validate triage closeout archive-cleanup check-change-index check-tasks check-change install-gitleaks check-decision-destinations check-history-wording check-version-bumps check-local-imports check-capability-index change-clone change-clone-remove change-history record-capacity change-next change-graph change-watch change-cost round-view round-done round-view-closed review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
+.PHONY: check-agent-skills review design-review design orchestrate plan implement validate-local validate-ci validate-helm validate-parallel check-push-ready push-branch validate triage closeout archive-cleanup check-change-index check-tasks check-change install-gitleaks check-public-content check-secrets audit-secrets check-decision-destinations check-history-wording check-version-bumps check-local-imports check-capability-index change-clone change-clone-remove change-history record-capacity change-next change-graph change-watch change-cost round-view round-done round-view-closed review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -1150,11 +1150,9 @@ fetch-e2e-logs: ## Wait for an E2E run, fetch its logs, and zip the resulting di
 prune-tombstones: ## Delete every file whose contents are a tombstone comment
 	@python3 scripts/prune_tombstones.py
 
-.PHONY: test-bare-metal-iac
 test-bare-metal-iac:
 	$(MAKE) -C domains test-bare-metal-iac
 
-.PHONY: test-bare-metal-iac-native
 test-bare-metal-iac-native: ## Native helper account/IPC/mount checks in a disposable private container
 	@docker image inspect $(PROVISIONING_IMAGE) >/dev/null 2>&1 || { \
 		echo "no $(PROVISIONING_IMAGE) image: build it first, with make build-provisioning" >&2; exit 1; }
@@ -1169,7 +1167,6 @@ test-bare-metal-iac-native: ## Native helper account/IPC/mount checks in a dispo
 install-gitleaks: ## Install the gitleaks release scripts/gitleaks-pins.toml pins, verified against its sha256; needs no root and does nothing when it is already on PATH ([GITLEAKS_INSTALL_DIR=~/.local/bin])
 	@python3 scripts/install_gitleaks.py$(if $(strip $(GITLEAKS_INSTALL_DIR)), --dir "$(GITLEAKS_INSTALL_DIR)")
 
-.PHONY: check-public-content check-secrets audit-secrets
 check-public-content: ## Scan staged changes for recognizable private content, and for private keys and provider credentials through the pinned gitleaks
 	@status=0; \
 	python3 scripts/check_public_content.py --staged || status=1; \

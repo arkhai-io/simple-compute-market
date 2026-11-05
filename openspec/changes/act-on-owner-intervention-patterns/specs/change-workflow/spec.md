@@ -14,7 +14,9 @@ whose run no longer holds it at either check. The owner's
 interrupt MUST be recorded as an owner's decision that resolves no run. A stopped run
 MUST then be recovered as any stop is: resumed with the owner's words, rerun, or
 resolved by the owner's decision. A stop MUST commit nothing, and an interrupted
-review MUST publish nothing.
+review MUST publish nothing. A run MUST end with its line however a stop reaches it:
+a stop that arrives after the run's agent or reviewer has exited MUST end nothing,
+and the run MUST log the outcome it reached.
 
 #### Scenario: The owner interrupts a running validation
 
@@ -42,6 +44,13 @@ review MUST publish nothing.
 - **WHEN** the run the stop command selected ends before the check immediately before
   the signal
 - **THEN** the command refuses and signals nothing
+
+#### Scenario: A stop arrives as the run writes its line
+
+- **WHEN** the stop command signals a review whose reviewer has exited and whose record
+  is published, before its line is written
+- **THEN** the run is not killed, its line records the outcome it reached, `finished`
+  naming the record, and the owner's interrupt resolves no run
 
 #### Scenario: Nothing is running
 

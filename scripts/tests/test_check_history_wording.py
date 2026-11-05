@@ -1,5 +1,6 @@
 """A comment or docstring line a change adds may not describe how the code came to
-be; code and string values, and lines the change did not add, are not read."""
+be; code and single-line string values, and lines the change did not add, are not
+read."""
 
 from __future__ import annotations
 
@@ -76,6 +77,19 @@ def test_only_lines_the_change_adds_are_read(
     assert checker.problems(repo, merge_base(repo)) == [
         'ci.yml:2: "no longer" describes history; say what holds now',
         'pkg/pyproject.toml:2: "originally" describes history; say what holds now',
+    ]
+
+
+def test_a_hash_line_in_a_block_scalar_or_multi_line_string_is_read_as_a_comment(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Such blocks hold embedded shell or configuration, whose comments the rule covers.
+    repo = change_repo(tmp_path, monkeypatch, {})
+    write(repo, "ci.yml", "steps:\n  - run: |\n      # previously ran twice\n      make test\n")
+    write(repo, "chart.toml", 'config = """\n# formerly in the image\nport = 1\n"""\n')
+
+    assert checker.problems(repo, merge_base(repo)) == [
+        'chart.toml:2: "formerly" describes history; say what holds now',
+        'ci.yml:3: "previously" describes history; say what holds now',
     ]
 
 

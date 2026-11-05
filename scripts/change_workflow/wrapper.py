@@ -42,7 +42,8 @@ from change_workflow.log import (last_run, log_path, read_log, record_outcome,
                                  revisit_direction, revisit_refusal)
 from change_workflow.outcome import SCHEMA, load_schema, outcome_problems
 from change_workflow.records import git_head, next_transcript, triage_outcome_problems
-from change_workflow.running import recorded_run, runs_directory, termination_ends_the_run
+from change_workflow.running import (recorded_run, runs_directory, termination_deferred,
+                                     termination_ends_the_run)
 from change_workflow.steps import STEP_TABLE, Model, StepRules, load_steps
 from change_workflow.stream import Stream
 from change_workflow.subagents import subagent_denials
@@ -274,8 +275,13 @@ class Wrapper:
               models: Sequence[Model], *, session: str | None, granted: Sequence[str] = (),
               extra: Entry | None = None) -> Entry:
         """Run one turn and log it, recorded as in progress in the checkout until its
-        line is written, however it ends."""
-        with recorded_run(self.runs(self.root), step, change, clock=self.clock):
+        line is written, however it ends.
+
+        A stop's SIGTERM is held from before the record is written until after it
+        is removed, and ends the run only while its agent runs, so a run is never
+        killed with its line unwritten."""
+        with termination_deferred(), recorded_run(self.runs(self.root), step, change,
+                                                  clock=self.clock):
             return self._logged_turn(step, rules, change, log, prompt, models,
                                      session=session, granted=granted, extra=extra)
 
@@ -302,10 +308,9 @@ class Wrapper:
         progress = transcript.with_suffix(".progress")
         named = transcript.relative_to(log.parent).as_posix()
         attempts: list[Stream] = []
-        with termination_ends_the_run():
-            outcome, status, failure, model, stream, passed_over, logged = (
-                self._attempt_models(rules, prompt, schema, models, session, granted,
-                                     transcript, progress, attempts))
+        outcome, status, failure, model, stream, passed_over, logged = (
+            self._attempt_models(rules, prompt, schema, models, session, granted,
+                                 transcript, progress, attempts))
         extra = {**(extra or {}), **model.entry(), "exit_status": status, "transcript": named}
         if passed_over:
             extra["unavailable"] = passed_over
@@ -355,7 +360,8 @@ class Wrapper:
                                          session=session, granted=granted)
                 failure, status, reached = None, None, None
                 try:
-                    status = self.runner(command, self.root, stream.feed)
+                    with termination_ends_the_run():
+                        status = self.runner(command, self.root, stream.feed)
                     reached = unreachable(stream.failure_text(status))
                 except FileNotFoundError as exc:
                     if missing_program(exc, command):

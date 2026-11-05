@@ -9,7 +9,11 @@ to `.py`, `.toml`, `.yml` and `.yaml` files. "Now" and "legacy" are not on the
 list: current-state comments and fixtures use them. A line the check misreads is
 reworded; there is no exception marker, since a rule with private exceptions is
 not the rule as written. The phrases are matched in comments and docstrings
-only, so code and string values holding them pass.
+only, so code and single-line string values holding them pass. A TOML or YAML
+line is read alone, so a `#` line inside a YAML block scalar or a TOML
+multi-line string is read as a comment: in this repository such blocks hold
+embedded shell or configuration — a workflow's `run:`, a chart's config file —
+whose comments the rule covers. A string line that trips the check is reworded.
 
 Run by `make check-change`, against the merge-base with the branch the change
 lands on. Usage: `check_history_wording.py [--base <branch>]`.

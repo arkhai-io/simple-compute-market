@@ -110,6 +110,46 @@ records' readers `scripts/round_view.py` and `scripts/change_clone.py`.
   section 4 stops. The session put each back by hand (only line 2 differed); until
   section 4 lands, check `git status` after `make test` and restore any lock it
   rewrote.
+- Round 1 triage fixes (64 F1, 64 F2):
+  - 64 F1 (the owner chose B): a stop that reached a run while it finished, after its
+    agent or reviewer had exited, killed it with no line. `running.py`'s new
+    `termination_deferred()` holds SIGTERM for as long as a run holds its record;
+    `termination_ends_the_run()` covers each runner call only — the wrapper's in
+    `_attempt_models`, the review's in `_codex_attempt` and `_claude_attempt` — raises
+    at entry a signal held before it, and sets its handler inside its `try`. A signal
+    after the process exits ends nothing, and the run logs the outcome it reached.
+    Delta spec: the interrupt requirement's last sentence and the scenario "A stop
+    arrives as the run writes its line"; `design.md` D15 records it.
+  - 64 F2: an interrupted review's `stopped` line now carries the reviewer's session,
+    read from the interrupted attempt's own output in the transcript, and its cost.
+    `run_review` hands the record to an `interrupted` callback before passing the
+    interruption on; `_unpublished_record` builds it, and the rejected-review path
+    shares it, so a rejected review's line carries its session too, and a runner
+    failure its models passed over, session and cost.
+  - Tests (unit, with real signals): a wrapper stop after the agent exits is logged
+    `finished`; a wrapper and a review stop before the agent or reviewer starts end
+    the run without running it; a review stop after publication is logged `finished`
+    with its record; a Codex interrupt records `codex:s-1` and its tokens, a Claude
+    interrupt `claude:c-1`.
+  - Evidence: the workflow suites (`test_change_workflow_wrapper.py`,
+    `test_change_workflow_review.py`, `test_change_workflow_harness.py`,
+    `test_run_change_step.py`, `test_change_next_step.py`, `test_change_clone.py`,
+    `test_check_history_wording.py`; unit, and library integration where a real
+    process or repository is used) 551 passed; `make test` passed, its scripts suite
+    2076 passed, no lock rewritten; `make check-packaging` passed; `make check-change`
+    fails only on the citation of section 8's skill. End-to-end: none; the owner
+    waived the Helm and end-to-end parts of validation for the rest of the change
+    (66 V1).
+  - Fresh-context check: fixed — the review's handler covered the whole model loop,
+    so a signal after a reviewer exited discarded its draft (moved into each
+    attempt); a pending signal could arrive before a handler's `try` and leave it
+    unrestored (handlers now set inside the `try`); a failure building the
+    interrupted record could swallow the interrupt (guarded); the session could be
+    read from an earlier attempt (read from the attempt's offset); two comments still
+    pointed at the shrunken `ARCHITECTURE.md` paragraph (65 O3); the audit was
+    described as running "every rule"; a missing before-start review test and
+    restoration asserts in the Claude test. Declined: a wrapper test for a signal
+    between network retries, since the before-start test covers the same entry check.
 
 ## 2. A finished triage can be resumed for a revisit (D16)
 
@@ -712,6 +752,22 @@ gitleaks' other default rules. No task above is checked.
   then clean, and continue with 5.1's record and 5.2–5.5 from the work above.
   Correction: design settled this as D25–D30 (B, with the audit); the replanned tasks
   5.1–5.6 above stand in for this paragraph.
+- Round 1 triage fixes (65 O1, 65 O3, 65 O4):
+  - 65 O3: `docs/development/ARCHITECTURE.md`'s "Secret scanning through gitleaks"
+    subsection is now one paragraph under "Public repository content checks" — the
+    pinned release and its install, the gate, the audit — linking to a new "Secret
+    scanning" section of `openspec/specs/change-workflow/architecture.md`, which holds
+    the key rule, why the provider rules stay, the tree test, the audit and the gate's
+    blind spots, and points to `.gitleaks.toml` for the disabled rules' reasons.
+    `.gitleaks.toml`, `scripts/gitleaks-audit.toml` and `scripts/check_secrets.py`
+    point there; the proposal's destinations for D24 item 4, D26, D28 and D29, its
+    impact list, and 11.9 follow.
+  - 65 O1: the root `Makefile`'s three scattered `.PHONY` lines
+    (`check-public-content check-secrets audit-secrets`, `test-bare-metal-iac`,
+    `test-bare-metal-iac-native`) are in the top block.
+  - 65 O4: "Cutting a release" step 1 in `docs/development/RELEASING.md` is a
+    three-line instruction; its explanation and link follow the list.
+  - Evidence: as section 1's round 1 note records; the documentation links resolve.
 
 ## 6. A change's closing checks enforce five more written rules (D24 items 1, 2, 3, 5, 6)
 
@@ -873,6 +929,13 @@ under `scripts/tests/`, and `openspec/specs/README.md`.
   `dev` unless told otherwise, so a change landing on another branch passes
   `CHANGE_BASE`, which no skill does yet; without it, a prerequisite's commits read as
   the change's own.
+- Round 1 triage fix (64 F3, the owner chose C): the history-wording check keeps
+  reading a `#` line inside a YAML block scalar or a TOML multi-line string as a
+  comment, since such blocks here hold embedded shell or configuration whose comments
+  the rule covers; its docstring now says so, and
+  `test_a_hash_line_in_a_block_scalar_or_multi_line_string_is_read_as_a_comment` (unit,
+  over a real Git repository) pins a `run: |` block and a TOML multi-line string.
+  `design.md` D24 item 2 records it. Evidence: as section 1's round 1 note records.
 
 ## 7. The guidance says what the owner does (D5, D6, D8–D12, D22, D23, D24)
 
@@ -1061,8 +1124,9 @@ The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
   - The record names, besides those, the documents sections 4, 5, 7, 8 and 10 wrote:
     `AGENTS.md` (D5, D9), `openspec/README.md` (D6), `docs/agents/domain.md` (D11),
     `docs/agents/change-workflow.md` (D1, D12, D15, D16, D19, D22, D24),
-    `docs/development/ARCHITECTURE.md` (D8, D10, and D24 item 4, D26, D28 and D29 under
-    "Public repository content checks"), `docs/development/BUILD_AND_PACKAGING.md` (D24
+    `docs/development/ARCHITECTURE.md` (D8, D10, and D24 item 4 and D29 in brief under
+    "Public repository content checks"), `openspec/specs/change-workflow/architecture.md`,
+    "Secret scanning" (D24 item 4, D26, D28, D29; 65 O3), `docs/development/BUILD_AND_PACKAGING.md` (D24
     item 7), `docs/development/RELEASING.md`, "Cutting a release" (D29), the comments of
     `.gitleaks.toml` (D26), `.agents/skills/change-design/SKILL.md` (D12),
     `.agents/skills/guidance-review/SKILL.md` (D20), and D7, D13, D23, D25 and D30 as

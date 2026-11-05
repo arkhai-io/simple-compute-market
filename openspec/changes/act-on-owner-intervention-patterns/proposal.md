@@ -206,10 +206,13 @@ None.
     guidance.
   - `openspec/README.md`: defects found during a change, and the scope-creep sentence.
   - `docs/development/ARCHITECTURE.md`: the guard-code and library rules, and, under
-    "Public repository content checks", gitleaks, its installation, the repository's
-    key rule and why it replaces the default, the three default rules the gate turns
-    off and why, the audit, and the two things the gate cannot see: an edit beneath an
-    existing key header, and a random credential in no provider's format.
+    "Public repository content checks", a paragraph on gitleaks, its installation, the
+    gate and the audit.
+  - `openspec/specs/change-workflow/architecture.md`, "Secret scanning": the
+    repository's key rule and why it replaces the default, why the provider rules
+    stay, the tree test, the audit, and the two things the gate cannot see: an edit
+    beneath an existing key header, and a random credential in no provider's format
+    (65 O3).
   - `docs/development/RELEASING.md`, "Cutting a release": run `make audit-secrets`
     and read its findings before an official build ships.
   - `openspec/specs/README.md`: the `contact-exchange-settlement` row.
@@ -280,17 +283,18 @@ None.
 - D23: no permanent destination — guidance is removed.
 - D24, the seven checks: `openspec/specs/change-workflow/spec.md` ("A change's closing
   checks enforce written rules"), `docs/agents/change-workflow.md`; for the private-key
-  check, `docs/development/ARCHITECTURE.md`, "Public repository content checks"; and,
+  check, `docs/development/ARCHITECTURE.md`, "Public repository content checks", in
+  brief, and `openspec/specs/change-workflow/architecture.md`, "Secret scanning"; and,
   for the lock revision and the uv minimum, `docs/development/BUILD_AND_PACKAGING.md`.
 - D25: no permanent destination — a defect fixed in place.
 - D26, the gate's rules and what it leaves to review and the audit:
-  `docs/development/ARCHITECTURE.md`, "Public repository content checks", and the
+  `openspec/specs/change-workflow/architecture.md`, "Secret scanning", and the
   comments of `.gitleaks.toml`.
 - D27, what the gate refuses and passes: `openspec/specs/change-workflow/spec.md`
   ("A change's closing checks enforce written rules").
 - D28, the tree test as the guard on a gitleaks upgrade:
-  `docs/development/ARCHITECTURE.md`, "Public repository content checks".
+  `openspec/specs/change-workflow/architecture.md`, "Secret scanning".
 - D29, the audit: `openspec/specs/change-workflow/spec.md` ("A change's closing checks
-  enforce written rules"), `docs/development/ARCHITECTURE.md`, "Public repository
-  content checks", and `docs/development/RELEASING.md`, "Cutting a release".
+  enforce written rules"), `openspec/specs/change-workflow/architecture.md`, "Secret
+  scanning", and `docs/development/RELEASING.md`, "Cutting a release".
 - D30: no permanent destination — the change's own cadence.
