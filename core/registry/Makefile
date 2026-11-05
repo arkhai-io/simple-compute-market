@@ -21,8 +21,9 @@ init: init-uv reinit
 reinit:
 	python3 ../../scripts/uv_project.py reinit
 
+# The repository's minimum uv (scripts/check_uv_version.py): reinit refuses an older one.
 init-uv:
-	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Installing uv..."; curl -LsSf https://astral.sh/uv/0.8.13/install.sh | sh; source $HOME/.local/bin/env; }
+	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Installing uv..."; curl -LsSf https://astral.sh/uv/0.12.22/install.sh | sh; source $HOME/.local/bin/env; }
 
 build: reinit build-images
 

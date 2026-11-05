@@ -252,10 +252,18 @@ before the other checks because the drift is happening now. Touches
 `kit/capability-shape/`, `kit/identity/`, `provisioning/compute/iac/`,
 `tools/frp-grant-admission/`, `tools/issue-discovery/`).
 
-- [ ] 4.1 Establish, by running uv, the first release that writes lock revision 5, and
+- [x] 4.1 Establish, by running uv, the first release that writes lock revision 5, and
   record it and how it was found in this section's notes (D24 item 7). Verify: the
   notes name the release, the release before it, and the revision each writes.
-- [ ] 4.2 Raise `MINIMUM` in `scripts/check_uv_version.py` to that release, its
+  Done: **uv 0.12.22** is the first release that writes revision 5; **0.12.21**, the
+  release before it, writes revision 3. Found by locking a fresh one-file project (no
+  dependencies, `requires-python = ">=3.10"`, no prior lock) with each release through
+  `uvx --from uv==<release> uv lock`, under the owner's grant for this run: 0.12.19,
+  0.12.20 and 0.12.21 write revision 3; 0.12.22, 0.12.23, 0.12.24 (the last 0.12
+  release; 0.12.25 does not exist) and 0.13.0 write revision 5. A fresh project
+  matters: a release relocking an existing lock in which nothing changes leaves it at
+  the revision it had (0.12.22 kept a revision-3 lock at 3).
+- [x] 4.2 Raise `MINIMUM` in `scripts/check_uv_version.py` to that release, its
   docstring covering drift in both directions; move `tests.yml`'s and `e2e.yml`'s
   `setup-uv` pins to it; and make `scripts/uv_project.py` run the uv-version check
   before its `lock` and `reinit` commands run uv, keeping `make lock`'s
@@ -266,16 +274,70 @@ before the other checks because the drift is happening now. Touches
   and `test_uv_project.py` show `lock` and `reinit` refusing an older uv before
   running it, naming both versions; `make lock` and `make review-locks` both reach the
   check.
-- [ ] 4.3 Add the lock-revision check to `scripts/check_locks.py`: every committed
+  Done: `MINIMUM = (0, 12, 22)`, its docstring covering both directions and naming
+  every lock writer; the seven `setup-uv` pins in `tests.yml` and `e2e.yml` at
+  0.12.22. `uv_project.main` takes the check as `uv_problem` and runs it before `lock`
+  and `reinit` build any command; `image` and `install-wheel` install a committed lock
+  and skip it. The check is imported inside `_installed_uv_problem`, with its reason
+  beside it: the image Dockerfiles copy `scripts/uv_project.py` alone to run `image`
+  and `install-wheel`, so a module-level import of `check_uv_version` would break every
+  image build. Tests: `test_check_uv_version.py` (unit) — the minimum is 0.12.22;
+  0.12.22, 0.12.24, 0.13.0 and 1.0.0 pass; 0.12.21, 0.12.19 and 0.11.17 refused
+  naming both versions. `test_uv_project.py` (unit, injected runner and check) — `lock`
+  and `reinit` refused naming both versions, nothing run; `image` and `install-wheel`
+  unchecked; the default check is `check_uv_version.problem`, looked up when called;
+  the existing cases inject a passing check. Integration, a real `make -n` over the
+  real Makefile: `make -n lock` and `make -n review-locks` both run
+  `scripts/uv_project.py lock`, and `make lock` runs `check_uv_version.py` before it
+  (`test_every_make_target_that_relocks_goes_through_the_guarded_command`). The guard
+  covers the repository's relock and environment refresh, not every lock writer: a
+  package's plain `uv run`, which relocks a changed project, is unguarded, and the
+  revision check (4.3) catches what it writes; the docstrings and
+  `BUILD_AND_PACKAGING.md` say so. Other uv installs: `install.sh` pins uv 0.8.13 and
+  runs `uv sync` only in its own install copy, never a checkout; uv 0.8.13 reads a
+  revision-5 lock under `--locked` and leaves it unchanged on a plain `sync` (both run
+  here); the release workflows and `validate-model-release.yml` (0.8.13) build, run,
+  or `uv pip install` without relocking; `scripts/bootstrap-clean-host-ubuntu.sh`
+  installs the latest uv. Found defect, fixed here (D6), from the fresh-context check:
+  the root `Makefile`'s `init-prerequisites` and `core/registry/Makefile`'s `init-uv`
+  install uv 0.8.13 where none is installed, and the `reinit` that `init` runs next
+  would refuse it; both now install 0.12.22.
+- [x] 4.3 Add the lock-revision check to `scripts/check_locks.py`: every committed
   `uv.lock` carries revision 5, and one carrying another fails, naming the lock and
   both revisions (D24 item 7). Verify: unit tests in `scripts/tests/test_check_locks.py`
   for a lock at the expected revision, one at 3, and one at a revision above 5.
-- [ ] 4.4 Relock the eight locks at revision 3 with the new minimum uv, changing
+  Done: a fourth axis in `check_locks.lock_problems`: `LOCK_REVISION = 5`, and a lock
+  carrying another, or none, fails as `<project>/uv.lock: lock revision <found>, but
+  the repository's locks carry revision 5 …` (`no lock revision` when it has none).
+  Tests, `test_check_locks.py` (temporary trees, injected lock check): the fixture's
+  locks now carry revision 5, so every existing case is a lock at the expected
+  revision passing; revisions 3, 6 and none each fail naming the lock and both
+  revisions; and, over the real repository tree, no committed lock reports a revision
+  problem (a lock that cannot be read at all is `check-locks`' to report, not this
+  test's). `test_check_locks_uv.py` (integration: the real uv), whose locks the real uv
+  writes, now skips unless the installed uv meets the minimum, since an older uv writes
+  revision 3 by design; on this machine (uv 0.12.19) its four cases skip, and CI's
+  0.12.22 runs them.
+- [x] 4.4 Relock the eight locks at revision 3 with the new minimum uv, changing
   nothing but what the relock writes, and update
   `docs/development/BUILD_AND_PACKAGING.md`'s uv minimum, the lock-revision check, and
   drift in both directions (D24 item 7). Verify: `git grep -l "^revision = 3" --
   '*uv.lock'` prints nothing; `make check-locks` passes.
-- [ ] 4.5 Verification: `pytest -q scripts/tests/test_check_locks.py
+  Done: none of the eight locks resolves anything from the wheelhouse, so `make lock`
+  passes uv no `--upgrade-package` for them, and uv, finding nothing changed, leaves a
+  lock at its revision: that is why exactly these eight stayed at 3. Each was relocked
+  with `uvx --from uv==0.12.22 uv lock --directory <project> --upgrade-package <its own
+  distribution>`, which forces the rewrite and moves no dependency. Seven change only
+  `revision = 3` → `5`; `kit/identity/uv.lock` also drops a redundant
+  `python_full_version < '3.13'` marker on exceptiongroup's typing-extensions
+  dependency, as the 53 revision-5 locks already write it (`kit/policy/uv.lock`).
+  `BUILD_AND_PACKAGING.md`, "Locks": the 0.12.22 minimum and revision 5, drift in both
+  directions, the guard in every lock writer, the revision check, CI's pin, a minimum
+  rather than a pin, and how to bring one lock to the running uv's revision; the
+  `check-locks` row of its checks table gains the revision. `git grep -l "^revision =
+  3" -- '*uv.lock'` prints nothing; `make check-packaging` passes, `check-locks` among
+  it.
+- [x] 4.5 Verification: `pytest -q scripts/tests/test_check_locks.py
   scripts/tests/test_check_locks_uv.py scripts/tests/test_check_uv_version.py
   scripts/tests/test_uv_project.py scripts/tests/test_tests_workflow.py` (unit)
   passes; `make check-packaging` passes; `make test` passes.
@@ -285,6 +347,20 @@ before the other checks because the drift is happening now. Touches
   Owed by validation: `tests.yml`, job `test · test-deployment-packaging` —
   `astral-sh/setup-uv` installs the new minimum release, and `make
   test-deployment-packaging` passes with the lock-revision tests in it.
+  Done: the five suites (unit, with `test_check_locks_uv.py` and the `make -n` case
+  integration), 61 passed and 4 skipped (`test_check_locks_uv.py`, below the minimum
+  here); `make check-packaging` passes; `make test-release-tooling` 2018 passed, 4
+  skipped. `make check-change` fails only on the citations sections 5 and 8 create. `make test` was not run: its subprojects' `make reinit` now
+  refuses this machine's uv 0.12.19, which is the guard working; it runs once the
+  machine has uv 0.12.22 or newer. End-to-end confirmed as planned: the pipeline's run
+  is evidence that 0.12.22 builds and runs the stack; no scenario exercises the checks.
+  Owed by validation, beside the line above: in the same job, the four cases of
+  `scripts/tests/test_check_locks_uv.py` run and pass rather than skip.
+  Handoff: every machine running the workflow's steps now needs uv 0.12.22 or newer
+  before `make lock`, `make init` or `make test`. `make lock` still passes no
+  `--upgrade-package` for a lock naming no internal package, so a future rise of the
+  minimum leaves such locks at the old revision; the revision check then names them,
+  and `BUILD_AND_PACKAGING.md` says how to relock one.
 
 ## 5. Private keys are refused through gitleaks (D24 item 4)
 
@@ -493,7 +569,9 @@ under `scripts/tests/`, and `openspec/specs/README.md`.
   started: section 4 needs a uv that writes lock revision 5, and the means to run
   other uv releases to find the first one, and section 5 a gitleaks binary; this
   machine has uv 0.12.19 only and no gitleaks, and the step may not download either.
-  Section 6 is independent of both. For section 7: `docs/agents/change-workflow.md`
+  Section 6 is independent of both. Correction: on the owner's answer the same session
+  then implemented section 4, running uv releases through a grant for the run; its
+  notes stand in for this paragraph. Section 5 still waits for gitleaks. For section 7: `docs/agents/change-workflow.md`
   should name the five checks and `CHANGE_BASE`, and that the diff checks compare with
   `dev` unless told otherwise, so a change landing on another branch passes
   `CHANGE_BASE`, which no skill does yet; without it, a prerequisite's commits read as

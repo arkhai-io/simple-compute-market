@@ -576,8 +576,10 @@ build-test-image:
 # separately for Docker images.
 init: init-prerequisites init-submodules init-buyer init-storefront init-bare-metal-storefront init-arkhai-core-registry
 
+# The uv installed here is the repository's minimum (scripts/check_uv_version.py):
+# init's reinit refuses an older one.
 init-prerequisites:
-	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Installing uv..."; curl -LsSf https://astral.sh/uv/0.8.13/install.sh | sh; source $HOME/.local/bin/env; }
+	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Installing uv..."; curl -LsSf https://astral.sh/uv/0.12.22/install.sh | sh; source $HOME/.local/bin/env; }
 
 init-submodules:
 	GIT_TRACE=1 GIT_CURL_TRACE=1 git submodule update --init
@@ -837,8 +839,8 @@ helm-values-schema: ## Regenerate each storefront's config definition in its Hel
 	cd domains/vms/storefront && uv run --frozen --no-sync python -m market_storefront.values_schema write --root ../../..
 	cd domains/bare_metal/storefront && uv run --frozen --no-sync python -m arkhai_bare_metal_storefront.values_schema write --root ../../..
 
-# An older uv writes locks differently, and check-locks would pass them; the
-# check runs before the wheelhouse is built, even under -j.
+# An older uv writes locks at an older revision; uv_project.py refuses it too, but
+# this prerequisite refuses before the wheelhouse is built, even under -j.
 lock: check-uv-version ## Relock projects against current wheels without installing anything (PROJECTS="dir ..." narrows it)
 	@$(MAKE) --no-print-directory dist
 	python3 scripts/uv_project.py lock $(PROJECTS)

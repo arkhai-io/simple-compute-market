@@ -65,7 +65,7 @@ jobs:
         run: echo "UV_PYTHON=$(cat .python-version)" >> "$GITHUB_ENV"
       - uses: astral-sh/setup-uv@v3
         with:
-          version: "0.12.19"
+          version: "0.12.22"
       # The API-credits suite includes the TypeScript and Rust middleware.
       - if: matrix.target == 'test-apicredits'
         uses: actions/setup-node@v4
@@ -98,7 +98,7 @@ jobs:
         run: echo "UV_PYTHON=$(cat .python-version)" >> "$GITHUB_ENV"
       - uses: astral-sh/setup-uv@v3
         with:
-          version: "0.12.19"
+          version: "0.12.22"
       - name: make test-frp-grant-admission-frp
         run: make test-frp-grant-admission-frp
       # Run whatever the real-frp step concluded, so one run reports both.
@@ -113,7 +113,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
         with:
-          version: "0.12.19"
+          version: "0.12.22"
       - name: Build repository wheels
         run: make dist-ci
       - name: Build the portable wheel
@@ -126,6 +126,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
         with:
-          version: "0.12.19"
+          version: "0.12.22"
       - name: Check package architecture
         run: make check-architecture

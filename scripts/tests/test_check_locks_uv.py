@@ -17,7 +17,13 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.skipif(shutil.which("uv") is None, reason="needs the uv executable")
+import check_uv_version
+
+# The check holds every lock to the revision the repository's minimum uv writes,
+# so the locks these tests write must come from that uv or a newer one.
+pytestmark = pytest.mark.skipif(
+    shutil.which("uv") is None or check_uv_version.problem() is not None,
+    reason="needs the uv executable at the repository's minimum version")
 
 _SPEC = importlib.util.spec_from_file_location(
     "check_locks", Path(__file__).resolve().parents[1] / "check_locks.py"
