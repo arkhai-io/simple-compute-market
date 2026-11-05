@@ -1204,12 +1204,22 @@ delta requirements `CW-d5ac`, `CW-t9bx`, `CW-j1nv`, `CW-neua`, `CW-9pbk`, `CW-3t
 `.agents/skills/change-triage/SKILL.md`, and, for the roles test,
 `openspec/specs/market-change-workflow/README.md`.
 
-- [ ] 9.1 Write Rule E into step 2 as the classification each finding receives with its
+- [x] 9.1 Write Rule E into step 2 as the classification each finding receives with its
   position, reading the reviewer's `Alternatives:` field, and the `Classification:`
   line and "accepted by default" disposition in step 4's record form (D3, D17, D18).
   Verify: the skill states every condition of D3 and the record form carries the D18
   example's fields.
-- [ ] 9.2 Rewrite step 3 so only discussed findings are presented one per message, the
+  Done: step 2 gains an **Alternatives** item (read the reviewer's field, assign it
+  for a pasted review, as 7's handoff asked; say what would change the
+  recommendation) and a **Default acceptance** item listing D3's five conditions in
+  the guide's words, citing CW-d5ac and "Default acceptance", decided with the
+  position before anything is presented; a finding of which not every condition can
+  be said to hold is discussed, and a challenge to an owner's decision is always
+  discussed, since the owner reaffirms or changes it. Step 4's form gains the
+  `Classification:` line, for a default acceptance only, and the disposition
+  "accepted by default", with D18's example verbatim; the guidance review's sampling
+  is why each condition's reading is written out.
+- [x] 9.2 Rewrite step 3 so only discussed findings are presented one per message, the
   agenda lists them, and the "Accepted by default" table rides on the last question or
   goes in the final report; rewrite step 6 so an advancing recommendation is taken
   without asking and reported beside the table, another round is still asked, and a
@@ -1217,24 +1227,89 @@ delta requirements `CW-d5ac`, `CW-t9bx`, `CW-j1nv`, `CW-neua`, `CW-9pbk`, `CW-3t
   D2). Update "Running unattended" to match. Verify: the skill no longer requires a
   question for a default-accepted finding or for an advancing exit, and still forbids
   inferring a discussed finding's disposition from silence.
-- [ ] 9.3 Add the resumed-triage path: resumed with the owner's revisit, the triage
+  Done: step 3 is "Present every discussed finding"; the agenda lists discussed
+  findings and the number accepted by default; the silence rule now governs
+  discussed findings, checked before step 6 whether it asks or advances; D1's table
+  rides after the `→` line of the last question asked — the round question when
+  another round is recommended, else the last discussed finding, shown again with
+  the round question if the last answer turns the recommendation — or goes in the
+  final report. Step 6 takes an advancing recommendation without asking and reports
+  it beside the table; another round is argued and asked; a triage with nothing to
+  discuss asks nothing when it advances, or the round question alone. Step 5's
+  opening, `## Next`'s wording ("taken as recommended"), the opening, the
+  description, and "Running unattended"'s outcome bullet follow.
+- [x] 9.3 Add the resumed-triage path: resumed with the owner's revisit, the triage
   amends the fix in a new commit, appends the `revisits default acceptance:` ledger
   line, and names its exit again; a correction of a table item before the fixes is
   logged the same way (D16, D19). Verify: the skill's ledger section shows the D19
   example and names both moments.
-- [ ] 9.4 Align the outcomes with `openspec/README.md#defects-found-during-a-change`:
+  Done: step 4's ledger paragraph names both moments — a reply to the question the
+  table rode on, and a resume after the triage finished — with D19's example; a new
+  step 7 handles the resume: check the branch and worktree (asking the owner to
+  clear a stopped step's uncommitted work, which is resolved, not resumed), record a
+  `Revisit:` line and the ledger line, amend in a new commit as step 5 carries out
+  the outcome, a contradiction with later commits being a return (at closeout, the
+  owner's), and name the exit again, the row's status put back when the earlier
+  advance set it. Outside the plan, from the fresh-context check: CW-r8vz logs a
+  revisit of the advancing exit too, which no document gave a form; it is a
+  `revisits default acceptance:` entry with `"finding": "next"`, in the skill, in
+  one sentence of `docs/agents/change-workflow.md`'s "The ledger", and in D19 of
+  `design.md`; `guidance-review` counts such entries under the advancing exit and
+  not among revisited findings, which the second check found it would otherwise
+  double-count.
+- [x] 9.4 Align the outcomes with `openspec/README.md#defects-found-during-a-change`:
   `fix` and `edit` cover a small, understood out-of-scope defect, recorded in the notes
   or triage record, and a large or vague one is `none`, recorded where `AGENTS.md`'s
   "Deferred work" says; and recommend a waiver at a review and validation of different
   commits when a criterion of `docs/agents/change-workflow.md`'s "Waivers" holds (D6,
   D22). Verify: `make check-agent-skills` passes.
-- [ ] 9.5 Verification: `make check-agent-skills` passes;
+  Done: step 2's outcomes say it, citing the section; `edit` reaches the document a
+  small out-of-scope defect lies in; step 5's `fix` records such a fix as outside the
+  plan, and a new `none` bullet records a large one where "Deferred work" says, which
+  step 6's commit carries. Step 1's commit comparison recommends a waiver when a
+  "Waivers" criterion holds, naming it and the paths (`git diff --stat`), and none
+  otherwise; a recommended waiver's ledger line names the recommendation and
+  criterion (CW-n6wy), and a declined one is named in the stop's `reason` and logged
+  by the round's triage once the commits agree, since that path stops and a stop
+  commits nothing.
+  `make check-agent-skills` passes.
+- [x] 9.5 Verification: `make check-agent-skills` passes;
   `pytest -q scripts/tests/test_change_workflow_assumptions.py` (unit) passes, any make
   target or repository path the skill newly names listed in
   `openspec/specs/market-change-workflow/README.md`'s tables (`MCW-5tgp`); `make
   check-change CHANGE=act-on-owner-intervention-patterns` passes; a read of the skill
   against the scenarios of `CW-d5ac`, `CW-t9bx`, `CW-j1nv`, `CW-neua`, `CW-9pbk` and
   `CW-3tvs` finds each one stated. End-to-end: none; no scenario exercises the skills.
+  Done: `make check-agent-skills` passes; the roles test (unit) 11 passed, run as `uv
+  run --no-project --with pytest pytest`, the skill naming no new target or path;
+  `make check-change` passes all twelve checks; `make test` passed, its scripts suite
+  2367 passed, rewriting no lock (run before the fresh-context fixes, which touched
+  only Markdown; the cheap checks were rerun after them). The read against the
+  scenarios: CW-d5ac's two in steps 2 and 4; CW-t9bx's in step 3; CW-j1nv's minor
+  finding with the reviewer's alternatives (discussed, by the fourth condition) and
+  validation failure (discussed, by the first); CW-neua's two in step 3's silence
+  rule; CW-9pbk's two in step 6; CW-3tvs's two in step 3, step 6 and "Running
+  unattended". End-to-end confirmed: none. No CI evidence is owed.
+  Fresh-context check: fixed — a declined waiver's ledger line left the worktree
+  dirty at a stop; a revisit of the exit had no record, and an advance's status was
+  not undone; step 7 imposed a fix's checks on every amendment and offered a return
+  at closeout; "Running unattended" said a resumed triage asks nothing; step 7's
+  checks assumed an implementation round; `## Next` and "fix what the owner accepts"
+  assumed the owner answered; a large out-of-scope defect's `none` was carried out
+  nowhere, and `edit` was limited to the change's documents; the `Classification:`
+  line was required of discussed findings too, beyond CW-d5ac; and the skill read an
+  out-of-scope fix into the scope condition, which the guide does not. Declined: the
+  opening's "The owner decides what to do with each finding", kept as the
+  principle, since every default acceptance is the owner's to revisit. A second
+  check found the fixes holding and `guidance-review` double-counting exit revisits,
+  and D19 not naming their form; both fixed (9.3). It noted, as older than this
+  section, that step 1 names each record's commit in a triage file before the
+  comparison that may stop, while a review with a triage file reads as triaged; the
+  declined waiver therefore goes in the stop's reason, not that file.
+  Handoff: section 10's `change-orchestrate` relays the table and the advancing exit
+  as any message, and routes a revisit to step 7's resume; the exit revisit's ledger
+  form (`"finding": "next"`) is the guide's now, so closeout's promotion of D19 to
+  `change-workflow`'s README carries it.
 
 ## 10. The other skills interrupt, route revisits, recommend waivers, and fix found defects (D6, D12, D15, D16, D22, D24 item 1)
 

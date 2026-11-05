@@ -546,7 +546,10 @@ dropped alternative is invisible in a one-line table.
 A correction of a default acceptance, before its fix (D1) or after (D16), is a ledger
 entry whose `owner_disposition` starts `revisits default acceptance:`. A later
 revision of that entry uses `revises <review> <finding>:` as today. The ledger's
-shape does not change.
+shape does not change. A revisit of the advancing exit (D2), which `CW-r8vz` also
+logs, is such an entry with `"finding": "next"` under the review's record, as a
+waived commit rule is `"finding": "commit"`; a guidance review counts it under the
+advancing exit, not among revisited findings.
 
 ```json
 {"review": "04-design", "finding": "F5", "section": null, "lens": "documentation", "basis": "evidence", "severity": "should", "agent_position": "agree: the heading was renamed; accepted by default", "owner_disposition": "revisits default acceptance: cite the goal's row in ROADMAP's table instead, which survives renames", "summary": "Default-accepted citation fix redirected to a stable target"}

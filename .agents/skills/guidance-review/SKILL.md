@@ -96,14 +96,17 @@ the ledger for comparison:
 - **Default acceptances and their revisits.** How many findings were accepted by
   default, and how many of those the owner revisited: before the fix, a `revisits
   default acceptance:` entry with no `--resumes` direction for it in the log; after
-  the fix, one with. Set the period's revisit rate beside Rule E's measured baseline:
+  the fix, one with. An entry with `"finding": "next"` revisits the advancing exit,
+  not a finding, and is counted under the advancing exit alone. Set the period's
+  revisit rate beside Rule E's measured baseline:
   2.7% intervention overall, and about 10% on the changes held out from the
   measurement — those after the date the rule was compared on, which no candidate was
   fitted to. Fixed thresholds over samples this small would be noise; read the rate,
   and the revisits themselves.
 - **The advancing exit.** How often triage advanced by default, how often it
   recommended another round and the owner agreed, and how often the owner revisited
-  an advancing exit, by a `--resumes` direction naming no finding.
+  an advancing exit: a `revisits default acceptance:` entry with `"finding":
+  "next"`, before the fix or, with its `--resumes` direction, after.
 - **The classification audit.** Sample default acceptances across the period's
   changes — all of them when there are a dozen or fewer, else at least ten, spread
   across changes and triages — and read each `Classification:` line against its

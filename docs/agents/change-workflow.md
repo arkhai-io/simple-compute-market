@@ -794,8 +794,9 @@ an earlier one starts its `owner_disposition` with `revises <review> <finding>:`
 
 A correction of a finding accepted by default, made before its fix or after, is an
 entry whose `owner_disposition` starts `revisits default acceptance:`; a later
-revision of it uses `revises` as any other. Whether it came before or after the fix
-is in the workflow log, where a revisit after it has its `--resumes` direction:
+revision of it uses `revises` as any other; a revisit of the advancing exit is such
+an entry with `"finding": "next"`. Whether it came before or after the fix is in the
+workflow log, where a revisit after it has its `--resumes` direction:
 
 ```json
 {"review": "04-design", "finding": "F5", "section": null, "lens": "documentation", "basis": "evidence", "severity": "should", "agent_position": "agree: the heading was renamed; accepted by default", "owner_disposition": "revisits default acceptance: cite the goal's row in ROADMAP's table instead, which survives renames", "summary": "Default-accepted citation fix redirected to a stable target"}
