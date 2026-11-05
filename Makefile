@@ -1169,6 +1169,15 @@ test-bare-metal-iac-native: ## Native helper account/IPC/mount checks in a dispo
 install-gitleaks: ## Install the gitleaks release scripts/gitleaks-pins.toml pins, verified against its sha256; needs no root and does nothing when it is already on PATH ([GITLEAKS_INSTALL_DIR=~/.local/bin])
 	@python3 scripts/install_gitleaks.py$(if $(strip $(GITLEAKS_INSTALL_DIR)), --dir "$(GITLEAKS_INSTALL_DIR)")
 
-.PHONY: check-public-content
-check-public-content: ## Scan staged changes for recognizable private content
-	@python3 scripts/check_public_content.py --staged
+.PHONY: check-public-content check-secrets audit-secrets
+check-public-content: ## Scan staged changes for recognizable private content, and for private keys and provider credentials through the pinned gitleaks
+	@status=0; \
+	python3 scripts/check_public_content.py --staged || status=1; \
+	python3 scripts/check_secrets.py --staged || status=1; \
+	exit $$status
+
+check-secrets: ## Scan staged changes for private keys and provider credentials through the pinned gitleaks (.gitleaks.toml)
+	@python3 scripts/check_secrets.py --staged
+
+audit-secrets: ## Report what every gitleaks rule finds in HEAD's tracked tree, refusing nothing; read it before an official build ships (scripts/gitleaks-audit.toml)
+	@python3 scripts/check_secrets.py --audit

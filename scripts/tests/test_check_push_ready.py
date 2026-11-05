@@ -2,18 +2,25 @@
 
 The guard's meaning is Git's own state — attachment, upstream configuration, what a
 push sends — so a temporary repository with a bare remote is the lowest level that
-proves it; a fake Git would only restate the guard's assumptions.
+proves it; a fake Git would only restate the guard's assumptions. The secret gate is
+injected as passing where a test is about something else; the cases about it run the
+pinned gitleaks, skipped where it is not on PATH except under `GITLEAKS_REQUIRED=1`.
 """
 
 from __future__ import annotations
 
+import base64
 import importlib.util
 import os
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
 
 import pytest
+
+import check_secrets
+import install_gitleaks
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "check_push_ready.py"
@@ -22,6 +29,10 @@ assert _SPEC is not None and _SPEC.loader is not None
 guard = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = guard
 _SPEC.loader.exec_module(guard)
+
+
+def _no_secrets(root: Path, *, remote: str) -> list[str]:
+    return []
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -64,7 +75,7 @@ def _remote_head(repo: Path, branch: str) -> str:
 def test_a_new_branch_is_pushed_to_its_own_name_and_tracks_it(repo: Path) -> None:
     head = _git(repo, "rev-parse", "HEAD")
 
-    assert guard.main(["push"], root=repo) == 0
+    assert guard.main(["push"], root=repo, secrets=_no_secrets) == 0
 
     assert _remote_head(repo, "feat/change") == head
     assert _git(repo, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/feat/change"
@@ -74,8 +85,8 @@ def test_a_tracked_branch_pushes_exactly_head(repo: Path) -> None:
     _git(repo, "push", "-q", "-u", "origin", "feat/change")
     head = _commit(repo, "fix")
 
-    assert guard.main(["check"], root=repo) == 0
-    assert guard.main(["push"], root=repo) == 0
+    assert guard.main(["check"], root=repo, secrets=_no_secrets) == 0
+    assert guard.main(["push"], root=repo, secrets=_no_secrets) == 0
     assert _remote_head(repo, "feat/change") == head
 
 
@@ -89,7 +100,7 @@ def test_a_remote_that_moved_on_rejects_the_push_rather_than_being_forced(
     _git(other, "push", "-q", "origin", "feat/change")
     _commit(repo, "local")
 
-    assert guard.main(["push"], root=repo) != 0
+    assert guard.main(["push"], root=repo, secrets=_no_secrets) != 0
     assert _remote_head(repo, "feat/change") == moved
 
 
@@ -167,6 +178,59 @@ def test_private_content_refuses_publication(repo: Path, capsys) -> None:
     _git(repo, "add", "notes.md")
     _git(repo, "commit", "-qm", "notes")
 
-    assert guard.main(["push"], root=repo) == 1
+    assert guard.main(["push"], root=repo, secrets=_no_secrets) == 1
     assert _git(repo, "ls-remote", "origin", "refs/heads/feat/change") == ""
     assert private not in capsys.readouterr().err
+
+
+def test_a_secret_scan_that_cannot_run_refuses_publication(
+        repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    def unavailable(root: Path, *, remote: str) -> list[str]:
+        raise check_secrets.SecretsError("gitleaks 8.30.1 is required and no gitleaks "
+                                         "is on PATH")
+
+    assert guard.main(["push"], root=repo, secrets=unavailable) == 1
+
+    assert _remote_head(repo, "feat/change") == ""
+    assert "REFUSED: gitleaks 8.30.1 is required" in capsys.readouterr().err
+
+
+@pytest.fixture
+def gitleaks() -> None:
+    reason = install_gitleaks.problem()
+    if reason is not None:
+        if os.environ.get("GITLEAKS_REQUIRED") == "1":
+            pytest.fail(reason)
+        pytest.skip(reason)
+
+
+@pytest.mark.usefixtures("gitleaks")
+def test_an_outgoing_commit_adding_a_key_refuses_publication(
+        repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # Random bytes under a header assembled at runtime: no key, and no block in this file.
+    body = base64.b64encode(os.urandom(1190)).decode()
+    block = "\n".join(["-----BEGIN " + "RSA PRIVATE KEY-----", *textwrap.wrap(body, 64),
+                       "-----END " + "RSA PRIVATE KEY-----"])
+    (repo / "deploy.pem").write_text(block + "\n", "utf-8")
+    _git(repo, "add", "deploy.pem")
+    _git(repo, "commit", "-qm", "deploy key")
+
+    assert guard.main(["push"], root=repo) == 1
+
+    err = capsys.readouterr().err
+    assert ":deploy.pem:1: private-key-block" in err
+    assert body[:40] not in err
+    assert _remote_head(repo, "feat/change") == ""
+
+
+@pytest.mark.usefixtures("gitleaks")
+def test_an_outgoing_commit_adding_a_key_fixture_is_pushed(repo: Path) -> None:
+    fixture = ("-----BEGIN " + "OPENSSH PRIVATE KEY-----\\nfixture\\n"
+               + "-----END " + "OPENSSH PRIVATE KEY-----\\n")
+    (repo / "test_hosts.py").write_text(f'PEM = "{fixture}"\n', "utf-8")
+    _git(repo, "add", "test_hosts.py")
+    _git(repo, "commit", "-qm", "fixture")
+
+    assert guard.main(["push"], root=repo) == 0
+
+    assert _remote_head(repo, "feat/change") == _git(repo, "rev-parse", "HEAD")

@@ -1,24 +1,26 @@
-# The gitleaks configuration the public-content checks run (scripts/check_secrets.py),
-# at the release scripts/gitleaks-pins.toml pins. Every rule is gitleaks' own but one.
+# The gitleaks configuration of the secret gate the public-content checks run
+# (scripts/check_secrets.py) — the pre-commit and pre-push hooks, the guarded push,
+# and the Public content workflow — at the release scripts/gitleaks-pins.toml pins.
+# It extends the audit's configuration, scripts/gitleaks-audit.toml, which holds
+# gitleaks' default rules and the repository's key rule, and turns three more default
+# rules off here; the audit keeps them. gitleaks resolves the extended path from its
+# working directory, so the check runs it from the repository root.
 #
-# gitleaks' `private-key` rule accepts any 64 or more characters between a
-# `BEGIN ... PRIVATE KEY-----` header and the next `KEY-----`, dashes included. A
-# short fixture's END marker comes too soon to end a match, so the match runs on to
-# the next block in the same scan and two fixtures read as one key. The rule here
-# keeps the 64-character minimum body but admits no run of five dashes in it, so a
-# match ends at its own block's END marker and never reaches another header. A real
-# key's body — base64 wrapped at any length, or one string with `\n` escapes — is
-# far longer than 64 characters and is refused; a fixture whose body is a word, such
-# as `fixture`, is passed however many share a file.
+# Each rule turned off here matches the repository's own development fixtures and
+# code as readily as a secret, so a refusal would say nothing:
+# - `generic-api-key`, a keyword-and-entropy heuristic, matches identifiers and
+#   type annotations such as `private_key: Ed25519PrivateKey`, public contract and
+#   token addresses, and Anvil's published development keys;
+# - `jwt` matches the frp grant test vector's tokens, signed with RFC 8032's
+#   published test keys;
+# - `curl-auth-header` matches documented placeholder headers in curl examples.
+# The provider-specific rules stay: they match fixed token formats that almost never
+# misfire. A random credential in no provider's format is what `generic-api-key`
+# would have found; the audit (`make audit-secrets`) reports it over the whole tree,
+# and review remains the safeguard for each change. A later fixture that trips a
+# provider rule is another entry in this list, never a marker beside the fixture.
 # See docs/development/ARCHITECTURE.md, "Public repository content checks".
 
 [extend]
-useDefault = true
-disabledRules = ["private-key"]
-
-[[rules]]
-id = "private-key-block"
-description = "A private key block whose body holds key material"
-regex = '''(?i)-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----(?:[^-]|-{1,4}[^-]){64,}-----END'''
-keywords = ["-----begin"]
-tags = ["key", "private-key"]
+path = "scripts/gitleaks-audit.toml"
+disabledRules = ["generic-api-key", "jwt", "curl-auth-header"]

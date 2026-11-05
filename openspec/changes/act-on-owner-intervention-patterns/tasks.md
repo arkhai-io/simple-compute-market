@@ -445,14 +445,20 @@ prepared notes before them and the gate-run notes after them name the earlier nu
 to 5.2, is 5.4's. The work those notes record as committed stands and is built on, not
 redone.
 
-- [ ] 5.1 The README's credential (D25): in `domains/vms/provisioning/iac/README.md`,
+- [x] 5.1 The README's credential (D25): in `domains/vms/provisioning/iac/README.md`,
   "Configure Build Variables (Optional)", replace the `root_password` and
   `root_filename` values the heredoc writes with `<the existing key's password>` and
   `<its filename>`, as the section's first commit. Record in the notes that the fix is
   outside the change's stated scope, a found defect fixed in place (D6), and that no
   customer image was built with the value, so nothing is rotated. Verify: the two
   lines hold placeholders, and 5.6's audit reports no finding in that file.
-- [ ] 5.2 The gate and audit configurations, confirmed (D24 item 4, D26, D28, D29):
+  Done, as the section's first commit (`da72f3841`, not yet pushed): the two lines
+  read `root_password: <the existing key's password>` and `root_filename: <its
+  filename>`. The fix lies outside the change's stated scope: a small, understood
+  defect the secret scan's first run found, fixed in place (D6). No customer image
+  was built with the value, so nothing is rotated; the value stays in public history.
+  On the resume, `make audit-secrets` at `9e5c10cfc` reported no finding in the file.
+- [x] 5.2 The gate and audit configurations, confirmed (D24 item 4, D26, D28, D29):
   move the current `.gitleaks.toml`'s content — `useDefault = true`, `disabledRules =
   ["private-key"]`, and the `private-key-block` rule as committed — into a new
   `scripts/gitleaks-audit.toml`, and make `.gitleaks.toml` the gate, extending it by
@@ -473,7 +479,31 @@ redone.
   rerun by 5.3's suite under the gate configuration. If a key case fails or the gate
   finds anything in the tree, stop: the change returns to design (`change-implement`,
   "Stop cleanly when the plan is wrong").
-- [ ] 5.3 The gate's provider-format cases and the audit in `scripts/check_secrets.py`
+  Done: `scripts/gitleaks-audit.toml` holds the committed key rule over the defaults
+  minus `private-key`; `.gitleaks.toml` extends it by path and turns off the three,
+  its comments giving D26's reasons. Release 8.30.1, linux_x64 sha256
+  `551f6fc8…70eb` (`scripts/gitleaks-pins.toml`). **The nested extension loads**, from
+  the repository root: `check_secrets.py` now runs gitleaks with the repository root as
+  its working directory whatever repository it scans, the scanned repository passed as
+  gitleaks' source argument, since gitleaks resolves `[extend] path` from its working
+  directory (`test_every_scan_runs_from_the_repository_root_where_the_gate_finds_the_audit`:
+  staged, range, pre-push and audit scans, injected runner). Evidence, each a
+  real-gitleaks case of 5.3's suite under the gate: every key case refuses as
+  `private-key-block`, which reaches the gate only through the extension;
+  `test_a_provider_token_is_staged` refuses a GitHub token, a default rule reaching the
+  gate through both levels; `test_a_development_fixture_is_added` passes lines of which
+  the audit reports at least one as `generic-api-key`, so that rule is off at the gate
+  and on in the audit; and `test_the_repositorys_own_tree_passes_the_gate`, now
+  asserting `found == []` under any rule (D28), passes over `HEAD`'s tree. That run's
+  `HEAD` was `da72f3841`, so the tree it scanned held none of this section's other
+  files; those passed the gate as staged additions (`make check-secrets`), and the
+  test reads them once they are committed. The fallback was not needed. Counts: none
+  under the gate. Under the audit, `make audit-secrets` at `9e5c10cfc` (before this
+  section's other files were committed): 116 findings, `generic-api-key` 76, `jwt` 38,
+  `curl-auth-header` 2. That is D26's 113 once the README's is gone, plus three lines
+  this change's own `design.md`, delta `spec.md` and `tasks.md` gained after the gate
+  run, each citing `private_key: Ed25519PrivateKey`.
+- [x] 5.3 The gate's provider-format cases and the audit in `scripts/check_secrets.py`
   (D26, D27, D28, D29): add `--audit`, which runs the pinned gitleaks with
   `scripts/gitleaks-audit.toml` and redaction over `HEAD`'s tracked tree, read as the
   tree test reads it — one parentless commit of `HEAD^{tree}` in a temporary shared
@@ -493,7 +523,36 @@ redone.
   at runtime, reported by the audit, which exits 0, and passed by the gate); the
   existing ten cases run under the gate configuration, each key scenario mapping to
   one.
-- [ ] 5.4 Run the gate wherever `check_public_content.py` runs (D24 item 4):
+  Done: `--audit`, `audit()`, and the shared helper `tree_commit()` (a `--shared
+  --no-checkout` clone, `commit-tree --no-gpg-sign` of `HEAD^{tree}` under a fixed
+  identity), used by the tree test too; findings print as `<file>:<line>: <rule>`,
+  then a count line; exit 0 whatever it found, 1 with `ERROR:` when gitleaks could not
+  run or another release is installed. `scan_source` takes the configuration, the gate
+  by default. Tests, `test_check_secrets.py`, 28 passed, none skipped. With gitleaks
+  injected (a recording runner and version check) over real temporary Git
+  repositories, as the file's earlier cases are: `--audit` passes
+  `scripts/gitleaks-audit.toml`, scans the temporary clone rather than the repository,
+  with `--log-opts` ending `--root --diff-merges=separate`, and exits 0 printing
+  `settings.yaml:1: generic-api-key`; the tree commit is parentless, holds `HEAD`'s
+  tree, and not an untracked file; an audit gitleaks could not finish (exit 2 or 126)
+  is an error; another release is an error and runs nothing; every scan runs from the
+  repository root. Integration against the real 8.30.1, a real external process
+  (`TESTING.md`'s third flavour, skipped without the binary and failing under
+  `GITLEAKS_REQUIRED=1`; the plan's "library integration" names these): "A provider
+  token is staged" (`test_a_provider_token_is_staged`: `ghp_` and 36 random characters,
+  refused at `deploy.env:2`, not echoed); "A development fixture is added"
+  (`test_a_development_fixture_is_added`: Anvil's first key, its first contract
+  address, and `private_key: Ed25519PrivateKey`, passed by the gate, while the audit of
+  the same lines reports at least one as `generic-api-key`; `check_public_content.py`
+  is not run on them, the scenario's gitleaks half being this section's); "The audit
+  reports what the gate passes"
+  (`test_the_audit_reports_what_the_gate_passes`: a random 40-character
+  `root_password`, reported by `main(["--audit"])`, which exits 0, without echoing it,
+  and passed by the gate's range scan). The existing ten real-scanner cases run under
+  the gate, and map to the key scenarios: "A key fixture carries no key material",
+  "Two key fixtures share a file", "A real key is staged" (wrapped at 64 and 16), "A
+  key is embedded as one escaped string", "A key is added in a merge resolution".
+- [x] 5.4 Run the gate wherever `check_public_content.py` runs (D24 item 4):
   `scripts/hooks/pre-commit` on staged additions and `scripts/hooks/pre-push` on each
   pushed ref's commits, each running both checks and failing when either does;
   `scripts/check_push_ready.py` on every outgoing commit; `make check-public-content`,
@@ -505,7 +564,26 @@ redone.
   show the guarded push refusing an outgoing commit that adds a key and passing one
   that adds a fixture; `python3 scripts/check_secrets.py --base origin/dev`, the
   workflow's own command, passes over this branch's commits.
-- [ ] 5.5 Documentation (D24 item 4, D26, D28, D29): `docs/development/ARCHITECTURE.md`,
+  Done: both hooks run both checks and exit non-zero when either fails, each check
+  reporting even after the other refused; the pre-push hook reads Git's ref updates
+  once and gives them to each. `check_push_ready.main` scans the outgoing commits with
+  the gate after `check_public_content`, a gate that cannot run refusing the push; the
+  gate is injected (`secrets=`) so the push tests about other states pass a scan that
+  finds nothing. `make check-public-content` runs both; `make check-secrets` and `make
+  audit-secrets` are new. `public-content.yml` runs both over the same base;
+  `tests.yml` sets `GITLEAKS_REQUIRED=1` on the `make` step of the
+  `test-deployment-packaging` job only, the one that installs gitleaks and runs the
+  script suites. Tests, `test_check_push_ready.py` (real Git repositories and a bare
+  remote; 15 passed): `test_an_outgoing_commit_adding_a_key_refuses_publication` and
+  `test_an_outgoing_commit_adding_a_key_fixture_is_pushed` (integration, the real
+  gitleaks as an external process, through the guard's real push; the plan asked for
+  unit tests, and the real scanner is the level that proves a refusal); a gate that
+  cannot run refusing the push (injected). `test_tests_workflow.py` passes. The hooks have no test, as before;
+  `make check-public-content` and `make check-secrets` passed over this section's
+  staged files. On the resume, `python3 scripts/check_secrets.py --base origin/dev`
+  passed over the branch's commits to `9e5c10cfc`; the section's own commit is scanned
+  by `make push-branch`'s outgoing check.
+- [x] 5.5 Documentation (D24 item 4, D26, D28, D29): `docs/development/ARCHITECTURE.md`,
   "Public repository content checks", records gitleaks and its pinned release, how to
   install it (`make install-gitleaks`), why the repository replaces the default key
   rule, the three default rules the gate turns off and why, the tree test as the guard
@@ -516,7 +594,16 @@ redone.
   audit-secrets` and read what it reports before an official build ships. Verify:
   `make check-doc-citations CHANGE=act-on-owner-intervention-patterns` reports no path
   this section added that fails to resolve.
-- [ ] 5.6 Verification: `pytest -q scripts/tests/test_check_secrets.py
+  Done: `ARCHITECTURE.md`, "Public repository content checks", says the two checks run
+  together and where, the hooks now needing Python 3.11 (`install_gitleaks` reads
+  `tomllib`) and the pinned gitleaks; a new "Secret scanning through gitleaks" covers
+  the scanner and its pin, `make install-gitleaks`, redaction and ignored
+  `gitleaks:allow`, merge patches, the gate's four rules off and why, the tree test as
+  the guard on an upgrade, the audit, and the two things the gate cannot see.
+  `RELEASING.md`, "Cutting a release", gains its first step, `make audit-secrets`.
+  `make check-doc-citations` (through `make check-change`) reports only section 8's
+  skill, cited by `proposal.md` and `tasks.md`.
+- [x] 5.6 Verification: `pytest -q scripts/tests/test_check_secrets.py
   scripts/tests/test_check_public_content.py scripts/tests/test_check_push_ready.py`
   (unit and library integration) passes with `GITLEAKS_REQUIRED=1`; `make
   check-public-content` and `make check-secrets` pass; `make audit-secrets` exits 0
@@ -525,6 +612,40 @@ redone.
   Owed by validation: `tests.yml`, job `test · test-deployment-packaging` — it
   installs the pinned gitleaks with its checksum checked, and the real-scanner cases in
   `scripts/tests/test_check_secrets.py` run and pass rather than being skipped.
+  So far: the three suites, 62 passed with none skipped (`pytest -rs`; with the pinned
+  release on PATH `GITLEAKS_REQUIRED=1` changes nothing, and the session could not set
+  it on the command line); `make check-public-content` and `make check-secrets` pass
+  over the section's staged files; `make test` passes, its `test-release-tooling`
+  2070 passed and none skipped, rewriting no lock; `make check-packaging` passes;
+  `make check-change` fails only on section 8's skill citation. End-to-end confirmed:
+  none. Owed by validation confirmed as written above, the gitleaks cases of
+  `test_check_push_ready.py` among the real-scanner cases that must run there.
+  On the resume, `make audit-secrets` exited 0 listing 116 findings, none in
+  `domains/vms/provisioning/iac/README.md` (5.2 gives the counts).
+
+Stopped, 2026-11-05, before committing: the session may not run `make audit-secrets`,
+`python3 scripts/check_secrets.py --audit`, or `python3 scripts/check_secrets.py
+--base origin/dev` (no rule of the implement step allows them), and four checks need
+them: 5.1's "no finding in the README", 5.2's audit count and its `jwt` and
+`curl-auth-header` findings over the tree, 5.4's scan of the branch since `dev`, and
+5.6's audit. Everything else is done and staged, uncommitted, but for 5.1's commit,
+`da72f3841`, made first as 5.1 asks and not yet pushed. For the resumed session: run
+the three commands; record the audit's count and the rules it names, and check that
+none is in `domains/vms/provisioning/iac/README.md` (the placeholders hold no value;
+if the audit still reports the file, read the line it names before checking 5.1);
+check 5.1, 5.2, 5.4 and 5.6 if they pass; then commit the rest as the
+section's second commit and push both with `make push-branch`, which now runs the gate
+over the outgoing commits too. The audit reads `HEAD`, so run it after that commit
+for the counts to include this section's files, or before it for the tree D26
+measured; the notes should say which. If `--base origin/dev` refuses an earlier
+commit of the branch, that is a found defect in a committed file, fixed in this
+section (D6), since the Public content workflow scans a pull request's commits from
+its base and would refuse the branch's.
+Resumed, the same day: the owner added `make audit-secrets` and `python3
+scripts/check_secrets.py *` to every step's rules (`9e5c10cfc`, committed by the
+orchestrator), and confirmed that running the real-scanner cases through pytest is
+acceptable. The audit ran before the section's commit, so its counts are D26's tree;
+both commands passed as 5.1–5.6 record, and the section was committed and pushed.
 
 Gate run, 2026-11-05: the key rule holds, and the change returns to design over
 gitleaks' other default rules. No task above is checked.

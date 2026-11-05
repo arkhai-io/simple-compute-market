@@ -1,13 +1,14 @@
-"""The private-key check runs the pinned gitleaks with the repository's rule.
+"""The secret gate and audit run the pinned gitleaks with the repository's configurations.
 
 The unit cases inject the runner and the version check. The real-scanner cases run
 the pinned release over temporary Git repositories, and over the repository's own
 tree; they skip where the pinned gitleaks is not on PATH, except under
 `GITLEAKS_REQUIRED=1`, which CI's packaging job sets, where a skip is a failure.
 
-No key here is real, and none is written into this file: each test assembles its
-header at runtime and fills its body with random bytes, so the check, scanning this
-file, finds no block in it.
+No key or token here is real, and none the gate refuses is written into this file:
+each test assembles its key header at runtime and fills the body with random bytes,
+and builds its provider token and password from random characters, so the gate,
+scanning this file, finds nothing in it.
 """
 
 from __future__ import annotations
@@ -16,6 +17,8 @@ import base64
 import io
 import json
 import os
+import secrets
+import string
 import subprocess
 import textwrap
 from pathlib import Path
@@ -32,6 +35,17 @@ HEADER = "-----BEGIN " + "RSA PRIVATE KEY-----"
 FOOTER = "-----END " + "RSA PRIVATE KEY-----"
 FIXTURE_HEADER = "-----BEGIN " + "OPENSSH PRIVATE KEY-----"
 FIXTURE_FOOTER = "-----END " + "OPENSSH PRIVATE KEY-----"
+# Anvil's first published development account key and the address of the first
+# contract it deploys: well-known deterministic development values, never to be used
+# on a public network.
+ANVIL_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+ANVIL_CONTRACT = "0x5FbDB2315678afecb367f032d93F642f64180aa3"
+
+
+def random_text(length: int) -> str:
+    """Random letters and digits, the shape of a generated token or password."""
+    return "".join(secrets.choice(string.ascii_letters + string.digits)
+                   for _ in range(length))
 
 
 def key_body() -> str:
@@ -199,6 +213,84 @@ def test_a_scan_gitleaks_could_not_complete_is_an_error_not_a_pass(
         checker.scan_source(repo, checker.staged_source(), run=runner)
 
 
+def test_every_scan_runs_from_the_repository_root_where_the_gate_finds_the_audit(
+        repo: Path) -> None:
+    base = git(repo, "rev-parse", "HEAD")
+    tip = commit(repo, "notes.md", "text")
+    calls: list[Path] = []
+    runner = _Runner()
+
+    def recording(command: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+        calls.append(cwd)
+        return runner(command, cwd)
+
+    checker.scan(repo, staged=True, run=recording, version_problem=_pinned)
+    checker.scan(repo, base=base, run=recording, version_problem=_pinned)
+    checker.pre_push(repo, "public", [f"refs/heads/topic {tip} refs/heads/topic {base}"],
+                     run=recording, version_problem=_pinned)
+    checker.audit(repo, run=recording, version_problem=_pinned)
+
+    assert calls == [ROOT] * 4
+    assert [c[-1] for c in runner.commands[:3]] == [str(repo)] * 3
+    assert runner.commands[3][-1] != str(repo)
+
+
+def test_the_audit_scans_heads_tree_with_the_audit_configuration_and_exits_0_with_findings(
+        repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    commit(repo, "settings.yaml", "value: 1\n")
+    (repo / "untracked.yaml").write_text("value: 2\n", "utf-8")
+    finding = {"RuleID": "generic-api-key", "File": "settings.yaml", "StartLine": 1,
+               "Commit": "b" * 40, "Secret": "REDACTED", "Match": "REDACTED"}
+    runner = _Runner([finding])
+
+    assert checker.main(["--audit"], root=repo, run=runner, version_problem=_pinned) == 0
+
+    [command] = runner.commands
+    assert command[command.index("--config") + 1] == str(ROOT / "scripts/gitleaks-audit.toml")
+    # The scanned repository is the temporary clone holding the tree commit, not `repo`.
+    assert Path(command[-1]).name == "tree" and command[-1] != str(repo)
+    log_opts = command[2]
+    assert log_opts.startswith("--log-opts=") and log_opts.endswith(
+        " --root --diff-merges=separate")
+    out = capsys.readouterr().out.splitlines()
+    assert out[0] == "settings.yaml:1: generic-api-key"
+    assert "1 finding(s)" in out[-1]
+
+
+def test_the_audit_reads_one_parentless_commit_of_heads_tree_and_nothing_untracked(
+        repo: Path) -> None:
+    commit(repo, "settings.yaml", "value: 1\n")
+    (repo / "untracked.yaml").write_text("value: 2\n", "utf-8")
+
+    with checker.tree_commit(repo) as (clone, whole):
+        assert git(clone, "show", "-s", "--format=%P", whole) == ""
+        assert git(clone, "rev-parse", whole + "^{tree}") == git(repo, "rev-parse",
+                                                                 "HEAD^{tree}")
+        assert "untracked.yaml" not in git(clone, "ls-tree", "-r", "--name-only", whole)
+
+
+@pytest.mark.parametrize("returncode", [2, 126])
+def test_an_audit_gitleaks_could_not_finish_is_an_error(
+        repo: Path, capsys: pytest.CaptureFixture[str], returncode: int) -> None:
+    runner = _Runner(returncode=returncode, stderr="config: unknown field")
+
+    assert checker.main(["--audit"], root=repo, run=runner, version_problem=_pinned) == 1
+
+    assert "ERROR: gitleaks could not complete the scan" in capsys.readouterr().err
+
+
+def test_an_audit_with_another_gitleaks_release_is_an_error_and_runs_nothing(
+        repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    runner = _Runner()
+    message = install_gitleaks.problem(lambda: "8.29.0\n")
+
+    assert checker.main(["--audit"], root=repo, run=runner,
+                        version_problem=lambda: message) == 1
+
+    assert "make install-gitleaks" in capsys.readouterr().err
+    assert runner.commands == []
+
+
 # ---------------------------------------------------------- real gitleaks
 
 
@@ -316,18 +408,53 @@ def test_a_key_added_in_a_merge_resolution_is_refused(repo: Path) -> None:
 
 
 @pytest.mark.usefixtures("gitleaks")
-def test_the_repositorys_own_tree_holds_no_key_block(tmp_path: Path, monkeypatch) -> None:
-    for key, value in {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
-                       "GIT_AUTHOR_NAME": "fixture", "GIT_COMMITTER_NAME": "fixture",
-                       "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
-                       "GIT_COMMITTER_EMAIL": "fixture@example.invalid"}.items():
-        monkeypatch.setenv(key, value)
-    clone = tmp_path / "tree"
-    git(tmp_path, "clone", "-q", "--shared", "--no-checkout", str(ROOT), str(clone))
-    # One parentless commit holding HEAD's tree: its patch adds every tracked file, so
-    # the scan reads the whole tree as content about to be published.
-    whole = git(clone, "commit-tree", "-m", "the tree", "HEAD^{tree}")
+def test_a_provider_token_is_staged(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    token = "ghp_" + random_text(36)
+    stage(repo, "deploy.env", f"MODE=ci\nGITHUB_TOKEN={token}\n")
 
-    found = checker.scan_source(clone, checker.range_source([whole, "--root"]))
+    assert checker.main(["--staged"], root=repo) == 1
 
-    assert [f for f in found if f.endswith((": private-key-block", ": private-key"))] == []
+    err = capsys.readouterr().err.splitlines()
+    assert any(f.startswith("REFUSED: deploy.env:2: ") for f in err), err
+    assert all(token not in f for f in err)
+
+
+@pytest.mark.usefixtures("gitleaks")
+def test_a_development_fixture_is_added(repo: Path) -> None:
+    lines = (f'private_key = "{ANVIL_KEY}"\n'
+             f'escrow_address = "{ANVIL_CONTRACT}"\n'
+             "    private_key: Ed25519PrivateKey\n")
+    stage(repo, "test_settlement.py", lines)
+
+    assert checker.scan(repo, staged=True) == []
+    # The audit's `generic-api-key` reports the same lines, so the gate passes them
+    # because that rule is off, which this case holds.
+    git(repo, "commit", "-qm", "fixtures")
+    assert any(f.endswith(": generic-api-key") for f in checker.audit(repo))
+
+
+@pytest.mark.usefixtures("gitleaks")
+def test_the_audit_reports_what_the_gate_passes(
+        repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    base = git(repo, "rev-parse", "HEAD")
+    password = random_text(40)
+    commit(repo, "build-vars.yaml", f"root_password: {password}\n")
+
+    assert checker.main(["--audit"], root=repo) == 0
+
+    out = capsys.readouterr().out
+    assert "build-vars.yaml:1: generic-api-key" in out.splitlines()
+    assert password not in out
+    assert checker.scan(repo, base=base) == []
+
+
+@pytest.mark.usefixtures("gitleaks")
+def test_the_repositorys_own_tree_passes_the_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Any rule counts, so a gitleaks release whose new rule the tree trips fails here,
+    # when its pin moves, rather than at someone's commit.
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    with checker.tree_commit(ROOT) as (clone, whole):
+        found = checker.scan_source(clone, checker.tree_source(whole))
+
+    assert found == []

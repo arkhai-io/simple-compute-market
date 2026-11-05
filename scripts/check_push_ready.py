@@ -11,6 +11,8 @@ that way.
 The check reports and never repairs: each refused state means something
 unexpected happened, and fixing it automatically would hide that. The push sends
 exactly HEAD and is never forced, so a remote branch that has moved on rejects it.
+Before it, both public-content checks read every outgoing commit:
+`check_public_content.py`'s rules and the pinned gitleaks of `check_secrets.py`.
 
 Contract: openspec/specs/change-workflow/spec.md, "Guarded push of a change
 branch".
@@ -23,13 +25,18 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
 
 from check_public_content import denylist, reasons, scan
+from check_secrets import SecretsError
+from check_secrets import scan as scan_secrets
 
 ROOT = Path(__file__).resolve().parents[1]
 PROTECTED = ("main", "dev")
 DEFAULT_REMOTE = "origin"
+
+# Every secret the commits `root` would send to `remote` add.
+SecretsScan = Callable[..., list[str]]
 
 
 @dataclass(frozen=True)
@@ -79,7 +86,8 @@ def check(root: Path = ROOT) -> tuple[PushTarget | None, list[str]]:
     return (None if problems else target), problems
 
 
-def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
+def main(argv: Sequence[str] | None = None, root: Path = ROOT, *,
+         secrets: SecretsScan = scan_secrets) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("action", choices=("check", "push"))
     args = parser.parse_args(argv)
@@ -96,6 +104,10 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
         findings.extend(scan(root, remote=target.remote))
     except ValueError as exc:
         findings = [str(exc)]
+    try:
+        findings.extend(secrets(root, remote=target.remote))
+    except SecretsError as exc:
+        findings.append(str(exc))
     if findings:
         for finding in findings:
             print("REFUSED: " + finding, file=sys.stderr)
