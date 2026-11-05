@@ -60,9 +60,10 @@ def main(root: Path | None = None) -> int:
         return 1
     found = problems(root)
     for problem in found:
-        print(problem)
+        print(problem, file=sys.stderr)
     if found:
-        print(f"\n{len(found)} agent skill problem(s). Each skill has one source under {SOURCE}.")
+        print(f"\n{len(found)} agent skill problem(s). Each skill has one source under {SOURCE}.",
+              file=sys.stderr)
         return 1
     print("OK: every agent skill is loaded from its one shared source.")
     return 0

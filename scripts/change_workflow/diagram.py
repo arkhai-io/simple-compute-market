@@ -105,8 +105,8 @@ def main(source: Path | None = None,
         print(f"{shown} draws the table.")
         return 0
     print(f"{shown} departs from the table; redraw it, and export its SVG from it "
-          "with the source embedded:")
-    print("".join(f"- {problem}\n" for problem in problems), end="")
+          "with the source embedded:", file=sys.stderr)
+    print("".join(f"- {problem}\n" for problem in problems), end="", file=sys.stderr)
     return 1
 
 

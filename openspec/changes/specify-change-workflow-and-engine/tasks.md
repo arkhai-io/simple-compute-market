@@ -1228,6 +1228,31 @@ removal check reads `dev` as the merged branch, not the merge's default), and
 naming `main` and `dev` as "the repository's" in the skill and the companion, which
 already named this repository's values, and which closeout rewrites (11.9).
 
+Pre-closeout review 62's triage fixed two findings against `ce2c0f3ee` (validation
+61 passed the scripts suite, everything else waived). 62 F1: CW-m7fk's exit 1 with
+its reason on standard error now holds on every path of the command. `check tasks`,
+`check skills`, and `check graph` write their failures to standard error, their OK
+lines staying on standard output; `history` names each refused file there beside its
+report; `start` and `resume` name a stopped run's reason there, the logged line
+alone on standard output, through one helper `review` now shares; an interactive
+session's non-zero exit and a failed `git push` name their status there. 62 F2:
+`cli.py`'s `_takes` and `delegated` docstrings describe what they do rather than
+the arrangement before the command. Evidence: `test_change_workflow_cli.py` (unit,
+real repositories in a temporary directory) gained command-level tests of a failing
+`check tasks` and `check skills`, a stopped unattended run, and an interactive
+session's status, and `test_check_tasks.py`, `test_change_workflow_graph.py`, and
+`test_change_history.py` (unit) assert the reasons on standard error; the scripts
+suite, as `make test-release-tooling` runs it, 2092 passed on the final diff; `make
+test` passed; `make check-packaging`, `make check-agent-skills`, and `make
+check-comment-hygiene` passed; `make check-change` failed only on
+`check-doc-citations`, its misses the files closeout creates (the two `index.md`,
+`market-change-workflow`'s `spec.md`). The fresh-context check found no blocking
+defect; fixed: the failed `git push` path, which it found still exited 1 with
+nothing of its own on standard error, `review`'s duplicate of the stopped-run
+helper, and a test comment and name worded as history. Declined: tests of
+`resume`'s and `start orchestrate`'s failure paths alone, which run the helpers the
+new tests prove.
+
 ## 11. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`, in its order.

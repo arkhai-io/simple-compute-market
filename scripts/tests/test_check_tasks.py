@@ -80,9 +80,11 @@ def test_the_command_names_each_problem_and_fails(tmp_path: Path,
 
     assert check.main([CHANGE], root=root) == 1
 
-    out = capsys.readouterr().out
-    assert out.startswith(f"openspec/changes/{CHANGE}/{nxt.TASKS_FILE}:line 6: {STRAYED}")
-    assert "FAIL:" in out
+    # A failed check gives its reason on standard error.
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err.startswith(f"openspec/changes/{CHANGE}/{nxt.TASKS_FILE}:line 6: {STRAYED}")
+    assert "FAIL:" in err
 
 
 def test_the_command_passes_a_well_formed_list(tmp_path: Path,

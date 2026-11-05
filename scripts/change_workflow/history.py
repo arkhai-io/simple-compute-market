@@ -217,6 +217,9 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     print(report(synced, workspace))
+    for refused in synced.refused:
+        print(f"ERROR: not copied, the workspace's file left as it is: {refused}",
+              file=sys.stderr)
     return 1 if synced.refused else 0
 
 

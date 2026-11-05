@@ -279,9 +279,12 @@ def test_the_command_fails_naming_each_refusal(
 
     assert history.main(["sync", CHANGE], root=clone) == 1
 
-    out = capsys.readouterr().out
+    out, err = capsys.readouterr()
     assert "Refused, the workspace's file left as it is:" in out
     assert f"{(REVIEWS / '01-implementation.md').as_posix()}: the workspace's copy" in out
+    # The exit 1's reason is on standard error too, not only in the report.
+    assert (f"ERROR: not copied, the workspace's file left as it is: "
+            f"{(REVIEWS / '01-implementation.md').as_posix()}: the workspace's copy") in err
 
 
 def test_the_command_refuses_outside_a_clone(

@@ -288,7 +288,9 @@ def test_the_report_lists_each_departure_and_fails(capsys) -> None:
     status = diagram.main(ROOT / SOURCE, table)
 
     assert status == 1
-    assert capsys.readouterr().out == (
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err == (
         f"{SOURCE} departs from the table; redraw it, and export its SVG from it with the "
         "source embedded:\n"
         "- no edge draws ('triage_closeout', 'design', ('a return',))\n"

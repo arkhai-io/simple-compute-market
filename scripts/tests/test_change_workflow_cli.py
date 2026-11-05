@@ -84,8 +84,8 @@ def _printed(capsys: pytest.CaptureFixture[str], run: Callable[[], int]) -> tupl
     return status, captured.out, captured.err
 
 
-# Each subcommand reaches its module with the arguments the module's own command
-# line took: what it prints, and its status, are the module's.
+# Each subcommand reaches its module with the arguments it hands the module's own
+# command line: what it prints, and its status, are the module's.
 
 @pytest.mark.parametrize("subcommand,module", [
     (["next", CHANGE], lambda root: next_step.main([CHANGE], root=root)),
@@ -110,7 +110,7 @@ def _printed(capsys: pytest.CaptureFixture[str], run: Callable[[], int]) -> tupl
     (["check", "round-view"], lambda root: round_view.main(["check"], root=root)),
     (["hook", "post-compaction"], lambda root: hook.main(root)),
 ])
-def test_a_subcommand_does_what_its_modules_command_line_did(
+def test_a_subcommand_does_what_its_modules_command_line_does(
         tmp_path: Path, capsys: pytest.CaptureFixture[str], subcommand: list[str],
         module: Callable[[Path], int]) -> None:
     # A workspace with no origin, a dirty worktree, and no round view: every
@@ -192,15 +192,32 @@ def test_success_exits_0_and_a_refusal_exits_1_with_its_reason_on_standard_error
     assert "'missing'" in err
 
 
+def test_a_failed_check_exits_1_with_its_reason_on_standard_error(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _repository(tmp_path / "workspace", CHANGE)
+    # A task numbered for the first section under the second's heading.
+    (root / "openspec/changes" / CHANGE / next_step.TASKS_FILE).write_text(
+        "## 1. First\n\n- [ ] 1.1 One.\n\n## 2. Second\n\n- [ ] 1.2 Strayed.\n", "utf-8")
+    # A shared skill with no SKILL.md, and no harness link to it.
+    (root / ".agents/skills/lone").mkdir(parents=True)
+
+    for arguments, reason in ((["check", "tasks", CHANGE], "sits under `## 2. Second`"),
+                              (["check", "skills"], "shared skill has no SKILL.md")):
+        status, out, err = _printed(capsys, lambda: cli.main(arguments, root=root))
+        assert (status, out) == (1, "")
+        assert reason in err
+
+
 def test_a_failed_push_exits_1_whatever_git_returned(
         tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root = _repository(tmp_path / "workspace", CHANGE)
     _git(root, "checkout", "-q", "-b", "feat/x")
     _git(root, "remote", "add", "origin", str(tmp_path / "no-such-remote"))
 
-    status, out, _ = _printed(capsys, lambda: cli.main(["push"], root=root))
+    status, out, err = _printed(capsys, lambda: cli.main(["push"], root=root))
     assert status == 1
     assert out.startswith("+ git push")
+    assert "ERROR: git push exited with status" in err
 
 
 # `start`: the make targets' entry logic.
@@ -321,10 +338,27 @@ def test_an_interactive_start_opens_the_steps_skill(tmp_path: Path, arguments: l
     assert launched.commands == [["claude", prompt]]
 
 
-def test_an_interactive_session_that_fails_exits_1(tmp_path: Path) -> None:
+def test_an_interactive_session_that_fails_exits_1_naming_its_status(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root = _repository(tmp_path / "workspace", CHANGE)
 
-    assert cli.main(["start", "design", CHANGE], root=root, launch=Launched(status=130)) == 1
+    status, _, err = _printed(capsys, lambda: cli.main(["start", "design", CHANGE], root=root,
+                                                       launch=Launched(status=130)))
+    assert status == 1
+    assert "status 130" in err
+
+
+def test_an_unattended_run_that_stops_exits_1_with_its_reason_on_standard_error(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _repository(tmp_path / "workspace", CHANGE)
+    claude = FakeClaude((event_lines(VALID["stopped"]), 0))
+
+    status, out, err = _printed(capsys, lambda: cli.main(
+        ["start", "plan", CHANGE, "--unattended"], root=root,
+        wrapper=make_wrapper(root, claude)))
+    line = json.loads(out)
+    assert (status, line["outcome"]) == (1, "stopped")
+    assert f"ERROR: {line['reason']}" in err
 
 
 @pytest.mark.parametrize("flag", [["--allow", "Bash(make lock)"], ["--session", "s-1"],

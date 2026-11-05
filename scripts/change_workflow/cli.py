@@ -356,7 +356,9 @@ def _round_view_closed(root: Path) -> None:
 
 
 def _takes(root: Path, step: str, change: str) -> None:
-    """Refuse a change `step` cannot take, as its make target did before it started."""
+    """Refuse a change `step` cannot take, before the step starts: an archived change
+    for a step that takes only an active one, and an active change for one that takes
+    only an archived one."""
     try:
         directory = change_directory(root, change)
     except ChangeNotFound as exc:
@@ -392,7 +394,7 @@ def start(args: argparse.Namespace, root: Path, wrapper: Wrapper, launch: Launch
         command = ["claude", "--model", model.model,
                    *(["--effort", model.effort] if model.effort else []),
                    f"/change-{ORCHESTRATE} {args.change}"]
-        return 0 if launch(command, root) == 0 else 1
+        return _session_status(launch(command, root))
     # The log is the record set format's only authority, so it is marked before the
     # step can record anything, its ledger lines included.
     open_log(log_path(root, args.change), args.change, args.step,
@@ -401,11 +403,28 @@ def start(args: argparse.Namespace, root: Path, wrapper: Wrapper, launch: Launch
         # The skill a step's session opens is named for the step, so an interactive
         # session needs no step table, as no table restricts it.
         prompt = f"/change-{args.step} {args.change}" + (f" {arguments}" if arguments else "")
-        return 0 if launch(["claude", prompt], root) == 0 else 1
+        return _session_status(launch(["claude", prompt], root))
     line = wrapper.run(args.step, args.change, arguments=arguments,
                        sections=expand_sections(args.sections), fresh=args.fresh,
                        granted=split_rules(args.allow),
                        continuing=args.session.strip() or None)
+    return _logged(line)
+
+
+def _session_status(status: int) -> int:
+    """An interactive session's exit as the command's: 0, or 1 naming its status."""
+    if status == 0:
+        return 0
+    print(f"ERROR: the session exited with status {status}", file=sys.stderr)
+    return 1
+
+
+def _logged(line: dict) -> int:
+    """Print the line a run logged on standard output, for a caller to parse, and
+    exit 1 when it stopped, its reason on standard error."""
+    if line["outcome"] == "stopped":
+        print(f"ERROR: {line.get('reason') or line.get('message', 'the run stopped')}",
+              file=sys.stderr)
     print(json.dumps(line, ensure_ascii=False))
     return 1 if line["outcome"] == "stopped" else 0
 
@@ -463,8 +482,8 @@ Delegated = tuple[Callable[..., int], list[str] | None]
 
 
 def delegated(args: argparse.Namespace) -> Delegated | None:
-    """The module command line a subcommand reaches, with the arguments that command
-    line took before the command held it; None for a subcommand this module runs."""
+    """The module command line a subcommand reaches, with the arguments it hands that
+    command line; None for a subcommand this module runs."""
     if args.command == "next":
         return next_step.main, [args.change, *(["--plain"] if args.plain else [])]
     if args.command == "find":
@@ -553,16 +572,12 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
         line = review_and_log(args.change, args.kind, root=wrapper.root, base=args.base,
                               model=args.model or None, effort=args.effort or None,
                               fresh=args.fresh, unvalidated=args.unvalidated)
-        if line["outcome"] == "stopped":
-            print(f"ERROR: {line['reason']}", file=sys.stderr)
-        else:
+        if line["outcome"] != "stopped":
             print(f"Review written to {line['record']}", file=sys.stderr)
-        print(json.dumps(line, ensure_ascii=False))
-        return 1 if line["outcome"] == "stopped" else 0
+        return _logged(line)
     if args.command == "resume":
-        line = wrapper.resume(args.change, args.seq, args.answer, split_rules(args.allow))
-        print(json.dumps(line, ensure_ascii=False))
-        return 1 if line["outcome"] == "stopped" else 0
+        return _logged(wrapper.resume(args.change, args.seq, args.answer,
+                                      split_rules(args.allow)))
     if args.command == "log":
         if args.branch:
             found = branch_decisions(read_log(path), args.branch, args.change)

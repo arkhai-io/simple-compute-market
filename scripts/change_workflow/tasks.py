@@ -11,8 +11,8 @@ recognised `## N.` heading are checked, so a list in another format passes.
 
 Run as `scripts/change-workflow check tasks <change>` (`make check-tasks`) by the
 skills that act on a task list before they do; its check, `task_problems`, is also
-the next-step computation's own backstop where it routes on sections. Prints each problem with its line and
-exits non-zero, or prints OK.
+the next-step computation's own backstop where it routes on sections. Prints each
+problem with its line on standard error and exits 1, or prints OK.
 
 Contract: openspec/specs/change-workflow/spec.md, CW-4rqr and CW-5r7l.
 """
@@ -48,10 +48,11 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
     shown = tasks.relative_to(root).as_posix()
     if problems := task_problems(tasks.read_text("utf-8")):
         for problem in problems:
-            print(f"{shown}:{problem}")
-        print()
-        print("FAIL: a task sits under another section's heading; a heading is missing or")
-        print("the task is misplaced. Nothing that reads the sections can act on it.")
+            print(f"{shown}:{problem}", file=sys.stderr)
+        print(file=sys.stderr)
+        print("FAIL: a task sits under another section's heading; a heading is missing or\n"
+              "the task is misplaced. Nothing that reads the sections can act on it.",
+              file=sys.stderr)
         return 1
     print(f"OK: every numbered task of {shown} sits under its own section's heading.")
     return 0
