@@ -84,6 +84,34 @@ settlement resource is refused as a capacity conflict.
   needs one
 - **THEN** it is admitted as any other matching declaration is
 
+### Requirement: Projected inventory is internally consistent
+
+Projected physical inventory MUST NOT report attribute values that contradict the
+same resource's projected capacity. A projected resource's capacity and its
+descriptive attributes MUST derive from one authoritative record for that resource:
+its capacity declaration, with every declared attribute projected except domain view
+configuration already published as a view. No host inventory record contributes to
+a projected resource's capacity or attributes. A projected resource's `enabled`
+state MAY reflect whether the host its declaration names takes new delivery, as
+"The resource-pool projection is built from capacity declarations and offers only
+a usable host" states. A quantity MUST appear only in the projected capacity, never
+duplicated as an attribute.
+
+#### Scenario: Declared capacity disagrees with a legacy inventory value
+
+- **WHEN** an operator-declared capacity resource reports a different quantity for a
+  dimension than a legacy inventory record holds for the same resource
+- **THEN** the projection reports the declared value in capacity, reports no
+  attribute carrying the same quantity, and never reports the two disagreeing in one
+  projected row
+
+#### Scenario: Categorical hardware identity is projected
+
+- **WHEN** a capacity declaration carries a categorical hardware attribute matched by
+  equality rather than by sufficiency
+- **THEN** the projection reports it as an attribute rather than as a capacity
+  dimension, sourced from the same authoritative record as the capacity
+
 ## REMOVED Requirements
 
 ### Requirement: The resource-pool projection is built from capacity declarations
@@ -112,7 +140,9 @@ usable host as admission judges it, SHALL project as not enabled. That judgement
 SHALL read of hosts only the identifiers of those taking new delivery, as the
 composition supplies them. A declaration in an unbacked pool, or in a pool whose
 provider needs no host, SHALL project its own `enabled` whatever host it names or
-whether it names one.
+whether it names one. A domain publication view SHALL be built from the
+declaration with this projected `enabled` state, so a view that reports
+availability reports a declaration with no usable host as unavailable.
 
 A generic projected entry SHALL NOT carry host connection identity: no host
 identifier, connection address, or tenant-facing address. A domain publication
@@ -159,7 +189,8 @@ host.
 
 #### Scenario: A disabled host is enabled again
 
-- **GIVEN** a declaration projected not enabled because its host was disabled
+- **GIVEN** an enabled declaration projected not enabled because its host was
+  disabled
 - **WHEN** the host is enabled and the projection is produced again
 - **THEN** the entry is projected enabled, with its derivation identity unchanged
 
@@ -167,7 +198,11 @@ host.
 
 The capacity-bucket projection and the advisory snapshot SHALL leave out a
 declaration that the resource-pool projection projects as not enabled for want of
-a usable host, as they leave out a disabled declaration. The administrative
+a usable host, as they leave out a disabled declaration. The site authority SHALL
+state each declaration's offered `enabled` state, its own `enabled` and the
+usable-host rule together, in one read that takes the declarations and the hosts
+taking new delivery in the same transaction, and both projections and the
+snapshot SHALL be built from that read. The administrative
 listing of capacity declarations SHALL report each declaration's own `enabled`
 state, so an operator sees what they declared. A change of a host's enabled state
 or registration SHALL NOT itself record a capacity event or advance the capacity

@@ -88,8 +88,8 @@ to start when the supplied requirement does not name exactly its registered prov
 identities, or when a registered provider declares differently from it.
 
 A composition that supplies a host requirement and registers hosts SHALL also
-supply site admission, settlement scheduling, and the site projections one report
-of the hosts taking new delivery: the identifiers of registered, enabled hosts,
+supply the site authority, for admission and for its projections, and settlement
+scheduling one report of the hosts taking new delivery: the identifiers of registered, enabled hosts,
 read in the caller's session. A lower layer receiving it SHALL NOT import the host
 registry to obtain it.
 
@@ -113,7 +113,7 @@ registry to obtain it.
 #### Scenario: The compute composition reports the hosts taking new delivery
 
 - **WHEN** the compute provisioning composition is built
-- **THEN** site admission, settlement scheduling, and the site projections each
-  receive the same report of hosts taking new delivery, and a host disabled
+- **THEN** the site authority and settlement scheduling each receive the same
+  report of hosts taking new delivery, and a host disabled
   through the host authority is absent from it in the next transaction that reads
   it

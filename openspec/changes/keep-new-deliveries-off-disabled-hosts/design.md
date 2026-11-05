@@ -105,7 +105,9 @@ possible, but the transfer is real only when this change lands.
 The provisioning composition supplies an object the kit layers call inside their
 own transaction to learn which hosts take new delivery (its shape is D6). The
 ledger and the scheduler receive the same object; the scheduler reads it through
-one new operation on its scheduling unit of work.
+one new operation on its scheduling unit of work. The ledger reads it for
+admission and for the offered state every projection is built from (11 F2), so
+no projection builder receives the object itself.
 
 *Rationale.* The fact keeps one authority, the host registry, and is read where it
 is kept, in the transaction that decides, so no disable can commit between the
@@ -194,15 +196,18 @@ would also turn a maintenance window into failed deals for work already placed.
 
 ### D5. Publication follows admission: an undeliverable declaration projects as not enabled
 
-In both projections, and therefore in the bare-metal view's `available`, which
-reads the entry's `enabled`, a declaration without a usable host (D3/D12) projects
-as not enabled. The projected `enabled` thus states whether the site offers the
-declaration: its own `enabled` and a usable host. The projection reads one host
-fact, the deliverable-host set through D2's seam, and still carries no host
-identifier, connection address, or tenant-facing address on a generic entry. The
-operator's own listing (`GET /api/v1/capacity/resources`) keeps each declaration's
-stored `enabled`, and `snapshot()`, the advisory input at negotiation time, follows
-the projection.
+In both projections, and in the bare-metal view's `available`, a declaration
+without a usable host (D3/D12) projects as not enabled. The projected `enabled`
+thus states whether the site offers the declaration: its own `enabled` and a
+usable host. The bare-metal view reads `enabled` from the declaration it is
+handed, not from the projected entry (`inventory_views.py`), so the provisioning
+builder hands it the declaration as the ledger's offered read states it (11 F2);
+the view itself is unchanged. The projection reads one host fact, the
+deliverable-host set through D2's seam, and still carries no host identifier,
+connection address, or tenant-facing address on a generic entry. The operator's
+own listing (`GET /api/v1/capacity/resources`) keeps each declaration's stored
+`enabled`, and `snapshot()`, the advisory input at negotiation time, follows the
+projection.
 
 *Rationale.* A storefront mirrors admission's constraints from its projections only
 to avoid committing to what admission will refuse (`ARCHITECTURE.md`, "Deciding
@@ -248,7 +253,8 @@ def declaration_has_usable_host(
 
 The compute composition implements `DeliverableHosts` over `Host`: the ids of hosts
 whose `enabled` is true, so a host with no record never appears. One set is read
-per transaction.
+per transaction: by admission, by the rebind recheck, by the ledger's offered read
+(11 F2), and by the scheduler.
 
 *Rationale.* Every layer applying the rule already imports `market_resource_pools`
 for the host requirement, so one module states the whole host rule. A set read once
@@ -281,17 +287,18 @@ Each layer applies the rule itself, so none relies on another having refused:
 - the scheduler's candidate filter, on the automatic and explicitly constrained
   paths, before policy selection, rebind, cursor advance, or assignment:
   `NoEligibleSettlementResourceError` (422 `no_eligible_resource`);
-- the provisioning resource-pool projection builder and the ledger's capacity-bucket
-  projection and `snapshot()`: the member is not enabled.
+- the ledger's offered read (11 F2), from which the capacity-bucket projection,
+  `snapshot()`, and the provisioning resource-pool projection builder and the
+  domain views it builds are all produced: the member is not enabled.
 
 The scheduler's existing-assignment path is unchanged (D4), including its refusal
 of an assignment recorded with no host. Dispatch remains the last check.
 
 Admission and scheduling need no backing of their own: a candidate's pool must
-deliver the claim's offering mode, and an unbacked pool delivers nothing. The two
-projection builders resolve backing from the pool's declarations through the
-shared resolver in `kit/resource-pools-contracts`; the provisioning builder already
-holds it in its pool context.
+deliver the claim's offering mode, and an unbacked pool delivers nothing. The
+ledger's offered read resolves backing from the pool's declarations through the
+shared resolver in `kit/resource-pools-contracts`, which the ledger already
+imports for offering modes; no projection builder resolves it for this rule.
 
 *Rejected.* A distinct refusal reason ("host unavailable"): it would change the
 wire and tell a storefront which physical resource backs a claim, which "Capacity
@@ -325,20 +332,60 @@ the remaining reason at closeout, which answers that change's revisit question.
 Disabling a host keeps new deliveries off it: no declaration naming it is admitted,
 placed, or projected enabled. An assignment already made keeps its host, and its
 create waits at dispatch until the host is enabled again. Teardown and operator
-jobs run. Enabling the host offers its declarations again, and their listings
-reopen under their original identities. `physical-provisioning`'s spec states this
+jobs run. Enabling the host lifts only that restriction: its declarations are then
+offered as any other declaration is, subject to their own `enabled`, their pool,
+fit, and availability, and the listings of those offered reopen under their
+original identities (11 F3). `physical-provisioning`'s spec states this
 beside "Jobs are submitted against a registered host"; `site-capacity` and
 `fulfillment` state the rule where admission, projection, and scheduling are
 specified. `storefront-publication` needs no delta: its disabled-source close and
 reopen rules already cover the result.
 
+A host record still contributes nothing to a projected resource's capacity or
+attributes, and is joined to a declaration for its connection only at dispatch;
+what admission, scheduling, and projection learn of hosts is the set of ids taking
+new delivery. `site-capacity`'s "Projected inventory is internally consistent" and
+`physical-provisioning`'s "Host inventory is connection identity" are narrowed to
+say so, since both otherwise forbid any host fact from reaching a projection
+(11 F1).
+
+### 11 F2. The ledger states each declaration's offered state, and every projection reads it
+
+The ledger gains one read returning every declaration with its offered `enabled`:
+its own `enabled` and the usable-host rule (D3/D12), judged with
+`declaration_has_usable_host` against the deliverable-host set and the pool's
+resolved backing, all read in one serialized session. The capacity-bucket
+projection and `snapshot()` are built from it, and the compute service passes it,
+in place of `list_resources()`, as the provisioning resource-pool builder's input,
+so the domain views the builder builds, the bare-metal view's `available` among
+them, receive the offered declaration. The administrative listing keeps
+`list_resources()` and the stored `enabled`.
+
+*Rationale.* Every projection is a view of the ledger's declarations, and the
+ledger already holds the deliverable-host report (D2), the host requirement, and
+the backing resolver it uses for offering modes. One application of the rule, in
+the session that reads the rows it judges, leaves one path to every projection's
+input, so the bare-metal view cannot drift from the capacity-bucket projection,
+and the provisioning builder reads no host.
+
+*Reservation.* The owner would rather a ledger be closer to a raw data structure,
+with projection logic kept apart from it. The existing ledger already mixes the
+two, and settling that is not this change's work.
+
+*Rejected.* Each builder applies the rule: the ledger for the capacity-bucket
+projection and the snapshot, and the provisioning builder by reading the
+deliverable set in its pool-context session and overwriting `enabled` on each
+declaration before building views. It calls the rule from two places and reads
+hosts in a session apart from the declarations, for no gain.
+
 ## Implementation cadence
 
 One implementation round in one session, covering the seam and rule function
-(`kit/resource-pools`), admission, the rebind recheck, the capacity-bucket
-projection and snapshot (`kit/site`), the scheduler filter and its unit-of-work read
-(`kit/fulfillment`), and the compute composition's implementation over `Host`, the
-resource-pool projection builder, and container wiring (`provisioning/compute`),
+(`kit/resource-pools`), admission, the rebind recheck, the ledger's offered read
+and the capacity-bucket projection and snapshot built from it (`kit/site`), the
+scheduler filter and its unit-of-work read (`kit/fulfillment`), and the compute
+composition's implementation over `Host`, the resource-pool projection builder's
+input, and container wiring (`provisioning/compute`),
 with their tests; then closeout. The pieces share one predicate and are meaningful
 only together.
 

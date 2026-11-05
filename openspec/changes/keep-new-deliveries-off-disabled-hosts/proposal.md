@@ -60,9 +60,11 @@ listing with no host, and neither should appear.
 ### Modified Capabilities
 
 - `site-capacity`: admission eligibility of a declaration with no usable host, and
-  the resource-pool projection's `enabled` for it.
+  the projections' `enabled` for it, which projected-inventory consistency now
+  admits.
 - `fulfillment`: scheduling eligibility of the same declaration.
-- `physical-provisioning`: what disabling a host means.
+- `physical-provisioning`: what disabling a host means, and host inventory as
+  connection identity narrowed to admit the ids of hosts taking new delivery.
 
 ### New Capabilities
 
@@ -89,13 +91,15 @@ None.
 
 - `kit/resource-pools`: the deliverable-host seam and the usable-host rule beside
   the host requirement.
-- `kit/site`: admission, the rebind recheck, the capacity-bucket projection, and
-  the advisory snapshot.
+- `kit/site`: admission, the rebind recheck, and one ledger read stating each
+  declaration's offered state, from which the capacity-bucket projection and the
+  advisory snapshot are built.
 - `kit/fulfillment`: the scheduler's candidate filter and one read on its
   scheduling unit of work.
 - `provisioning/compute`: the seam's implementation over the host registry, the
-  resource-pool projection builder, and container wiring.
-- Operator documentation of what disabling a host does.
+  resource-pool projection builder's input, taken from the ledger's offered read,
+  and container wiring.
+- Operator and deployment documentation of what disabling a host does.
 - No wire, persistence, or deployment change.
 
 ## Dependencies and Related Changes
@@ -128,8 +132,10 @@ read a host record's enabled flag" is owned by this change and closes with it.
 | A listing whose delivery has no usable host is the same as a listing with no host, and neither appears; why projected `enabled` follows admission (D5, D12) | `openspec/specs/site-capacity/architecture.md`, "Declared capacity and connection identity" |
 | Host eligibility reaches the kit layers through a composition-supplied seam read in the caller's session, beside the host requirement (D2, D6, D7) | `openspec/specs/site-capacity/architecture.md`; `docs/development/ARCHITECTURE.md`'s resource-pools paragraph on the host requirement, restated to name the usable-host rule |
 | New placement never uses an unusable host; an existing assignment keeps its host (D4) | `openspec/specs/fulfillment/spec.md`, via the delta spec |
-| What disabling a host means (D11) | `openspec/specs/physical-provisioning/spec.md`, via the delta spec; `docs/operator-handbook.md` |
+| What disabling a host means (D11) | `openspec/specs/physical-provisioning/spec.md`, via the delta spec; `docs/operator-handbook.md`, the host-documents bullet "A host the document does not name is left as it is"; `docs/development/DEPLOYMENT_AND_CONFIG.md`, the host retention paragraph |
+| A host record contributes nothing to a projection's capacity or attributes; admission, scheduling, and projection learn only the ids of hosts taking new delivery (D11, 11 F1) | `openspec/specs/site-capacity/spec.md` and `openspec/specs/physical-provisioning/spec.md`, via the delta specs |
+| The ledger states each declaration's offered state in one read, from which every projection and the snapshot are built (11 F2) | `openspec/specs/site-capacity/spec.md`, via the delta spec; `openspec/specs/site-capacity/architecture.md` |
 | A change of host state emits no capacity event (D9) | `openspec/specs/site-capacity/architecture.md` |
-| Host definitions documents keep retaining unnamed hosts, on the remaining reason (D10) | `openspec/specs/physical-provisioning/architecture.md`, its retention paragraph restated |
+| Host definitions documents keep retaining unnamed hosts, on the remaining reason (D10) | `openspec/specs/physical-provisioning/architecture.md`, its retention paragraph restated; `docs/development/DEPLOYMENT_AND_CONFIG.md`'s host retention paragraph restated on the same reason |
 | The gap closes; "Host records are used only where a connection is made" restated | `docs/development/ROADMAP.md` Goal 1 |
 | pools-6 drops its claim to the rule (D1) | `openspec/changes/pools-6-fair-scheduling-policy/` proposal and design, and its row in `openspec/changes/README.md` |
