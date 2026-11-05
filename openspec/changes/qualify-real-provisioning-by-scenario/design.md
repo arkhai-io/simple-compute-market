@@ -191,27 +191,37 @@ This change adds:
   container and sets `SSL_CERT_FILE` to it. The bundle holds the deployment's CA
   plus the public roots; the option names no CA itself.
 
-### P10. A programmable mock dispute authority, as a module of the chart
+### P10. A pinned dispute authority, and no dispute-authority double
 
-Every `arkhai.payments.v1` listing needs an accepted dispute authority, or it
-publishes no payment option. The production mediation authority is another
-service's. The scenarios need one whose responses they program in advance, in the
-style of provisioning's mock mode (owner direction).
+An `arkhai.payments.v1` listing publishes no payment option unless a dispute
+authority advertising the mechanism is accepted, and every mandate names that
+authority's payments account as the one that may stop, reverse and extend the
+payment. That is why these purchases need a dispute authority although the Alkahest
+real-provisioning modules never did: there, the escrow's oracle releases at lease
+end unless a dispute is raised, and no separate authority appears in the Agreement.
 
-The mock is this repository's: the `arkhai.mediation.v1` HTTP double that
-`add-arkhai-payments-lane-double` plans. This change makes it deployable as another
-module of the umbrella chart, a subchart enabled by a condition like the others.
-That change refuses lane fixture identities in production configuration, so this
-module runs with a deployment-supplied identity, record key and origin, and with
-no fixture identity. A scenario programs its responses before a run through the
-double's typed control client. The storefronts accept it through `[[Dispute]]` /
-`[[DisputeCredential]]` entries, and the buyer through its own, both rendered by
-the deployment. It serves HTTPS with the same deployment CA as P9.
+None of observations 2, 4, 5 and 6 exercises a dispute. The deployment therefore
+supplies only what each Agreement pins: an authority identity (interface, origin,
+account and record key) whose account is a real account at the payments target,
+accepted by the storefronts' and the buyer's existing dispute settings. This change
+deploys no dispute authority and builds no double (owner decision). Nothing has to
+answer at the authority's origin for these observations.
 
-The mock's behaviour and its control client come from `add-arkhai-payments-lane-double`.
-That change gates this part of the implementation (index Notes). If its double is
-not ready, the design phase decides whether this change builds the minimal subset
-of the double the purchases exercise.
+The scenarios then account for the authority's absence:
+
+- The buyer's teardown stops the payment, has the surrender acknowledged, and then
+  files a delivery-end case (`kit/deal-lifecycle-buyer/src/market_deal_lifecycle_buyer/ending.py`).
+  With no authority answering, the case outcome is not accepted. The scenario
+  records the case filing as outside its observations, never reads it as delivery,
+  access-end or refund evidence, and does not fail on it.
+- The seller's servicing watch reads the authority's records while a deal is open
+  (`kit/deal-servicing/src/market_deal_servicing/watch.py`). Whether an unanswered
+  authority stalls servicing or the reclaim is not yet established (open question 3).
+
+A hosted deployment with a controllable dispute authority is an unowned gap,
+recorded in `docs/development/ROADMAP.md` Goal 1. `add-arkhai-payments-lane-double`'s
+mediation double serves the local lanes only, and production configuration refuses
+its fixture identities.
 
 ## Open questions
 
@@ -220,6 +230,11 @@ of the double the purchases exercise.
    this a scenario setting, or the listing's own?
 2. **Owners of the missing reads** (P3): provisioning, or another service, for each
    read.
+3. **An unanswered dispute authority** (P10). Does the seller's servicing watch, or
+   anything on the storefronts' teardown and reclaim path, stall or fail when the
+   pinned authority does not answer and no dispute credential is configured? If it
+   does, design picks the smallest remedy, such as tolerating the unanswered read
+   for a deal with no case. A deployed dispute-authority double stays out of scope.
 
 ## Owner answers
 
@@ -238,5 +253,6 @@ of the double the purchases exercise.
 - The kit supports an in-cluster `https://<service>.<namespace>.svc.cluster.local`
   payments origin and keeps requiring HTTPS. The deployment supplies a development
   CA (P9).
-- The dispute authority is a programmable mock, deployed as another module of the
-  chart, since its definition is this repository's (P10).
+- No programmable dispute-authority double this round. The deployment pins an
+  authority identity with a real payments account, and the hosted double is
+  recorded as an unowned gap (P10).
