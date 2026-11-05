@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Compute the next step of an OpenSpec change from its files and workflow log.
 
 The orchestrating session runs whatever this names and never routes on its own
@@ -30,15 +29,16 @@ log, and whether a round view is open, and prints one JSON object:
   map, a validation that did not pass, a prerequisite to land, a failed bootstrap,
   a change whose records are in the workspace but whose branch is not, an exit its
   node does not declare (`choice`, and the node's `exits`), an exit whose target
-  cannot be entered, or a change whose records predate the log's format, with the
-  command that converts them (`convert`); for a waiting run, its `seq` — a question
+  cannot be entered, a change whose records predate the log's format, with the
+  command that converts them (`convert`), or a log line naming a step, node, or kind
+  the graph does not declare; for a waiting run, its `seq` — a question
   or a stop is resumed by it; for a guard on an exit no step can satisfy, the exit
   as `target`;
 - `{"step": "done", …}` for an archived change, or once archive cleanup names it;
 - `{"step": "unclassified", "reason": …, "read": …}` when no rule applies, with
   what it read, for the orchestrating session to work out.
 
-The workflow's graph is the table in `change_workflow/graph.py`: each node's exits,
+The workflow's graph is the table in `graph`: each node's exits,
 the join an exit waits on, the guards on each exit with the step that remedies
 each, and each node's entry guards. This computation reads the route from the log
 — the exit the last step's outcome named, or the owner's latest direction until a
@@ -52,9 +52,13 @@ round's join is read from the records its members supply (`graph.ROUND_JOIN`). A
 review's triage file routes nothing: a review whose triage file exists while no
 triage outcome, and no conversion line, names it is a triage in progress.
 
-Every line the workflow tooling appends to a log carries the log's format marker. A
-change whose log holds a line without it, or that has numbered records and no log,
-is routed on none of them: the owner converts its records first.
+The JSON object printed begins with `format`, the record set's format this computation
+reads (`common.FORMAT`). Every line the workflow tooling appends to a log carries
+it. A change whose log holds a line of an older format — none, or a lower one — or
+that has numbered records and no log, is routed on none of them: the owner converts
+its records first. A log holding a line of a newer format is refused, naming it,
+before anything of it is read. A line naming what the graph does not declare names
+the owner, and nothing is routed on.
 
 The files hold the change's state and the log its route. A status set back by hand
 behind the log's last step is followed: the computation names the node its phase
@@ -71,11 +75,12 @@ and later steps wait for the clone's bootstrap, and the owner reads a round in
 the workspace beside its validation and review, the workspace's view read
 through the clone's `workspace` remote. A task list whose tasks sit under another
 section's heading is not routed on (`task_problems`, which
-`scripts/check_tasks.py` runs for the skills). `--plain` prints the result as
+`tasks` runs for the skills). `--plain` prints the result as
 lines rather than JSON.
 
-Contract: openspec/specs/change-workflow/spec.md, "The next step is computed from
-the files".
+Contract: openspec/specs/change-workflow/spec.md, CW-4rqr, CW-tel3, CW-m70n,
+CW-l866, CW-0wna, CW-8tdv, CW-nkys, CW-izj1, CW-tnp6, CW-4c3e, CW-zcx8, CW-sd34,
+CW-9fbu, CW-x7jd, CW-qj77, CW-v6nj, CW-p7xk, CW-4x66, CW-8npg, and CW-9tzd.
 """
 
 from __future__ import annotations
@@ -88,29 +93,25 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+from . import graph
+from .clone import ABSENT as BOOTSTRAP_ABSENT
+from .clone import DEFAULT_FROM
+from .clone import FAILED as BOOTSTRAP_FAILED
+from .clone import RUNNING as BOOTSTRAP_RUNNING
+from .clone import Bootstrap, bootstrap_state, clone_of, default_branch, workspace_of
+from .common import FORMAT, ORCHESTRATOR, StepError, repository_root
+from .find import ChangeNotFound, change_directory, is_archived
+from .graph import (CLOSEOUT, CLOSEOUT_REVIEW, DESIGN, DONE, IMPLEMENTATION_REVIEW,
+                    IMPLEMENTATION_TRIAGE, MERGE, PHASES, ROUND, ROUND_JOIN, ROUND_VIEW, STEPS,
+                    VALIDATE, Join, Node, Standing, TargetError, entry_refusal, node_of)
+from .graph import owner as _owner
+from .index import INDEX, Row, index_rows
+from .log import (LOG, NewerFormat, branch_decisions, log_path, older, ran, read_log,
+                  refuse_newer, standing, undeclared)
+from .records import (RECORD as _RECORD_FILE, ChangedSince, changed_since, is_documentation, is_record,
+                      latest_validation, validation_problem, validation_result)
+from .round_view import RoundError, View, open_view
 
-from change_clone import (ABSENT as BOOTSTRAP_ABSENT, DEFAULT_FROM,  # noqa: E402
-                          FAILED as BOOTSTRAP_FAILED, RUNNING as BOOTSTRAP_RUNNING, Bootstrap,
-                          bootstrap_state, clone_of, default_branch, workspace_of)
-from check_change_index import _DEPENDENCY, INDEX, Row, index_rows  # noqa: E402
-from find_change import ChangeNotFound, change_directory, is_archived  # noqa: E402
-from round_view import RoundError, View, open_view  # noqa: E402
-from change_workflow import graph  # noqa: E402
-from change_workflow.common import ORCHESTRATOR, STEPS, StepError  # noqa: E402
-from change_workflow.graph import (CLOSEOUT, CLOSEOUT_REVIEW, DESIGN, DONE,  # noqa: E402
-                                   IMPLEMENTATION_REVIEW, IMPLEMENTATION_TRIAGE, MERGE, PHASES,
-                                   ROUND, ROUND_JOIN, ROUND_VIEW, VALIDATE, Join, Node,
-                                   Standing, TargetError, entry_refusal, node_of)
-from change_workflow.graph import owner as _owner  # noqa: E402
-from change_workflow.log import (LOG, branch_decisions, log_path, ran,  # noqa: E402
-                                 read_log, standing, unmarked)
-from change_workflow.records import (ChangedSince, changed_since,  # noqa: E402
-                                     is_documentation, is_record, latest_validation,
-                                     validation_problem, validation_result)
-
-ROOT = Path(__file__).resolve().parents[1]
-_RECORD = re.compile(r"^(?P<number>\d+)-(?P<kind>[a-z-]+)\.md$")
 # A record as a triage's outcome names it, its file's name without `.md`.
 _RECORD_NAME = re.compile(r"^(?P<number>\d+)-(?P<kind>[a-z-]+)$")
 _REVIEWED_COMMIT = re.compile(r"<!-- reviewed-commit: (\S+) -->")
@@ -120,10 +121,12 @@ _SECTION = re.compile(r"^## (?P<id>[0-9]+[A-Za-z]?)\. (?P<title>.+?)\s*$")
 # A task is numbered for its section, `N.m`, when it is numbered at all.
 _TASK = re.compile(r"^\s*- \[(?P<done>[ xX])\] "
                    r"(?P<number>(?P<section>[0-9]+[A-Za-z]?)\.[0-9]+\b)?")
-# Where a log line's step sits among the phases, for comparing with the status.
-_STEP_PHASE = {"design": "design", "plan": "planning", "implement": "implementation",
-               "validate": "implementation", "merge": "implementation", "triage": None,
-               "review": None, "closeout": "closeout", "archive-cleanup": "closeout"}
+# Where a log line's step sits among the phases, for comparing with the status: the
+# earliest phase of the one node that runs it. A review or a triage runs in a node
+# of each kind, across phases, so it has no one phase and is never compared.
+_STEP_PHASE = {step: (runs[0].phases[0] if len(runs) == 1 else None)
+               for step in STEPS
+               for runs in ([d for d in graph.TABLE if d.runs == step],)}
 # The node each phase a status can be set back to starts at, which the status is
 # followed to; no step runs after closeout, so no status is set back behind it.
 _PHASE_START = {"design": DESIGN, "planning": graph.PLAN, "implementation": ROUND}
@@ -132,8 +135,8 @@ _SUPPLIES = {ROUND_VIEW: "implementation-owner", VALIDATE: "validation",
              IMPLEMENTATION_REVIEW: "implementation"}
 # The target a validation in a round's join is given: the round's triage.
 _ROUND_TRIAGE = {"step": IMPLEMENTATION_TRIAGE.step, "kind": IMPLEMENTATION_TRIAGE.kind}
-CONVERT = "python3 scripts/run_change_step.py convert {change}"
-RECORD = "python3 scripts/run_change_step.py record {change} {step} --outcome '<its outcome>'"
+CONVERT = "scripts/change-workflow convert {change}"
+RECORD = "scripts/change-workflow record {change} {step} --outcome '<its outcome>'"
 
 # How the log routes the change (`Route.how`): a step's exit; the owner's direction;
 # a round started, by the line recording it; a directed validation that ran, naming
@@ -290,7 +293,7 @@ class Pass:
 def read_records(reviews: Path) -> list[Record]:
     records = []
     for entry in sorted(reviews.iterdir()) if reviews.is_dir() else []:
-        match = _RECORD.match(entry.name)
+        match = _RECORD_FILE.match(entry.name)
         if match and not entry.name.endswith(".triage.md"):
             records.append(Record(int(match["number"]), match["kind"], entry))
     return sorted(records, key=lambda r: (r.number, r.path.stat().st_mtime))
@@ -611,10 +614,20 @@ class Computation:
             self.read()
         except ChangeNotFound as exc:
             return self.unclassified(str(exc))
+        try:
+            # Before anything is read of the log, a branch decision included: a
+            # later engine's lines may mean what this one cannot tell.
+            refuse_newer(f"{state.change}'s workflow log", state.log)
+        except StepError as exc:
+            return self.unclassified(str(exc))
         if is_archived(self.root, state.directory) and (
                 state.row is None or state.row.status == "archived"):
             return {"step": "done", "reason": "archived" if state.row else
                     "archived, and its index row pruned"}
+        # Before a branch decision is read: no line is routed on past one this
+        # engine cannot read.
+        if unknown := self.undeclared():
+            return unknown
         if located := self.locate():
             return located
         if state.view is not None:
@@ -644,7 +657,12 @@ class Computation:
         progress."""
         try:
             log = read_log(log_path(self.root, self.state.change))
+            refuse_newer(f"{self.state.change}'s workflow log", log)
+        except NewerFormat as exc:
+            return self.unclassified(str(exc))
         except (ChangeNotFound, StepError):
+            return None
+        if self.first_undeclared(log) is not None:
             return None
         decisions = [e for e in log if e.get("outcome") == ORCHESTRATOR]
         last = next((e for e in reversed(log) if e.get("step") in STEPS), None)
@@ -682,8 +700,8 @@ class Computation:
         a return with no target, triage tokens in files — would be read as the new
         format's."""
         state = self.state
-        if (first := unmarked(state.log)) is not None:
-            why = f"its workflow log holds lines without the log's format, from seq " \
+        if (first := older(state.log)) is not None:
+            why = f"its workflow log holds lines of an older format, from seq " \
                   f"{first['seq']}"
         elif not state.log and state.records:
             why = "it has numbered records under reviews/ and no workflow log"
@@ -693,6 +711,26 @@ class Computation:
         return _owner(f"{state.change}'s records are not in the workflow log's format: {why}; "
                       f"the owner converts them, between steps, with `{command}`",
                       convert=command)
+
+    @staticmethod
+    def first_undeclared(log: Sequence[Entry]) -> tuple[Entry, str] | None:
+        """The first line of this format naming a step, node, or kind of review the
+        graph does not declare, and why; a line of an older format is the
+        conversion's to read."""
+        for entry in log:
+            if entry.get("format") == FORMAT and (why := undeclared(entry)):
+                return entry, why
+        return None
+
+    def undeclared(self) -> Result | None:
+        """The owner, naming it, for the first line of the log naming what the graph
+        does not declare; nothing is routed on, since what that line meant, and so
+        every line after it, cannot be read."""
+        if (found := self.first_undeclared(self.state.log)) is None:
+            return None
+        entry, why = found
+        return _owner(f"the line at seq {entry['seq']} names what the workflow graph does not "
+                      f"declare: {why}; no line is routed on until the owner settles it")
 
     # Where the change is worked.
 
@@ -833,18 +871,17 @@ class Computation:
         closeout (`graph.PLANNING_RELEASED`, `graph.IMPLEMENTATION_RELEASED`,
         `graph.CLOSEOUT_RELEASED`), and a dependency gating design, which holds the
         change before its first node."""
-        depends_on = self.state.row.depends_on if self.state.row else None
-        if depends_on in (None, "", "—"):
+        row = self.state.row
+        if row is None or row.depends_on in (None, "", "—"):
             return None
-        for entry in (part.strip() for part in depends_on.split(",")):
-            match = _DEPENDENCY.match(entry)
-            if match is None:
-                return self.unclassified(f"Depends on entry {entry!r} is not a change name "
-                                         "with an optional (phase)")
-            gates = match["phase"] or "implementation"
+        for dependency in row.dependencies:
+            if dependency.name is None:
+                return self.unclassified(f"Depends on entry {dependency.entry!r} is not a "
+                                         "change name with an optional (phase)")
+            gates = dependency.phase or "implementation"
             if gates not in PHASES or PHASES.index(gates) > PHASES.index(phase):
                 continue
-            name = match["name"]
+            name = dependency.name
             try:
                 directory = change_directory(self.root, name)
             except ChangeNotFound:
@@ -1516,16 +1553,28 @@ def plain(result: Result) -> str:
     return "\n".join(f"{key}: {shown[key]}" for key in keys)
 
 
-def main(argv: Sequence[str] | None = None, root: Path = ROOT, **seams: Any) -> int:
+def main(argv: Sequence[str] | None = None, root: Path | None = None, **seams: Any) -> int:
     args = sys.argv[1:] if argv is None else list(argv)
     as_text = "--plain" in args
     args = [arg for arg in args if arg != "--plain"]
     if len(args) != 1:
-        print("usage: change_next_step.py <change> [--plain]", file=sys.stderr)
+        print("usage: next <change> [--plain]", file=sys.stderr)
         return 2
+    try:
+        root = repository_root() if root is None else root
+    except StepError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
     result = compute(root, args[0], **seams)
-    print(plain(result) if as_text else json.dumps(result, ensure_ascii=False, default=str))
-    return 1 if result["step"] == "unclassified" else 0
+    # The data output names the record set's format before anything a runner routes on.
+    print(plain(result) if as_text else json.dumps({"format": FORMAT, **result},
+                                                   ensure_ascii=False, default=str))
+    if result["step"] != "unclassified":
+        return 0
+    # Exit 1 promises its reason on standard error, as every subcommand's refusal
+    # gives it; the result on standard output is the structured form a program reads.
+    print(f"ERROR: {result['reason']}", file=sys.stderr)
+    return 1
 
 
 if __name__ == "__main__":

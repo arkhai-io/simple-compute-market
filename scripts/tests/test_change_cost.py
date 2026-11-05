@@ -2,29 +2,13 @@
 
 from __future__ import annotations
 
-import importlib.util
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
+from change_workflow import cost_report as cost
 from change_workflow.log import log_path, note_round, read_log, record_outcome
-
-SCRIPTS = Path(__file__).resolve().parents[1]
-
-
-def _load(name: str):
-    spec = importlib.util.spec_from_file_location(name, SCRIPTS / f"{name}.py")
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    # Registered before it runs: its dataclasses look their module up by name.
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-cost = _load("change_cost")
 
 CHANGE = "shape-bounds"
 COMMIT = "7f3c6e90"

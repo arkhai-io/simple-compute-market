@@ -2,16 +2,10 @@
 
 from __future__ import annotations
 
-import importlib.util
 import shutil
 from pathlib import Path
 
-_SPEC = importlib.util.spec_from_file_location(
-    "check_agent_skills", Path(__file__).resolve().parents[1] / "check_agent_skills.py"
-)
-assert _SPEC and _SPEC.loader
-checker = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(checker)
+from change_workflow import skills as checker
 
 
 def _repository(tmp_path: Path, *names: str) -> Path:

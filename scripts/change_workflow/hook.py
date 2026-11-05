@@ -1,8 +1,7 @@
-#!/usr/bin/env python3
 """Print what a Claude Code session must re-read after its context is compacted.
 
 Run by the project's `SessionStart` hook for the `compact` source; Claude Code adds
-this script's standard output to the session's context. Compaction keeps a summary
+the hook's standard output to the session's context. Compaction keeps a summary
 of the task but drops the documents `AGENTS.md` requires reading, and guidance
 compliance falls sharply once they are gone. The documents themselves are far
 larger than the 10,000 characters a hook may inject, and a digest of their rules
@@ -19,8 +18,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-INDEX = Path("openspec/changes/README.md")
+from .common import StepError, repository_root
+from .index import INDEX
+
 REQUIRED = (
     "docs/development/ARCHITECTURE.md",
     "docs/development/TESTING.md",
@@ -53,7 +53,7 @@ def _branch(root: Path) -> str:
     return result.stdout.strip() or "(detached HEAD)"
 
 
-def context(root: Path = ROOT) -> str:
+def context(root: Path) -> str:
     index = root / INDEX
     progress = changes_in_progress(index.read_text("utf-8")) if index.is_file() else []
     lines = [
@@ -75,8 +75,13 @@ def context(root: Path = ROOT) -> str:
     return text if len(text) <= LIMIT else text[:LIMIT] + "\n…\n"
 
 
-def main() -> int:
-    sys.stdout.write(context())
+def main(root: Path | None = None) -> int:
+    try:
+        root = repository_root() if root is None else root
+    except StepError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    sys.stdout.write(context(root))
     return 0
 
 

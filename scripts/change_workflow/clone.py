@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Create a change's own clone of the owner's workspace, and read its state.
 
 A change is worked in a clone of the owner's workspace under one sibling
@@ -34,18 +33,19 @@ environment, and a silent retry would hide it.
 
 `remove`, run by the owner in the workspace once the change has merged, deletes
 the clone. It copies the change's history into the workspace first
-(`change_history.py`), then refuses, deleting nothing and naming each problem,
+(`history`), then refuses, deleting nothing and naming each problem,
 unless every file of that history is in the workspace with the clone's contents,
 the branch is merged into `origin`'s `dev`, and the clone holds no commit `origin`
 lacks, no uncommitted change, no stash, and no run in progress: anything else would
 be lost with it.
 
 `clone_of` and `bootstrap_state` are what the next-step computation and the round
-view read; `workspace_of`, which `find_change.py` defines, tells a clone from any
-other checkout. Importing the module does nothing.
+view read; `where` is what `clone where` answers, a usable clone told apart from
+none and from one that cannot be used; `workspace_of`, which `find` defines, tells
+a clone from any other checkout. Importing the module does nothing.
 
-Contract: openspec/specs/change-workflow/spec.md, "Each change is worked in its
-own clone".
+Contract: openspec/specs/change-workflow/spec.md, CW-yib2, CW-8jyb, CW-8npg, and
+CW-xx5f; openspec/specs/market-change-workflow/spec.md, MCW-uqlq.
 """
 
 from __future__ import annotations
@@ -61,11 +61,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Sequence
 
-from change_history import HistoryError, Synced, differences, report, sync
-from change_workflow.running import runs_in_progress
-from find_change import WORKSPACE_REMOTE, workspace_of
+from .common import StepError, repository_root
+from .find import WORKSPACE_REMOTE, workspace_of
+from .history import HistoryError, Synced, differences, report, sync
+from .running import runs_in_progress
 
-ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_FROM = "dev"
 BOOTSTRAP_COMMAND = ("make", "init")
 SETTINGS = Path(".claude/settings.local.json")
@@ -190,6 +190,31 @@ def clone_of(workspace: Path, change: str) -> Path | None:
     branch = _marker(directory).get("branch") or default_branch(change)
     if not _checked_out(directory) or _current_branch(directory) != branch:
         return None
+    return directory
+
+
+def where(workspace: Path, change: str) -> Path | None:
+    """The change's clone of `workspace`, once it is usable: a clone of the workspace,
+    with the change's branch checked out and its bootstrap succeeded. None when no
+    clone directory exists, so the change is worked in place.
+
+    A clone directory that exists but is not usable raises `CloneError`, naming why,
+    so neither a broken clone nor a misspelled name is taken for a change worked in
+    place.
+    """
+    _check_name(change)
+    directory = clone_directory(workspace, change)
+    if not directory.exists():
+        return None
+    if not directory.is_dir() or not _is_clone_of(directory, workspace):
+        raise CloneError(f"{directory} is not a clone of {workspace.resolve()}")
+    branch = _marker(directory).get("branch") or default_branch(change)
+    if not _checked_out(directory) or _current_branch(directory) != branch:
+        raise CloneError(f"{directory} does not have {branch} checked out")
+    bootstrap = bootstrap_state(directory)
+    if bootstrap.state != SUCCEEDED:
+        log = f"; its log is {bootstrap.log}" if bootstrap.log else ""
+        raise CloneError(f"{directory}'s bootstrap is {bootstrap.state}{log}")
     return directory
 
 
@@ -534,7 +559,7 @@ def remove(workspace: Path, change: str) -> Removed:
     return Removed(target, synced)
 
 
-def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
+def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     actions = parser.add_subparsers(dest="action", required=True)
     creating = actions.add_parser("create", help="create or finish a change's clone")
@@ -547,6 +572,11 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
                                   "history is in the workspace")
     removing.add_argument("change")
     args = parser.parse_args(argv)
+    try:
+        root = repository_root() if root is None else root
+    except StepError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 1
     if args.action == "remove":
         try:
             removed = remove(root, args.change)

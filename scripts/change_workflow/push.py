@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Check that HEAD may be pushed unattended to its own branch, and push it.
 
 An unattended push needs a mechanical definition of "the change's own branch".
@@ -12,8 +11,15 @@ The check reports and never repairs: each refused state means something
 unexpected happened, and fixing it automatically would hide that. The push sends
 exactly HEAD and is never forced, so a remote branch that has moved on rejects it.
 
-Contract: openspec/specs/change-workflow/spec.md, "Guarded push of a change
-branch".
+Before either action reports success, the repository's pre-push check, where it
+provides one, reads what the push would send and may refuse it. The check is a
+command the engine runs, never a module it imports, so the engine loads in a
+repository that provides none. It is run as Git runs a pre-push hook: the remote
+as its argument, and one line on standard input naming the branch, `HEAD`, and an
+all-zero remote object, so it reads every commit the remote's refs lack.
+
+Contract: openspec/specs/change-workflow/spec.md, CW-59c7, CW-p7kq;
+openspec/specs/market-change-workflow/spec.md, MCW-farr, MCW-q8vd.
 """
 
 from __future__ import annotations
@@ -25,11 +31,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
-from check_public_content import denylist, reasons, scan
+from .common import StepError, repository_root
 
-ROOT = Path(__file__).resolve().parents[1]
 PROTECTED = ("main", "dev")
 DEFAULT_REMOTE = "origin"
+# The repository's pre-push check, a Python script relative to its root run with the
+# engine's own interpreter, and the arguments before the remote's name. Absent, the
+# repository provides no check.
+PRE_PUSH_CHECK = ("scripts/check_public_content.py", "--pre-push")
+_NO_OBJECT = "0" * 40
 
 
 @dataclass(frozen=True)
@@ -47,7 +57,7 @@ def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True)
 
 
-def check(root: Path = ROOT) -> tuple[PushTarget | None, list[str]]:
+def check(root: Path) -> tuple[PushTarget | None, list[str]]:
     """The push HEAD may receive, or every reason it may not be pushed."""
     problems: list[str] = []
     attached = _git(root, "symbolic-ref", "--quiet", "--short", "HEAD")
@@ -79,10 +89,33 @@ def check(root: Path = ROOT) -> tuple[PushTarget | None, list[str]]:
     return (None if problems else target), problems
 
 
-def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
+def pre_push_findings(root: Path, target: PushTarget) -> list[str]:
+    """Every reason the repository's pre-push check refuses the push, if it has one."""
+    script, *arguments = PRE_PUSH_CHECK
+    if not (root / script).is_file():
+        return []
+    head = _git(root, "rev-parse", "--verify", "HEAD").stdout.strip()
+    ref = f"refs/heads/{target.branch}"
+    result = subprocess.run(
+        [sys.executable, str(root / script), *arguments, target.remote], cwd=root,
+        input=f"{ref} {head} {ref} {_NO_OBJECT}\n", capture_output=True, text=True)
+    if result.returncode == 0:
+        return []
+    # A check may give its reasons on either stream, as a Git hook may.
+    reasons = [line.removeprefix("REFUSED: ")
+               for line in (result.stderr + result.stdout).splitlines() if line.strip()]
+    return reasons or [f"the pre-push check {script} exited with status {result.returncode}"]
+
+
+def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("action", choices=("check", "push"))
     args = parser.parse_args(argv)
+    try:
+        root = repository_root() if root is None else root
+    except StepError as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 1
     target, problems = check(root)
     if problems:
         for problem in problems:
@@ -91,11 +124,7 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
               file=sys.stderr)
         return 1
     assert target is not None
-    try:
-        findings = ["<branch name>: " + r for r in reasons(target.branch, denylist(root))]
-        findings.extend(scan(root, remote=target.remote))
-    except ValueError as exc:
-        findings = [str(exc)]
+    findings = pre_push_findings(root, target)
     if findings:
         for finding in findings:
             print("REFUSED: " + finding, file=sys.stderr)
@@ -105,7 +134,13 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
         print(f"Ready to push {target.branch} to {target.remote} ({upstream}).")
         return 0
     print("+ " + " ".join(target.command()), flush=True)
-    return subprocess.run(target.command(), cwd=root).returncode
+    # Git's own status, which may be any number, becomes a failed push's 1, named on
+    # standard error, since Git or a hook may fail without saying why.
+    status = subprocess.run(target.command(), cwd=root).returncode
+    if status == 0:
+        return 0
+    print(f"ERROR: git push exited with status {status}", file=sys.stderr)
+    return 1
 
 
 if __name__ == "__main__":

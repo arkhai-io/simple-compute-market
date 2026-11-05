@@ -3,6 +3,7 @@ says so in one line when all pass."""
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from typing import Sequence
 
@@ -12,14 +13,20 @@ from check_change import OPENSPEC, checks, main, openspec_command, run_checks
 
 CHANGE = "shape-bounds"
 NAMES = ["comment hygiene", "agent skills", "documentation citations", "task list",
-         "change index", "openspec validate"]
+         "change index", "specification index", "openspec validate"]
+
+
+def _checkout(tmp_path: Path) -> Path:
+    """A Git repository, where the workflow's command finds a change."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    return tmp_path
 
 
 def _change(tmp_path: Path, archived: bool = False) -> Path:
     directory = (tmp_path / "openspec/changes/archive" / f"2026-10-20-{CHANGE}" if archived
                  else tmp_path / "openspec/changes" / CHANGE)
     directory.mkdir(parents=True)
-    return tmp_path
+    return _checkout(tmp_path)
 
 
 class FakeChecks:
@@ -54,6 +61,8 @@ def test_every_check_passing_prints_one_line(tmp_path: Path) -> None:
         ["make", "--no-print-directory", "check-doc-citations", f"CHANGE={CHANGE}"],
         ["make", "--no-print-directory", "check-tasks", f"CHANGE={CHANGE}"],
         ["make", "--no-print-directory", "check-change-index"],
+        # The change named, so its deltas count as the archive will leave them.
+        ["make", "--no-print-directory", "check-spec-index", f"CHANGE={CHANGE}"],
         ["bunx", OPENSPEC, "validate", CHANGE, "--strict"],
     ]
 
@@ -95,10 +104,23 @@ def test_an_unknown_change_is_refused_before_any_check_runs(tmp_path: Path) -> N
     shown: list[str] = []
     runner = FakeChecks()
 
-    assert run_checks("missing", root=tmp_path, runner=runner, echo=shown.append) == 1
+    assert run_checks("missing", root=_checkout(tmp_path), runner=runner,
+                      echo=shown.append) == 1
 
     assert runner.commands == []
-    assert "no change 'missing'" in shown[0]
+    assert shown[0].startswith("ERROR: no change 'missing'")
+
+
+def test_a_directory_outside_any_repository_is_refused_naming_it(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    shown: list[str] = []
+    runner = FakeChecks()
+
+    assert run_checks(CHANGE, root=tmp_path, runner=runner, echo=shown.append) == 1
+
+    assert runner.commands == []
+    assert shown[0].startswith("ERROR: ") and str(tmp_path) in shown[0]
 
 
 def test_the_command_needs_one_change(capsys: pytest.CaptureFixture[str]) -> None:

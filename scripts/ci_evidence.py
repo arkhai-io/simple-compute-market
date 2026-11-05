@@ -34,8 +34,8 @@ runner's error lines instead. Each failure is classed:
   failed; or one side names failing tests where the other names only the same
   step failing.
 
-Contract: openspec/specs/change-workflow/spec.md, "Validation observes a committed
-slice".
+Contract: openspec/specs/change-workflow/spec.md, CW-5h8e;
+openspec/specs/market-change-workflow/spec.md, MCW-3i99, MCW-2lzw, and MCW-3yqn.
 """
 
 from __future__ import annotations

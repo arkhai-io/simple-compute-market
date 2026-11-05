@@ -57,8 +57,9 @@ as it ends, so a part can be watched while it runs, then a summary, which it als
 writes as `summary.json` beside the logs for the validation report. A step's
 result is `passed`, `failed`, or `warning`; a warning does not fail the part.
 
-Contract: openspec/specs/change-workflow/spec.md, "Validation observes a committed
-slice" and "Each Helm validation is isolated in its change's namespace".
+Contract: openspec/specs/change-workflow/spec.md, CW-a7dw, CW-af15, and CW-zkhs;
+openspec/specs/market-change-workflow/spec.md, MCW-v3tf, MCW-qeja, MCW-8h0r,
+MCW-2lzw, MCW-fnuh, MCW-a0hu, MCW-notv, MCW-7bia, MCW-epkd, and MCW-7ts3.
 """
 
 from __future__ import annotations
@@ -80,7 +81,7 @@ from typing import Callable, Sequence
 
 import change_namespace
 import ci_evidence
-from find_change import REVIEWS, ChangeNotFound, change_directory
+from workflow_command import WorkflowRefused, found_change
 
 ROOT = Path(__file__).resolve().parents[1]
 LOG_ROOT = Path(".snapshot/validation")
@@ -344,11 +345,11 @@ def latest_helm_summary(root: Path, change: str) -> tuple[Path | None, str]:
     """The `summary.json` of the latest Helm attempt of the commit the change's latest
     validation record names, or None with why there is none."""
     try:
-        reviews = change_directory(root, change) / REVIEWS
-    except ChangeNotFound as exc:
+        records = found_change(root, change)["records"]
+    except WorkflowRefused as exc:
         raise ValidationError(str(exc)) from exc
     numbered = sorted((int(match[1]), entry) for entry in
-                      (reviews.iterdir() if reviews.is_dir() else [])
+                      ((root / records).iterdir() if records is not None else [])
                       if (match := _RECORD_NUMBER.match(entry.name)))
     if not numbered:
         return None, f"{change} has no validation record"

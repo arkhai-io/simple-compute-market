@@ -2,17 +2,11 @@
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 
 import pytest
 
-_SPEC = importlib.util.spec_from_file_location(
-    "find_change", Path(__file__).resolve().parents[1] / "find_change.py"
-)
-assert _SPEC and _SPEC.loader
-finder = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(finder)
+from change_workflow import find as finder
 
 
 def _tree(root: Path, *directories: str) -> Path:

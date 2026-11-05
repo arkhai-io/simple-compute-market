@@ -780,9 +780,9 @@ test pods.
 
 A change's pre-review validation deploys release 1 into a namespace of the change's
 own, so several changes are validated side by side on one development cluster
-without uninstalling each other's release (the `change-workflow` contract,
-`openspec/specs/change-workflow/spec.md`, "Each Helm validation is isolated in its
-change's namespace").
+without uninstalling each other's release (this repository's part of the change
+workflow, `openspec/specs/market-change-workflow/spec.md`, MCW-fnuh "Each Helm
+validation deploys into its change's namespace under its change's tag").
 
 - **The namespace.** `validate-<change>`, cut to 63 characters with the first eight
   hex digits of the full name's SHA-256 appended when longer

@@ -2,15 +2,9 @@
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 
-_SPEC = importlib.util.spec_from_file_location(
-    "post_compaction_context", Path(__file__).resolve().parents[1] / "post_compaction_context.py"
-)
-assert _SPEC and _SPEC.loader
-hook = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(hook)
+from change_workflow import hook
 
 INDEX = """| Change | Status | Depends on | Notes |
 |---|---|---|---|

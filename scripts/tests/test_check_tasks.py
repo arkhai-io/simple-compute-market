@@ -2,26 +2,12 @@
 
 from __future__ import annotations
 
-import importlib.util
-import sys
 from pathlib import Path
 
 import pytest
 
-SCRIPTS = Path(__file__).resolve().parents[1]
-
-
-def _load(name: str):
-    spec = importlib.util.spec_from_file_location(name, SCRIPTS / f"{name}.py")
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-check = _load("check_tasks")
-nxt = sys.modules["change_next_step"]
+from change_workflow import next_step as nxt
+from change_workflow import tasks as check
 
 CHANGE = "shape-bounds"
 # Joined at run time: this file is scanned for task-number references like any
@@ -94,9 +80,11 @@ def test_the_command_names_each_problem_and_fails(tmp_path: Path,
 
     assert check.main([CHANGE], root=root) == 1
 
-    out = capsys.readouterr().out
-    assert out.startswith(f"openspec/changes/{CHANGE}/{nxt.TASKS_FILE}:line 6: {STRAYED}")
-    assert "FAIL:" in out
+    # A failed check gives its reason on standard error.
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err.startswith(f"openspec/changes/{CHANGE}/{nxt.TASKS_FILE}:line 6: {STRAYED}")
+    assert "FAIL:" in err
 
 
 def test_the_command_passes_a_well_formed_list(tmp_path: Path,
@@ -115,7 +103,8 @@ def test_the_command_refuses_an_unknown_change_and_a_missing_argument(
         tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root = _repository(tmp_path, WELL_FORMED)
 
-    assert check.main(["missing"], root=root) == 2
+    # An unknown change is a refusal; only a malformed argument is a usage error.
+    assert check.main(["missing"], root=root) == 1
     assert "missing" in capsys.readouterr().err
     assert check.main([], root=root) == 2
     assert "usage" in capsys.readouterr().err

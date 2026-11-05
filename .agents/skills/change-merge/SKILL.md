@@ -39,7 +39,7 @@ fails: you hold what each side changed, so you repair what it found
 
 Run interactively, this section does not apply but for the outcome it describes,
 which an interactive run records itself ("Running interactively"). When this skill
-runs through `scripts/run_change_step.py` — `make merge UNATTENDED=1`, or the
+runs through `scripts/change-workflow start --unattended` — `make merge UNATTENDED=1`, or the
 orchestrating session — nobody can answer in the session, and every turn ends with
 an outcome matching `.agents/change-outcome.schema.json`, whose `message` the owner
 reads as written:
@@ -87,7 +87,7 @@ command — no wrapper records the run, so its last act records the outcome it w
 end with unattended:
 
 ```text
-python3 scripts/run_change_step.py record <change> merge --outcome '<the outcome, as JSON>'
+scripts/change-workflow record <change> merge --outcome '<the outcome, as JSON>'
 ```
 
 Record `finished` or `returned`, never a question or a stop, which the owner,
@@ -99,17 +99,17 @@ present, settles in the session. When the owner waived the validation of the mer
 - **Branch.** The checked-out branch is the one this change is worked on. If it
   does not carry the change's latest commits, or its name belongs to another
   change, stop and ask the owner — unless the change's log holds the owner's
-  decision that it runs on this branch (`python3 scripts/run_change_step.py log
-  <change> --branch <branch>` prints it).
+  decision that it runs on this branch (`scripts/change-workflow log <change>
+  --branch <branch>` prints it).
 - **Base.** Your invocation names it. It is not the change's own branch.
-- **Route.** `python3 scripts/change_next_step.py <change>` names `merge`: the
+- **Route.** `scripts/change-workflow next <change>` names `merge`: the
   pre-closeout triage's exit, a failed validation of the merged `HEAD`, or the
   owner's direction. When a merge is in progress it names the owner, `merging`;
   that is yours to continue only when this session started it and is resumed with
   the owner's answer. Otherwise, when it names anything else, stop: its reason says
   what comes first.
-- **Worktree.** It is clean, but for a merge this session started, and `make
-  round-view-closed` passes.
+- **Worktree.** It is clean, but for a merge this session started, and
+  `scripts/change-workflow check round-view` passes.
 - **Repair or merge.** Read the latest validation record in `reviews/`. When it
   names `HEAD` and failed, this run repairs it: go to "Repairing a failed
   validation". Otherwise go on.
@@ -202,7 +202,7 @@ without opening an editor: `git commit -m "<Git's merge subject>" -m "<each
 conflicted file and how it was resolved; each reconciliation and why>"`, the
 subject the first line of `.git/MERGE_MSG`. Without conflicts, the merge concluded
 itself: commit the reconciliations on their own, the message naming the change,
-that they reconcile it with the base, and each fix. Push with `make push-branch`;
+that they reconcile it with the base, and each fix. Push with `scripts/change-workflow push`;
 if it refuses, stop and report its reasons.
 
 ## 7. Choose the exit
@@ -237,14 +237,14 @@ Then:
   Interactively, record it yourself after your outcome:
 
   ```text
-  python3 scripts/run_change_step.py note <change> orchestrator --by owner --decision "closeout without validating the merged HEAD" --reason "<the owner's words>" --resolves <your run's seq> --next closeout
+  scripts/change-workflow note <change> orchestrator --by owner --decision "closeout without validating the merged HEAD" --reason "<the owner's words>" --resolves <your run's seq> --next closeout
   ```
 
 When the exit is closeout and the latest validation passed for `HEAD`, or for an
 ancestor `HEAD` differs from only under `openspec/` and `docs/`, set the change's
 `Status` in `openspec/changes/README.md` to `ready for closeout`, rewrite the row's
 `Notes` in the same edit so nothing in them describes the implementation phase,
-run `make check-change-index`, and commit and push the row. Otherwise leave the
+run `scripts/change-workflow check index`, and commit and push the row. Otherwise leave the
 status: closeout accepts a change still `in implementation` once the computation
 names it.
 

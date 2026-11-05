@@ -18,8 +18,7 @@ from `CHANGE=`; `--image-overlay <path>` also writes the change's overlay there.
 `--images` prints instead every image a change's validation build tags, which
 `make -C helm teardown` removes.
 
-Contract: openspec/specs/change-workflow/spec.md, "Each Helm validation is isolated
-in its change's namespace".
+Contract: openspec/specs/market-change-workflow/spec.md, MCW-fnuh and MCW-7ts3.
 """
 
 from __future__ import annotations

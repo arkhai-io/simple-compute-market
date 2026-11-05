@@ -7,7 +7,7 @@ told from its session's other turns; for a Codex review the tokens it reports.
 conversation file's turns when the run ended, which the session's next run is
 measured against; they are not the run's cost. A resumed session's line also
 records the gap since its last turn (`gap_s`) and whether its first model call
-read the prompt cache (`cache_hit`); `scripts/change_cost.py` reports them.
+read the prompt cache (`cache_hit`); `cost_report` reports them.
 """
 
 from __future__ import annotations
@@ -19,9 +19,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Sequence
 
-from change_workflow.common import STEPS, Entry
-from change_workflow.log import read_log
-from change_workflow.stream import read_transcript
+from .common import Entry
+from .graph import STEPS
+from .log import read_log
+from .stream import read_transcript
 
 
 def run_cost(results: Sequence[dict[str, Any]], before: float | None) -> Entry:

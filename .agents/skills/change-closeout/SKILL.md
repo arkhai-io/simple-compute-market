@@ -28,7 +28,7 @@ validation.
 Run interactively, as most runs are, this section does not apply but for the
 outcome it describes, which an interactive run records itself ("Running
 interactively"); nothing else in the skill changes.
-When this skill runs through `scripts/run_change_step.py` —
+When this skill runs through `scripts/change-workflow start --unattended` —
 `make closeout UNATTENDED=1`, or the orchestrating session — nobody can answer in
 the session, and every turn ends with an outcome matching
 `.agents/change-outcome.schema.json`, whose `message` the owner reads as written:
@@ -72,7 +72,7 @@ the session, and every turn ends with an outcome matching
   confirmation directs the implementation that makes the edit. Before ending,
   commit what closeout has written — the status, the notes, any part done — as one
   work-in-progress commit naming the change and why it returns, and push it with
-  `make push-branch`: no session is left to commit it, and a dirty checkout blocks
+  `scripts/change-workflow push`: no session is left to commit it, and a dirty checkout blocks
   every later step's guarded push. The owner confirms the return, and the step
   their confirmation directs then sets the status. A stop commits nothing: its work waits
   uncommitted for the resumed session, and one stopped because a repository guard
@@ -87,7 +87,7 @@ slash command — no wrapper records the run, so its last act records the outcom
 it would end with unattended, as "Running unattended" gives it:
 
 ```text
-python3 scripts/run_change_step.py record <change> closeout --outcome '<the outcome, as JSON>'
+scripts/change-workflow record <change> closeout --outcome '<the outcome, as JSON>'
 ```
 
 `record` checks the outcome against `.agents/change-outcome.schema.json` and
@@ -108,9 +108,9 @@ names it again, to be resumed, or its outcome recorded with the command above.
   not carry this change's latest commits, or its name belongs to another change,
   stop and ask the owner — unless the change's log holds the owner's decision
   that it runs on this branch: run `git branch --show-current`, then
-  `python3 scripts/run_change_step.py log <change> --branch <that branch>`; a line
+  `scripts/change-workflow log <change> --branch <that branch>`; a line
   it prints is that decision, and the branch is accepted.
-- **Route.** `python3 scripts/change_next_step.py <change>` names `closeout`,
+- **Route.** `scripts/change-workflow next <change>` names `closeout`,
   whatever the status says: the exit of the merge that follows the pre-closeout
   triage, bringing in the branch the change lands on, once a validation cleared the merged `HEAD`, or the owner's
   direction to closeout, which checks no exit guard. A row still `in
@@ -119,7 +119,7 @@ names it again, to be resumed, or its outcome recorded with the command above.
   anything else — the pre-closeout review's triage, the merge, a validation of
   `HEAD`, the owner — stop: the change is not ready, and the computation's reason
   says what comes first.
-- **Where it stopped.** Find the change with `python3 scripts/find_change.py
+- **Where it stopped.** Find the change with `scripts/change-workflow find
   <change>`. When it prints a directory under `openspec/changes/archive/` while the
   row says `in closeout`, an earlier session archived it and stopped: if the
   archive is committed, closeout is finished: say so, end with the finished
@@ -131,7 +131,7 @@ names it again, to be resumed, or its outcome recorded with the command above.
   the headings say. Every task outside the closeout section is checked, or carries
   a note recording its deferral with the owner's word. An unchecked task with
   neither is unfinished implementation: stop and say which.
-- **Worktree.** It is clean, and `make round-view-closed` passes.
+- **Worktree.** It is clean, and `scripts/change-workflow check round-view` passes.
 
 If any check fails, stop and say why. Otherwise set the row's status to
 `in closeout`, rewriting its `Notes` in the same edit so nothing in it still
@@ -150,11 +150,12 @@ Read in full, even if you believe you know it:
 - The pre-closeout review and its triage, and the latest validation record: their
   dispositions may have added to the closeout task.
 - For every capability the change touches: `openspec/specs/<capability>/spec.md`
-  and its `architecture.md` companion when one exists.
+  and its companion when one exists — `README.md` where the capability has an
+  `index.md`, which you read too, and `architecture.md` elsewhere.
 - The change's row, campaign, and every row that lists it in `Depends on`, in
   `openspec/changes/README.md`.
 - Another change's records, where the closeout's evidence or promotion rests on
-  them, wherever `python3 scripts/find_change.py --records <change>` says they are:
+  them, wherever `scripts/change-workflow find --records <change>` says they are:
   this checkout, or, from a change's clone, the owner's workspace, which holds the
   history of every cleaned-up change.
 
@@ -189,7 +190,7 @@ list its parts in another order; work in this order, and note it on the section.
   the closeout review's triage advances it
   (`openspec/README.md#plan-closeout-requirements` part 6). The
   status stays `in closeout`: archive cleanup writes `archived`. Run
-  `make check-change-index` after the edit.
+  `scripts/change-workflow check index` after the edit.
 - **Packaging.** Run `make check-packaging`, then `make check-architecture-change
   CHANGE=<change>`, and `make check-agent-skills` when the change touched
   `.agents/`, `.claude/`, or `.codex/`. A failure that needs a code or lock change
@@ -214,12 +215,22 @@ decided. Never settle it yourself.
 ## 4. Promote, check, then archive
 
 **Promotion.** Write every permanent document the closeout section names:
-architecture companions, `ARCHITECTURE.md`, the other documents under `docs/`,
+companions — a capability's `README.md` where it has an `index.md`, its
+`architecture.md` elsewhere — `ARCHITECTURE.md`, the other documents under `docs/`,
 `openspec/specs/README.md`, and any `spec.md` content the deltas do not carry.
 Describe the system as it is now, never the change that made it so. Complete the
 design-promotion record in `design.md`: every accepted decision and its permanent
 location, as a heading anchor where one exists. A `spec.md` the change's deltas
 cover is written by the archive, not by hand; the record names it all the same.
+
+In a capability organized by an `index.md`
+(`openspec/README.md#capability-documentation-pattern`), promotion also writes the
+index before the archive merges the deltas: an entry for each id the change's deltas
+add — its link to the requirement's heading in `spec.md` and its summary line, under
+the part and group it belongs to — and, for each requirement the deltas remove, its
+id moved to the retired ids with where its rule went. `make check-change` runs the
+index check with the change's deltas counted, so an id a delta adds is accepted
+before the archive puts it in `spec.md`.
 
 **Checks against the promoted state.** Now that every document the change cites
 exists:
@@ -249,7 +260,7 @@ part is checked first.
    it did not touch changed. A wrong merge is fixed in the permanent spec now,
    before the review reads it.
 4. Point the change's row in `openspec/changes/README.md` at the directory
-   `python3 scripts/find_change.py <change>` now prints, and update any other link
+   `scripts/change-workflow find <change>` now prints, and update any other link
    to the change's directory in the index.
 5. Run `make check-change CHANGE=<change>`, which for an archived change runs
    `openspec validate --specs --strict` with the pinned validator, and checks the
@@ -263,8 +274,8 @@ not closeout's to make, stop and tell the owner.
 Commit the closeout as one commit: the permanent documents, the archived change
 with its `tasks.md` and promotion record, the merged specifications, and the index.
 The message names the change and says it is closed out and archived. Then push it
-with `make push-branch`, the guarded push of exactly `HEAD`; if it refuses, stop
-and report its reasons. The closeout review reads the commit locally.
+with `scripts/change-workflow push`, the guarded push of exactly `HEAD`; if it
+refuses, stop and report its reasons. The closeout review reads the commit locally.
 
 ## 6. Report
 

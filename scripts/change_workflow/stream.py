@@ -21,7 +21,7 @@ from datetime import timezone
 from pathlib import Path
 from typing import Any, Callable, TextIO
 
-from change_workflow.common import Clock, utc_now
+from .common import Clock, utc_now
 
 
 def tool_summary(tool: dict[str, Any]) -> str:

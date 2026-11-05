@@ -37,8 +37,8 @@ part needs the clone's environments; its change is read from where it stands. Ea
 run's output is kept as `<change>.log`, with `report.json` beside it, under
 `.snapshot/parallel-validation/<time>/` in the checkout this runs from.
 
-Contract: openspec/specs/change-workflow/spec.md, "Each Helm validation is isolated
-in its change's namespace", scenario "Two changes are validated at once".
+Contract: openspec/specs/market-change-workflow/spec.md, MCW-fnuh, scenario "Two
+changes are validated at once".
 """
 
 from __future__ import annotations
@@ -55,8 +55,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Protocol, Sequence
 
-import change_clone
 import change_namespace
+from workflow_command import WorkflowRefused, clone_where
 
 ROOT = Path(__file__).resolve().parents[1]
 LOG_ROOT = Path(".snapshot/parallel-validation")
@@ -184,19 +184,19 @@ def change_of(clone: Path) -> str:
     """The change `clone` was made for, once it holds that change's branch and its
     bootstrap has succeeded."""
     clone = clone.resolve()
-    workspace = change_clone.workspace_of(clone)
-    if workspace is None:
-        raise CheckError(f"{clone} is not a change's clone: no `workspace` remote of it "
-                         "names a directory")
     change = clone.name
-    if change_clone.clone_of(workspace, change) != clone:
-        raise CheckError(f"{clone} is not {workspace}'s clone of {change} with that "
-                         "change's branch checked out")
-    bootstrap = change_clone.bootstrap_state(clone)
-    if bootstrap.state != change_clone.SUCCEEDED:
-        log = f"; its log is {bootstrap.log}" if bootstrap.log else ""
-        raise CheckError(f"{clone}'s bootstrap is {bootstrap.state}{log}: the Helm part "
-                         "needs the clone's environments, which `make change-clone` builds")
+    # Asked from inside the clone, the workflow looks for the change's clone beside
+    # the workspace the clone's `workspace` remote names, and refuses one whose branch
+    # is not checked out or whose bootstrap has not succeeded; no clone found means
+    # the directory is no change's clone.
+    try:
+        found = clone_where(clone, change)
+    except WorkflowRefused as exc:
+        raise CheckError(f"{clone} is not a change's clone the workflow can use: "
+                         f"{exc}") from exc
+    if found is None or found.resolve() != clone:
+        raise CheckError(f"{clone} is not a change's clone: the workflow finds no clone of "
+                         f"{change} at it")
     return change
 
 
@@ -577,7 +577,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         check = ParallelValidation(args.clones, context=args.context or DEFAULT_HELM_CONTEXT)
-    except (CheckError, change_clone.CloneError, ValueError, OSError) as exc:
+    except (CheckError, ValueError, OSError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
     report = check.run()

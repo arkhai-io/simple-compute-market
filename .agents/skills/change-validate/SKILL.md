@@ -30,7 +30,7 @@ images, and nothing else should be building in your checkout while you run.
 Run interactively, as most runs are, this section does not apply but for the
 outcome it describes, which an interactive run records itself ("Running
 interactively"); nothing else in the skill changes.
-When this skill runs through `scripts/run_change_step.py` —
+When this skill runs through `scripts/change-workflow start --unattended` —
 `make validate UNATTENDED=1`, or the orchestrating session — nobody can answer in
 the session, and every turn ends with an outcome matching
 `.agents/change-outcome.schema.json`, whose `message` the owner reads as written:
@@ -89,7 +89,7 @@ it would end with unattended, as "Running unattended" gives it, its `next` the
 target step 1 read:
 
 ```text
-python3 scripts/run_change_step.py record <change> validate --outcome '<the outcome, as JSON>'
+scripts/change-workflow record <change> validate --outcome '<the outcome, as JSON>'
 ```
 
 `record` checks the outcome against `.agents/change-outcome.schema.json` and
@@ -108,10 +108,11 @@ names it again, saying to resume the session or record its outcome.
 
 ## 1. Check that this commit may be validated
 
-`make validate` refuses while a round view is open in this checkout (`make
-round-view` of a change worked in the owner's workspace): the branch then points
-at the round's base, not its commit. If you were started some other way, `make
-round-view-closed` says the same; stop and ask the owner to run `make round-done`.
+`scripts/change-workflow start validate` refuses while a round view is open in this
+checkout (`make round-view` of a change worked in the owner's workspace): the
+branch then points at the round's base, not its commit. If you were started some
+other way, `scripts/change-workflow check round-view` says the same; stop and ask
+the owner to run `make round-done`.
 A view the owner opens in their workspace for a change worked in its own clone
 moves nothing here, and validation runs beside it.
 
@@ -125,14 +126,14 @@ moves nothing here, and validation runs beside it.
   branch belongs to another change, stop and ask the owner — unless the change's
   log holds the owner's decision that it runs on this branch: run
   `git branch --show-current`, then
-  `python3 scripts/run_change_step.py log <change> --branch <that branch>`; a line
+  `scripts/change-workflow log <change> --branch <that branch>`; a line
   it prints is that decision, and the branch is accepted.
 - **Worktree.** `git status --porcelain --untracked-files=all` is empty. Ignored
   files do not count.
 - **Commit.** Record `git rev-parse HEAD` and the branch. Every part below describes
   that commit; if `HEAD` moves while you work, stop: the evidence no longer belongs
   to one commit.
-- **Target.** Run `python3 scripts/change_next_step.py <change>` and record the
+- **Target.** Run `scripts/change-workflow next <change>` and record the
   `target` its result carries: the round's triage, `{"step": "triage", "kind":
   "implementation"}`, when it names `validate` or `validate-and-review` in a
   round's join; the exit whose guard this validation remedies, such as `{"step":
@@ -164,7 +165,7 @@ moves nothing here, and validation runs beside it.
 The pipeline is by far the slowest part, so it runs while everything else does:
 
 1. `gh auth status` — without it the dispatch fails after the push.
-2. `make push-branch` — the guarded push of exactly `HEAD`, never forced. If it
+2. `scripts/change-workflow push` — the guarded push of exactly `HEAD`, never forced. If it
    refuses, stop and report its reasons.
 3. Record the newest end-to-end run ID —
    `gh run list --workflow e2e.yml --limit 1 --json databaseId --jq '.[0].databaseId'`
@@ -403,7 +404,7 @@ that a green pipeline is not evidence for this change.
 ## 7. Write the validation record
 
 Write `reviews/NN-validation.md` in the change's directory — what
-`python3 scripts/find_change.py <change>` prints, under the archive once closeout
+`scripts/change-workflow find <change>` prints, under the archive once closeout
 has archived the change — numbered after every
 file in `reviews/` and `reviews/transcripts/` at the moment you write it — a review
 started beside this validation may have taken a number since you began. Never
