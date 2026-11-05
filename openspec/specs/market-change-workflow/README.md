@@ -16,9 +16,13 @@ validation's parts are the repository's (CW-zkhs); the push refuses the reposito
 protected branches (CW-59c7) and runs its pre-push check where it provides one
 (CW-p7kq); a repository may forbid models (CW-zq4h); the clone's bootstrap is the
 repository's (CW-8npg) — and this capability states what this repository adds. It is
-the shape every adopting repository's own capability will have: the workflow ships
-no repository's values, and a repository's values never need to be read out of the
-workflow's rules.
+the shape every adopting repository's own capability will have: the workflow's rules
+hold no repository's values, so a repository's values never need to be read out of
+them. The engine does not yet match: it still holds several of this repository's
+values as constants — the protected branches, the remote, the pre-push check, the
+branch a clone starts from and a review reads against, and the bootstrap command among
+them — as [the engine's own assumptions](#the-engines-own-assumptions) list and
+`change-workflow`'s [current limits](../change-workflow/README.md#current-limits) say.
 
 ## Validation's parts
 

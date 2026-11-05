@@ -129,6 +129,40 @@ def test_an_id_only_a_changes_added_delta_holds_is_accepted_from_it(tmp_path: Pa
                for problem in problems(tmp_path))
 
 
+def test_a_capability_the_change_creates_resolves_against_its_delta(tmp_path: Path) -> None:
+    # Before the archive writes it, the new capability has its index but no spec.md.
+    capability = tmp_path / "openspec/specs/example-flow"
+    capability.mkdir(parents=True)
+    (capability / "index.md").write_text(INDEX, "utf-8")
+    _delta(tmp_path, "## ADDED Requirements\n\n" + SPEC.split("## Requirements\n\n", 1)[1])
+
+    assert problems(tmp_path, CHANGE) == []
+    # Without the change named, nothing holds the ids, and spec.md is missing.
+    assert any("its file spec.md does not exist" in problem for problem in problems(tmp_path))
+
+
+def test_a_missing_spec_a_delta_adds_nothing_to_is_still_missing(tmp_path: Path) -> None:
+    capability = tmp_path / "openspec/specs/example-flow"
+    capability.mkdir(parents=True)
+    (capability / "index.md").write_text(INDEX, "utf-8")
+    _delta(tmp_path, "## REMOVED Requirements\n\n### Requirement: EF-zz00 Gone\n\n"
+                     "**Reason**: gone.\n")
+
+    assert any("its file spec.md does not exist" in problem
+               for problem in problems(tmp_path, CHANGE))
+
+
+def test_a_link_to_a_heading_a_new_capabilitys_delta_lacks_does_not_resolve(
+        tmp_path: Path) -> None:
+    capability = tmp_path / "openspec/specs/example-flow"
+    capability.mkdir(parents=True)
+    (capability / "index.md").write_text(INDEX + "\n[x](spec.md#not-a-heading)\n", "utf-8")
+    _delta(tmp_path, "## ADDED Requirements\n\n" + SPEC.split("## Requirements\n\n", 1)[1])
+
+    assert any("spec.md has no heading #not-a-heading" in problem
+               for problem in problems(tmp_path, CHANGE))
+
+
 def test_a_requirement_the_changes_delta_removes_is_held_to_nothing(tmp_path: Path) -> None:
     # Before the archive, the specification still holds a requirement the change
     # removes, here one written before the capability had ids.

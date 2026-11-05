@@ -857,9 +857,27 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
       check-change`, also failed only on that capability's links to the same
       missing file, because it looks for the linked file before it reads a
       change's deltas, so it cannot accept a capability whose `spec.md` the
-      change itself creates. That is a limit of the check, not of the index, and
-      the archived run (11.11) settles it. `npx --yes @fission-ai/openspec@1.14.0
-      validate specify-change-workflow-and-engine --strict`: valid.
+      change itself creates. The archived run (11.11) passed both. `npx --yes
+      @fission-ai/openspec@1.14.0 validate specify-change-workflow-and-engine
+      --strict`: valid.
+      Closeout review 80 F2 found that part 10 was ticked on those failures and that
+      the next new indexed capability would meet them; both checks were corrected
+      after the archive, on the owner's direction. `scripts/check_spec_index.py`
+      resolves a new capability's links to `spec.md` against the change's deltas
+      when `spec.md` does not yet exist, and `scripts/check_doc_citations.py`,
+      scoped to an active change, resolves a citation of
+      `openspec/specs/<capability>/spec.md` the change's own delta creates. Unit
+      tests in `scripts/tests/test_check_spec_index.py` and
+      `scripts/tests/test_check_doc_citations.py` cover both, and the archived
+      change's own run is unchanged. Evidence: the scripts suite (unit, `make
+      test-release-tooling`) 2166 passed; `make test` passed; `make
+      check-packaging` passed; `make check-change` passed. The fresh-context check
+      found no defect; the two tests it asked for were added: a remove-only delta
+      still leaves a missing `spec.md` missing, and a change's delta exempts only
+      the `spec.md` it creates. Declined: the unscoped citation check still
+      reports such a citation, since that view holds permanent documents to what
+      exists; and the rules' `origin` (CW-8jyb, CW-xx5f) names the workspace's own
+      remote by Git's convention, not one of this repository's values.
 - [x] 11.11 Archival: `openspec archive specify-change-workflow-and-engine -y`,
       merging the deltas into `change-workflow`, the new `market-change-workflow`,
       and `planning-governance`; where the archive writes a placeholder Purpose for

@@ -97,6 +97,23 @@ def test_a_cited_agents_path_must_resolve(tmp_path: Path) -> None:
         ".agents/gone.json"]
 
 
+def test_an_active_change_citing_a_spec_its_delta_creates_resolves(tmp_path: Path) -> None:
+    change = tmp_path / "openspec/changes/shape-bounds"
+    (change / "specs/new-flow").mkdir(parents=True)
+    (change / "specs/new-flow/spec.md").write_text("## ADDED Requirements\n", "utf-8")
+    (change / "why.md").write_text(
+        "writes openspec/specs/new-flow/spec.md, not openspec/specs/new-flow/README.md"
+        " or openspec/specs/other-flow/spec.md\n",
+        "utf-8")
+
+    assert [cited for _, cited, _ in checker.unresolvable(tmp_path, "shape-bounds")] == [
+        "openspec/specs/new-flow/README.md", "openspec/specs/other-flow/spec.md"]
+    # The repository-wide view holds every document, permanent ones among them, to
+    # what exists.
+    assert "openspec/specs/new-flow/spec.md" in [
+        cited for _, cited, _ in checker.unresolvable(tmp_path)]
+
+
 def test_an_active_change_citing_its_own_path_must_resolve_as_written(tmp_path: Path) -> None:
     change = tmp_path / "openspec/changes/shape-bounds"
     change.mkdir(parents=True)

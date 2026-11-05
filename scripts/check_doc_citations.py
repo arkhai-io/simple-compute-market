@@ -21,7 +21,10 @@ archived, and their citations are allowed to have moved on. Scoped to one
 change by name, the check finds it active or archived, since closeout archives
 a change before its review; once it is archived, a citation of the change's own
 unarchived path resolves against its archive directory, so the archive move
-itself is never reported. A change's `reviews/` are excluded too:
+itself is never reported. Before it is archived, a citation of a capability's
+`spec.md` that the change's own delta creates resolves, since closeout checks
+citations before the archive writes that file from the delta. A change's
+`reviews/` are excluded too:
 review records are untracked working notes, never part of the branch, so a
 citation in one is not a citation the branch makes.
 """
@@ -97,16 +100,26 @@ def documents(root: Path, change: str | None = None) -> list[Path]:
     return found
 
 
+def _created_specs(directory: Path) -> set[str]:
+    """Each capability's `spec.md`, as cited, that an active change's deltas write
+    when the change is archived."""
+    return {f"openspec/specs/{delta.parent.name}/spec.md"
+            for delta in directory.glob("specs/*/spec.md")}
+
+
 def unresolvable(
     root: Path, change: str | None = None
 ) -> list[tuple[str, str, str]]:
     """Every citation that is absent or points at a tombstone."""
 
     own: tuple[str, Path] | None = None
+    created: set[str] = set()
     if change is not None:
         found = _found(root, change)
         if found["archived"]:
             own = (f"openspec/changes/{change}/", root / found["directory"])
+        else:
+            created = _created_specs(root / found["directory"])
     problems: list[tuple[str, str, str]] = []
     for document in documents(root, change):
         text = document.read_text(encoding="utf-8", errors="ignore")
@@ -115,7 +128,8 @@ def unresolvable(
             if own and cited.startswith(own[0]):
                 target = own[1] / cited[len(own[0]):]
             if not target.exists():
-                problems.append(("absent", cited, document.as_posix()))
+                if cited not in created:
+                    problems.append(("absent", cited, document.as_posix()))
             elif target.is_file() and is_tombstone(target):
                 problems.append(("tombstone", cited, document.as_posix()))
     return problems

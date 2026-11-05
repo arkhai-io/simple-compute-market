@@ -20,7 +20,9 @@ not checked.
 Closeout writes `index.md` before the archive merges the change's deltas into
 `spec.md`, so with a change named its deltas count as the archive will leave them:
 an id its deltas add or rename to is in the specification, its headings resolve,
-and a requirement its deltas remove or rename from is gone.
+and a requirement its deltas remove or rename from is gone. A capability the change
+creates has no `spec.md` before the archive; its links to `spec.md` resolve against
+the deltas alone.
 
 Usage: `make check-spec-index [CHANGE=<change>]`.
 """
@@ -157,17 +159,21 @@ def _link_problem(capability: Path, target: str, deltas: Deltas) -> str | None:
     """Why a link in `index.md` does not resolve; None when it does. A URL, a link
     with a scheme, is not followed. A heading of `spec.md` is read as the deltas
     will leave it: the headings they add or rename to resolve, and those they
-    remove or rename from do not."""
+    remove or rename from do not, whether or not `spec.md` exists yet."""
     if re.match(r"^[a-z][a-z0-9+.-]*:", target):
         return None
     path, _, fragment = target.partition("#")
     file = (capability / path).resolve() if path else capability / INDEX
-    if not file.exists():
+    is_spec = file == (capability / SPEC).resolve()
+    # A capability new with the change has no spec.md until the archive writes it
+    # from the deltas, so its links resolve against what the deltas add.
+    if not file.exists() and not (is_spec and deltas.present):
         return f"its file {path} does not exist"
     if not fragment or file.is_dir():
         return None
-    known = anchors(file.read_text("utf-8")) if file.suffix == ".md" else set()
-    if file == (capability / SPEC).resolve():
+    known = anchors(file.read_text("utf-8")) if file.suffix == ".md" and file.exists() \
+        else set()
+    if is_spec:
         known = (known - {_requirement_anchor(name) for name in deltas.removed}) | {
             _requirement_anchor(name) for name in deltas.present}
     return None if fragment in known else f"{file.name} has no heading #{fragment}"
