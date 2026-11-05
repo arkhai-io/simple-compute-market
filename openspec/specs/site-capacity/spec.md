@@ -1102,8 +1102,8 @@ snapshot SHALL be built from that read. The administrative
 listing of capacity declarations SHALL report each declaration's own `enabled`
 state, so an operator sees what they declared. A change of a host's enabled state
 or registration SHALL NOT itself record a capacity event or advance the capacity
-version; each projection's revision and digest SHALL advance when it is next
-produced.
+version; a projection whose contents the change alters SHALL advance its
+revision and digest when it is next produced.
 
 #### Scenario: A host is disabled
 
