@@ -4,7 +4,7 @@
   "files": {
     "mediation.schema.json": {
       "source": "schema/mediation.schema.json",
-      "sha256": "f4923db68ba7e26bd5759a40ce7afae35eb61a62bbec4d199802a48adb3755fe"
+      "sha256": "ae12438e8ad8a608b56c17bc55c4b53594012914304f39a7d05f2daef566b2c4"
     },
     "mediation.vectors.json": {
       "source": "test-vectors/mediation.json",
