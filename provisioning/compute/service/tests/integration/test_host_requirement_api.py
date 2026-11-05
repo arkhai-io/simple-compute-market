@@ -98,8 +98,11 @@ async def test_placing_a_declaration_naming_no_host_is_refused_before_any_effect
     assert not_scheduled.value.status_code == 404
     # ...no execution was reached, and the hold stayed where admission put it.
     fake_ansible.start_playbook.assert_not_called()
+    # Read from the operator's listing: the snapshot offers only declarations
+    # with a usable host, and leaves out the one naming none.
     available = {
-        row["resource_id"]: row["available_units"] for row in await site.snapshot()
+        row["resource_id"]: row["available_units"]
+        for row in await admin.list_resources()
     }
     assert available == {"hosted": 3, "no-host": 4}
 

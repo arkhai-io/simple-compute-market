@@ -72,7 +72,7 @@ projection is built from capacity declarations and offers only a usable host",
 "Every capacity surface offers only a declaration with a usable host"). Touches
 `kit/site` only.
 
-- [ ] 2.1 `CapacityLedgerService.__init__` (`kit/site/src/market_site/ledger.py`)
+- [x] 2.1 `CapacityLedgerService.__init__` (`kit/site/src/market_site/ledger.py`)
   accepts `deliverable_hosts: DeliverableHosts | None = None` beside
   `host_requirement`, documented in its docstring as D2 and D7 state.
   `_find_candidate` (probe, reserve, resize) reads the deliverable set once per
@@ -83,11 +83,19 @@ projection is built from capacity declarations and offers only a usable host",
   candidate does not match, so the claim falls through or receives the ordinary
   no-capacity answer. Rewrite the comment at the existing check to state the
   generalised invariant. Verify with 2.4.
-- [ ] 2.2 `assign_settlement_resource_in_session` applies the same rule to its
+  *Done:* the per-pool cache now holds the pool's provider (the rule needs
+  the host too, so caching the pool's bool would restate the rule beside the
+  function). `_pool_needs_host` is replaced by `_pool_provider` and
+  `_deliverable_host_ids`, shared by 2.1–2.3; admission and the rebind read
+  only the provider, never the backing (D8).
+- [x] 2.2 `assign_settlement_resource_in_session` applies the same rule to its
   destination, read in the caller's session, refusing with
   `CapacityConflictError` as its host-requirement check does (D8). Verify with
   2.4.
-- [ ] 2.3 Add the offered read (11 F2): one method, `list_offered_resources()`,
+  *Done:* the message names why — "names no host", or "names host X, which is
+  not taking new delivery"; it is internal to scheduling's transaction and
+  never reaches a storefront.
+- [x] 2.3 Add the offered read (11 F2): one method, `list_offered_resources()`,
   returning `list_resources()`'s payload for every declaration with `enabled`
   replaced by its offered state — the declaration's own `enabled` and
   `declaration_has_usable_host`, judged with the pool's provider, the pool's
@@ -100,7 +108,24 @@ projection is built from capacity declarations and offers only a usable host",
   `list_resources()`, which the administrative `GET /capacity/resources` serves,
   keeps the stored `enabled`. Nothing here records a capacity event or advances
   the capacity version (D9). Verify with 2.4 and 2.5.
-- [ ] 2.4 Library integration (`kit/site/tests/integration/test_ledger_host_requirement.py`,
+  *Done:* `SiteProjectionService`'s default `resource_inventory` is the
+  offered read too, so a composition that supplies none (API credits) builds
+  its resource-pool projection from it; with no host requirement the offered
+  read equals `list_resources()`, and the read skips the pool and report reads
+  entirely. The resolved `CapacityBacking` decides whether the host rule is
+  consulted through `judge`, the rule as its availability step (it bounds
+  only admitted supply), so `declaration_has_usable_host` is called with
+  `backed=True` there: the delegate exposes no flag and callers are not to
+  compare its label. A missing or unresolvable pool resolves to `BACKED`.
+  *Tension to note for review:* `ARCHITECTURE.md` ("Kit areas") asks that no
+  new site read of pool state be added while the ledger's pool-authority edge
+  stands; the backing read in the offered read is one, prescribed by 11 F2 and
+  D8, from the same `ResourcePool` row the ledger already reads for provider
+  and modes. *Beyond the plan:* `arkhai-kit-site` takes a minor
+  bump to 0.13.0 (new constructor parameter and method), raising its bounds to
+  `arkhai-kit-resource-pools>=0.9.0` and
+  `arkhai-kit-resource-pools-contracts>=0.3.0`; locks refreshed.
+- [x] 2.4 Library integration (`kit/site/tests/integration/test_ledger_host_requirement.py`,
   with a fake `DeliverableHosts` over a fixed set): probe, reserve, and resize
   refuse a declaration naming a disabled host and one naming an unregistered
   host, falling through to a declaration with a usable host; a host returned to
@@ -112,12 +137,45 @@ projection is built from capacity declarations and offers only a usable host",
   offered read and the snapshot report a declaration with no usable host as not
   enabled, `list_resources()` reports its stored `enabled`, and the capacity
   version is unchanged.
-- [ ] 2.5 Unit (`kit/site/tests/unit/test_projections.py`): the capacity-bucket
+  *Done:* library integration — the real ledger on in-memory SQLite with a
+  fake report over a mutable set — 29 passed, covering every case listed plus:
+  one report read per admission call, each in a session of its own; resize
+  refusing, and falling through past, a disabled or unregistered host's
+  declaration; the rebind refusal leaving the capacity version unchanged; the
+  offered read differing from the stored one only in `enabled`; a pool whose
+  declarations do not resolve judged backed; no requirement refusing nothing
+  with a report supplied and making the two reads equal; and, through
+  `SiteProjectionService` over the real ledger, both projections' revisions
+  advancing when a host leaves the report. That no capacity event is recorded
+  is true by construction here (the report is read, never written); a host
+  write recording none is 4.4's evidence. The existing cases that read
+  availability through `snapshot()` now read `list_resources()`, since the
+  snapshot leaves out a declaration with no usable host; the case asserting an
+  unregistered host is admitted now asserts it only with no report supplied
+  (D7). Two provisioning integration tests read a no-host declaration's
+  availability through the snapshot for the same reason and now read the
+  operator's listing (`test_capacity_api.py`,
+  `test_host_requirement_api.py`).
+- [x] 2.5 Unit (`kit/site/tests/unit/test_projections.py`): the capacity-bucket
   projection is built from the offered read, leaving out a declaration it
   reports as not enabled, and its revision and digest advance when only that
   state changes.
-- [ ] 2.6 Verification: `uv run pytest kit/site/tests` passes. No end-to-end
+  *Done:* with a fake ledger whose stored and offered reads differ; also the
+  default resource-pool inventory is the offered read.
+- [x] 2.6 Verification: `uv run pytest kit/site/tests` passes. No end-to-end
   scenario exercises this section on its own; section 5's do.
+  *Done:* run from `kit/site` after `make reinit`: unit and library
+  integration, 332 passed. After `make dist`: `make test` passed (its first
+  run failed the two provisioning tests repaired above), `make
+  check-packaging` passed, `make check-change` passed. End-to-end: none on
+  its own, confirmed; once
+  section 4 wires the report, `e2e_bare_metal_publication` (its host disable
+  and enable stages) exercises the offered read through the deployed
+  projections. Nothing is owed by validation.
+  *Handoff:* the docstrings of `list_offered_resources` and
+  `SiteProjectionService` say every projection is built from the offered
+  read; that holds for the compute service only once 4.2 passes
+  `list_offered_resources()` to its resource-pool builder.
 
 ## 3. The scheduler's candidate filter
 

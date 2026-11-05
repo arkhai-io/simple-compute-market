@@ -1083,9 +1083,13 @@ async def test_a_declaration_naming_no_host_is_not_admitted_in_a_host_requiring_
     reserved = await capacity.reserve({"offering_mode": "vm", "gpu_count": 1}, {})
 
     assert reserved is not None
-    snapshot = {row["resource_id"]: row for row in await capacity.snapshot()}
-    assert snapshot["no-host"]["available_units"] == 4
-    assert snapshot["hosted"]["available_units"] == 3
+    # The snapshot offers only declarations with a usable host, so the
+    # untouched availability of the one naming none is read from the
+    # operator's listing.
+    declared = {row["resource_id"]: row for row in await capacity.admin.list_resources()}
+    assert declared["no-host"]["available_units"] == 4
+    assert declared["hosted"]["available_units"] == 3
+    assert {row["resource_id"] for row in await capacity.snapshot()} == {"hosted"}
 
 
 

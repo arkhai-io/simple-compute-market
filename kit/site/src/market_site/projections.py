@@ -197,7 +197,14 @@ def capacity_bucket_projection(resources: Iterable[Mapping[str, Any]]) -> list[d
 
 
 class SiteProjectionService:
-    """Produce independently versioned resource-pool and capacity projections."""
+    """Produce independently versioned resource-pool and capacity projections.
+
+    Both are built from the ledger's offered read, in which a declaration the
+    site would not admit against for want of a usable host is not enabled, so
+    a storefront mirroring a projection never offers what admission refuses.
+    A mounting service that builds richer resource-pool inventory supplies
+    ``resource_inventory`` built from that same read.
+    """
 
     def __init__(
         self,
@@ -207,7 +214,7 @@ class SiteProjectionService:
         pool_directory: Callable[[], Mapping[str, Mapping[str, Any]]] | None = None,
     ) -> None:
         self._ledger = ledger
-        self._resource_inventory = resource_inventory or ledger.list_resources
+        self._resource_inventory = resource_inventory or ledger.list_offered_resources
         self._pool_directory = pool_directory
         self._resource_pools = ProjectionRevisionTracker()
         self._capacity_buckets = ProjectionRevisionTracker()
@@ -218,5 +225,5 @@ class SiteProjectionService:
         return self._resource_pools.observe(rows), rows
 
     def capacity_buckets(self) -> tuple[ProjectionIdentity, list[dict[str, Any]]]:
-        rows = capacity_bucket_projection(self._ledger.list_resources())
+        rows = capacity_bucket_projection(self._ledger.list_offered_resources())
         return self._capacity_buckets.observe(rows), rows
