@@ -138,4 +138,5 @@ read a host record's enabled flag" is owned by this change and closes with it.
 | A change of host state emits no capacity event (D9) | `openspec/specs/site-capacity/architecture.md` |
 | Host definitions documents keep retaining unnamed hosts, on the remaining reason (D10) | `openspec/specs/physical-provisioning/architecture.md`, its retention paragraph restated; `docs/development/DEPLOYMENT_AND_CONFIG.md`'s host retention paragraph restated on the same reason |
 | The gap closes; "Host records are used only where a connection is made" restated | `docs/development/ROADMAP.md` Goal 1 |
+| Each layer's proof of the usable-host rule, the offered read, and the bare-metal publication stages | `docs/development/TESTING.md`, "Host Requirement Enforcement" |
 | pools-6 drops its claim to the rule (D1) | `openspec/changes/pools-6-fair-scheduling-policy/` proposal and design, and its row in `openspec/changes/README.md` |

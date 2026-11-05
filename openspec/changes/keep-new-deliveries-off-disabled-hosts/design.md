@@ -359,7 +359,11 @@ projection and `snapshot()` are built from it, and the compute service passes it
 in place of `list_resources()`, as the provisioning resource-pool builder's input,
 so the domain views the builder builds, the bare-metal view's `available` among
 them, receive the offered declaration. The administrative listing keeps
-`list_resources()` and the stored `enabled`.
+`list_resources()` and the stored `enabled`. A pool whose declarations do not
+resolve, which the service refuses to start with and every write refuses, is
+judged as backed, so the read fails closed for it: the convention
+`pool_needs_host` follows for a provider the requirement does not name, the case
+a guess would get wrong silently.
 
 *Rationale.* Every projection is a view of the ledger's declarations, and the
 ledger already holds the deliverable-host report (D2), the host requirement, and
@@ -397,6 +401,10 @@ only together.
 - **[Capacity declared before its host is registered no longer sells]** → Intended
   (D3/D12). Definition documents apply hosts before capacity, so the normal order is
   unaffected; an operator registering through the API registers the host first.
+  The same holds for tests and end-to-end scenarios: those that declare backed,
+  host-requiring capacity naming a host they never register — the bare-metal
+  publication and introduction scenarios among them — register the host first,
+  as the VM lane's helpers already do.
 - **[A projection consumer cannot tell an operator-disabled declaration from one
   without a usable host]** → No consumer needs to; the operator's listing keeps the
   declaration's own `enabled`.
