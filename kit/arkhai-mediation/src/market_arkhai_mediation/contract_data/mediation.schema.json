@@ -61,8 +61,8 @@
     },
     "AgreementStart": {
       "type": "string",
-      "pattern": "^\\d{4}-\\d{2}-\\d{2}T[0-2]\\d:[0-5]\\d:[0-5]\\d(?:\\.0+)?(?:Z|\\+00:00)$",
-      "description": "Whole-second RFC 3339 UTC start_utc; checked as an actual date by the mapping."
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T[0-2]\\d:[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|\\+00:00)$",
+      "description": "RFC 3339 UTC start_utc; mapping validates the date and microsecond precision and rounds the payment boundary up to whole seconds."
     },
     "Amount": {
       "type": "string",
@@ -765,7 +765,7 @@
         "extend"
       ],
       "additionalProperties": false,
-      "description": "stop/reverse are required mediation entries, not exhaustive lists. extend is exclusive to mediation. This projection does not derive parties' start/stop/refund rights."
+      "description": "stop is required on rate parts; reverse is required on every part. These are mediation entries, not exhaustive lists. extend is exclusive to mediation. This projection does not derive parties' start/stop/refund rights."
     },
     "ExpectedLifecycle": {
       "type": "object",

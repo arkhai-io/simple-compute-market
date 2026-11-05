@@ -262,11 +262,13 @@ class MediationAdapter:
                     fixed = wire(filing)["request"]
                     if len(originals) != 1 or json.loads(originals[0].items[0].body)["entry"]["filing"]["request"] != fixed:
                         return Rejected(reason="repair required: delivery-end revision requires resolved prior rulings and effects")
-                    case = wire(await self.client.case(
+                    answer = wire(await self.client.case(
                         originals[0].case_ref, agreement=self.agreement_digest,
                         transaction=self.binding.commitment_ref,
                     ))
-                    return await self._filing_answer(case)
+                    if answer["status"] != "accepted":
+                        return _failure(answer)
+                    return await self._filing_answer(answer["case"])
                 # Only the original caller may write while its result is uncertain.
                 # Other callers adopt a signed equivalent above, or fail closed.
                 owner = hashlib.sha256(canonical_json({
