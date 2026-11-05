@@ -1,10 +1,11 @@
-"""An untrusted payments certificate fails the access check at its transport step.
+"""Trust the access check cannot establish fails it at its transport step.
 
 The real check and payments client against a real TLS listener on a loopback
 port, serving a certificate this test issues and no trust store holds: a real
 handshake, not a mocked transport. The handshake fails before any request is sent, and the
 outcome names the transport step. Spec scenario "The storefront does not trust
-the payments origin".
+the payments origin". A trust bundle the client cannot load at all fails the
+same step, before any connection.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -105,3 +107,30 @@ def test_a_certificate_no_trust_store_holds_fails_the_transport_step(tmp_path):
     assert outcome.step == "transport"
     assert requests == []
     assert KEY not in outcome.json_line()
+
+
+@pytest.mark.parametrize("bundle", ["missing", "malformed"])
+def test_a_trust_bundle_that_cannot_be_loaded_fails_the_transport_step(
+    tmp_path, monkeypatch, bundle,
+):
+    # The client trusts the process's SSL_CERT_FILE only off loopback, and loads
+    # it when built, so the origin is a reserved name nothing is ever asked at.
+    path = tmp_path / "lane-ca.pem"
+    if bundle == "malformed":
+        path.write_text("-----BEGIN CERTIFICATE-----\nnot a certificate\n", "utf-8")
+    monkeypatch.setenv("SSL_CERT_FILE", str(path))
+
+    outcome = check_payments_access(
+        {
+            "enabled": True, "service_url": "https://payments.invalid",
+            "service_identity": SERVICE.identity, "fee_bps": 250,
+            "api_key_env": KEY_ENV,
+        },
+        PAYEE,
+        environment={KEY_ENV: KEY},
+    )
+
+    assert (outcome.outcome, outcome.step) == ("failed", "transport")
+    assert outcome.detail == "the trust bundle SSL_CERT_FILE names could not be loaded"
+    assert KEY not in outcome.json_line()
+    assert str(path) not in outcome.json_line()

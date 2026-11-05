@@ -64,14 +64,17 @@ def target_ready(
     Environment proxies are never used: the probe asks the target itself. httpx
     reads SSL_CERT_FILE only alongside the proxy variables, so a CA bundle it
     names, such as a lane's CA for its payments double, is loaded here as the
-    only trust the probe has, just as the payments client trusts it.
+    only trust the probe has, just as the payments client trusts it. A bundle
+    that cannot be loaded leaves the target not ready, as the payments client
+    could not reach it either.
     """
     cafile = environ.get("SSL_CERT_FILE")
-    verify: ssl.SSLContext | bool = ssl.create_default_context(cafile=cafile) if cafile else True
     try:
+        # ssl.SSLError, a malformed bundle, is an OSError like a missing one.
+        verify: ssl.SSLContext | bool = ssl.create_default_context(cafile=cafile) if cafile else True
         health = get(url + "/health", timeout=5.0, trust_env=False, verify=verify)
         return health.status_code == 200 and health.json().get("status") == "ok"
-    except (httpx.HTTPError, ValueError):
+    except (httpx.HTTPError, ValueError, OSError):
         return False
 
 

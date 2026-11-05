@@ -118,6 +118,14 @@ NOT_SERVED = ("the default charts do not serve it: no settlement mechanism, and 
 # The e2e-tests chart's scenario test pod, which runs the selected scenarios.
 SCENARIO_POD = "{release}-e2e-tests-e2e-scenarios"
 SCENARIO_TIMEOUT = "30m"
+# The storefront charts' payments-check test pods end in this: each runs the
+# storefront's `check-payments` from its own image, configuration, CA mount, and
+# key, the only proof of a deployed storefront's payments access, since readiness
+# never contacts the payments service.
+PAYMENTS_CHECK_SUFFIX = "-payments-check"
+PAYMENTS_CHECK_TIMEOUT = "5m"
+_HOOK_POD = re.compile(r"^kind: Pod$", re.M)
+_HOOK_NAME = re.compile(r"^  name: (\S+)$", re.M)
 READY_TIMEOUT = "600s"
 # How often the namespace's memory is sampled while the scenarios run.
 SAMPLE_SECONDS = 15.0
@@ -822,6 +830,8 @@ def validate_helm(validation: Validation, *, change: str | None = None,
                 _run_scenarios(validation, run, sample_interval)
             else:
                 validation.note("e2e", "no scenario is selected for the Helm run")
+            if not validation.commit_changed():
+                _run_payments_checks(validation, run)
     finally:
         _after_scenarios(validation, run)
     return _after_part(validation)
@@ -1223,6 +1233,73 @@ def _stop_scenario_pod(validation: Validation, run: HelmRun, pod: str) -> None:
                                           run.namespace, "--ignore-not-found", "--wait=false"])
 
 
+def payments_check_pods(hooks: str) -> list[str]:
+    """The payments-check test pods among a release's rendered hooks."""
+    names = []
+    for document in hooks.split("\n---"):
+        name = _HOOK_NAME.search(document)
+        if _HOOK_POD.search(document) and name and name[1].endswith(PAYMENTS_CHECK_SUFFIX):
+            names.append(name[1])
+    return sorted(names)
+
+
+def _run_payments_checks(validation: Validation, run: HelmRun) -> None:
+    """Run each payments-check pod the release renders, as its own step.
+
+    As with the scenario pod, `helm test` passes when its filter matches nothing,
+    so a check counts as passed only with its pod's own exit status of 0. A
+    release that renders none is warned, never passed: nothing then shows its
+    storefronts can use their payments service.
+    """
+    try:
+        pods = payments_check_pods(validation.read(
+            ["helm", "get", "hooks", run.release, "--namespace", run.namespace]))
+    except ValidationError as exc:
+        validation.fail("payments check", f"could not read the release's test hooks: {exc}")
+        return
+    records: list[dict] = []
+    validation.summary.evidence["payments_checks"] = records
+    if not pods:
+        validation.warn("payments check", f"{run.release} renders no payments-check pod, so no "
+                        "storefront's payments access is shown")
+        return
+    for pod in pods:
+        step = validation.step(f"payments check {pod}", [
+            "helm", "test", run.release, "--namespace", run.namespace,
+            "--filter", f"name={pod}", "--timeout", PAYMENTS_CHECK_TIMEOUT])
+        record: dict = {"pod": pod, "log": None, "exit_code": None}
+        records.append(record)
+        if validation.commit_changed():
+            # No evidence describes the commit now, but validation stops what it started.
+            _stop_payments_check(validation, run, pod)
+            return
+        record["log"] = _kept(validation, f"{pod}'s log", [
+            "kubectl", "logs", "--namespace", run.namespace, pod],
+            validation.log_dir / f"{pod}.log")
+        try:
+            code = validation.read(["kubectl", "get", "pod", pod, "--namespace", run.namespace,
+                                    "--output", "jsonpath={.status.containerStatuses[0]"
+                                    ".state.terminated.exitCode}"]).strip()
+            record["exit_code"] = int(code) if code else None
+        except (ValidationError, ValueError) as exc:
+            validation.warn("payments check", f"could not read {pod}'s exit status: {exc}")
+        if step.result == "passed" and record["exit_code"] != 0:
+            step.result = "failed"
+            step.detail = (f"{pod} exited {record['exit_code']}" if record["exit_code"] is not None
+                           else f"{pod} has no exit status, so its check is not shown to have run")
+            validation.summary.passed = False
+        if record["exit_code"] is None:
+            _stop_payments_check(validation, run, pod)
+
+
+def _stop_payments_check(validation: Validation, run: HelmRun, pod: str) -> None:
+    # A pod with no exit status may still be running, which scaling the workloads
+    # down would not stop.
+    validation.step(f"stop payments check {pod}", [
+        "kubectl", "delete", "pod", pod, "--namespace", run.namespace,
+        "--ignore-not-found", "--wait=false"])
+
+
 def _sample_memory(validation: Validation, run: HelmRun, *, warn: bool = True) -> None:
     """Add the release's current memory use to its samples, when it can be measured."""
     if not run.metrics:
@@ -1384,6 +1461,9 @@ def render(summary: Summary) -> str:
     if scenarios:
         lines.append(f"  scenarios pod {scenarios['pod']}: exit {scenarios['exit_code']}, "
                      f"log {scenarios['log']}")
+    for check in summary.evidence.get("payments_checks") or ():
+        lines.append(f"  payments check pod {check['pod']}: exit {check['exit_code']}, "
+                     f"log {check['log']}")
     if summary.part == "ci":
         lines += _render_ci(summary.evidence)
     return "\n".join(lines)

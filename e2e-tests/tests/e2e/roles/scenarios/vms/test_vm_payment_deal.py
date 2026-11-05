@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import dataclasses
 import time
 
 import pytest
@@ -30,10 +31,19 @@ from tests.e2e.roles.helpers.payments import configured_payments, payment_settin
 from tests.e2e.roles.scenarios.vms.conftest import (
     _publisher_trust, _signer, capacity_source_for,
 )
+from tests.e2e.roles.scenarios.vms.host_registry import (
+    E2E_PAYMENT_DEAL_HOST, E2E_PAYMENT_DEAL_POOL_ID,
+)
 from tests.e2e.roles.scenarios.vms.lifecycle_deal import (
     LifecyclePurchase, Stage12c_CapacityReleasedOnce, TypedLifecycleBuyer,
 )
-from tests.e2e.roles.scenarios.vms.test_full_deal import OFFER_RESOURCE
+from tests.e2e.roles.scenarios.vms.test_full_deal import OFFER_RESOURCE as _DEAL_RESOURCE
+
+#: This scenario's own resource, the canonical deal's shape under another id. A
+#: listing's binding to its resource outlives the listing, so whichever scenario on a
+#: shared stack lists a resource second is refused.
+PAYMENT_RESOURCE_ID = "compute-e2e-payment-deal-001"
+OFFER_RESOURCE = {**_DEAL_RESOURCE, "resource_id": PAYMENT_RESOURCE_ID}
 
 
 pytestmark = [
@@ -54,6 +64,15 @@ def payments_config():
 def mediation_target():
     """The case stages' dispute authority; a blocked skip when none is configured."""
     return configured_mediation()
+
+
+@pytest.fixture(scope="module")
+def deal_driver(deal_driver):
+    """The VM deal driver over this scenario's own executor, pool, and resource."""
+    return dataclasses.replace(
+        deal_driver, reserved_resource_id=PAYMENT_RESOURCE_ID,
+        host=E2E_PAYMENT_DEAL_HOST, pool_id=E2E_PAYMENT_DEAL_POOL_ID,
+    )
 
 
 @pytest.fixture(scope="module")

@@ -215,6 +215,17 @@ test_access_check.py (new)}`, and the fake's existing tests; `kit/arkhai-payment
     plus a `code` field (1.4's note). Closeout's narrative compression should bring the
     design in line.
 
+  Implementation round 1's triage (reviews 29–31), fixes to this section:
+  - 29 F1. A trust bundle the client could not load escaped the check's JSON outcome.
+    `PaymentsClient` loads the bundle `SSL_CERT_FILE` names when it is built, off
+    loopback, so a missing, unreadable or malformed file raised `FileNotFoundError` or
+    `ssl.SSLError` before any request, and the CLIs printed a traceback. `access_check.py`
+    now builds the client in its own `try` and reports an `OSError` there as the
+    `transport` step, detail "the trust bundle SSL_CERT_FILE names could not be loaded",
+    composed from fixed text. Building is now separate from the read, so only a failure
+    to build gets that detail. `test_access_check_tls.py` adds the missing and malformed
+    cases against a non-loopback origin at `.invalid`.
+
 ## 2. The payments double
 
 Delivers `tools/payments-lane-double`: the HTTP app mirroring the payments service over
@@ -1024,6 +1035,33 @@ it, `e2e-tests/tests/unit/test_payments_helper.py`;
     the lane storefront's eip191 key (4.4). Narrative compression should correct it.
   - The session ran long; section 5 should start fresh.
 
+  Implementation round 1's triage (reviews 29–31), fixes to this section:
+  - 30 V2. Validation 30's VM lane had `e2e_vm_payment_deal`'s stage 1 refused with a 409
+    "publication source is already bound". The scenario listed `test_full_deal`'s
+    resource, `compute-e2e-deal-001`, which the canonical deal binds earlier on the same
+    stack, and a listing's binding outlives the listing. The VM deal driver
+    (`compute_deal_driver.py`) now takes its executor, pool and resource as fields,
+    defaulting to the canonical deal's. `test_vm_payment_deal.py` overrides `deal_driver`
+    with its own: `kvm-payment-deal`, `compute-e2e-payment-deal-pool` and
+    `compute-e2e-payment-deal-001`, the first two in `host_registry.py`. It offers the
+    canonical shape under that resource. Stage 2's failure followed from stage 1's. No
+    lane has yet run the stages after the listing.
+  - 29 F1, the e2e half. `helpers/payments.py`'s `target_ready` built its SSL context
+    outside its `try`, so a missing or malformed `SSL_CERT_FILE` bundle raised, instead
+    of reporting the target not ready, which fails a lane-owned target by name. It now
+    builds the context inside the `try` and catches `OSError`, of which `ssl.SSLError` is
+    one. `test_payments_helper.py` adds the missing and malformed cases.
+  - Returned to design, 31 O1. The owner's notes on this round found the lane settings
+    carried by the Makefile against `DEPLOYMENT_AND_CONFIG.md`'s "Profile-based
+    configuration": the `e2e-<lane>-payments-env` targets print `ARKHAI_PAYMENTS__`
+    variables, with a hard-coded buyer seed and a seller key read with `sed`, and
+    `lane_env.py compose` prints the Compose values. The owner chose alternative B: move
+    this section's settings into per-lane runner profiles and literal overlays, and move
+    the pre-existing `e2e-*-dev-env` targets, with their services' `REGISTRY_*` and
+    `PROVISIONING_*` values, into profile files too. That reverses D9 and widens the
+    scope, so the change returns to design (`design.md` D9 and Open Questions). This
+    section's lane wiring is reworked by whatever the design and plan make of it.
+
 ## 5. Helm: the subchart, the storefront chart options, and the local rehearsal
 
 Delivers the double in the local release, both storefront charts' CA bundle and
@@ -1339,6 +1377,77 @@ the recommendation needs them; `helm/charts/e2e-tests/` values for `PAYMENTS`;
     check.
   - The section is a session of its own. The next step is the round's validation and
     implementation review.
+
+  Implementation round 1's triage (reviews 29–31), fixes to this section and outside
+  any section:
+  - 29 F2. Validation now runs the payments check pods, as decided in `design.md` under
+    D12. `scripts/validate_slice.py` reads the release's hooks (`helm get hooks`) and
+    runs each `-payments-check` pod as its own step after the scenario pod. A pass counts
+    only with the pod's exit status 0, and a pod with no status is stopped. The validator
+    keeps each pod's log under `evidence["payments_checks"]` and in the rendered summary.
+    A release rendering no check pod is warned, never passed. In
+    `scripts/tests/test_validate_slice.py`, the full-sequence case now includes Bob's
+    check. Eight cases are new: two pods, a nonzero exit, no exit status, a commit during
+    the check, no pod rendered, unreadable hooks, the hook parser, and the suffix both
+    charts render. 6.8 reads the check from the validation record.
+  - 29 documentation. The permanent requirement "A storefront's configuration reaches it
+    through its configuration system" allowed only two kinds of value outside the
+    configuration system, and its scenario said the pod environment holds only the
+    configuration directory and the signing credential. Both are false with 5.2's
+    `caBundle` and 5.3's `paymentsKey`. The `deployment-state` delta now MODIFIES it
+    with a third kind: a value something other than the loader reads from the process
+    environment, such as `SSL_CERT_FILE`. The credential kind now includes the variable
+    `api_key_env` names. One scenario covers each case. The owner's disposition: code
+    follows the guidance, and where a spec disagrees, one of them changes. The
+    fresh-context check found that the guidance does not yet say this either.
+    `DEPLOYMENT_AND_CONFIG.md`'s "Profile-based configuration" lets a pod spec set only
+    the profile resolver variables and a variable an external subprocess reads. Its
+    example, `ANSIBLE_CONFIG`, is written into `os.environ` from resolved settings, not
+    set on the pod, and it names no credential variable. Whether that guidance gains the
+    in-process reader and the named-credential kinds, or `SSL_CERT_FILE` travels another
+    way, is recorded in `design.md`'s Open Questions for the design session this change
+    returns to.
+  - Also from the fresh-context check. Two fixes: the payments check pod is stopped
+    when the commit moves during its step, with a case for it in
+    `test_validate_slice.py`, and the `deployment-state` delta gains the scenario "The
+    storefront's CA bundle cannot be loaded" for 29 F1. Promotion destinations for 29 F2,
+    beyond 6.9's list: `docs/development/TESTING.md`'s account of what the Helm part
+    runs and keeps, and `.agents/skills/change-validate/SKILL.md`'s, both of which name
+    only the scenario pod. For 6.8, a `payments check` warning, meaning no check pod was
+    rendered, is not evidence.
+  - Evidence for these fixes, all local, against base `5e2f0fd86`:
+    - Unit and integration (`TESTING.md`'s levels):
+      - `make -C core/storefront test`: 226 passed, the new real-SQLite case included.
+      - `make -C kit/arkhai-payments test`: 197 passed, with mypy, vectors and
+        generated models checked.
+      - `make test-e2e-unit`: 539 passed. `test_vm_payment_deal.py` collects its 4
+        tests, by `make -C e2e-tests test-unit PYTEST_ARGS=--collect-only …`.
+      - `make test-release-tooling`: 2189 passed, re-run after the fresh-context
+        fixes.
+    - `make test`: exit 0, run before the fresh-context fixes. Those touched only
+      `validate_slice.py` and its tests, which were re-run above, a test comment, and
+      change documents.
+    - `make check-packaging`: all eight checks OK. No dependency or lock changed.
+    - `make check-comment-hygiene` and `make check-change`: pass.
+    - Not run: any end-to-end lane or Helm deployment. The VM payment deal past its
+      listing, and Bob's payments check pod in a cluster, are owed to the validation of
+      the round the design and plan make of this return.
+    - Fresh-context check, against `5e2f0fd86`: no code bug. Fixed, as above: the stop on
+      a commit change, the spec scenario, the test comment, and the overstated note on
+      the guidance. Left as recorded:
+      - an `OSError` from `SSL_CERT_DIR` or certifi shares the trust-bundle detail, a
+        negligible edge;
+      - the index row stays `in implementation` until the return is confirmed and the
+        design step takes it.
+  - Owner's addition to 30 V2. `core_storefront`'s
+    `SQLiteClient.listing_id_for_derivation_key` called an undefined `self._connect()`,
+    so every source-conflict 409 logged an `AttributeError` and could not name the
+    listing holding the source, as validation 30's VM log showed. It now opens
+    `sqlite3.connect(self.db_path)` like its neighbours. A real-SQLite case in
+    `core/storefront/tests/integration/test_listing_closure.py` covers it: the method
+    names the bound listing, still names it once closed, and returns `None` for an
+    unknown key. The fix removes the unowned-work row for this in
+    `openspec/changes/README.md`.
 
 ## 6. Closeout
 

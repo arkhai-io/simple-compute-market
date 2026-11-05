@@ -197,6 +197,18 @@ def test_the_probe_reports_an_unhealthy_or_unreachable_target_unready(response) 
     assert not payments.target_ready("https://payments-double:8443", get=_Probe(response), environ={})
 
 
+@pytest.mark.parametrize("bundle", ["missing", "malformed"])
+def test_a_trust_bundle_that_cannot_be_loaded_leaves_the_target_unready(tmp_path, bundle) -> None:
+    path = tmp_path / "lane-ca.pem"
+    if bundle == "malformed":
+        path.write_text("-----BEGIN CERTIFICATE-----\nnot a certificate\n", "utf-8")
+    probe = _Probe(_healthy())
+    assert not payments.target_ready(
+        "https://payments-double:8443", get=probe, environ={"SSL_CERT_FILE": str(path)},
+    )
+    assert probe.calls == []
+
+
 @pytest.mark.parametrize("flag", ["LIVEMODE", "DEVELOPMENT_AUTH", "LANE_OWNED"])
 def test_a_flag_that_is_not_a_boolean_fails(configure, flag) -> None:
     configure(**{**_COMPLETE, flag: "yes"})

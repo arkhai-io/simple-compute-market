@@ -117,7 +117,6 @@ No change owns these yet. The first two are the archived design's open questions
 | A time bound on holding an unknown site's listings, so a site decommissioned without closing them stops advertising unbookable capacity | Decision 11; deferred at the maintainer's direction |
 | How a shape generator is assigned to a pool; the generator seam exists, with the VM default as its one implementation | Open question in the archived design |
 | Thirteen anchor-form spec citations (in `listing_cardinality_mode.py`, `legacy_backfill.py`, `kit/site`'s ledger, and seven `kit/fulfillment` modules) omit the `requirement-` prefix their headings' slugs carry, so none resolves | Not recorded |
-| `core_storefront`'s `SQLiteClient.listing_id_for_derivation_key` calls an undefined `self._connect()`, so it raises whenever reached | Not recorded |
 
 ### Unowned work found by `gpu-optional-compute-shapes`
 

@@ -113,9 +113,17 @@ def check_payments_access(
                            f"environment variable {section.api_key_env} is unset, empty, "
                            "or not a single-line key")
     try:
-        with payments_client_for_owner(
+        client = payments_client_for_owner(
             section, account, environment=source, transport=transport,
-        ) as client:
+        )
+    except OSError:
+        # The HTTP client loads the bundle SSL_CERT_FILE names when it is built,
+        # before any request; a missing, unreadable, or malformed bundle raises
+        # here (ssl.SSLError is an OSError), never as a transport error.
+        return _failed(account, service_url, "transport",
+                       "the trust bundle SSL_CERT_FILE names could not be loaded")
+    try:
+        with client:
             balance = client.get_balance(account)
     except PaymentsAPIError as exc:
         return _failed(account, service_url, "refused",

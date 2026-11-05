@@ -66,7 +66,49 @@ Each storefront CLI MUST offer `check-payments --account <id>`, which loads the 
 - **WHEN** the storefront's CA bundle does not cover the payments service's certificate
 - **THEN** the check prints a `failed` outcome naming the transport step and exits nonzero
 
+#### Scenario: The storefront's CA bundle cannot be loaded
+
+- **WHEN** the bundle `SSL_CERT_FILE` names is missing, unreadable, or malformed
+- **THEN** the check prints a `failed` outcome naming the transport step, before any request, and exits nonzero
+
 #### Scenario: A deployment reruns the check
 
 - **WHEN** a deployment runs the storefront chart's Helm test
 - **THEN** the check runs with the storefront's image, configuration, credential, CA mount and key variable, and mounts no storefront data volume, so it does not depend on where the storefront's volume is attached
+
+## MODIFIED Requirements
+
+### Requirement: A storefront's configuration reaches it through its configuration system
+
+Every configuration value of a storefront MUST be supplied through its configuration system:
+its configuration files and its loader's documented override layer. A value MAY be supplied
+outside that system only when it controls which configuration is loaded — the configuration
+directory and the profiles to layer — when it must be kept from the loader, as the signing
+credential is and as a credential the configuration names by variable is, such as the payments
+key `[Settlement.arkhai_payments].api_key_env` names, or when something other than the loader
+reads it from the process environment, such as the TLS trust bundle `SSL_CERT_FILE` names. A
+storefront's chart MUST know a configuration value only where the deployment itself needs it for
+a stated reason, such as the port its container, probes, and Service share, and MUST supply
+outside the configuration system only values of those three kinds. Conformance is a compliance
+check of the source and charts, not a runtime refusal: a storefront MUST NOT refuse to start
+because a value reached it through its environment, and the loader's override layer remains
+available to an operator.
+
+#### Scenario: An operator overrides a setting on a development cluster
+
+- **WHEN** an operator injects a setting through the loader's environment override layer into a
+  running deployment and restarts it
+- **THEN** the storefront starts and applies the override
+
+#### Scenario: The chart renders a storefront's environment
+
+- **WHEN** the bare-metal chart is rendered without its CA bundle and payments key options
+- **THEN** its pod environment carries only the configuration directory and the signing
+  credential, and every other value is in a mounted configuration file
+
+#### Scenario: The chart renders a storefront's payments access
+
+- **WHEN** the bare-metal chart is rendered with its CA bundle and payments key options
+- **THEN** its pod environment carries, beyond the configuration directory and the signing
+  credential, only `SSL_CERT_FILE` naming the mounted bundle and the variable `api_key_env`
+  names, and every other value is in a mounted configuration file

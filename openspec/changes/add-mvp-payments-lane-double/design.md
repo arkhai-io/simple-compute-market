@@ -329,6 +329,27 @@ same keys.
 **Rejected:** a `PAYMENTS` section in `config-docker.yml`, which would configure the same
 values in every lane and in any run selecting the profile.
 
+**Reversed at the implementation round's triage (31 O1).** The owner chose alternative B,
+against the triage's recommendation of A. Lane configuration follows
+`DEPLOYMENT_AND_CONFIG.md`'s "Profile-based configuration", where `<PREFIX>_*` variables
+are a last-resort escape hatch, never the normal way to supply configuration:
+- The test runner reads each lane's `PAYMENTS` settings from a committed profile,
+  `e2e-tests/config/config-<lane>-lane.yml`, selected by that lane's `ACTIVE_PROFILES`.
+  This answers the rejection above, because only the lane that selects a profile gets its
+  values.
+- Each lane's Compose overlay states its values literally.
+- The pre-existing `e2e-*-dev-env` targets move the same way in this change. That
+  includes the values their services read as `REGISTRY_*` and `PROVISIONING_*`
+  environment variables, which move into those services' profile files.
+- The only environment values left are the buyer's bearer token, which `api_key_env`
+  reads from the process by design, and `SSL_CERT_FILE`, process trust read by the TLS
+  library.
+- Tests hold every restated value to the fixture files it restates.
+
+The shape is open, and it returned the change to design: which values become which
+service's profile, what remains a real per-run choice beyond `PROVISIONING_MODE`, what
+replaces `e2e-dev-identities`, and the proposal's scope and impact.
+
 ### D10. Implementation cadence
 
 One round of four sessions, then its review:
@@ -419,6 +440,16 @@ problem, so a render case asserts the test pod mounts no data volume.
 - **A storefront admin route performing the read.** New authenticated production surface
   for a diagnostic.
 
+**Settled at the implementation round's triage (29 F2): validation's Helm part runs the
+check pods.** `scripts/validate_slice.py` runs every `-payments-check` test pod the
+release's hooks render, each as its own step, after the scenario pod. As with the scenario
+pod, a pass counts only with the pod's own exit status of 0, because `helm test` passes
+when its filter matches nothing. The validator keeps each pod's log as evidence, and warns
+when the release renders no check pod. Validation deploys only the first release, so this
+covers Bob's storefront; the bare-metal storefront's check stays under `topology-check`.
+**Rejected:** closeout recording an owner-run `make -C helm test`. It is evidence once,
+and nothing re-proves the check on the next change to the charts.
+
 ## Effects on other changes
 
 - **`qualify-real-provisioning-by-scenario`:** the storefront charts' CA option, its D11,
@@ -442,6 +473,17 @@ problem, so a render case asserts the test pod mounts no data volume.
 
 ## Open Questions
 
-None. Serving payment scenarios on the local Helm release is recorded as a roadmap gap
-with its trigger (D11), and a production guard on fixture identities is
+- **31 O1, the shape of D9's reversal.** It is open, and returned the change to design;
+  D9 lists the questions.
+- **29 documentation, the guidance the MODIFIED `deployment-state` requirement follows.**
+  The delta permits a value read from the process environment by something other than
+  the loader (`SSL_CERT_FILE`) and a credential the configuration names by variable
+  (the `api_key_env` key). `DEPLOYMENT_AND_CONFIG.md`'s "Profile-based configuration"
+  names only the profile resolver variables and a variable an external subprocess
+  reads. The owner's rule is that code follows the guidance and a disagreeing spec or
+  guidance changes. So either that section gains the two kinds, or the CA bundle and
+  key travel another way.
+
+Serving payment scenarios on the local Helm release is recorded as a roadmap gap with its
+trigger (D11), and a production guard on fixture identities is
 `add-arkhai-payments-lane-double`'s decision (D4).
