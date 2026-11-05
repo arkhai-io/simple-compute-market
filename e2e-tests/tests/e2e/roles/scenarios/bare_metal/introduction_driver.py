@@ -24,6 +24,7 @@ from market_resource_pools_contracts import PoolCreate
 
 from tests.e2e.roles.buyer_cli import BuyerCli
 from tests.e2e.roles.helpers.compute_deal import assert_storefront_loops_held
+from tests.e2e.roles.helpers.hosts import register_e2e_host
 from tests.e2e.roles.helpers.introduction_stages import (
     BACKED_RATE,
     CONTACT_MECHANISM,
@@ -99,6 +100,8 @@ class BareMetalIntroductionDriver:
     site_operator: Any
     site_capacity: Any
     registry: Any
+    #: The site's family client, which registers the hosts backed machines name.
+    provisioning: Any
 
     def assert_loops_held(self) -> None:
         assert_storefront_loops_held(self.storefront_admin)
@@ -130,6 +133,13 @@ class BareMetalIntroductionDriver:
 
         async def declare() -> None:
             for resource_id, pool_id, backed in resources.values():
+                if backed:
+                    # A backed machine is offered only while the host it names
+                    # is registered and enabled; nothing connects to it under
+                    # the mock profile.
+                    register_e2e_host(
+                        self.provisioning, name=f"host-{resource_id}", pool_id=pool_id
+                    )
                 await self.site_capacity.register_resource(
                     resource_id,
                     pool_id=pool_id,

@@ -80,6 +80,7 @@ class FakeHosts:
         self.hosts = dict(hosts)
         self.registered: list = []
         self.updates: list = []
+        self.enabled: list = []
 
     def get_host(self, host_id: str):
         if host_id not in self.hosts:
@@ -96,8 +97,12 @@ class FakeHosts:
         connection = _view(body.connection) if body.connection else host.connection
         self.hosts[host_id] = SimpleNamespace(
             host_id=host_id, pool_id=body.pool_id or host.pool_id, connection=connection,
-            enabled=True,
+            enabled=host.enabled,
         )
+
+    def enable_host(self, host_id: str) -> None:
+        self.enabled.append(host_id)
+        self.hosts[host_id].enabled = True
 
 
 def _view(submission: ConnectionSubmission) -> SimpleNamespace:
@@ -127,7 +132,22 @@ def test_a_new_host_is_registered_with_the_connection_given():
 def test_an_unchanged_host_is_left_as_it_is():
     hosts = FakeHosts(**{HOST: _host(HOST, REAL_POOL_ID, target_connection(TARGET))})
     register_e2e_host(hosts, name=HOST, pool_id=REAL_POOL_ID, connection=target_connection(TARGET))
-    assert hosts.registered == [] and hosts.updates == []
+    assert hosts.registered == [] and hosts.updates == [] and hosts.enabled == []
+
+
+def test_a_host_an_earlier_run_left_disabled_is_enabled_again():
+    """A declaration naming a disabled host is neither admitted nor published,
+    so registration restores the host it reconciles."""
+    disabled = _host(HOST, REAL_POOL_ID, target_connection(TARGET))
+    disabled.enabled = False
+    hosts = FakeHosts(**{HOST: disabled})
+
+    host = register_e2e_host(
+        hosts, name=HOST, pool_id=REAL_POOL_ID, connection=target_connection(TARGET)
+    )
+
+    assert hosts.enabled == [HOST]
+    assert host.enabled is True
 
 
 def test_a_host_an_earlier_run_left_has_its_connection_replaced():

@@ -384,7 +384,7 @@ and reopens it under its original identity on re-enable, and keeps the lanes
 whose bare-metal declarations name hosts they never registered passing under
 D3/D12 (D5, D11, D12). Touches `e2e-tests` only.
 
-- [ ] 5.1 `e2e-tests/tests/e2e/roles/scenarios/bare_metal/test_bare_metal_publication.py`
+- [x] 5.1 `e2e-tests/tests/e2e/roles/scenarios/bare_metal/test_bare_metal_publication.py`
   (`e2e_bare_metal_publication`) and
   `e2e-tests/tests/e2e/roles/scenarios/bare_metal/test_bare_metal_introduction.py`
   (`e2e_bare_metal_introduction`) declare whole-host capacity in backed
@@ -396,12 +396,44 @@ D3/D12 (D5, D11, D12). Touches `e2e-tests` only.
   for the same omission (`git grep -n "register_resource" e2e-tests/tests/e2e`)
   and repair any found the same way. Verify by the scenarios' unchanged stage
   assertions passing in validation's pipeline run.
-- [ ] 5.2 Add stages to `e2e_bare_metal_publication`, after the reinstatement
+  *Done:* the VM lane's `register_e2e_host`, its placeholder connection (now
+  public as `PLACEHOLDER_CONNECTION`), and its connection comparison moved into
+  a shared helper, `e2e-tests/tests/e2e/roles/helpers/hosts.py`, which
+  `vms/host_registry.py` now imports, so `provision_e2e_executor` is
+  unchanged. The helper also enables a host an earlier run left disabled, so
+  a scenario rerun after a failed 05f is not refused for it; a unit test in
+  `tests/unit/test_real_vm_lane.py` covers that. Both bare-metal scenarios
+  register each `machine-<resource>` host in its declaration's pool before
+  declaring. The check found one more:
+  `e2e_bare_metal_unbacked_introduction`'s driver
+  (`bare_metal/introduction_driver.py`) declares its backed and rateless
+  machines on `host-<resource>` hosts it never registered; it now registers
+  them through a `provisioning` field its fixture fills with the lane's
+  `provisioning_client`, the unbacked machine still naming none. The other
+  scenarios declaring capacity already register their hosts first: the VM
+  lane's through `provision_e2e_executor`, its unbacked introduction pool
+  needing none, and bare metal's mock and real deal drivers. The repaired
+  stages' assertions are unchanged; validation's pipeline run is their
+  evidence.
+- [x] 5.2 Add stages to `e2e_bare_metal_publication`, after the reinstatement
   stages: disabling the advertised resource's host through the provisioning
   client closes its listing as a withdrawn source after one site-projection
   cycle and one publication cycle; enabling the host reopens the same listing
   id. Follow the module's stepped, `require_state`-gated stage pattern.
-- [ ] 5.3 Verification: `uv run pytest e2e-tests/tests/unit` passes and the new
+  *Done:* `TestStage05f_DisableTheHost` and `TestStage05g_EnableTheHost`,
+  placed after the pricing and GPU-less stages (still after reinstatement) so
+  the pricing stages' refresh assertions see an untouched listing. The close
+  asserts reason `source_gone`: the storefront classifies a resource the
+  projection reports not enabled as withdrawn
+  (`arkhai_bare_metal/storefront_publication.py`, `_classify`). 05f also
+  asserts the operator's listing still reports the declaration enabled. The
+  reopen asserts no second listing is published for the resource, as stage 05
+  does. Like stages 04 and 05, the new stages step publication without a dry
+  run first, and no finaliser re-enables the host if 05f fails after the
+  disable: its host name is unique to the run, and `register_e2e_host`
+  restores a disabled host on a rerun that reuses one. The marker's
+  description in `e2e-tests/pyproject.toml` names the new stages.
+- [x] 5.3 Verification: `uv run pytest e2e-tests/tests/unit` passes and the new
   and repaired stages collect (`uv run pytest e2e-tests/tests/e2e --collect-only
   -m "e2e_bare_metal_publication or e2e_bare_metal_introduction"`).
   End-to-end: `e2e_bare_metal_publication` (the disable and enable stages) and
@@ -409,6 +441,24 @@ D3/D12 (D5, D11, D12). Touches `e2e-tests` only.
   already and exercise the unchanged path for an enabled host. Validation's
   pipeline run is the evidence for both bare-metal scenarios; no CI workflow is
   owed.
+  *Done:* run from `e2e-tests`: the e2e unit suite, 507 passed; collection
+  with the markers above plus `e2e_bare_metal_unbacked_introduction` and
+  `e2e_bare_metal_mock_deal`, 67 selected, the two new stages among them. No
+  scenario was run here: the lanes need the compose stacks. The root
+  `make test` passed before the review fixes, which touched only `e2e-tests`
+  (unit suite rerun: 507 passed). End-to-end, confirmed:
+  `e2e_bare_metal_publication` (its host disable and enable stages, and its
+  repaired declarations), `e2e_bare_metal_introduction`, and
+  `e2e_bare_metal_unbacked_introduction` (whose backed machines' hosts are now
+  registered) on the bare-metal lane; the VM lane's scenarios exercise the
+  rule passing for registered, enabled hosts. Nothing is owed by validation.
+  *Handoff:* the reason `source_gone` and the reopen's shape are read from the
+  storefront's code, not observed; validation's pipeline run is the first to
+  observe them. A failure in 05f or 05g may lie in parts no earlier stage
+  covers: `disable_host` through the family client, the site building its
+  projection from the hosts taking new delivery, or the lane's images not
+  carrying section 4; stage 05's withdraw-and-reinstate shares only the
+  storefront half.
 
 ## 6. Closeout
 
