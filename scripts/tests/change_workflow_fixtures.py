@@ -45,12 +45,15 @@ DENIALS = [{"tool_name": "Bash", "tool_input": {"command": "gh run view 1"}, "re
 DENIED = {"tool_name": "Bash", "tool_use_id": "t1",
           "tool_input": {"command": "gh run view 123456 --json headSha"}}
 
-FINDING = """### F1 — The override has no carrier
+ALTERNATIVES = ("- **Alternatives:** a field on the record, which every reader must learn; "
+                "or a table of its own, which the records' readers never see")
+FINDING = f"""### F1 — The override has no carrier
 
 - **Lens:** architecture
 - **Basis:** evidence
 - **Severity:** blocking
 - **Evidence:** `kit/pool-overrides/records.py:43`
+{ALTERNATIVES}
 
 The record has no field for it.
 

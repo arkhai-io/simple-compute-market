@@ -1,7 +1,7 @@
 """Fail if a committed lock is not current, without contacting any index.
 
 Run after `make dist`: it reads the committed tree and the built wheelhouse.
-Each lock is checked on three axes.
+Each lock is checked on four axes.
 
 1. Against its project: `uv lock --check --offline`.
 2. Against the wheels. For each package the lock resolves from the wheelhouse,
@@ -20,6 +20,12 @@ Each lock is checked on three axes.
    changed.
 3. Against the repository. A distribution some project declares must resolve
    from the wheelhouse, never from an index or another local registry.
+4. Against the uv that writes the repository's locks. Every lock carries
+   `LOCK_REVISION`, the lock revision the repository's minimum uv writes
+   (`check_uv_version.py`). Whenever a uv release rewrites a lock it writes its
+   own revision, an older release as surely as a newer one, and the first three
+   axes pass a lock at any revision; this one catches such a rewrite, by any
+   command, before it lands.
 
 What the check cannot evaluate — a specifier or version it does not parse, or
 a dependency locked at several versions with none recorded on the edge — is
@@ -55,6 +61,7 @@ uv_project = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(uv_project)
 
 SKIPPED_DIRS = {".venv", "node_modules", "openspec", ".git"}
+LOCK_REVISION = 5
 LockCheck = Callable[[Path, str], str | None]
 
 _REQUIREMENT = re.compile(
@@ -194,7 +201,13 @@ def lock_problems(project: Path, root: Path, versions: dict[str, str],
     failure = lock_check(project, uv_project.relative_wheelhouse(project, wheelhouse))
     if failure:
         problems.append(f"{where}: lock does not match the project ({failure}); run `make lock`")
-    packages = uv_project._read_toml(project / "uv.lock").get("package", [])
+    lock = uv_project._read_toml(project / "uv.lock")
+    if (revision := lock.get("revision")) != LOCK_REVISION:
+        found = f"lock revision {revision}" if revision is not None else "no lock revision"
+        problems.append(f"{where}/uv.lock: {found}, but the repository's locks "
+                        f"carry revision {LOCK_REVISION}, which its minimum uv writes; relock "
+                        "it with that uv or newer")
+    packages = lock.get("package", [])
     locked: dict[str, set[str]] = {}
     for package in packages:
         locked.setdefault(uv_project.normalise(package["name"]), set()).add(package["version"])

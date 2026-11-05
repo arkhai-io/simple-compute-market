@@ -14,7 +14,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-nfdb](spec.md#requirement-cw-nfdb-a-phase-ends-only-when-its-reviews-triage-advances-it) — design, implementation, and closeout end only when their review's triage names a next-phase exit.
 - [CW-hdxi](spec.md#requirement-cw-hdxi-the-merge-brings-in-the-branch-the-change-lands-on) — after pre-closeout, a merge brings in the landing branch and reconciles the change's code with it.
 - [CW-a6ow](spec.md#requirement-cw-a6ow-closeout-waits-for-a-validation-of-the-merged-head) — closeout waits for a passed validation of the merged `HEAD`; another review or a waiver needs the owner.
-- [CW-9pbk](spec.md#requirement-cw-9pbk-the-owner-is-consulted-at-fixed-touchpoints) — the owner answers design questions, round notes, dispositions, and whether to review again; nothing else waits.
+- [CW-9pbk](spec.md#requirement-cw-9pbk-the-owner-is-consulted-at-fixed-touchpoints) — the owner answers design questions, round notes, discussed findings' dispositions, and another round when recommended; advancing is taken without asking.
 
 ### Closeout and the archive
 
@@ -31,7 +31,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 
 ### Discussion steps
 
-- [CW-3tvs](spec.md#requirement-cw-3tvs-design-and-triage-are-conversations-with-the-owner) — design and triage run with the owner, one decision or finding per turn, as resumable sessions.
+- [CW-3tvs](spec.md#requirement-cw-3tvs-design-and-triages-discussed-findings-are-conversations-with-the-owner) — design runs with the owner, and triage brings the owner every finding not accepted by default, one decision or discussed finding per turn, as resumable sessions; a triage with nothing to discuss that advances asks nothing.
 - [CW-p1us](spec.md#requirement-cw-p1us-planning-asks-the-owner-nothing) — planning asks nothing; a plan needing an undecided design question returns the change to design.
 
 ### A design blocked on a prerequisite
@@ -45,6 +45,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-zcx8](spec.md#requirement-cw-zcx8-a-directed-step-is-named-until-it-runs) — a directed step is named, unguarded by exit guards, until it runs; it sets its own status.
 - [CW-uhdy](spec.md#requirement-cw-uhdy-a-direction-is-held-to-the-unwaivable-entry-guards-it-meets) — a direction is refused at an unmet unwaivable entry guard, never crossing the archive; waivable guards yield.
 - [CW-eups](spec.md#requirement-cw-eups-a-direction-to-validation-names-the-validations-target) — a direction to validation nests its target; a pass leads there, a failure goes to the owner.
+- [CW-q3dm](spec.md#requirement-cw-q3dm-waivers-are-recommended-and-the-owners-to-take) — a step recommends a waiver only on a written criterion, naming it and its evidence; only the owner waives.
 
 ## 2. Implementation and validation
 
@@ -74,8 +75,8 @@ meaningful order; [`README.md`](README.md) is the readable description.
 
 - [CW-a7dw](spec.md#requirement-cw-a7dw-validation-describes-one-commit-and-modifies-nothing) — validation describes one commit, fails on a dirty worktree or moved `HEAD`, and regenerates nothing.
 - [CW-af15](spec.md#requirement-cw-af15-validation-repairs-nothing) — validation fixes nothing; a repairable condition such as a stale lock fails it back to implementation.
-- [CW-zkhs](spec.md#requirement-cw-zkhs-validations-parts-are-the-repositorys) — validation runs the repository's parts, each part's evidence from the commit under validation alone.
-- [CW-e7lm](spec.md#requirement-cw-e7lm-validations-result-is-passed-failed-or-inconclusive) — results are `passed`, `failed` (commit-caused or unknown), or `inconclusive` (environmental missing evidence).
+- [CW-zkhs](spec.md#requirement-cw-zkhs-validations-parts-are-the-repositorys) — validation runs the repository's parts but those the owner waived, each part's evidence from the commit under validation alone.
+- [CW-e7lm](spec.md#requirement-cw-e7lm-validations-result-is-passed-failed-or-inconclusive) — results are `passed`, `failed` (commit-caused or unknown), or `inconclusive` (environmental missing evidence); a part the owner waived is `waived`, counted in no result, a standing waiver read from the log and lapsing at a merge.
 - [CW-a1nz](spec.md#requirement-cw-a1nz-an-environmental-failure-goes-to-the-owner-with-its-remedy) — an environmental failure goes to the owner with its remedy, rerun on their word, every attempt kept.
 - [CW-av28](spec.md#requirement-cw-av28-a-validation-record-names-the-scenarios-that-exercise-the-change) — the validation record names the end-to-end scenarios exercising the change, with each one's basis.
 
@@ -97,6 +98,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-ovuj](spec.md#requirement-cw-ovuj-review-records-are-untracked-and-their-durable-content-is-promoted) — `reviews/` is untracked and uncited by permanent documents; durable content is promoted at closeout.
 - [CW-5e24](spec.md#requirement-cw-5e24-a-reviews-transcript-is-kept-and-never-read-as-a-record) — a review's raw transcript may be kept, untracked, but no review or triage step reads it.
 - [CW-r9d2](spec.md#requirement-cw-r9d2-a-reviewers-output-is-published-only-as-a-review) — reviewer output is published only once format-checked; a run publishing nothing is recorded as stopped.
+- [CW-a2lf](spec.md#requirement-cw-a2lf-each-finding-states-its-alternatives) — each finding states its alternatives with their trade-offs, or none and why; a finding without them is not published.
 
 ### Lens, basis, and severity
 
@@ -105,8 +107,15 @@ meaningful order; [`README.md`](README.md) is the readable description.
 
 ### Triage
 
-- [CW-j1nv](spec.md#requirement-cw-j1nv-triage-states-a-position-on-every-finding-and-presents-every-one) — the agent states a reasoned position and proposed action on every finding, and presents them all.
-- [CW-neua](spec.md#requirement-cw-neua-a-finding-is-disposed-of-only-by-the-owner) — a finding is disposed of only by the owner's stated disposition, before any is acted on.
+- [CW-j1nv](spec.md#requirement-cw-j1nv-triage-states-a-position-on-every-finding-and-presents-every-one-not-accepted-by-default) — the agent states a reasoned position and proposed action on every finding, and presents every one not accepted by default.
+- [CW-neua](spec.md#requirement-cw-neua-a-finding-not-accepted-by-default-is-disposed-of-only-by-the-owner) — a finding is disposed of only by the owner's stated disposition, before any is acted on, unless accepted by default.
+- [CW-d5ac](spec.md#requirement-cw-d5ac-a-review-finding-the-default-rule-admits-is-accepted-by-default) — an uncontested, non-blocking review finding with one agreed edit or fix and no alternative is accepted by default, its classification recorded.
+- [CW-t9bx](spec.md#requirement-cw-t9bx-default-acceptances-are-reported-in-one-table) — default acceptances are reported in one table, with the triage's last question or its final report.
+- [CW-r8vz](spec.md#requirement-cw-r8vz-the-owner-revisits-a-default-acceptance) — on the owner's direction, the latest finished triage resumes to amend a default acceptance or its advancing exit.
+
+### Guidance reviews
+
+- [CW-g6ua](spec.md#requirement-cw-g6ua-guidance-reviews) — the owner's interactive guidance review reports the period's figures, lists candidate edits, and records its period.
 
 ### The intervention ledger
 
@@ -114,6 +123,8 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-xe8m](spec.md#requirement-cw-xe8m-an-accepted-proposal-is-not-logged-to-the-ledger) — a disposition accepting the agent's proposal unchanged is not logged; the triage record holds it.
 - [CW-w22z](spec.md#requirement-cw-w22z-a-design-reversal-is-logged-to-the-ledger) — an owner changing a design recommendation is logged as a `design` entry; an accepted one is not.
 - [CW-1jxh](spec.md#requirement-cw-1jxh-the-ledger-is-tracked-and-archived-with-the-change) — the ledger is tracked, stays in the change directory, and is archived with the change.
+- [CW-v1rk](spec.md#requirement-cw-v1rk-a-revisited-default-acceptance-is-logged-and-marked) — a corrected default acceptance is logged, its disposition beginning `revisits default acceptance:`.
+- [CW-n6wy](spec.md#requirement-cw-n6wy-a-recommended-waiver-is-logged-with-its-criterion) — a recommended waiver is logged with its criterion; one the owner declines is a correction.
 
 ## 4. The engine
 
@@ -133,6 +144,9 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-tax4](spec.md#requirement-cw-tax4-the-orchestrating-session-resolves-a-merges-conflicts-but-codes) — it resolves merge conflicts in workflow documents itself; code conflicts go to the owner or implementation.
 - [CW-6scj](spec.md#requirement-cw-6scj-the-orchestrating-session-may-report-the-toolings-misbehaviour) — it may report the workflow tooling's observed misbehaviour as its own numbered record for the next triage.
 - [CW-6fi2](spec.md#requirement-cw-6fi2-a-waived-design-review-after-a-return-is-a-direction-to-planning) — an owner's waiver of another design review after a return is recorded as a direction to planning.
+- [CW-k2rv](spec.md#requirement-cw-k2rv-the-owner-stops-a-running-step-through-the-command) — on the owner's word, the command stops the change's running step, naming it when two run; the interrupt resolves no run.
+- [CW-h7lq](spec.md#requirement-cw-h7lq-a-stop-signals-only-a-run-that-still-holds-its-record) — a stop checks the run still holds its record at selection and just before the signal, else refuses.
+- [CW-w4ne](spec.md#requirement-cw-w4ne-a-stopped-run-is-recovered-as-any-stop-and-a-late-stop-ends-nothing) — a stopped run is recovered as any stop and commits nothing; a stop after the agent exits ends nothing.
 
 ### Step runs and outcomes
 

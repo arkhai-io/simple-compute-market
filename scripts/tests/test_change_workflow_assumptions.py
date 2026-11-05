@@ -28,6 +28,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SKILLS = ROOT / ".agents/skills"
+# The workflow's skills: one per step, and the guidance review, which no step runs.
+# The `openspec-*` skills beside them are OpenSpec's own, not the workflow's.
+WORKFLOW_SKILLS = ("change-*/SKILL.md", "guidance-review/SKILL.md")
 STEP_TABLE = ROOT / ".claude/change-steps.toml"
 FRAGMENT = ROOT / "scripts/change_workflow/workflow.mk"
 ROLES = ROOT / "openspec/specs/change-workflow/README.md"
@@ -136,7 +139,7 @@ def collected(root: Root, skills: Path = SKILLS, step_table: Path = STEP_TABLE,
     where: dict[str, set[str]] = defaultdict(set)
     sources: list[tuple[str, list[str]]] = [
         (_shown(skill), code_of(skill.read_text("utf-8")))
-        for skill in sorted(skills.glob("change-*/SKILL.md"))]
+        for skill in sorted(path for pattern in WORKFLOW_SKILLS for path in skills.glob(pattern))]
     table = tomllib.loads(step_table.read_text("utf-8"))
     # A step's rules are under `[steps.<name>]`, the shared ones under `[common]`.
     rows = [table.get("common", {}), *table.get("steps", {}).values()]
@@ -290,6 +293,17 @@ def test_a_skill_naming_an_unlisted_target_is_named(tmp_path: Path) -> None:
 
     assert missing == [f"make check-something (named in "
                        f"{tmp_path / 'skills/change-extra/SKILL.md'})"]
+
+
+def test_the_guidance_review_is_read_and_openspecs_own_skills_are_not(tmp_path: Path) -> None:
+    for name, text in (("guidance-review", "Append to `openspec/changes/archive/x.jsonl`.\n"),
+                       ("openspec-propose", "Run `make check-something`.\n")):
+        (tmp_path / "skills" / name).mkdir(parents=True)
+        (tmp_path / "skills" / name / "SKILL.md").write_text(text, "utf-8")
+
+    where = _sources(tmp_path)
+
+    assert set(where) == {"openspec/changes/archive/x.jsonl"}
 
 
 def test_the_step_table_and_the_fragment_name_their_targets_and_paths(tmp_path: Path) -> None:

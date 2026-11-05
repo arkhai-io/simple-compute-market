@@ -733,6 +733,40 @@ def test_an_advancing_round_validates_its_fix_commit_then_starts_the_next_planne
                          "reason": validated["reason"]}
 
 
+def test_a_revisit_while_the_fix_commit_is_validated_routes_on_the_resumed_triage(
+        tmp_path: Path) -> None:
+    """A revisit while the fix commit is validated: the validation is stopped and
+    resolved, the triage resumed, and its later outcome governs the reviews."""
+    root = _repository(tmp_path, "in implementation")
+    _planned(root)
+    triage = _triaged_round(root, to=_to("round"), validated="e" * 40)
+    validating = _next(root)
+    stopped = _log(root, "validate", {"outcome": "stopped", "message": "interrupted",
+                                      "reason": "the run did not finish: Terminated: "
+                                                "received SIGTERM", "denials": []})
+    _decide(root, "the owner interrupts the validation", by="owner")
+    interrupted = _next(root)
+    _decide(root, "revisits 02 F1", by="owner", resumes=triage["seq"])
+    directed = _next(root)
+    _decide(root, "the revisit supersedes the validation", by="owner",
+            resolves=stopped["seq"])
+    _check(root, ALL_WORK_DONE)
+    _log(root, "triage", {**_done(_to("review", "pre-closeout")),
+                          "triaged": ["01-validation", "02-implementation"]},
+         resumes=triage["seq"])
+
+    result = _next(root)
+
+    assert (validating["step"], validating["target"]) == ("validate", {"step": "round"})
+    # The stopped validation waits until a decision line resolves it: neither the
+    # interrupt nor the revisit's direction resolves it.
+    assert interrupted["step"] == directed["step"] == "owner"
+    assert interrupted["seq"] == directed["seq"] == stopped["seq"]
+    # The resumed triage's exit governs: its fix commit validated for pre-closeout.
+    assert (result["step"], result["target"]) == (
+        "validate", {"step": "review", "kind": "pre-closeout"})
+
+
 def test_an_inconclusive_validation_of_the_fix_commit_goes_to_the_owner(
         tmp_path: Path) -> None:
     root = _repository(tmp_path, "in implementation")

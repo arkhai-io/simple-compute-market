@@ -16,6 +16,7 @@
 | [Deployment topology](#deployment-topology) | Local and deployed structure, and who operates it |
 | [Build, packaging, and initialization](#build-packaging-and-initialization) | Internal wheels, images, migrations, and reinit rules |
 | [Recovery workers](#recovery-workers) | Timer-driven durable recovery: capacity, fulfillment convergence, lease expiry |
+| [Implementation rules](#implementation-rules) | No speculative guard code; prefer an existing library |
 | [Testing strategy](#testing-strategy) | Test levels; see `TESTING.md` for methodology |
 | [Capability documentation index](#capability-documentation-index) | Permanent detailed contracts and rationale |
 
@@ -1182,6 +1183,16 @@ Each storefront process holds its timer loops with one loop controller from `kit
 
 Beside the loop controller, `kit/storefront` owns the trading pause, which refuses new negotiations and leaves the loops running. The negotiation runtime reads it, and system status reports it. Each storefront binds the pause's framework-free route service at its admin pause and resume routes. The two pauses are separate, and both are process-local: a restarted storefront trades and runs its loops again, which suits an operator who is actively correcting an issue. See [market composition](../../openspec/specs/market-composition/spec.md).
 
+## Implementation rules
+
+### No speculative guard code
+
+Production code adds no refusal, warning, probe, or hardening for a case nobody can describe, or that no integration or end-to-end test could deliberately trigger: such a guard is code no test defends.
+
+### Prefer an existing library
+
+Use an existing open-source library wherever one meets the requirements, and build our own only when none does. The relay's grant-admission plugin ([`frp-grant-admission`](../../openspec/specs/frp-grant-admission/spec.md)) is the repository's own because no library met its requirements; the secret scan uses gitleaks rather than a scanner of our own.
+
 ## Testing strategy
 
 Tests belong at the lowest level that can prove the behavior: unit, integration, smoke, and end-to-end, each defending the narrowest observable contract appropriate to its level — no level should rely on end-to-end tests alone for behavior it could prove itself. See [`docs/development/TESTING.md`](TESTING.md) for the level definitions, coverage jurisdiction between them, the client-contract "no raw calls" rule, contract fixtures, boundary-change validation, cross-language conformance, and offline review validation, and [the testing and compatibility specification](../../openspec/specs/test-compatibility/spec.md) for the normative requirements.
@@ -1206,8 +1217,11 @@ A schema cutover that transfers ownership of active workloads between persistenc
 
 ### Public repository content checks
 
-`make check-public-content` checks the staged index using
-`scripts/check_public_content.py`. The guarded branch push checks every outgoing
+Two checks read content about to be published: `scripts/check_public_content.py`,
+the repository's own rules below, and `scripts/check_secrets.py`, which runs the
+gitleaks secret scanner for private keys and provider credentials. They run
+together. `make check-public-content` runs both over the staged index, and `make
+check-secrets` the second alone. The guarded branch push checks every outgoing
 commit, including intermediate additions and commit messages. The Public content
 CI workflow checks commits against the event base, using `origin/dev` for a
 new branch without a previous tip. This retains inspection of every commit outside
@@ -1220,8 +1234,8 @@ planning/session paths. `example-user` is the synthetic fixture username;
 `appuser` and `ubuntu` are documented runtime-image accounts, and `you` is an
 example placeholder. These names do not authorize publishing actual operator
 paths. Machine-specific names, addresses and other operational identifiers require
-a private local literal denylist; arbitrary identifiers and secrets are not
-automatically recognizable. Binary additions are refused because this text
+a private local literal denylist; arbitrary identifiers, and secrets in no format
+the secret scan below recognizes, are not automatically recognizable. Binary additions are refused because this text
 scanner cannot inspect them. Review remains required. Diagnostics report location
 and rule without echoing matched content.
 
@@ -1229,7 +1243,9 @@ Enable the repository-owned hooks in each checkout with
 `git config --local core.hooksPath scripts/hooks` after inspecting any existing
 hooks configuration; preserve or chain existing hooks instead of overwriting them.
 The pre-commit hook checks staged additions. The pre-push hook checks the actual
-refs being sent, including ref names and annotated tag content. Hooks require Python 3.10 or newer and may be bypassed by direct
+refs being sent, including ref names and annotated tag content. Each hook runs both
+checks and refuses when either does. Hooks and the guarded push require Python 3.11
+or newer and the pinned gitleaks; hooks may be bypassed by direct
 Git options; they are local safeguards, not server enforcement. Use the guarded
 `make push-branch` path for agent pushes.
 
@@ -1242,3 +1258,14 @@ be read fails the check. A CI runner without that private file runs the generic
 rules only. Fetch the target remote before checking outgoing commits. Use
 `python3 scripts/check_public_content.py --base <commit>` to inspect a known
 committed range; this is not a complete historical secret audit.
+
+Private keys and provider credentials are recognized by
+[gitleaks](https://github.com/gitleaks/gitleaks) at the release
+`scripts/gitleaks-pins.toml` pins; `make install-gitleaks` installs it, refusing an
+archive whose sha256 is not the pinned one, and a check that finds no gitleaks, or
+another release, refuses and names that command. The gate, `.gitleaks.toml`, runs
+wherever `check_public_content.py` runs and reports locations, never content.
+`make audit-secrets` runs the gate's rules and the three default rules it turns off
+over the tracked tree, gates nothing, and is run before a release ships ([`RELEASING.md`, "Cutting a release"](RELEASING.md#cutting-a-release)).
+The gate's rules, the audit, and what both leave to review:
+[`openspec/specs/market-change-workflow/README.md`, "Secret scanning"](../../openspec/specs/market-change-workflow/README.md#secret-scanning).

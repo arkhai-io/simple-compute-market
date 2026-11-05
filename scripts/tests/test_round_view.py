@@ -4,7 +4,8 @@ What the owner sees is Git's own status of the checkout, and what the view must
 preserve is Git's own state — the branch, the commits, the files — so a temporary
 repository is the lowest level that proves it: a checkout of its own for a change
 worked in place, and for a change worked in a clone a workspace with a bare
-`origin` and the change's clone beside it. Runs in progress are injected.
+`origin` and the change's clone beside it. Runs in progress are injected, but for
+one test reading the checkout's real run records.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ import pytest
 
 from change_workflow import clone as clones
 from change_workflow import round_view as rounds
-from change_workflow.running import Run
+from change_workflow.running import Run, recorded_run, runs_directory
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -313,6 +314,25 @@ def test_a_checkout_with_a_run_in_progress_is_refused_naming_it(repo: Path) -> N
         _start(repo, base, runs=lambda _: [running])
     assert _git(repo, "rev-parse", "HEAD") == head
     assert rounds.open_view(repo) is None
+
+
+def test_a_held_record_refuses_the_view_and_a_stale_one_does_not(repo: Path) -> None:
+    """Library integration: the checkout's real run records, read through their locks."""
+    base, head = _round(repo)
+    runs = runs_directory(repo)
+
+    with recorded_run(runs, "implement", CHANGE):
+        with pytest.raises(rounds.RoundError, match=r"implement of the-change \(process"):
+            rounds.start(repo, CHANGE, base=base)
+    assert _git(repo, "rev-parse", "HEAD") == head
+
+    # Left by a run killed before it could remove it: its process (this one) lives
+    # on, but nothing holds the record.
+    assert runs is not None
+    (runs / "4242-stale.json").write_text(json.dumps(
+        {"pid": os.getpid(), "step": "implement", "change": CHANGE,
+         "started": "2026-10-20T10:00:00Z"}), "utf-8")
+    assert rounds.start(repo, CHANGE, base=base).base == base
 
 
 def test_a_base_that_is_not_an_ancestor_is_refused(repo: Path) -> None:

@@ -1,6 +1,6 @@
 ---
 name: change-validate
-description: Validate the commit at HEAD of an OpenSpec change before its implementation is triaged — push it and run the end-to-end pipeline and every CI workflow its complete sections owe, run the local and Helm validation parts meanwhile, diagnose every failure from its logs, settle environmental failures with the owner, and write reviews/NN-validation.md. Never edits, relocks, commits, or fixes the commit. Use after implementation sections are committed, beside an implementation review, when the owner says "validate <change>", or when `make validate` invokes you.
+description: Validate the commit at HEAD of an OpenSpec change before its implementation is triaged — push it and run the end-to-end pipeline and every CI workflow its complete sections owe, run the local and Helm validation parts meanwhile, skipping any part the owner waived in the change's log, diagnose every failure from its logs, settle environmental failures with the owner, and write reviews/NN-validation.md. Never edits, relocks, commits, or fixes the commit. Use after implementation sections are committed, beside an implementation review, when the owner says "validate <change>", or when `make validate` invokes you.
 ---
 
 # Validating a committed slice
@@ -147,13 +147,34 @@ moves nothing here, and validation runs beside it.
 - **Instructions.** If the invocation says `HELM_ALL_SCENARIOS=1`, the Helm part
   runs every pipeline scenario and the served list together, to find which the
   charts serve now (step 3).
+- **Waivers.** Any part may be waived, and only by the owner. A waiver for later
+  validations is the owner's decision in the change's workflow log — a line
+  `"by": "owner"` in `workflow.jsonl` beside the change's records, which Grep finds
+  — naming the parts and the condition they are waived on, such as "nothing the
+  change touches affects the services the end-to-end tests validate"; an
+  instruction in the invocation is not a waiver. For each part such a decision
+  waives, find the last validation record of the change whose `Parts:` line ran
+  that part, and its `Commit:`. The waiver lapses, and the part runs, when the
+  commits since then include a merge (`git log --merges <that commit>..HEAD`),
+  since a merge brings in code the change did not write, or when the condition does
+  not hold over what they change (`git diff --stat <that commit> HEAD`); with no
+  such record, judge the condition over the change's own diff. Otherwise the part
+  is `waived`: it is not run, and the record names the decision's `seq`, its
+  condition, and what you checked. A lapsed waiver is written in the part's section
+  too, naming the decision's `seq` and why it lapsed — the merge, or how the
+  condition broke. A waived part is an omission of evidence, neither passed,
+  failed, nor inconclusive, and the result is judged on the parts that ran. When
+  every part is waived there is nothing to validate: write no record, and tell the
+  owner that waiving validation entirely is their direction past the guard it
+  remedies.
 - **Owed CI evidence.** Evidence only a push produces — a CI workflow's run, which a
   change branch's push does not trigger — is owed by validation rather than gating a
   task. Read the change's `tasks.md`, as the clean worktree holds it at `HEAD`, and
   note every `Owed by validation:` line of a section whose tasks are all checked:
   the workflow, the job, what the job must show, and the section and task owing
   it. Every validation of the change dispatches them, a fix commit's included,
-  since a later commit can break what an earlier one showed. With none, the record's
+  since a later commit can break what an earlier one showed — unless the owner
+  waived the `ci` part (above). With none, the record's
   CI part is `ci not owed` and nothing is dispatched. Only the workflows
   `scripts/ci_evidence.py` lists (`DISPATCHABLE`) can be dispatched; none publishes.
   A line owing another is refused by `make run-ci`, which names the list: its
@@ -162,7 +183,9 @@ moves nothing here, and validation runs beside it.
 
 ## 2. Start the pipeline first
 
-The pipeline is by far the slowest part, so it runs while everything else does:
+A part waived (step 1) is not started, here or in step 3: a waived pipeline is
+not dispatched, a waived owed workflow not run, and the push still made. The
+pipeline is by far the slowest part, so it runs while everything else does:
 
 1. `gh auth status` — without it the dispatch fails after the push.
 2. `scripts/change-workflow push` — the guarded push of exactly `HEAD`, never forced. If it
@@ -378,14 +401,24 @@ the change, and triage cannot fix it. Settle it now:
 
 1. Stop, and tell the owner the failure, its evidence, and the remedy — for
    example, another change's namespace to scale to zero, a volume that outlived
-   its deletion (`volumes gone`) to delete, the daemon to restart.
+   its deletion (`volumes gone`) to delete, the daemon to restart. When it is a
+   known environmental failure, already diagnosed in an earlier validation record
+   of this change, recommend beside the remedy that the owner may waive the part
+   instead, naming that record, as `docs/agents/change-workflow.md`'s "Waivers" gives the criterion;
+   with no criterion holding, recommend none. Only the owner waives: a part they
+   waive is `waived`, an omission of evidence counted in no result, while one they
+   decline to remedy is `inconclusive`.
 2. Wait for the owner's word: either the owner carries out the remedy, or names the
    action for you to take. Take only the action named.
 3. Rerun that part. It is a new attempt with its own directory; the earlier
    attempt stays as evidence, and the record reports both.
 
 When the owner declines, or the remedy cannot be applied now, the part is
-`inconclusive`. Never rerun a failed step only to get a pass: a rerun is to tell an
+`inconclusive`. A waiver you recommended goes in the record's `## Environment`,
+taken or declined, with its criterion: validation commits nothing, so the triage
+that reads the record writes its ledger line, and archive cleanup writes it for a
+record no triage reads — a validation of the merged `HEAD`, or one before closeout
+or archive cleanup. Never rerun a failed step only to get a pass: a rerun is to tell an
 environmental fault from a failure, or to validate after a remedy, and its first
 result is always reported.
 
@@ -412,10 +445,19 @@ overwrite a record: if the name exists, take the next number.
 
 The result, overall and per part, is one of:
 
-- `passed` — every part ran and passed;
+- `passed` — every part that ran passed;
 - `failed` — at least one failure is caused by the commit, or its cause is unknown;
 - `inconclusive` — no failure is caused by the commit, but some part produced no
   evidence for an environmental reason the owner declined or could not remedy.
+
+A part the owner waived is `waived` on the `Parts:` line and counts in no result:
+the overall result is judged on the parts that ran. A part waived before it ran
+has a section holding only the line `Waived: <the owner's decision, by its log
+seq>; <the condition, and what you checked of it>`. A part waived after an
+environmental failure keeps its attempts as any part does, adding the line
+`Waived: <the environmental failure waived>; <the owner's words>`. A waiver that
+lapsed is the line `Waiver lapsed: <the decision, by its log seq>; <the merge, or
+how the condition broke>` above the part's evidence.
 
 `make review KIND=pre-closeout` reads the `Commit:` and `Result:` lines, so keep
 them exactly as the template shows: the full commit, then the result word, with no
@@ -426,8 +468,8 @@ backticks or emphasis around either.
 
 - **Commit:** <full commit> on <branch>
 - **Result:** passed | failed | inconclusive — <one line why>
-- **Parts:** local <result> · helm <result> · pipeline <result> · ci <result> | ci not owed
-- **Pipeline:** run <id>, <conclusion>
+- **Parts:** local <result> · helm <result> · pipeline <result> · ci <result> | ci not owed (each result passed, failed, inconclusive, or waived)
+- **Pipeline:** run <id>, <conclusion> | waived
 - **CI:** <workflow> run <id>, <conclusion> — <the owed jobs' result>; <the jobs failing not owed, and whether every failure is also in dev's run> (omit when nothing is owed)
 
 ## Local
@@ -471,8 +513,9 @@ Not owed: `<job>` — <conclusion>, <each failure: the test and its exception ty
 
 ## Environment
 
-<each environmental failure: its evidence, the remedy, what the owner decided, and
-the attempt that followed; or `None.`>
+<each environmental failure: its evidence, the remedy, any waiver you recommended
+with its criterion and the earlier record, what the owner decided, and the attempt
+that followed; or `None.`>
 
 ## Failures
 
@@ -494,7 +537,7 @@ labelled `V<n>` so triage can carry them beside review findings; write `None.` w
 there are none. The `ci` part's result is `passed` when every owed job passed and
 showed its observation and no other failure is a finding, `failed` with a `V<n>`,
 and `inconclusive` when its run produced no evidence and the owner declined the
-rerun. What a section owes is read from `tasks.md`, never written there: a line
+rerun, or `waived` (step 1). What a section owes is read from `tasks.md`, never written there: a line
 that names the wrong job or workflow is reported, and the plan's correction is
 implementation's. Environmental failures go under `## Environment` and are never
 findings.
@@ -509,7 +552,8 @@ Report a list that should grow under "About the validation".
 
 ## 8. Report
 
-Tell the owner the commit, the result and each part's, the pipeline run and its
+Tell the owner the commit, the result and each part's, each part waived and each
+waiver that lapsed, with the decision and why, the pipeline run and its
 conclusion, each CI run with its owed observations and its baseline, the coverage
 of the change, the scenarios not run against Helm, each
 environmental failure and how it was settled, each failure with its diagnosis, and

@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import importlib.util
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
+
+import check_uv_version
 
 _SPEC = importlib.util.spec_from_file_location(
     "uv_project", Path(__file__).resolve().parents[1] / "uv_project.py"
@@ -51,6 +55,64 @@ class _Recorder:
 WHEELHOUSE = {"registry": "../../.dist"}
 
 
+def _uv_ok() -> None:
+    """The installed uv meets the minimum."""
+    return None
+
+
+def _uv_old() -> str:
+    return "uv 0.12.19 is older than 0.12.22, which writes this repository's locks"
+
+
+@pytest.mark.parametrize("name", ["lock", "reinit"])
+def test_a_command_that_may_rewrite_a_lock_refuses_an_older_uv_before_running_it(
+        tmp_path, capsys, name):
+    root = _repository(tmp_path)
+    project = _project(root, sources={"arkhai-core": WHEELHOUSE})
+    command = ["lock"] if name == "lock" else ["reinit", "--project", str(project)]
+    run = _Recorder()
+
+    assert uv_project.main(command, root=root, run=run, uv_problem=_uv_old) == 2
+    assert run.calls == []
+    err = capsys.readouterr().err
+    assert f"{command[0]} refused" in err and "0.12.19" in err and "0.12.22" in err
+
+
+@pytest.mark.parametrize("target", [["lock", "PROJECTS=kit/identity"],
+                                    ["review-locks", "REVIEW_PROJECTS=kit/identity"]])
+def test_every_make_target_that_relocks_goes_through_the_guarded_command(target):
+    shown = subprocess.run(["make", "-n", "--no-print-directory", *target],
+                           cwd=Path(__file__).resolve().parents[2], capture_output=True,
+                           text=True, check=True, env={**os.environ, "MAKEFLAGS": ""}).stdout
+
+    assert "python3 scripts/uv_project.py lock" in shown
+    if target[0] == "lock":
+        # It also refuses before building the wheelhouse the relock reads.
+        assert shown.index("check_uv_version.py") < shown.index("uv_project.py lock")
+
+
+def test_commands_that_install_a_committed_lock_do_not_check_uv(tmp_path):
+    root = _repository(tmp_path)
+    project = _project(root, sources={"arkhai-core": WHEELHOUSE})
+    run = _Recorder()
+
+    assert uv_project.main(["image", "--project", str(project), "--"], root=root, run=run,
+                           uv_problem=_uv_old) == 0
+    assert uv_project.main(["install-wheel", "--project", str(project)], root=root, run=run,
+                           uv_problem=_uv_old) == 0
+    assert len(run.calls) == 2
+
+
+def test_the_default_check_is_the_repository_uv_version_check(tmp_path, monkeypatch):
+    monkeypatch.setattr(check_uv_version, "problem", _uv_old)
+    root = _repository(tmp_path)
+    _project(root)
+    run = _Recorder()
+
+    assert uv_project.main(["lock"], root=root, run=run) == 2
+    assert run.calls == []
+
+
 def test_internal_packages_are_those_resolved_from_the_wheelhouse(tmp_path):
     root = _repository(tmp_path)
     project = _project(root, sources={
@@ -80,7 +142,8 @@ def test_reinit_upgrades_and_reinstalls_each_internal_package(tmp_path):
     project = _project(root, sources={"arkhai-kit-site": WHEELHOUSE, "arkhai-core": WHEELHOUSE})
     run = _Recorder()
 
-    assert uv_project.main(["reinit", "--project", str(project)], root=root, run=run) == 0
+    assert uv_project.main(["reinit", "--project", str(project)], root=root, run=run,
+                           uv_problem=_uv_ok) == 0
     assert run.calls == [([
         "uv", "sync", "--python", "3.13", "--find-links", "../../.dist",
         "--upgrade-package", "arkhai-core", "--reinstall-package", "arkhai-core",
@@ -94,7 +157,7 @@ def test_reinit_passes_the_wheelhouse_relative_to_the_project(tmp_path):
                        sources={"arkhai-core": {"registry": "../../../.dist"}})
     run = _Recorder()
 
-    uv_project.main(["reinit", "--project", str(project)], root=root, run=run)
+    uv_project.main(["reinit", "--project", str(project)], root=root, run=run, uv_problem=_uv_ok)
     assert run.calls[0][0][4:6] == ["--find-links", "../../../.dist"]
 
 
@@ -133,7 +196,7 @@ def test_lock_upgrades_internal_packages_for_every_locked_project(tmp_path):
     (root / "kit" / "not-a-project" / "uv.lock").write_text("version = 1\n", "utf-8")
     run = _Recorder()
 
-    assert uv_project.main(["lock"], root=root, run=run) == 0
+    assert uv_project.main(["lock"], root=root, run=run, uv_problem=_uv_ok) == 0
     assert run.calls == [
         (["uv", "lock", "--find-links", "../../.dist",
           "--upgrade-package", "arkhai-core"], first.resolve()),
@@ -151,7 +214,7 @@ def test_lock_also_upgrades_repository_distributions_resolved_elsewhere(tmp_path
     })
     run = _Recorder()
 
-    uv_project.main(["lock", str(project)], root=root, run=run)
+    uv_project.main(["lock", str(project)], root=root, run=run, uv_problem=_uv_ok)
     assert run.calls[0][0] == [
         "uv", "lock", "--find-links", "../../.dist",
         "--upgrade-package", "arkhai-core", "--upgrade-package", "arkhai-kit-config",
@@ -162,7 +225,8 @@ def test_a_failed_command_fails_the_invocation(tmp_path, capsys):
     root = _repository(tmp_path)
     project = _project(root)
 
-    assert uv_project.main(["lock", str(project)], root=root, run=_Recorder(1)) == 1
+    assert uv_project.main(["lock", str(project)], root=root, run=_Recorder(1),
+                           uv_problem=_uv_ok) == 1
     assert "lock failed" in capsys.readouterr().err
 
 
@@ -179,5 +243,6 @@ def test_a_derivation_failure_runs_nothing(tmp_path, breakage):
     run = _Recorder()
 
     command = "install-wheel" if breakage == "no-version" else "reinit"
-    assert uv_project.main([command, "--project", str(project)], root=root, run=run) == 2
+    assert uv_project.main([command, "--project", str(project)], root=root, run=run,
+                           uv_problem=_uv_ok) == 2
     assert run.calls == []
