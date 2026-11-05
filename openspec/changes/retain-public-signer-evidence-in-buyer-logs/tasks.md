@@ -4,8 +4,8 @@
 
 - [x] 1.1 Add a failing core buyer regression under `core/buyer/tests/unit/` for nested canonical public signer evidence and private/extended/noncanonical rejection; verify the exact failure before changing validation.
 - [x] 1.2 Update `core/buyer/src/core_buyer/run_log.py` to validate the narrow public identity shape through the existing identity codec; verify evidence round trips and the complete core buyer suite.
-- [ ] 1.3 Exercise the ordinary VM end command and retained signed result under the corrected package, preserving the same operation identity on retry; verify no repeated physical or financial effect.
-- [ ] 1.4 Run packaging/comment gates and share one applicable full-suite/end-to-end/independent-review round on the frozen candidate.
+- [x] 1.3 Exercise the ordinary VM end command and retained signed result under the corrected package, preserving the same operation identity on retry; verify no repeated physical or financial effect.
+- [x] 1.4 Run packaging/comment gates and share one applicable full-suite/end-to-end/independent-review round on the frozen candidate.
 
 - [x] 1.5 Project `core/buyer/src/core_buyer/orchestration.py` settlement-poll observations to public status while returning authenticated delivery intact; verify a real signed HTTP sequence and run-log canary regression under `core/buyer/tests/integration/`, and rerun the core buyer suite.
 
@@ -29,3 +29,15 @@
 |---|---|---|
 | Preserve canonical public signer evidence while refusing private carriers | buyer-orchestration specification and architecture | Pending |
 | No new protocol, dependency edge or repository-wide authority | Existing architecture remains applicable | Verify at closeout |
+
+Round validation: core buyer 169 tests passed, including signed HTTP status/result
+handling with a private-delivery canary. The actual ordinary VM end retry passed
+using the same durable operation and receipt, with no repeated native release or
+signed financial event. Existing journals remain historical; new status-only
+progress does not rewrite them. Supported-tool packaging and comment checks
+passed. The exact executable commit 6c2fa5004 passed all 20 root make-test targets in
+[Tests CI 41998371221](https://github.com/arkhai-io/simple-compute-market/actions/runs/41998371221);
+independent Standards/Spec review reported no confirmed finding. The applicable
+automated hosted-payment system journey passed; the default Compose workflow
+and its named markers remain unrun, not passed. Formal validation/closeout records
+and permanent documentation remain outstanding.
