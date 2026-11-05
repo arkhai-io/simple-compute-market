@@ -286,7 +286,7 @@ directory has exactly one row. An archived change MAY have no row.
 - **WHEN** the index no longer lists a change archived some time ago
 - **THEN** the index check passes, since only an active change needs a row
 
-### Requirement: CW-3tvs Design and triage are conversations with the owner
+### Requirement: CW-3tvs Design and triage's discussed findings are conversations with the owner
 
 Design MUST NOT run without the owner. Triage MUST bring every finding it does not
 accept by default, and every point of the owner's notes, to the owner, and MAY finish
@@ -1031,7 +1031,7 @@ agent MAY decline with a reason.
 - **THEN** the change remains in design until the fix lands, and planning does not
   begin before the triage records that the change advances
 
-### Requirement: CW-j1nv Triage states a position on every finding and presents every one
+### Requirement: CW-j1nv Triage states a position on every finding and presents every one not accepted by default
 
 The implementing agent MUST record, for every finding in a review, its own position
 (agree, disagree, or partly) with the evidence for it and a proposed action, and a
@@ -1050,7 +1050,7 @@ minor or uncontested.
 - **WHEN** a validation record's failure has one evident fix the agent agrees with
 - **THEN** it is presented to the owner, since it does not come from a review
 
-### Requirement: CW-neua A finding is disposed of only by the owner
+### Requirement: CW-neua A finding not accepted by default is disposed of only by the owner
 
 Every review MUST stop for the owner's disposition of each finding it does not accept
 by default before any finding is acted on, and such a finding MUST be treated as

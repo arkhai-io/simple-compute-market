@@ -99,7 +99,7 @@ started. Everything under "Open questions" is undecided.
 - **Skills that restate guidance.** Skills restate rules the guidance already
   holds, briefly and with a citation, because a session's compaction drops the
   documents it read through tool calls while the skill stays salient
-  (`openspec/specs/change-workflow/architecture.md`, "Sections are slices,
+  (`openspec/specs/change-workflow/README.md`, "Sections are slices,
   sessions are the owner's"). `docs/agents/change-workflow.md`, "Skills", limits
   a restatement to never being stricter than its source. Every restatement spends
   context and is a second copy that can drift. The owner would rather skills

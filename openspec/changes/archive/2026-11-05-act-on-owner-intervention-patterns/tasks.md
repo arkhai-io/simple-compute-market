@@ -974,3 +974,11 @@ The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
   The merged diff holds each added requirement once inside "Requirements", the six
   modified ones as the delta states them, and nothing else changed. The row links the
   archive; `make check-change` passes on the archived change.
+  Closeout review 95's triage, after the archive: the citation this change's design
+  added to `openspec/changes/layer-engineering-guidance/design.md` now points to
+  `openspec/specs/change-workflow/README.md`, since the merge brought in that
+  companion's rename from `architecture.md` (95 F1). The headings of `CW-3tvs`,
+  `CW-j1nv` and `CW-neua` in `openspec/specs/change-workflow/spec.md` now state the
+  default-acceptance exception their bodies define, their ids unchanged, and
+  `index.md`'s links follow them, with `CW-3tvs`'s summary revised (95 F2). The
+  archived delta keeps the headings it merged.

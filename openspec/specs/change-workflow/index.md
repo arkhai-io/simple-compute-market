@@ -31,7 +31,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 
 ### Discussion steps
 
-- [CW-3tvs](spec.md#requirement-cw-3tvs-design-and-triage-are-conversations-with-the-owner) — design and triage run with the owner, one decision or discussed finding per turn, as resumable sessions.
+- [CW-3tvs](spec.md#requirement-cw-3tvs-design-and-triages-discussed-findings-are-conversations-with-the-owner) — design runs with the owner, and triage brings the owner every finding not accepted by default, one decision or discussed finding per turn, as resumable sessions; a triage with nothing to discuss that advances asks nothing.
 - [CW-p1us](spec.md#requirement-cw-p1us-planning-asks-the-owner-nothing) — planning asks nothing; a plan needing an undecided design question returns the change to design.
 
 ### A design blocked on a prerequisite
@@ -107,8 +107,8 @@ meaningful order; [`README.md`](README.md) is the readable description.
 
 ### Triage
 
-- [CW-j1nv](spec.md#requirement-cw-j1nv-triage-states-a-position-on-every-finding-and-presents-every-one) — the agent states a reasoned position and proposed action on every finding, and presents every one not accepted by default.
-- [CW-neua](spec.md#requirement-cw-neua-a-finding-is-disposed-of-only-by-the-owner) — a finding is disposed of only by the owner's stated disposition, before any is acted on, unless accepted by default.
+- [CW-j1nv](spec.md#requirement-cw-j1nv-triage-states-a-position-on-every-finding-and-presents-every-one-not-accepted-by-default) — the agent states a reasoned position and proposed action on every finding, and presents every one not accepted by default.
+- [CW-neua](spec.md#requirement-cw-neua-a-finding-not-accepted-by-default-is-disposed-of-only-by-the-owner) — a finding is disposed of only by the owner's stated disposition, before any is acted on, unless accepted by default.
 - [CW-d5ac](spec.md#requirement-cw-d5ac-a-review-finding-the-default-rule-admits-is-accepted-by-default) — an uncontested, non-blocking review finding with one agreed edit or fix and no alternative is accepted by default, its classification recorded.
 - [CW-t9bx](spec.md#requirement-cw-t9bx-default-acceptances-are-reported-in-one-table) — default acceptances are reported in one table, with the triage's last question or its final report.
 - [CW-r8vz](spec.md#requirement-cw-r8vz-the-owner-revisits-a-default-acceptance) — on the owner's direction, the latest finished triage resumes to amend a default acceptance or its advancing exit.
