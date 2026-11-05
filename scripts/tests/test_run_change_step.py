@@ -796,6 +796,8 @@ def test_make_review_passes_the_owners_model_for_one_run() -> None:
 
 def test_make_check_change_runs_the_changes_closing_checks() -> None:
     assert _make_n("check-change", "CHANGE=X") == ['python3 scripts/check_change.py "X"']
+    assert _make_n("check-change", "CHANGE=X", "CHANGE_BASE=release") == [
+        'python3 scripts/check_change.py "X" --base "release"']
 
 
 def test_make_change_cost_reports_the_changes_runs() -> None:

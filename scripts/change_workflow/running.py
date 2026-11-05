@@ -76,7 +76,7 @@ def termination_ends_the_run() -> Iterator[None]:
     A process killed by SIGTERM's default action writes nothing, and a log whose
     last line is a run's question cannot tell a run still going from one that
     died. Raised in the run, the signal ends it as any interruption does: the
-    runner stops the process it can no longer watch, and the run is logged
+    runner stops the process it started, and the run is logged
     `stopped`, naming the signal. SIGKILL cannot be caught, so a run killed that
     way still leaves no line. Signal handlers can be set only on the main thread;
     elsewhere nothing changes.
@@ -180,8 +180,8 @@ def runs_in_progress(root: Path) -> list[Run]:
 def select_run(directory: Path | None, change: str, step: str | None = None) -> Run:
     """The one run in progress of `change` in `directory`, of `step` when named.
 
-    Refused when none is, naming a record left by a run that no longer holds it as
-    stale, and when two are and no step tells them apart.
+    Refused when none is, naming a record whose lock no run holds as stale, and
+    when two are and no step tells them apart.
     """
     found = [(run, held) for run, held in _records(directory)
              if run.change == change and (step is None or run.step == step)]

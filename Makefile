@@ -21,7 +21,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: dist-bare-metal-buyer
 .PHONY: run-e2e run-ci fetch-e2e-logs
 .PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
-.PHONY: check-agent-skills review design-review design orchestrate plan implement validate-local validate-ci validate-helm validate-parallel check-push-ready push-branch validate triage closeout archive-cleanup check-change-index check-tasks check-change change-clone change-clone-remove change-history record-capacity change-next change-graph change-watch change-cost round-view round-done round-view-closed review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
+.PHONY: check-agent-skills review design-review design orchestrate plan implement validate-local validate-ci validate-helm validate-parallel check-push-ready push-branch validate triage closeout archive-cleanup check-change-index check-tasks check-change check-decision-destinations check-history-wording check-version-bumps check-local-imports check-capability-index change-clone change-clone-remove change-history record-capacity change-next change-graph change-watch change-cost round-view round-done round-view-closed review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -1032,8 +1032,23 @@ check-change-index: ## Fail if the change index has a malformed row, an unresolv
 check-tasks: ## Fail if a task of a change's task list sits under another section's heading: a heading is missing or the task misplaced (CHANGE=<change>)
 	@python3 scripts/check_tasks.py "$(CHANGE)"
 
-check-change: ## Run a change's closing checks — comment hygiene, agent skills, its citations and task list, the change index, and the pinned strict OpenSpec validation — printing only failures and one pass line (CHANGE=<change>)
-	@python3 scripts/check_change.py "$(CHANGE)"
+check-change: ## Run a change's closing checks — comment hygiene, agent skills, its citations and task list, the change index, the pinned strict OpenSpec validation, decision destinations, history wording, version bumps, local imports, and the capability index — printing only failures and one pass line (CHANGE=<change> [CHANGE_BASE=<the branch it lands on; dev>])
+	@python3 scripts/check_change.py "$(CHANGE)"$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")
+
+check-decision-destinations: ## Fail if a `### D<n>` decision of a change's design has no bullet starting `D<n>` in its proposal's "Knowledge to promote" (CHANGE=<change>)
+	@python3 scripts/check_decision_destinations.py "$(CHANGE)"
+
+check-history-wording: ## Fail if a comment or docstring line added since the merge-base with the branch the change lands on describes history ([CHANGE_BASE=dev])
+	@python3 scripts/check_history_wording.py$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")
+
+check-version-bumps: ## Fail if a package version differs from its version at the merge-base with the branch the change lands on by more than one SemVer step ([CHANGE_BASE=dev])
+	@python3 scripts/check_version_bumps.py$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")
+
+check-local-imports: ## Fail if an import added inside a function since the merge-base with the branch the change lands on has no comment giving its reason ([CHANGE_BASE=dev])
+	@python3 scripts/check_local_imports.py$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")
+
+check-capability-index: ## Fail if a capability with a spec.md has no row in openspec/specs/README.md, or a row links nothing
+	@python3 scripts/check_capability_index.py
 
 change-watch: ## Follow the progress of an OpenSpec change's steps as they run, moving to each new step's progress file as it starts; Ctrl+C stops (CHANGE=<change>)
 	@python3 scripts/run_change_step.py watch "$(CHANGE)"

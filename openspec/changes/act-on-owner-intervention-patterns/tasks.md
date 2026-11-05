@@ -351,7 +351,7 @@ smaller one", "A local import has no reason", and "A capability has no index row
 Touches `scripts/check_change.py`, new check scripts under `scripts/` with their tests
 under `scripts/tests/`, and `openspec/specs/README.md`.
 
-- [ ] 6.1 Destinations (D24 item 1): each `### D<n>` heading under `design.md`'s
+- [x] 6.1 Destinations (D24 item 1): each `### D<n>` heading under `design.md`'s
   `## Decisions`, outside fenced code blocks, has a bullet starting `D<n>` in
   `proposal.md`'s "Knowledge to promote"; a design with no such heading passes,
   reported as not checked. Run it over every active change and record in this
@@ -359,37 +359,145 @@ under `scripts/tests/`, and `openspec/specs/README.md`.
   tests for a missing bullet named, a `D<n>: no permanent destination — <reason>`
   bullet passing, a heading inside a fenced block ignored, and this change's own
   design and proposal passing.
-- [ ] 6.2 History wording (D24 item 2): a comment or docstring line the change's diff
+  Done: `scripts/check_decision_destinations.py`, `make check-decision-destinations
+  CHANGE=<change>`. Only a level-2 `## Decisions` is read, and, as in CommonMark, a
+  fence closes only on a bare run of its own character at its opening's length or
+  longer. Tests, `test_check_decision_destinations.py`: decisions read only from
+  `## Decisions` outside fences (a `### Decisions` elsewhere, a fence, a line opening
+  another fence inside one, and a longer fence holding a shorter one ignored) (unit);
+  through `main()` over a change directory in a temporary tree (library integration):
+  every decision named passes, the `no permanent destination` form among them; a
+  missing bullet named; a bullet must start with the decision (`per D2` and `D20` do
+  not name D2); a design with no headings not checked. This change's
+  own pair is a run, not a test, since code may not name a change
+  (`check-comment-hygiene`): `make check-decision-destinations
+  CHANGE=act-on-owner-intervention-patterns` passes, 24 decisions. Over every active
+  change, 12 designs carry `### D<n>` headings; two pass
+  (`activate-compute-leases-at-the-site`, and this one), and ten fail, for their own
+  next step to fix: `spot-deals-through-arkhai-payments` (D1–D8),
+  `lapse-billing-with-the-site-lease` (D1–D4), `publish-wheels-through-a-gate`
+  (D1–D6), `renewable-compute-lease-deadlines` (D2, D4: its `D1–D2` range bullet names
+  only D1), `unify-compute-delivery-path` (D1–D7), `negotiate-open-ended-compute-terms`
+  (D1–D8), `add-arkhai-payments-lane-double` (D1–D7),
+  `activate-per-period-compute-servicing` (D1–D4),
+  `discover-open-ended-compute-listings` (D1–D4), and
+  `converge-ongoing-compute-leases` (D1–D7). The rest write decisions as bullets and
+  are not checked.
+- [x] 6.2 History wording (D24 item 2): a comment or docstring line the change's diff
   from its merge-base adds in a `.py`, `.toml`, `.yml` or `.yaml` file fails on
   "previously", "formerly", "used to", "no longer", "moved from", "was renamed" or
   "originally", naming the file and line, with no exception marker. Verify: unit tests
   for each word, for "now" and "legacy" passing, for a matching word in code rather
   than a comment passing, and library integration tests over a temporary Git
   repository showing only added lines are read.
-- [ ] 6.3 One version bump (D24 item 3): each `pyproject.toml` version that differs
+  Done: `scripts/check_history_wording.py`, `make check-history-wording`, over the
+  shared `scripts/change_diff.py`, which reads the lines the diff from the merge-base
+  adds in the working tree, uncommitted edits and untracked files included, since a
+  step runs its checks before committing. Python comments come from `tokenize`,
+  docstrings (module, class, function) from `ast`; a `.toml`/`.yml`/`.yaml` comment is
+  a `#` after whitespace outside a quoted value. A Python file that does not parse is
+  named, not a traceback. Tests, `test_check_history_wording.py`: each listed phrase in
+  an added comment fails and "now" and "legacy" pass, through `problems()` over a real
+  repository (library integration); a phrase in code or a string value is not a
+  comment, every line of a docstring is read, and the TOML/YAML comment rule's cases,
+  escaped quotes among them (unit); only added lines are read, across `.py`, `.yml` and
+  `pyproject.toml`, `.md` ignored (library integration); the command fails naming file
+  and line, then passes once reworded; an unparsable file; an unknown base.
+  `test_change_diff.py` (library integration, real Git): only added lines, uncommitted
+  and untracked included; dev's commits merged into the branch are not the change's;
+  the branch found on a remote; of two copies of the branch, the newer read when the
+  local one lags; an added line starting `++ `, printed `+++ ` before a file's second
+  hunk, and a path holding a space parsed; the user's `diff.noprefix` and
+  `diff.mnemonicPrefix` hiding nothing, the prefixes being fixed; a branch found
+  nowhere refused. Outside the plan: run on this branch, the check found
+  three comments sections 1 and 3 added saying "no longer" in
+  `scripts/change_workflow/harness.py` and `running.py`, reworded here.
+- [x] 6.3 One version bump (D24 item 3): each `pyproject.toml` version that differs
   from the merge-base is exactly one SemVer step from it, lower parts reset; a missing
   bump is not checked. Verify: unit tests for 0.4.0 → 0.4.1, 0.5.0 and 1.0.0 passing,
   0.4.0 → 0.4.2 and 0.6.0 failing with the package and both versions, and a package
   bumped 0.4.0 → 0.4.1 → 0.5.0 on the branch passing.
-- [ ] 6.4 Local imports (D24 item 5): an import inside a function that the diff adds to
+  Done: `scripts/check_version_bumps.py`, `make check-version-bumps`, comparing every
+  tracked or untracked `pyproject.toml` with its copy at the merge-base; one absent
+  there, or with no `[project].version`, is not checked; a version not
+  `MAJOR.MINOR.PATCH` is named. Tests, `test_check_version_bumps.py`: 0.4.0 → 0.4.0,
+  0.4.1, 0.5.0, 1.0.0 pass and 0.4.2, 0.6.0, 0.5.1, 2.0.0, 0.3.9 fail naming the
+  package and both versions (unit); a pre-release version named (unit); 0.4.0 → 0.4.1
+  → 0.5.0 in two commits passes, and a package bumped 0.4.0 → 0.4.2 fails through the
+  command, named by distribution and path, beside a new package not checked (library
+  integration, real Git).
+- [x] 6.4 Local imports (D24 item 5): an import inside a function that the diff adds to
   a `.py` file has a comment on its own line or the line above, else the check names
   the file and line. Verify: unit tests for an added local import with and without a
   reason comment, a module-level import passing, and an unchanged local import not
   read.
-- [ ] 6.5 The capability index (D24 item 6): every `openspec/specs/<capability>/` with a
+  Done: `scripts/check_local_imports.py`, `make check-local-imports`: an import inside
+  a function, nested and async functions and methods included, any line of which the
+  diff adds, needs a comment ending one of its lines or alone on the line above. Beyond
+  the plan, from the fresh-context check: an empty comment, or one made only of tool
+  directives (`noqa`, `type: ignore`, `pyright: ignore`, `pylint: disable=`, `pragma:
+  no cover`/`no branch`, `fmt:`/`isort:` skip, off or on, one or several), is no
+  reason, since the repository has local imports carrying only `# noqa: F401`; a
+  directive followed by a reason counts. Tests, `test_check_local_imports.py`: an
+  import without a reason named; trailing, above, and multi-line forms pass;
+  directives alone refused and a directive with a reason passing; module-level imports
+  pass; nested, async and method imports read (unit); an unchanged local import not
+  read beside an added one named, and the command failing then passing once a reason
+  is given (library integration, real Git).
+- [x] 6.5 The capability index (D24 item 6): every `openspec/specs/<capability>/` with a
   `spec.md` has a row in `openspec/specs/README.md` linking it, and every row links one
   that exists; add the `contact-exchange-settlement` row. Verify: unit tests for a
   missing row and a row linking nothing; the check passes on the repository.
-- [ ] 6.6 Run the five checks from `scripts/check_change.py` after its existing ones,
+  Done: `scripts/check_capability_index.py`, `make check-capability-index`, reading the
+  body rows of the `## Capabilities` table (its first two lines are header and
+  delimiter): every row links a capability's `spec.md` and no missing file, and every
+  capability with a `spec.md` is linked. The `Contact-exchange settlement` row is added
+  to `openspec/specs/README.md`, with no architecture companion, which the capability
+  has none of. An external link is not resolved. Tests,
+  `test_check_capability_index.py` (library integration, over temporary trees and the
+  repository's own index): a full index passes; a capability with no row named; a dead
+  link named; a row with no link, or linking only a non-spec file, named as linking no
+  capability; the repository's index passes.
+- [x] 6.6 Run the five checks from `scripts/check_change.py` after its existing ones,
   each named in its failure line, the diff-scoped ones against the merge-base with the
   branch the change lands on, `dev` by default. Verify: `scripts/tests/test_check_change.py`
   lists the new checks in order and reports each failure by name; `make check-change
   CHANGE=act-on-owner-intervention-patterns` runs all of them, failing only on the
   citation of the skill section 8 creates.
-- [ ] 6.7 Verification: the new checks' suites and `pytest -q
+  Done: each check is a `make` target `check_change.py` runs, named in its failure
+  line; `make check-change CHANGE=<change> [CHANGE_BASE=<branch>]` passes the branch to
+  the three diff checks (`--base`, `dev` by default). Tests: `test_check_change.py`
+  (unit, injected runner) lists the eleven commands in order, reports each failure by
+  name, passes `CHANGE_BASE` through, and takes `--base`; `test_run_change_step.py`'s
+  `make -n` case shows the target passing `CHANGE_BASE`. `make check-change` ran all
+  eleven, failing only on documentation citations, of the skill section 8 creates and
+  of `scripts/check_secrets.py` and its test, which section 5, not yet implemented,
+  creates. Outside the plan: `check-comment-hygiene` refuses the file names of a
+  change's design and proposal in code, so its exemption, until now only `TASKS_FILE` in
+  `change_next_step.py`, became a table that also exempts `DESIGN_FILE` and
+  `PROPOSAL_FILE` in `check_decision_destinations.py`; `test_check_comment_hygiene.py`
+  covers them, exempt there and caught elsewhere.
+- [x] 6.7 Verification: the new checks' suites and `pytest -q
   scripts/tests/test_check_change.py` (unit, and library integration where a temporary
   Git repository is used) pass; `make test` passes. End-to-end: none; no scenario
   exercises the closing checks.
+  Done: the eight suites (`test_change_diff`, the five checks', `test_check_change`,
+  `test_check_comment_hygiene`), 124 passed; `make test-release-tooling` 2009 passed.
+  `make test` was not run: on this machine it runs uv 0.12.19, which rewrites the 53
+  revision-5 locks to revision 3 (section 1's handoff), and this session can restore
+  them only one Edit at a time; the section touched only `scripts/`, its tests, the
+  `Makefile`'s new check targets and `openspec/specs/README.md`, which `make
+  test-release-tooling` covers. `make check-comment-hygiene` passes. End-to-end
+  confirmed: none.
+  Handoff: sections 4 and 5 were given to this session before section 6 and are not
+  started: section 4 needs a uv that writes lock revision 5, and the means to run
+  other uv releases to find the first one, and section 5 a gitleaks binary; this
+  machine has uv 0.12.19 only and no gitleaks, and the step may not download either.
+  Section 6 is independent of both. For section 7: `docs/agents/change-workflow.md`
+  should name the five checks and `CHANGE_BASE`, and that the diff checks compare with
+  `dev` unless told otherwise, so a change landing on another branch passes
+  `CHANGE_BASE`, which no skill does yet; without it, a prerequisite's commits read as
+  the change's own.
 
 ## 7. The guidance says what the owner does (D5, D6, D8–D12, D22, D23, D24)
 

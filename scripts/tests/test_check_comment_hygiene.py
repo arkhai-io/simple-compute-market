@@ -85,6 +85,18 @@ def test_the_task_list_constant_is_exempt_but_no_other_mention_in_the_script(
     assert f"./scripts/other.py:1:{TASK_LIST_CONSTANT}" in checker.change_history_matches(root)
 
 
+def test_the_design_and_proposal_constants_are_exempt_only_where_they_are_read(
+        tmp_path: Path) -> None:
+    root = _tree(tmp_path)
+    constants = 'DESIGN_FILE = "' + DESIGN + '"\nPROPOSAL_FILE = "' + PROPOSAL + '"\n'
+    _write(root, "scripts/check_decision_destinations.py", constants)
+
+    assert checker.change_history_matches(root) == []
+
+    _write(root, "scripts/other.py", constants)
+    assert len(checker.change_history_matches(root)) == 2
+
+
 def test_change_names_are_the_active_and_archived_directories_without_dates(
         tmp_path: Path) -> None:
     root = _tree(tmp_path)

@@ -284,8 +284,8 @@ def run_codex(command: Sequence[str], log: Path) -> int:
                 print(shown, file=sys.stderr, flush=True)
             return process.wait()
         finally:
-            # The review is logged as ended, so a reviewer it can no longer watch
-            # must not go on to write its output.
+            # The review is logged as ended, so an unwatched reviewer must not go
+            # on to write its output.
             if process.poll() is None:
                 process.kill()
                 process.wait()
