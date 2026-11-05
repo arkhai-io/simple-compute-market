@@ -19,13 +19,13 @@
 - [x] 2.8 Record applicable passing end-to-end pipeline scenarios for the final candidate; an unavailable required pipeline remains an explicit blocker.
 - [x] 2.9 Promote readiness ownership/rationale to `openspec/specs/deal-lifecycle/architecture.md`, retaining the normative delta for archive; complete the promotion record.
 - [x] 2.10 Run `make check-doc-citations CHANGE=complete-hosted-compute-lifecycle` and pinned strict OpenSpec validation; resolve every relevant citation.
-- [ ] 2.11 Archive last, merging the verified delta into `openspec/specs/deal-lifecycle/spec.md`, then complete closeout review and archive cleanup.
+- [x] 2.11 Archive last, merging the verified delta into `openspec/specs/deal-lifecycle/spec.md`, then complete closeout review and archive cleanup.
 
 ## Design promotion record
 
 | Decision | Permanent destination | State |
 |---|---|---|
-| Seller servicing adopts validated readiness without buyer polling and keeps end recovery independent | deal-lifecycle specification and architecture | Companion promoted; normative delta pending archive |
+| Seller servicing adopts validated readiness without buyer polling and keeps end recovery independent | deal-lifecycle specification and architecture | Promoted to specification and companion |
 | No new timer, protocol, dependency edge or repository-wide authority | Existing architecture remains applicable | Verified unchanged |
 
 Validation: bare-metal lifecycle/payment32 and VM payment/admission/database30 passed. All20root make-test targets pass on6c2fa5004 in
@@ -43,5 +43,5 @@ physical evidence are reused, not a fresh unassisted full VM financial run. Defa
 Compose/Alkahest markers remain unrun. No LIVE financial proof is claimed.
 
 Companion architecture and roadmap describe current behavior; the design records
-promotion destinations and retained provenance. Normative archive and its final
-independent documentation review remain the unchecked closeout task.
+promotion destinations and retained provenance. Normative archive and independent documentation review are complete.
+Both review axes found no confirmed finding; cleanup retains their records.

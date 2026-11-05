@@ -50,7 +50,7 @@ and architecture; repository-wide authority and dependency rules are unchanged.
 
 | Accepted decision | Permanent location | State |
 |---|---|---|
-| Canonical public signer evidence remains loggable; private delivery is excluded from progress | `openspec/specs/buyer-orchestration/architecture.md#identity-first-execution` | Companion promoted after executable review; normative delta remains for archive |
+| Canonical public signer evidence remains loggable; private delivery is excluded from progress | `openspec/specs/buyer-orchestration/architecture.md#identity-first-execution` | Promoted to specification and companion |
 | Existing authority, dependency, wire and persistence boundaries remain applicable | `docs/development/ARCHITECTURE.md` | Verified no repository-wide change needed |
 
 Qualification scope and current-state summary are reconciled in
@@ -58,8 +58,8 @@ Qualification scope and current-state summary are reconciled in
 
 ## Validation provenance
 
-The following preserves implementation and qualification observations compressed
-from the task ledger; it does not change the remaining archive/review boundary.
+The following preserves pre-archive implementation and qualification observations
+compressed from the task ledger. Final promotion and review are recorded above.
 
 Round validation: core buyer 169 tests passed, including signed HTTP status/result
 handling with a private-delivery canary. The actual ordinary VM end retry passed
@@ -89,3 +89,7 @@ automated ordinary-buyer Arkhai qualification is recorded separately from the
 unrun default Compose/Alkahest workflow. No fresh unassisted VM financial run
 or LIVE financial processing is claimed. Normative merge/archive and its
 independent documentation review remain the final unchecked closeout task.
+
+Normative promotion: `openspec/specs/buyer-orchestration/spec.md#requirement-public-signer-evidence-remains-loggable`.
+The archived documentation was independently reviewed at b829afbdb, with no
+confirmed Standards or Spec finding.

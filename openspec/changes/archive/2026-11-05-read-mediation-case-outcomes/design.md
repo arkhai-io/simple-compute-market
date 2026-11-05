@@ -40,7 +40,7 @@ Repository-wide architecture is unchanged.
 
 | Accepted decision | Permanent location | State |
 |---|---|---|
-| Case reads retain accepted/pending protection and verify bindings without duplicate filing | `openspec/specs/deal-lifecycle/architecture.md#buyer-surrender-and-cases` | Companion promoted after executable review; normative delta remains for archive |
+| Case reads retain accepted/pending protection and verify bindings without duplicate filing | `openspec/specs/deal-lifecycle/architecture.md#buyer-surrender-and-cases` | Promoted to specification and companion |
 | Existing authority, dependency, wire and persistence boundaries remain applicable | `docs/development/ARCHITECTURE.md` | Verified no repository-wide change needed |
 
 Qualification scope and current-state summary are reconciled in
@@ -48,8 +48,8 @@ Qualification scope and current-state summary are reconciled in
 
 ## Validation provenance
 
-The following preserves implementation and qualification observations compressed
-from the task ledger; it does not change the remaining archive/review boundary.
+The following preserves pre-archive implementation and qualification observations
+compressed from the task ledger. Final promotion and review are recorded above.
 
 Round validation: mediation 67 tests and contract/generated-model/typing checks
 passed. Corrected reads verified existing deployed cases and pinned records.
@@ -80,3 +80,7 @@ automated ordinary-buyer Arkhai qualification is recorded separately from the
 unrun default Compose/Alkahest workflow. No fresh unassisted VM financial run
 or LIVE financial processing is claimed. Normative merge/archive and its
 independent documentation review remain the final unchecked closeout task.
+
+Normative promotion: `openspec/specs/deal-lifecycle/spec.md#requirement-mediation-case-recovery-preserves-protection-outcomes`.
+The archived documentation was independently reviewed at b829afbdb, with no
+confirmed Standards or Spec finding.

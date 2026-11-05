@@ -28,14 +28,14 @@
   promotion record. The normative delta merges through archival, not manual duplication.
 - [x] Run `make check-doc-citations CHANGE=accept-advertised-mediation-window`,
   resolve every match, then pinned `openspec validate accept-advertised-mediation-window --strict`.
-- [ ] Archive last so the verified delta merges into the permanent specification;
+- [x] Archive last so the verified delta merges into the permanent specification;
   closeout review reads the archived change and companion promotion.
 
 ## Design promotion record
 
 | Decision | Destination | State |
 |---|---|---|
-| Minimum window is advertised authority policy, enforced with compute delivery timing | deal-lifecycle spec and architecture | Companion promoted; normative delta pending archive |
+| Minimum window is advertised authority policy, enforced with compute delivery timing | deal-lifecycle spec and architecture | Promoted to specification and companion |
 
 Validation: mediation consumer56, lifecycle62 and payment consumer156 passed. All20root make-test targets pass on6c2fa5004 in
 [Tests CI41998371221](https://github.com/arkhai-io/simple-compute-market/actions/runs/41998371221).
@@ -52,5 +52,5 @@ physical evidence are reused, not a fresh unassisted full VM financial run. Defa
 Compose/Alkahest markers remain unrun. No LIVE financial proof is claimed.
 
 Companion architecture and roadmap describe current behavior; the design records
-promotion destinations and retained provenance. Normative archive and its final
-independent documentation review remain the unchecked closeout task.
+promotion destinations and retained provenance. Normative archive and independent documentation review are complete.
+Both review axes found no confirmed finding; cleanup retains their records.

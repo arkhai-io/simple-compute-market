@@ -53,7 +53,7 @@ delta and explanation into `deal-lifecycle`; repository-wide ownership is unchan
 
 | Accepted decision | Permanent location | State |
 |---|---|---|
-| Existing seller servicing adopts validated readiness independently of buyer reads and end recovery | `openspec/specs/deal-lifecycle/architecture.md#background-readiness-adoption` | Companion promoted after executable review; normative delta remains for archive |
+| Existing seller servicing adopts validated readiness independently of buyer reads and end recovery | `openspec/specs/deal-lifecycle/architecture.md#background-readiness-adoption` | Promoted to specification and companion |
 | Existing authority, dependency, wire and persistence boundaries remain applicable | `docs/development/ARCHITECTURE.md` | Verified no repository-wide change needed |
 
 Qualification scope and current-state summary are reconciled in
@@ -61,8 +61,8 @@ Qualification scope and current-state summary are reconciled in
 
 ## Validation provenance
 
-The following preserves implementation and qualification observations compressed
-from the task ledger; it does not change the remaining archive/review boundary.
+The following preserves pre-archive implementation and qualification observations
+compressed from the task ledger. Final promotion and review are recorded above.
 
 Focused verification: the readiness regression failed with `unstarted` before
 the fix, then passed. Bare-metal lifecycle/payment integration32 passed; VM
@@ -100,3 +100,7 @@ automated ordinary-buyer Arkhai qualification is recorded separately from the
 unrun default Compose/Alkahest workflow. No fresh unassisted VM financial run
 or LIVE financial processing is claimed. Normative merge/archive and its
 independent documentation review remain the final unchecked closeout task.
+
+Normative promotion: `openspec/specs/deal-lifecycle/spec.md#requirement-compute-readiness-progresses-without-buyer-polling`.
+The archived documentation was independently reviewed at b829afbdb, with no
+confirmed Standards or Spec finding.

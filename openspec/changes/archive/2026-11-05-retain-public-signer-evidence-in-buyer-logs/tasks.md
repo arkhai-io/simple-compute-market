@@ -21,13 +21,13 @@
 - [x] 2.8 Record applicable passing end-to-end pipeline scenarios for the final candidate; an unavailable required pipeline remains an explicit blocker.
 - [x] 2.9 Promote canonical public signer evidence validation to `openspec/specs/buyer-orchestration/architecture.md`, retaining the normative delta for archive; complete the promotion record.
 - [x] 2.10 Run `make check-doc-citations CHANGE=retain-public-signer-evidence-in-buyer-logs` and pinned strict OpenSpec validation; resolve every relevant citation.
-- [ ] 2.11 Archive last, merging the verified delta into `openspec/specs/buyer-orchestration/spec.md`, then complete closeout review and archive cleanup.
+- [x] 2.11 Archive last, merging the verified delta into `openspec/specs/buyer-orchestration/spec.md`, then complete closeout review and archive cleanup.
 
 ## Design promotion record
 
 | Decision | Permanent destination | State |
 |---|---|---|
-| Preserve canonical public signer evidence while refusing private carriers | buyer-orchestration specification and architecture | Companion promoted; normative delta pending archive |
+| Preserve canonical public signer evidence while refusing private carriers | buyer-orchestration specification and architecture | Promoted to specification and companion |
 | No new protocol, dependency edge or repository-wide authority | Existing architecture remains applicable | Verified unchanged |
 
 Validation: core buyer169, including signed HTTP private-result canary coverage passed. All20root make-test targets pass on6c2fa5004 in
@@ -45,5 +45,5 @@ physical evidence are reused, not a fresh unassisted full VM financial run. Defa
 Compose/Alkahest markers remain unrun. No LIVE financial proof is claimed.
 
 Companion architecture and roadmap describe current behavior; the design records
-promotion destinations and retained provenance. Normative archive and its final
-independent documentation review remain the unchecked closeout task.
+promotion destinations and retained provenance. Normative archive and independent documentation review are complete.
+Both review axes found no confirmed finding; cleanup retains their records.
