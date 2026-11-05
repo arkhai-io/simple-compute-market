@@ -103,12 +103,17 @@ between sessions, where no other agent or person sees them.
   source.
 - **Seven written rules get checks** (D24): permanent destinations for decisions,
   history wording in added comments, one version bump per changed package, private
-  keys, through gitleaks, a maintained secret scanner, reasons for function-local
-  imports, the capability index, whose missing `contact-exchange-settlement` row is
+  keys and provider-format credentials, through gitleaks, a maintained secret scanner,
+  with four of its default rules off because they misfire on the repository's own
+  fixtures and code (D26, D27), reasons for function-local imports, the capability index, whose missing `contact-exchange-settlement` row is
   added, and one lock revision across every `uv.lock`. Agents on different uv releases
   have been rewriting each other's locks. So the uv minimum rises to the release that
   writes the repository's lock revision, every command that rewrites a lock checks it,
   and the locks still at the older revision are relocked.
+- **A full-rule secret audit, run by hand** (D29). `make audit-secrets` reports what
+  every gitleaks rule finds in the tracked tree, gating nothing, and is run before an
+  official build ships. Its first run found a golden-image root password in the VM
+  IaC README, which is replaced with placeholders (D25).
 
 ### Not changed, by the owner's decision
 
@@ -163,8 +168,13 @@ None.
     `scripts/hooks/pre-commit`, `scripts/hooks/pre-push`, the guarded push
     (`scripts/check_push_ready.py`), `make check-public-content`, and
     `.github/workflows/public-content.yml`, its commit scans reading merge patches; a
-    new `.gitleaks.toml` replacing the default private-key rule with one that cannot
-    join two key blocks.
+    new `.gitleaks.toml`, the gate, extending a new `scripts/gitleaks-audit.toml`, the
+    audit, which replaces the default private-key rule with one that cannot join two
+    key blocks; the gate also turns off `generic-api-key`, `jwt` and
+    `curl-auth-header`. `scripts/check_secrets.py --audit` and `make audit-secrets`:
+    the audit.
+  - `domains/vms/provisioning/iac/README.md`: the root password and key filename
+    replaced with placeholders.
   - `scripts/check_locks.py`: one lock revision. `scripts/check_uv_version.py`: the
     raised minimum. `scripts/uv_project.py`: `lock` and `reinit` check the uv version.
     `.github/workflows/tests.yml` and `e2e.yml`: the uv they install. The `uv.lock`
@@ -196,8 +206,11 @@ None.
   - `openspec/README.md`: defects found during a change, and the scope-creep sentence.
   - `docs/development/ARCHITECTURE.md`: the guard-code and library rules, and, under
     "Public repository content checks", gitleaks, its installation, the repository's
-    key rule and why it replaces the default, and the edit beneath an existing key
-    header it cannot see.
+    key rule and why it replaces the default, the three default rules the gate turns
+    off and why, the audit, and the two things the gate cannot see: an edit beneath an
+    existing key header, and a random credential in no provider's format.
+  - `docs/development/RELEASING.md`, "Cutting a release": run `make audit-secrets`
+    and read its findings before an official build ships.
   - `openspec/specs/README.md`: the `contact-exchange-settlement` row.
   - `docs/development/BUILD_AND_PACKAGING.md`: the raised uv minimum, the lock-revision
     check, and drift in both directions.
@@ -268,3 +281,15 @@ None.
   checks enforce written rules"), `docs/agents/change-workflow.md`; for the private-key
   check, `docs/development/ARCHITECTURE.md`, "Public repository content checks"; and,
   for the lock revision and the uv minimum, `docs/development/BUILD_AND_PACKAGING.md`.
+- D25: no permanent destination — a defect fixed in place.
+- D26, the gate's rules and what it leaves to review and the audit:
+  `docs/development/ARCHITECTURE.md`, "Public repository content checks", and the
+  comments of `.gitleaks.toml`.
+- D27, what the gate refuses and passes: `openspec/specs/change-workflow/spec.md`
+  ("A change's closing checks enforce written rules").
+- D28, the tree test as the guard on a gitleaks upgrade:
+  `docs/development/ARCHITECTURE.md`, "Public repository content checks".
+- D29, the audit: `openspec/specs/change-workflow/spec.md` ("A change's closing checks
+  enforce written rules"), `docs/development/ARCHITECTURE.md`, "Public repository
+  content checks", and `docs/development/RELEASING.md`, "Cutting a release".
+- D30: no permanent destination — the change's own cadence.

@@ -137,11 +137,16 @@ list; when a package version differs from its version at the merge-base with the
 branch the change lands on by more than one SemVer step; when an import its diff adds
 inside a function has no comment giving its reason; or when a capability with a
 specification has no row in the capability index, or a row links no capability. The
-public-content checks MUST refuse a private key in added content, a merge's own
+public-content checks MUST refuse a private key, or a credential in a format one of the
+scanner's provider-specific rules recognizes, in added content, a merge's own
 resolution included, through a maintained secret scanner at a pinned release, whether
-the key is wrapped at any length or written as one escaped string, reporting its
+a key is wrapped at any length or written as one escaped string, reporting its
 location without its content; they MUST pass a key block whose short body holds no key
-material, however many such blocks share a file. The packaging
+material, however many such blocks share a file, and MUST pass the repository's
+development fixtures: published development keys, public contract addresses, and code
+that names a key. An audit run on demand MUST report, by rule, file and line without
+content, what every rule of the pinned scanner but its default private-key rule finds
+in the tracked tree, and MUST gate nothing. The packaging
 checks MUST fail when a committed lock carries a lock revision other than the one the
 repository's minimum uv writes, and every command that may rewrite a lock MUST first
 refuse a uv older than that minimum.
@@ -212,6 +217,26 @@ refuse a uv older than that minimum.
   breaks written as `\n` escapes, with key material for a body
 - **THEN** the public-content checks refuse it, naming the file and line without
   echoing the key
+
+#### Scenario: A provider token is staged
+
+- **WHEN** a staged addition holds a token in a provider's published format, such as a
+  GitHub personal access token
+- **THEN** the public-content checks refuse it, naming the file and line without
+  echoing the token
+
+#### Scenario: A development fixture is added
+
+- **WHEN** an added line holds one of Anvil's published development keys, a contract
+  address, or the annotation `private_key: Ed25519PrivateKey`
+- **THEN** the public-content checks pass it
+
+#### Scenario: The audit reports what the gate passes
+
+- **WHEN** the tracked tree holds a random 40-character password with no provider
+  format, and the owner runs the audit
+- **THEN** the audit reports its rule, file and line without echoing it, exits
+  successfully, and the public-content checks still pass the line
 
 #### Scenario: A lock is written by another uv release
 

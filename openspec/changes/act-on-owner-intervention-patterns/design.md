@@ -13,7 +13,12 @@ the window between its last lock check and the signal as an accepted risk, gave 
 private-key check to gitleaks, and put D24's uv-version guard in `uv_project.py` for
 every lock writer. The triage of design review 38 replaced gitleaks' default
 private-key rule with a repository rule that cannot join two blocks, and made its
-commit scans read merge patches.
+commit scans read merge patches. Implementation's gate on that rule (section 5) passed
+every key case and returned the change to design over gitleaks' other default rules,
+which fired 114 times on the tree; the design discussion of 2026-11-05 reviewed each
+finding and settled D25–D30: a credential the scan found is replaced, the gate runs
+the default rules minus the four that misfire, and a full-rule audit beside it is run
+by hand before an official build ships.
 
 ## Context
 
@@ -801,8 +806,8 @@ every step that commits already runs:
    A real key, wrapped at any length or written as one escaped string, has a body of
    base64 and `\n` escapes well past 64 characters and is refused; a fixture whose body
    is `fixture`, `material` or `legacy-fixture` passes, however many share a file. The
-   repository owns that one rule; the scan modes, the redaction, and every other rule
-   stay gitleaks'.
+   repository owns that one rule and the list of default rules it turns off (D26); the
+   scan modes, the redaction, and every other rule stay gitleaks'.
 
    Every commit-range invocation passes `--diff-merges=separate` through gitleaks'
    `--log-opts` (38 F2). Gitleaks reads commits through `git log -p -U0`, which prints
@@ -819,10 +824,11 @@ every step that commits already runs:
    rather than working around it.
 
    A body edited into an existing block beneath an unchanged header is a known
-   limitation: a diff-reading scanner sees no header in that patch.
-   `ARCHITECTURE.md`'s "Public repository content checks" records it, with how to
-   install the pinned release and why the repository replaces the default key rule, and
-   review remains the safeguard there.
+   limitation: a diff-reading scanner sees no header in that patch. So is a random
+   credential in no provider's format, which the gate does not look for (D26).
+   `ARCHITECTURE.md`'s "Public repository content checks" records both, with how to
+   install the pinned release, why the repository replaces the default key rule and
+   turns off three others, and the audit (D29); review remains the safeguard there.
 5. **Local imports.** An import inside a function that the diff adds to a `.py` file
    has a comment on its own line or the line above giving its reason
    (`openspec/README.md`, closeout part 2). Whether the reason is sound stays with
@@ -895,6 +901,159 @@ runs the workflow's steps needs a uv at or above the new minimum.
 - **Rejected: an exact uv pin in this change** (21 R1). The revision check holds the
   locks steady without one. Pinning is later tooling work.
 
+### The secret scan's rules
+
+Section 5's gate ran gitleaks 8.30.1 over the tree with D24's configuration: the key
+rule held every case, and the default rules D24 had kept unmeasured reported 114
+findings in 47 tracked files — `generic-api-key` 74, `jwt` 38, `curl-auth-header` 2.
+Read one by one, they are:
+
+- 30 not secrets of any kind: a comment, type annotations and identifiers
+  (`private_key: Ed25519PrivateKey`), a constant's name, migration revision names,
+  idempotency keys, and public contract and token addresses;
+- 40 of Anvil's published development keys, and one deterministic identity its file
+  marks as a fixture, in `dev-env/`, the e2e configurations, the storefronts'
+  `.env.*.docker` files, documentation examples and test constants;
+- 5 placeholder test credentials: `X-Admin-Key: test-api-key` in curl examples,
+  synthetic passwords in a codec fixture, and the base64 of "supplied-key";
+- 38 JWTs of the frp grant test vector, signed with RFC 8032's published test keys;
+- 1 credential not marked as a fixture (D25).
+
+### D25 — The README's root password is replaced with placeholders
+
+`domains/vms/provisioning/iac/README.md`, "Configure Build Variables (Optional)",
+wrote a `root_password` and `root_filename` into `build-vars.yaml` with no fixture
+marker. They have exactly the form `vm-setup`'s `golden-image-build.yml` generates —
+40 ASCII letters and digits, and `root_ssh_<6 hex>_ed25519` — and the password becomes
+a golden image's root password. Both lines become placeholders, `<the existing key's
+password>` and `<its filename>`, as a small, understood defect fixed in this change
+(D6), in the first commit of section 5's resumed session, since the design step does
+not edit `domains/`. No customer image was built with the value, so nothing outside the
+repository is rotated; the value stays in public history, which no edit removes.
+
+- **Rejected: its own change.** A design, reviews, validation and a closeout for two
+  lines, which D6 exists to avoid.
+- **Rejected: marking the value as an example.** It has the shape of the role's real
+  output, so the comment would assert what nobody can check (`AGENTS.md`, "Test
+  fixtures and local development configuration").
+- **Rejected: an unowned gap.** It leaves a plausible credential in operator
+  documentation meanwhile.
+
+### D26 — The gate runs gitleaks' default rules minus four, beside an audit of all of them
+
+The public-content checks run every gitleaks default rule except four: `private-key`,
+replaced by the repository's block rule (D24 item 4); `generic-api-key`, a keyword and
+entropy heuristic that matches identifiers, public addresses and published development
+keys as readily as secrets; `jwt` and `curl-auth-header`, which match test vectors and
+documented placeholder headers. With them off the tree has no finding and every key
+case still passes, and the provider-specific rules — cloud keys, source-host tokens,
+chat and payment tokens — stay, matching fixed formats that almost never misfire.
+Turning a rule off is an edit to the rule list, not a marker beside a fixture (D9); a
+later fixture that trips a provider rule is another such edit.
+
+The one finding a secret scan exists for, D25's password, came from `generic-api-key`,
+and the gate does not catch its class: a random credential in no provider's format has
+the character class of the identifiers the same rule matched, and separating them is
+entropy tuning of the repository's own, the scanner 31 F3 declined to build. The audit
+(D29), run by hand before an official build ships, finds that class over the whole
+tree, as the gate run found D25; review remains the safeguard for each change.
+
+- **Rejected: the repository's key rule alone.** It claims exactly the key requirement
+  and never moves with a gitleaks upgrade, but drops every provider rule, so a leaked
+  cloud token would pass.
+- **Rejected: keeping `generic-api-key` with allowlists by shape** — contract
+  addresses, Anvil's ten keys, identifiers. An identifier allowlist passes D25's
+  password, which has that shape, so it keeps the cost and loses the catch.
+- **Rejected: `generic-api-key` as a warning that refuses nothing.** It would print on
+  every fixture and key annotation a change touches, and a warning read by agents is
+  acted on unpredictably.
+- **Rejected: allowlisting the fixtures by path or value, or rewriting them to build
+  their values at runtime.** An exception list (D9, 38 F1), and the churn 20 F4
+  declined, across 47 files.
+
+### D27 — The requirement says what the gate refuses and passes
+
+The delta requirement's public-content clause refuses a private key or a credential in
+a format one of the scanner's provider-specific rules recognizes, and passes the
+repository's development fixtures: published development keys, public contract
+addresses, and code that names a key. Its scenarios "A provider token is staged" and
+"A development fixture is added" pin both sides, the second keeping `generic-api-key`
+from returning unnoticed.
+
+- **Rejected: leaving the requirement at keys.** The check would enforce rules no
+  requirement states.
+
+### D28 — The tree test asserts the whole tree clean under the gate
+
+`scripts/tests/test_check_secrets.py`'s scan of the repository's tree asserts no
+finding of any rule under the shipped configuration, not only key findings, so a
+gitleaks release whose new rule the tree trips fails that test when the pin moves,
+not at someone's commit. A provider-token case builds its token at runtime, as the key
+cases already assemble their headers, so the test file passes its own hook.
+
+- **Rejected: asserting key findings only.** A noisy new rule would surface as a
+  refused commit.
+
+### D29 — `make audit-secrets`
+
+`make audit-secrets` runs `scripts/check_secrets.py --audit`: every gitleaks default
+rule but `private-key`, plus the repository's key rule, over `HEAD`'s tracked tree,
+read as the tree test reads it — one parentless commit of `HEAD^{tree}` in a temporary
+shared clone — so untracked and ignored files are never scanned. It reports each
+finding by rule, file and line, redacted; exits 0 when it ran, since its output is for
+reading and lists the fixtures D26 describes; and exits non-zero only when gitleaks
+could not run. It keeps no baseline (D9), and no hook, push, CI job or
+`check-packaging` runs it. Its caller is the owner, by hand, before an official build
+ships; `docs/development/RELEASING.md`, "Cutting a release", gains that step.
+
+The two configurations differ by the three rules the gate also turns off:
+
+```toml
+# scripts/gitleaks-audit.toml — the audit
+[extend]
+useDefault = true
+disabledRules = ["private-key"]
+
+[[rules]]
+id = "private-key-block"
+regex = '''(?i)-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----(?:[^-]|-{1,4}[^-]){64,}-----END'''
+keywords = ["-----begin"]
+```
+
+```toml
+# .gitleaks.toml — the gate the hooks, the guarded push and CI run
+[extend]
+path = "scripts/gitleaks-audit.toml"
+disabledRules = ["generic-api-key", "jwt", "curl-auth-header"]
+```
+
+Section 5's gate confirms that the pinned release loads a configuration extended by
+path that itself extends the defaults, the path resolved from the repository root
+where `check_secrets.py` runs gitleaks. If it does not, the two files are each
+self-contained, the key rule written in both, and a test asserts the two rules are
+identical; that fallback is settled here, so it is not a return to design.
+
+Tests: unit cases with an injected runner showing `--audit` passes the audit
+configuration and the tree source; a library integration case in which a random
+40-character password, built at runtime, is reported by the audit and passed by the
+gate.
+
+- **Rejected: the audit running gitleaks' defaults with no repository
+  configuration.** Every audit would report the default key rule's false join of the
+  two fixtures in `test_hosts_api.py`.
+- **Rejected: a baseline of known findings.** An exception list kept in the
+  repository (D9).
+- **Rejected: its own change.** Its configuration is what the gate's extends; split, the
+  gate's would be built self-contained now and as an extension later.
+
+### D30 — Section 5 resumes from its notes
+
+Section 5 finishes round 1's checks session in one session, from its gate notes: the
+README placeholders (D25); the two configurations (D29) and the tree assertion (D28);
+5.1's record with the nested-extension check; then 5.2–5.5 with the audit target and
+its tests. Planning amends section 5's tasks once the design review advances, keeping
+its notes. No other section and no other round moves.
+
 ### Not changed
 
 ### D13 — The migration rule stays
@@ -923,7 +1082,10 @@ evidence serves the guidance review alone, so it lives in that skill (D20).
   round 1's own review is written in the format its publisher checks. One session for
   the seven checks and the capability-index row (D24), the lock revision first, with
   the raised uv minimum and the relock, and gitleaks' repository rule and merge-patch
-  scan confirmed against the fixture and key cases before it is wired in. Skills should describe tooling that exists, so
+  scan confirmed against the fixture and key cases before it is wired in. Its section 5
+  returned to design at that confirmation and resumes in one session (D30): the README
+  placeholders, the gate and audit configurations with their nested extension
+  confirmed, then the scan, its wiring and `make audit-secrets`. Skills should describe tooling that exists, so
   the code comes first; the two sessions are independent, and are reviewed and
   validated together.
 - **Round 2 — the skills and guidance, two sessions.** One session for the workflow
