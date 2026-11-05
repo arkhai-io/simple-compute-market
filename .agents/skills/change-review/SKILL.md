@@ -26,7 +26,7 @@ in Codex's read-only sandbox, or, when Codex is unavailable, on Claude, whose ru
 let it read the repository and its history and edit nothing. Nothing in this
 skill changes for either: your final message is the review, and nothing else —
 on Claude too, where no outcome schema is given. It carries no structured
-outcome; `scripts/run_change_step.py` checks it, publishes it, and logs an outcome
+outcome; `scripts/change-workflow review` checks it, publishes it, and logs an outcome
 from the record it publishes, naming as its exit a review's one successor, the
 triage of its kind (`{"step": "triage", "kind": "<kind>"}`), or a stopped one when
 your message is not a review.
@@ -55,7 +55,7 @@ Read all of this before forming a view:
 - `docs/development/ROADMAP.md`, the goal the change serves, and the change's row,
   campaign, and dependencies in `openspec/changes/README.md`.
 - Every file in the change's directory, including `specs/` and
-  `interventions.jsonl`. The directory is what `python3 scripts/find_change.py
+  `interventions.jsonl`. The directory is what `scripts/change-workflow find
   <change>` prints: `openspec/changes/<change>/`, or for a closeout review, which
   follows the archive, the change's dated directory under
   `openspec/changes/archive/`.
@@ -66,11 +66,12 @@ Read all of this before forming a view:
   would carry an earlier reviewer's reasoning into yours.
 - Another change's records, where a claim rests on them — a dependency's findings,
   an earlier change's validation. They are untracked, so they are where that change
-  was worked: `python3 scripts/find_change.py --records <change>` prints where, this
+  was worked: `scripts/change-workflow find --records <change>` prints where, this
   checkout's or, from a change's clone, the owner's workspace's, which holds the
   history of every cleaned-up change.
 - For every capability the change names or touches: `openspec/specs/<capability>/spec.md`
-  and its `architecture.md` companion when one exists.
+  and its companion when one exists — `README.md` where the capability has an
+  `index.md`, which you read too, and `architecture.md` elsewhere.
 - The code the change cites, and the code it changes or would change. Read enough
   to verify every factual claim it makes.
 - For `implementation`, `pre-closeout`, and `closeout`: the change's diff,

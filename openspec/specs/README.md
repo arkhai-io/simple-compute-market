@@ -4,10 +4,11 @@ This directory describes the implemented system by capability.
 
 - `spec.md` is the normative, machine-validated contract: observable behavior, invariants, ownership, and acceptance scenarios.
 - `architecture.md` is optional durable explanatory context: conceptual models, design motivation, trade-offs, relationships, and current limits.
+- A capability organized by an index keeps that context in its `README.md` instead, its human-readable description with its diagrams, and has no `architecture.md`; its `index.md` lists its requirements by id under the parts and groups of its table of contents, with the ids it retired ([the pattern](../README.md#a-capability-organized-by-an-index)).
 - [`docs/development/ARCHITECTURE.md`](../../docs/development/ARCHITECTURE.md) is the repository-wide map connecting the capabilities.
 - [`openspec/changes/`](../changes/) contains proposed transitions and temporary implementation plans.
 
-An architecture companion does not replace a normative requirement. When explanatory prose states behavior implementations must satisfy, the owning `spec.md` must also express that invariant. OpenSpec currently validates and synchronizes only `spec.md`; changes that accept durable rationale must name the companion-file promotion explicitly.
+An architecture companion does not replace a normative requirement. When explanatory prose states behavior implementations must satisfy, the owning `spec.md` must also express that invariant. OpenSpec currently validates and synchronizes only `spec.md`; changes that accept durable rationale must name the companion-file promotion explicitly, and so must changes to an indexed capability's requirements, for its `index.md`.
 
 ## Capabilities
 
@@ -15,7 +16,7 @@ An architecture companion does not replace a normative requirement. When explana
 |---|---|---|
 | API credits | [Spec](api-credits/spec.md) | [Architecture](api-credits/architecture.md) |
 | Buyer orchestration | [Spec](buyer-orchestration/spec.md) | [Architecture](buyer-orchestration/architecture.md) |
-| Change workflow | [Spec](change-workflow/spec.md) | [Architecture](change-workflow/architecture.md) |
+| Change workflow | [Spec](change-workflow/spec.md) | [README](change-workflow/README.md), [index](change-workflow/index.md) |
 | CLI query language | [Spec](cli-query-language/spec.md) | [Architecture](cli-query-language/architecture.md) |
 | Compute provisioning contract | [Spec](compute-provisioning-contract/spec.md) | — |
 | Contact-exchange settlement | [Spec](contact-exchange-settlement/spec.md) | — |
@@ -24,6 +25,7 @@ An architecture companion does not replace a normative requirement. When explana
 | frp grant admission | [Spec](frp-grant-admission/spec.md) | [Architecture](frp-grant-admission/architecture.md) |
 | Fulfillment | [Spec](fulfillment/spec.md) | [Architecture](fulfillment/architecture.md) |
 | Introduction delivery | [Spec](introduction-delivery/spec.md) | [Architecture](introduction-delivery/architecture.md) |
+| Market change workflow | [Spec](market-change-workflow/spec.md) | [README](market-change-workflow/README.md), [index](market-change-workflow/index.md) |
 | Market composition | [Spec](market-composition/spec.md) | [Architecture](market-composition/architecture.md) |
 | Marketplace identity | [Spec](marketplace-identity/spec.md) | [Architecture](marketplace-identity/architecture.md) |
 | Negotiation protocol | [Spec](negotiation-protocol/spec.md) | [Architecture](negotiation-protocol/architecture.md) |
@@ -57,6 +59,6 @@ An architecture companion does not replace a normative requirement. When explana
 For a cross-cutting change:
 
 1. Start with the repository-wide architecture map.
-2. Read the owning capability's `architecture.md` for design intent and limits.
+2. Read the owning capability's companion for design intent and limits: its `README.md` where it has an `index.md`, otherwise its `architecture.md`.
 3. Read its `spec.md` for the enforceable current contract.
 4. Inspect active changes for proposed deltas before editing either permanent document.

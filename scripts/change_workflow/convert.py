@@ -3,9 +3,8 @@ next-step computation reads.
 
 A change whose log holds a line without the format marker, or whose numbered
 records have no log, is routed on by nothing until its records are converted, once,
-in the checkout that holds them (`python3 scripts/run_change_step.py convert
-<change>`). The conversion replaces the log whole, under its lock
-(`log.replace_log`):
+in the checkout that holds them (`scripts/change-workflow convert <change>`). The
+conversion replaces the log whole, under its lock (`log.replace_log`):
 
 - each line without the marker is rewritten in place, keeping its seq, so every
   `resolves` and `reads` still names its run: a decision's string `next` and its
@@ -38,10 +37,12 @@ triage whose interactive session closed before it recorded its outcome cannot be
 told from a finished one in the older format, whose words may begin the same way. A
 change already in the format is refused, and so is one with a triage in progress —
 a triage file holding neither `## Next` nor `## Gate` that no recorded outcome
-names — writing nothing.
+names — writing nothing. A log holding a line of a newer format is refused before
+anything else is read of it: a later engine wrote it, and nothing converts a log
+backwards.
 
-Contract: openspec/specs/change-workflow/spec.md, "The next step is computed from the
-files".
+Contract: openspec/specs/change-workflow/spec.md, CW-qj77, CW-h12x, CW-42me,
+CW-o1ca, CW-zniv, CW-ajcm, and CW-95xp.
 """
 
 from __future__ import annotations
@@ -53,16 +54,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from change_next_step import EXIT, Computation, Record, Route, target_label
-from change_workflow import graph
-from change_workflow.common import ORCHESTRATOR, STEPS, Clock, Entry, StepError, utc_now
-from change_workflow.graph import (IMPLEMENTATION_TRIAGE, PRE_CLOSEOUT_REVIEW, VALIDATE, Node,
-                                   TargetError, entry_refusal, node_of)
-from change_workflow.log import (FORMAT, decision_line, log_path, numbered, ran, replace_log,
-                                 unmarked)
-from find_change import ChangeNotFound
+from . import graph
+from .common import FORMAT, ORCHESTRATOR, Clock, Entry, StepError, utc_now
+from .find import ChangeNotFound
+from .graph import (IMPLEMENTATION_TRIAGE, PRE_CLOSEOUT_REVIEW, STEPS, VALIDATE, Node,
+                    TargetError, entry_refusal, node_of)
+from .log import (CONVERSION, decision_line, log_path, numbered, older, ran, refuse_newer,
+                  replace_log)
+from .next_step import EXIT, Computation, Record, Route, target_label
 
-CONVERSION = "convert"
 # The target a returned outcome's `return_to`, the phase it returns to, names.
 _RETURN_STEP = {"design": "design", "planning": "plan", "implementation": "round"}
 
@@ -179,10 +179,12 @@ def conversion(entries: Sequence[Entry], computation: Computation,
                clock: Clock = utc_now) -> Conversion:
     """The conversion of the log whose lines are `entries`, for the change
     `computation` has read; its state's log becomes the converted one, so its
-    guards read it. Refused, naming why, for a change already in the format, or
-    with a triage in progress."""
+    guards read it. Refused, naming why, for a log holding a line of a newer format,
+    which is never converted backwards; for a change already in the format; or with
+    a triage in progress."""
     state = computation.state
-    if unmarked(entries) is None and (entries or not state.records):
+    refuse_newer(f"{state.change}'s workflow log", entries)
+    if older(entries) is None and (entries or not state.records):
         raise StepError(f"{state.change}'s records are in the workflow log's format already: "
                         "there is nothing to convert")
     attested = _attested(entries)
@@ -194,7 +196,7 @@ def conversion(entries: Sequence[Entry], computation: Computation,
             f"the triage of {', '.join(in_progress)} is in progress: its triage file holds "
             "neither `## Next` nor `## Gate`, and no recorded triage outcome names it. Finish "
             "it on the code it started with, or resume it under the current skill, which "
-            "records its outcome with `python3 scripts/run_change_step.py record`; then "
+            "records its outcome with `scripts/change-workflow record`; then "
             "convert the change again")
     lines = [rewritten(entry) for entry in entries]
     changed = [entry["seq"] for entry in entries if entry.get("format") != FORMAT]

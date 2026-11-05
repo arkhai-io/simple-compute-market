@@ -25,7 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from find_change import ChangeNotFound, change_directory  # noqa: E402
+from workflow_command import WorkflowRefused, found_change  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 DESIGN_FILE = "design.md"
@@ -92,8 +92,8 @@ def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
         print("usage: check_decision_destinations.py <change>", file=sys.stderr)
         return 2
     try:
-        directory = change_directory(root, args[0])
-    except ChangeNotFound as exc:
+        directory = root / str(found_change(root, args[0])["directory"])
+    except WorkflowRefused as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
     design, proposal = directory / DESIGN_FILE, directory / PROPOSAL_FILE

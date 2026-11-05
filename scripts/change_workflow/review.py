@@ -37,20 +37,19 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
-from change_workflow.common import KINDS, ROOT, Clock, Entry, StepError, utc_now
-from change_workflow.cost import review_cost
-from change_workflow.harness import (NETWORK_RETRIES, CodexRunner, Reached, Runner,
-                                     claude_command, codex_command, missing_program,
-                                     resume_command, run_claude, run_codex, unreachable)
-from change_workflow.log import LOG, log_path, read_log, record_outcome, unused_direction
-from change_workflow.records import (TRANSCRIPTS, ChangedSince, changed_since,
-                                     is_documentation, is_record, next_number,
-                                     validation_problem)
-from change_workflow.running import (recorded_run, runs_directory, termination_deferred,
-                                     termination_ends_the_run)
-from change_workflow.steps import HARNESSES, STEP_TABLE, Model, StepRules, load_steps
-from change_workflow.stream import Stream, transcript_denials
-from find_change import ChangeNotFound, change_directory, is_archived
+from .common import Clock, Entry, StepError, repository_root, utc_now
+from .cost import review_cost
+from .find import ChangeNotFound, change_directory, is_archived
+from .graph import KINDS
+from .harness import (NETWORK_RETRIES, CodexRunner, Reached, Runner, claude_command,
+                      codex_command, missing_program, resume_command, run_claude, run_codex,
+                      unreachable)
+from .log import LOG, log_path, read_log, record_outcome, unused_direction
+from .records import (TRANSCRIPTS, ChangedSince, changed_since, is_documentation, is_record,
+                      next_number, validation_problem)
+from .running import recorded_run, runs_directory, termination_deferred, termination_ends_the_run
+from .steps import HARNESSES, STEP_TABLE, Model, StepRules, load_steps
+from .stream import Stream, transcript_denials
 
 DEFAULT_BASE = "dev"
 SECTIONS = ("Summary", "Assessment", "Questions", "Findings", "Readiness")
@@ -81,7 +80,7 @@ _REVIEWED_COMMIT = re.compile(r"<!-- reviewed-commit: (\S+) -->")
 # What a review on Claude is told beside its prompt: nobody can answer it, and its
 # final message is the review, which the wrapper checks and publishes.
 REVIEW_UNATTENDED = (
-    "This review runs unattended through scripts/run_change_step.py: nobody can answer a "
+    "This review runs unattended through scripts/change-workflow: nobody can answer a "
     "permission prompt or a question in this session. Follow the change-review skill's "
     "instructions for running unattended. Your final message is the review, in the skill's "
     "format, and nothing else; the wrapper checks it and publishes it. Run one command per "
@@ -343,10 +342,10 @@ def _marker_text(text: str) -> str:
 
 
 def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str | None = None,
-               effort: str | None = None, fresh: bool = False, root: Path = ROOT,
+               effort: str | None = None, fresh: bool = False, root: Path | None = None,
                runner: CodexRunner = run_codex, claude: Runner = run_claude,
                unvalidated: bool = False, head: Callable[[Path], str] = _reviewed_head,
-               changed_since: ChangedSince = changed_since, steps_path: Path = STEP_TABLE,
+               changed_since: ChangedSince = changed_since, steps_path: Path | None = None,
                clock: Clock = utc_now,
                echo: Callable[[str], None] | None = lambda shown: print(
                    shown, file=sys.stderr, flush=True),
@@ -355,11 +354,15 @@ def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str |
 
     A review continues the previous reviewer's session only on the same harness,
     since a session cannot move between harnesses; on another it starts fresh. The
-    record names the reviewer's harness and model, and each model passed over.
-    A reviewer interrupted, or whose runner failed, is passed on as it was raised,
-    once `interrupted` is given what its log line records beside its reason.
+    record names the reviewer's harness and model, and each model passed over. The
+    change and the step table are the repository's the command runs in, unless
+    `root` and `steps_path` name others. A reviewer interrupted, or whose runner
+    failed, is passed on as it was raised, once `interrupted` is given what its log
+    line records beside its reason.
     """
     started = clock()
+    root = repository_root() if root is None else root
+    steps_path = repository_root() / STEP_TABLE if steps_path is None else steps_path
     if kind not in KINDS:
         raise ReviewError(f"unknown review kind {kind!r}; expected one of {', '.join(KINDS)}")
     try:
@@ -535,8 +538,8 @@ def review_outcome(path: Path, kind: str) -> tuple[Entry, str | None, str | None
     return outcome, session, commits[-1] if commits else None, extra
 
 
-def review_and_log(change: str, kind: str, *, root: Path = ROOT, clock: Clock = utc_now,
-                   **options: Any) -> Entry:
+def review_and_log(change: str, kind: str, *, root: Path | None = None,
+                   clock: Clock = utc_now, **options: Any) -> Entry:
     """Run a review and log its outcome, recorded as in progress in the checkout
     until its line is written, since a round view moving the checkout would change
     the commit it reads.
@@ -547,6 +550,7 @@ def review_and_log(change: str, kind: str, *, root: Path = ROOT, clock: Clock = 
     SIGTERM is held for as long as the run is recorded and ends it only while its
     reviewer runs, so a review published before the signal is logged `finished`.
     """
+    root = repository_root() if root is None else root
     runs = options.pop("runs", runs_directory)
     with termination_deferred(), recorded_run(runs(root), "review", change, clock=clock):
         return _review_and_log(change, kind, root=root, clock=clock, **options)

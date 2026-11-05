@@ -50,7 +50,7 @@ from datetime import timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
-from change_workflow.common import Clock, StepError, utc_now
+from .common import Clock, StepError, utc_now
 
 RUNS = "change-runs"
 

@@ -140,7 +140,7 @@ def _introduction_option(listing: Any) -> dict[str, Any]:
     options = [
         dict(option)
         for option in listing.settlement_options
-        if dict(option).get("mechanism") == CONTACT_MECHANISM
+        if dict(option)["settlement"].get("schema") == CONTACT_MECHANISM
     ]
     assert len(options) == 1, listing.settlement_options
     return options[0]

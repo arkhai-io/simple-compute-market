@@ -458,3 +458,84 @@ def test_the_repositorys_own_tree_passes_the_gate(monkeypatch: pytest.MonkeyPatc
         found = checker.scan_source(clone, checker.tree_source(whole))
 
     assert found == []
+
+
+# ---------------------------------------------------------------- the guarded push
+
+# The workflow's command; the guarded push runs the repository's pre-push checks, the
+# gate among them, as commands.
+COMMAND = ROOT / "scripts/change-workflow"
+
+
+@pytest.fixture
+def branch(repo: Path, tmp_path: Path) -> Path:
+    """`repo` with a bare `origin` holding `dev`, on a change branch, its secret gate
+    where the guarded push looks for it: a stand-in that runs this repository's gate,
+    with its gitleaks configuration, over `repo`."""
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+    git(repo, "remote", "add", "origin", str(remote))
+    git(repo, "push", "-q", "-u", "origin", "dev")
+    git(repo, "checkout", "-q", "-b", "feat/change")
+    return repo
+
+
+def provide_gate(repo: Path, version_problem: str | None = None) -> None:
+    """The stand-in gate, ignored so the worktree stays clean; `version_problem`
+    stands in for a gitleaks that cannot run."""
+    injected = ("" if version_problem is None
+                else f", version_problem=lambda: {version_problem!r}")
+    gate = repo / "scripts" / Path(checker.__file__).name
+    gate.parent.mkdir(exist_ok=True)
+    gate.write_text("import sys\n"
+                    "from pathlib import Path\n"
+                    f"sys.path.insert(0, {str(Path(checker.__file__).parent)!r})\n"
+                    "import check_secrets\n"
+                    "sys.exit(check_secrets.main(sys.argv[1:], "
+                    f"root=Path(__file__).resolve().parents[1]{injected}))\n", "utf-8")
+    with (repo / ".git/info/exclude").open("a", encoding="utf-8") as exclude:
+        exclude.write(f"/{gate.relative_to(repo).as_posix()}\n")
+
+
+def push(repo: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run([str(COMMAND), "push"], cwd=repo, capture_output=True, text=True)
+
+
+def remote_head(repo: Path) -> str:
+    return git(repo, "ls-remote", "origin", "refs/heads/feat/change").split("\t")[0]
+
+
+def test_a_gate_that_cannot_run_refuses_the_guarded_push(branch: Path) -> None:
+    provide_gate(branch, "gitleaks 8.30.1 is required and no gitleaks is on PATH")
+    commit(branch, "notes.md", "notes\n")
+
+    pushed = push(branch)
+
+    assert pushed.returncode == 1
+    assert "REFUSED: gitleaks 8.30.1 is required" in pushed.stderr
+    assert remote_head(branch) == ""
+
+
+@pytest.mark.usefixtures("gitleaks")
+def test_an_outgoing_commit_adding_a_key_refuses_the_guarded_push(branch: Path) -> None:
+    provide_gate(branch)
+    block, body = wrapped_key(64)
+    commit(branch, "deploy.pem", block, "deploy key")
+
+    pushed = push(branch)
+
+    assert pushed.returncode == 1
+    assert ":deploy.pem:1: private-key-block" in pushed.stderr
+    assert body[:40] not in pushed.stderr + pushed.stdout
+    assert remote_head(branch) == ""
+
+
+@pytest.mark.usefixtures("gitleaks")
+def test_an_outgoing_commit_adding_a_key_fixture_is_pushed(branch: Path) -> None:
+    provide_gate(branch)
+    head = commit(branch, "test_hosts.py", f"PEM = {fixture('fixture')}\n", "fixture")
+
+    pushed = push(branch)
+
+    assert pushed.returncode == 0, pushed.stderr
+    assert remote_head(branch) == head

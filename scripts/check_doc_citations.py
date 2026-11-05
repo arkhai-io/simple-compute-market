@@ -21,9 +21,11 @@ archived, and their citations are allowed to have moved on. Scoped to one
 change by name, the check finds it active or archived, since closeout archives
 a change before its review; once it is archived, a citation of the change's own
 unarchived path resolves against its archive directory, so the archive move
-itself is never reported. A change's `reviews/` are excluded too:
-review records are untracked working notes, never part of the branch, so a
-citation in one is not a citation the branch makes.
+itself is never reported. Before it is archived, a citation of a capability's
+`spec.md` that the change's own delta creates resolves, since closeout checks
+citations before the archive writes that file from the delta. A change's
+`reviews/` are excluded too: review records are untracked working notes, never
+part of the branch, so a citation in one is not a citation the branch makes.
 """
 
 from __future__ import annotations
@@ -34,8 +36,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from find_change import ChangeNotFound, change_directory, is_archived  # noqa: E402
+from check_spec_index import read_deltas  # noqa: E402
 from tombstones import is_tombstone  # noqa: E402
+from workflow_command import WorkflowRefused, found_change  # noqa: E402
 
 #: Directories whose paths `AGENTS.md` requires to resolve when cited.
 CITED_ROOTS = ("openspec", "docs", "tools", "scripts", "e2e-tests", ".agents")
@@ -51,6 +54,15 @@ CITATION = re.compile(
     r"(?<![\w./-])((?:%s)/[\w./-]+?\.(?:%s))(?![\w/-])"
     % ("|".join(map(re.escape, CITED_ROOTS)), "|".join(CITED_SUFFIXES))
 )
+
+
+def _found(root: Path, change: str) -> dict:
+    """The change as the workflow's command finds it, active or archived; a change it
+    does not find ends the check with its reason."""
+    try:
+        return found_change(root, change)
+    except WorkflowRefused as exc:
+        raise SystemExit(str(exc)) from exc
 
 
 def _change_documents(directory: Path) -> list[Path]:
@@ -75,10 +87,7 @@ def documents(root: Path, change: str | None = None) -> list[Path]:
 
     changes = root / "openspec" / "changes"
     if change is not None:
-        try:
-            return _change_documents(change_directory(root, change))
-        except ChangeNotFound as exc:
-            raise SystemExit(str(exc)) from exc
+        return _change_documents(root / _found(root, change)["directory"])
 
     found: list[Path] = []
     for pattern in ("openspec/specs/**/*.md", "docs/**/*.md"):
@@ -91,19 +100,29 @@ def documents(root: Path, change: str | None = None) -> list[Path]:
     return found
 
 
+def _created_specs(directory: Path) -> set[str]:
+    """Each capability's `spec.md`, as cited, that an active change's deltas write
+    when the change is archived. Only a delta that adds a requirement can write one:
+    a modification, removal, or rename needs a requirement already there. The delta
+    is read by the index check's parser, so the two checks agree on what it adds."""
+    return {f"openspec/specs/{delta.parent.name}/spec.md"
+            for delta in directory.glob("specs/*/spec.md")
+            if read_deltas(delta.read_text(encoding="utf-8", errors="ignore")).added}
+
+
 def unresolvable(
     root: Path, change: str | None = None
 ) -> list[tuple[str, str, str]]:
     """Every citation that is absent or points at a tombstone."""
 
     own: tuple[str, Path] | None = None
+    created: set[str] = set()
     if change is not None:
-        try:
-            directory = change_directory(root, change)
-        except ChangeNotFound as exc:
-            raise SystemExit(str(exc)) from exc
-        if is_archived(root, directory):
-            own = (f"openspec/changes/{change}/", directory)
+        found = _found(root, change)
+        if found["archived"]:
+            own = (f"openspec/changes/{change}/", root / found["directory"])
+        else:
+            created = _created_specs(root / found["directory"])
     problems: list[tuple[str, str, str]] = []
     for document in documents(root, change):
         text = document.read_text(encoding="utf-8", errors="ignore")
@@ -112,7 +131,8 @@ def unresolvable(
             if own and cited.startswith(own[0]):
                 target = own[1] / cited[len(own[0]):]
             if not target.exists():
-                problems.append(("absent", cited, document.as_posix()))
+                if cited not in created:
+                    problems.append(("absent", cited, document.as_posix()))
             elif target.is_file() and is_tombstone(target):
                 problems.append(("tombstone", cited, document.as_posix()))
     return problems

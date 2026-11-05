@@ -15,7 +15,7 @@
 # key's body — base64 wrapped at any length, or one string with `\n` escapes — is
 # far longer than 64 characters and is refused; a fixture whose body is a word, such
 # as `fixture`, is passed however many share a file.
-# See openspec/specs/change-workflow/architecture.md, "Secret scanning".
+# See openspec/specs/market-change-workflow/README.md, "Secret scanning".
 
 [extend]
 useDefault = true

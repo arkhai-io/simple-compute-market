@@ -19,7 +19,7 @@
 # would have found; the audit (`make audit-secrets`) reports it over the whole tree,
 # and review remains the safeguard for each change. A later fixture that trips a
 # provider rule is another entry in this list, never a marker beside the fixture.
-# See openspec/specs/change-workflow/architecture.md, "Secret scanning".
+# See openspec/specs/market-change-workflow/README.md, "Secret scanning".
 
 [extend]
 path = "scripts/gitleaks-audit.toml"

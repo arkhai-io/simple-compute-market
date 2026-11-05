@@ -2,37 +2,21 @@
 
 The guard's meaning is Git's own state — attachment, upstream configuration, what a
 push sends — so a temporary repository with a bare remote is the lowest level that
-proves it; a fake Git would only restate the guard's assumptions. The secret gate is
-injected as passing where a test is about something else; the cases about it run the
-pinned gitleaks, skipped where it is not on PATH except under `GITLEAKS_REQUIRED=1`.
+proves it; a fake Git would only restate the guard's assumptions. The repository's
+pre-push checks are absent unless a test provides one.
 """
 
 from __future__ import annotations
 
-import base64
-import importlib.util
 import os
 import subprocess
-import sys
-import textwrap
 from pathlib import Path
 
 import pytest
 
-import check_secrets
-import install_gitleaks
+from change_workflow import push as guard
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = REPO_ROOT / "scripts" / "check_push_ready.py"
-_SPEC = importlib.util.spec_from_file_location("check_push_ready", SCRIPT)
-assert _SPEC is not None and _SPEC.loader is not None
-guard = importlib.util.module_from_spec(_SPEC)
-sys.modules[_SPEC.name] = guard
-_SPEC.loader.exec_module(guard)
-
-
-def _no_secrets(root: Path, *, remote: str) -> list[str]:
-    return []
+PUBLIC_CONTENT, SECRETS = (script for script, *_ in guard.PRE_PUSH_CHECKS)
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -75,7 +59,7 @@ def _remote_head(repo: Path, branch: str) -> str:
 def test_a_new_branch_is_pushed_to_its_own_name_and_tracks_it(repo: Path) -> None:
     head = _git(repo, "rev-parse", "HEAD")
 
-    assert guard.main(["push"], root=repo, secrets=_no_secrets) == 0
+    assert guard.main(["push"], root=repo) == 0
 
     assert _remote_head(repo, "feat/change") == head
     assert _git(repo, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/feat/change"
@@ -85,8 +69,8 @@ def test_a_tracked_branch_pushes_exactly_head(repo: Path) -> None:
     _git(repo, "push", "-q", "-u", "origin", "feat/change")
     head = _commit(repo, "fix")
 
-    assert guard.main(["check"], root=repo, secrets=_no_secrets) == 0
-    assert guard.main(["push"], root=repo, secrets=_no_secrets) == 0
+    assert guard.main(["check"], root=repo) == 0
+    assert guard.main(["push"], root=repo) == 0
     assert _remote_head(repo, "feat/change") == head
 
 
@@ -100,7 +84,7 @@ def test_a_remote_that_moved_on_rejects_the_push_rather_than_being_forced(
     _git(other, "push", "-q", "origin", "feat/change")
     _commit(repo, "local")
 
-    assert guard.main(["push"], root=repo, secrets=_no_secrets) != 0
+    assert guard.main(["push"], root=repo) != 0
     assert _remote_head(repo, "feat/change") == moved
 
 
@@ -164,73 +148,87 @@ def test_every_refusal_is_reported_at_once(repo: Path) -> None:
     assert len(problems) == 2
 
 
-def test_make_targets_delegate_to_the_script() -> None:
-    makefile = (REPO_ROOT / "Makefile").read_text("utf-8")
+def _provide_check(repo: Path, source: str, name: str = PUBLIC_CONTENT) -> None:
+    """Give the repository a pre-push check, ignored so the worktree stays clean."""
+    script = repo / name
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text(source, "utf-8")
+    with (repo / ".git/info/exclude").open("a", encoding="utf-8") as exclude:
+        exclude.write(f"/{name}\n")
 
-    assert "scripts/check_push_ready.py check" in makefile
-    assert "scripts/check_push_ready.py push" in makefile
+
+def test_the_pre_push_check_is_run_as_a_git_hook_and_its_refusal_stops_both_actions(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _provide_check(repo, "import sys\n"
+                         "print('REFUSED: ' + ' '.join(sys.argv[1:]) + ' | '"
+                         " + sys.stdin.read().strip(), file=sys.stderr)\n"
+                         "sys.exit(1)\n")
+    head = _git(repo, "rev-parse", "HEAD")
+    ref = "refs/heads/feat/change"
+
+    for action in ("check", "push"):
+        assert guard.main([action], root=repo) == 1
+        err = capsys.readouterr().err
+        assert f"REFUSED: --pre-push origin | {ref} {head} {ref} {'0' * 40}" in err
+    assert _remote_head(repo, "feat/change") == ""
 
 
-def test_private_content_refuses_publication(repo: Path, capsys) -> None:
+def test_a_pre_push_check_failing_silently_is_named(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _provide_check(repo, "import sys\nsys.exit(3)\n")
+
+    assert guard.main(["push"], root=repo) == 1
+    assert "exited with status 3" in capsys.readouterr().err
+    assert _remote_head(repo, "feat/change") == ""
+
+
+def _provide_this_repositorys_check(repo: Path) -> None:
+    """This repository's own pre-push check, the public-content scan, where the
+    engine looks for it."""
+    provided = Path(__file__).resolve().parents[2] / PUBLIC_CONTENT
+    _provide_check(repo, provided.read_text("utf-8"))
+
+
+def test_this_repositorys_check_passes_a_clean_push(repo: Path) -> None:
+    _provide_this_repositorys_check(repo)
+
+    assert guard.main(["push"], root=repo) == 0
+    assert _remote_head(repo, "feat/change") == _git(repo, "rev-parse", "HEAD")
+
+
+@pytest.mark.parametrize("removed_later", [False, True])
+def test_private_content_refuses_publication(
+    repo: Path, capsys: pytest.CaptureFixture[str], removed_later: bool
+) -> None:
+    _provide_this_repositorys_check(repo)
     # Synthetic prohibited account assembled so this test remains publishable.
     private = "/home/" + "fixture-person" + "/work"
-    (repo / "notes.md").write_text(private)
+    (repo / "notes.md").write_text(private, "utf-8")
     _git(repo, "add", "notes.md")
     _git(repo, "commit", "-qm", "notes")
+    if removed_later:
+        _git(repo, "rm", "-q", "notes.md")
+        _git(repo, "commit", "-qm", "remove notes")
 
-    assert guard.main(["push"], root=repo, secrets=_no_secrets) == 1
-    assert _git(repo, "ls-remote", "origin", "refs/heads/feat/change") == ""
-    assert private not in capsys.readouterr().err
-
-
-def test_a_secret_scan_that_cannot_run_refuses_publication(
-        repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    def unavailable(root: Path, *, remote: str) -> list[str]:
-        raise check_secrets.SecretsError("gitleaks 8.30.1 is required and no gitleaks "
-                                         "is on PATH")
-
-    assert guard.main(["push"], root=repo, secrets=unavailable) == 1
-
+    assert guard.main(["push"], root=repo) == 1
     assert _remote_head(repo, "feat/change") == ""
-    assert "REFUSED: gitleaks 8.30.1 is required" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "personal home path" in err
+    assert private not in err
 
 
-@pytest.fixture
-def gitleaks() -> None:
-    reason = install_gitleaks.problem()
-    if reason is not None:
-        if os.environ.get("GITLEAKS_REQUIRED") == "1":
-            pytest.fail(reason)
-        pytest.skip(reason)
-
-
-@pytest.mark.usefixtures("gitleaks")
-def test_an_outgoing_commit_adding_a_key_refuses_publication(
-        repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    # Random bytes under a header assembled at runtime: no key, and no block in this file.
-    body = base64.b64encode(os.urandom(1190)).decode()
-    block = "\n".join(["-----BEGIN " + "RSA PRIVATE KEY-----", *textwrap.wrap(body, 64),
-                       "-----END " + "RSA PRIVATE KEY-----"])
-    (repo / "deploy.pem").write_text(block + "\n", "utf-8")
-    _git(repo, "add", "deploy.pem")
-    _git(repo, "commit", "-qm", "deploy key")
+def test_every_pre_push_check_runs_and_each_refusal_is_reported(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    for name in (PUBLIC_CONTENT, SECRETS):
+        _provide_check(repo, f"import sys\nprint('REFUSED: {name}', file=sys.stderr)\n"
+                             "sys.exit(1)\n", name)
 
     assert guard.main(["push"], root=repo) == 1
 
     err = capsys.readouterr().err
-    assert ":deploy.pem:1: private-key-block" in err
-    assert body[:40] not in err
+    assert f"REFUSED: {PUBLIC_CONTENT}" in err
+    assert f"REFUSED: {SECRETS}" in err
     assert _remote_head(repo, "feat/change") == ""
-
-
-@pytest.mark.usefixtures("gitleaks")
-def test_an_outgoing_commit_adding_a_key_fixture_is_pushed(repo: Path) -> None:
-    fixture = ("-----BEGIN " + "OPENSSH PRIVATE KEY-----\\nfixture\\n"
-               + "-----END " + "OPENSSH PRIVATE KEY-----\\n")
-    (repo / "test_hosts.py").write_text(f'PEM = "{fixture}"\n', "utf-8")
-    _git(repo, "add", "test_hosts.py")
-    _git(repo, "commit", "-qm", "fixture")
-
-    assert guard.main(["push"], root=repo) == 0
-
-    assert _remote_head(repo, "feat/change") == _git(repo, "rev-parse", "HEAD")

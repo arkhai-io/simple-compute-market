@@ -1257,4 +1257,4 @@ wherever `check_public_content.py` runs and reports locations, never content.
 `make audit-secrets` runs the gate's rules and the three default rules it turns off
 over the tracked tree, gates nothing, and is run before a release ships ([`RELEASING.md`, "Cutting a release"](RELEASING.md#cutting-a-release)).
 The gate's rules, the audit, and what both leave to review:
-[`openspec/specs/change-workflow/architecture.md`, "Secret scanning"](../../openspec/specs/change-workflow/architecture.md#secret-scanning).
+[`openspec/specs/market-change-workflow/README.md`, "Secret scanning"](../../openspec/specs/market-change-workflow/README.md#secret-scanning).

@@ -10,25 +10,18 @@ one test reading the checkout's real run records.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
-import change_clone as clones
+from change_workflow import clone as clones
+from change_workflow import round_view as rounds
 from change_workflow.running import Run, recorded_run, runs_directory
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = REPO_ROOT / "scripts" / "round_view.py"
-_SPEC = importlib.util.spec_from_file_location("round_view", SCRIPT)
-assert _SPEC is not None and _SPEC.loader is not None
-rounds = importlib.util.module_from_spec(_SPEC)
-sys.modules[_SPEC.name] = rounds
-_SPEC.loader.exec_module(rounds)
 
 CHANGE = "the-change"
 BRANCH = f"feat/{CHANGE}"

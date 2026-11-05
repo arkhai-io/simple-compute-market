@@ -22,9 +22,9 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from change_workflow.common import ROOT
-from change_workflow.outcome import harness_schema
-from change_workflow.steps import Model, StepRules
+from .common import repository_root
+from .outcome import harness_schema
+from .steps import Model, StepRules
 
 # Runs a command in a directory, handing each line of its merged output to the
 # callback as it arrives, and returns its exit status.
@@ -39,7 +39,7 @@ Reached = tuple[str, str] | None
 # What an unattended run is told beside its skill: that nobody can answer it, and
 # how it ends a turn.
 UNATTENDED = (
-    "This step runs unattended through scripts/run_change_step.py: nobody can answer a "
+    "This step runs unattended through scripts/change-workflow: nobody can answer a "
     "permission prompt or a question in this session. Follow your skill's instructions for "
     "running unattended. End every turn with an outcome matching the JSON schema you were "
     "given. Where your skill says to stop and ask the owner, end the turn with a `question` "
@@ -271,7 +271,7 @@ def run_codex(command: Sequence[str], log: Path) -> int:
     progress = Progress()
     # Appended: a review's attempts on each of its models share one transcript.
     with log.open("a", encoding="utf-8") as stream:
-        process = subprocess.Popen(list(command), cwd=ROOT, stdin=subprocess.DEVNULL,
+        process = subprocess.Popen(list(command), cwd=repository_root(), stdin=subprocess.DEVNULL,
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                    text=True, encoding="utf-8", errors="replace")
         assert process.stdout is not None

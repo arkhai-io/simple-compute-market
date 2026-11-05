@@ -1,7 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:change-workflow:change-outcome:format:2",
   "title": "Change step outcome",
-  "description": "The structured outcome a step of an OpenSpec change ends with: an unattended run's last turn, or what an interactive run records through run_change_step.py record. Contract: openspec/specs/change-workflow/spec.md.",
+  "description": "The structured outcome a step of an OpenSpec change ends with: an unattended run's last turn, or what an interactive run records through change-workflow record. Contract: openspec/specs/change-workflow/spec.md.",
   "type": "object",
   "properties": {
     "outcome": {

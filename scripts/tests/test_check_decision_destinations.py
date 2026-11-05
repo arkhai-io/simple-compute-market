@@ -3,6 +3,7 @@ its proposal's "Knowledge to promote"."""
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -47,6 +48,8 @@ DESIGN = """# Design
 
 
 def _change(tmp_path: Path, design: str, proposal: str) -> Path:
+    """A change in a Git repository, where the workflow's command finds it."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     directory = tmp_path / "openspec/changes" / CHANGE
     directory.mkdir(parents=True)
     (directory / checker.DESIGN_FILE).write_text(design)

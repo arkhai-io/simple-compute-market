@@ -1,0 +1,62 @@
+"""Fail if a change's task list has a task under another section's heading.
+
+The sections of a task list are its `## N. Title` headings, and every step that
+acts on the list — implementation choosing its section, closeout confirming every
+task is checked, the next-step computation routing on which sections are done —
+reads them from those headings alone. A heading lost in an edit hands its tasks
+to the section before it, and nothing else in the file says so. A task numbered
+`N.m` under a heading other than `## N.` is that loss made visible: this check
+names each such task and the heading it sits under. Only tasks under a
+recognised `## N.` heading are checked, so a list in another format passes.
+
+Run as `scripts/change-workflow check tasks <change>` (`make check-tasks`) by the
+skills that act on a task list before they do; its check, `task_problems`, is also
+the next-step computation's own backstop where it routes on sections. Prints each
+problem with its line on standard error and exits 1, or prints OK.
+
+Contract: openspec/specs/change-workflow/spec.md, CW-4rqr and CW-5r7l.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+from .common import StepError, repository_root
+from .find import ChangeNotFound, change_directory
+from .next_step import TASKS_FILE, task_problems
+
+
+def main(argv: list[str] | None = None, root: Path | None = None) -> int:
+    args = sys.argv[1:] if argv is None else list(argv)
+    if len(args) != 1 or not args[0]:
+        print("usage: check tasks <change>", file=sys.stderr)
+        return 2
+    try:
+        root = repository_root() if root is None else root
+    except StepError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    try:
+        tasks = change_directory(root, args[0]) / TASKS_FILE
+    except ChangeNotFound as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    if not tasks.is_file():
+        print(f"OK: {args[0]} has no task list yet.")
+        return 0
+    shown = tasks.relative_to(root).as_posix()
+    if problems := task_problems(tasks.read_text("utf-8")):
+        for problem in problems:
+            print(f"{shown}:{problem}", file=sys.stderr)
+        print(file=sys.stderr)
+        print("FAIL: a task sits under another section's heading; a heading is missing or\n"
+              "the task is misplaced. Nothing that reads the sections can act on it.",
+              file=sys.stderr)
+        return 1
+    print(f"OK: every numbered task of {shown} sits under its own section's heading.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -20,8 +20,8 @@ from typing import Sequence
 
 import pytest
 
-import change_clone as clones
 from change_workflow import cli, running
+from change_workflow import clone as clones
 
 CHANGE = "seed-pool"
 BRANCH = f"feat/{CHANGE}"

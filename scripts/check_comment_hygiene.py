@@ -23,11 +23,11 @@ judgement-call check.
 
 A script that reads a change document must name its file once, so that one
 definition is exempt from the first scan: `TASKS_FILE` in
-`scripts/change_next_step.py`, which reads the task list, and `DESIGN_FILE` and
-`PROPOSAL_FILE` in `scripts/check_decision_destinations.py`, which reads the
-design and the proposal. Any other mention in those scripts is still caught. This script and
-its test are scanned like any other file, so neither spells out what the first
-scan looks for: the pattern is written as a pattern, and the test builds its
+`scripts/change_workflow/next_step.py`, which reads the task list, and `DESIGN_FILE`
+and `PROPOSAL_FILE` in `scripts/check_decision_destinations.py`, which reads the
+design and the proposal. Any other mention in those scripts is still caught. This
+script and its test are scanned like any other file, so neither spells out what the
+first scan looks for: the pattern is written as a pattern, and the test builds its
 samples at run time.
 """
 
@@ -48,7 +48,7 @@ HISTORY_EXCLUDED_DIRS = frozenset(
     {"openspec", ".git", "__pycache__", ".venv", ".dist", "node_modules", "build"})
 #: The exempt lines: each file name's definition in the script that reads it.
 EXEMPT = {
-    "scripts/change_next_step.py": re.compile(r'^TASKS_FILE = "[^"]*"$'),
+    "scripts/change_workflow/next_step.py": re.compile(r'^TASKS_FILE = "[^"]*"$'),
     "scripts/check_decision_destinations.py": re.compile(r'^(DESIGN|PROPOSAL)_FILE = "[^"]*"$'),
 }
 

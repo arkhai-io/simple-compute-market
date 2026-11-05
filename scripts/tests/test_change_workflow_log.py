@@ -11,12 +11,14 @@ from pathlib import Path
 
 import pytest
 
+from change_workflow import graph
 from change_workflow.cli import main
-from change_workflow.common import StepError
-from change_workflow.log import (LogError, append_entry, branch_decisions, last_entries,
-                                 note_orchestrator, note_round, numbered, read_log,
-                                 record_interactive, record_outcome, replace_log,
-                                 revisit_direction, unmarked, unused_direction)
+from change_workflow.common import FORMAT, StepError
+from change_workflow.log import (LogError, NewerFormat, append_entry, branch_decisions,
+                                 last_entries, newer, note_orchestrator, note_round, numbered,
+                                 older, open_log, read_log, record_interactive, record_outcome,
+                                 replace_log, revisit_direction, undeclared, unused_direction)
+from change_workflow.outcome import triaged_problems
 from change_workflow_fixtures import (CHANGE, COMMIT, DENIALS, VALID, clock, descriptors_of,
                                       log_file)
 
@@ -693,12 +695,155 @@ def test_a_replacement_of_a_missing_log_creates_it(tmp_path: Path) -> None:
     assert [entry["seq"] for entry in read_log(log)] == [1]
 
 
-def test_a_line_without_the_format_is_found() -> None:
-    marked = {"seq": 1, "format": 2}
-    older = {"seq": 2}
+def test_a_line_with_no_format_or_a_lower_one_is_older() -> None:
+    marked = {"seq": 1, "format": FORMAT}
+    unmarked = {"seq": 2}
+    lower = {"seq": 3, "format": FORMAT - 1}
 
-    assert unmarked([marked, older, {"seq": 3}]) == older
-    assert unmarked([marked]) is None
+    assert older([marked, unmarked, lower]) == unmarked
+    assert older([marked, lower]) == lower
+    assert older([marked]) is None
+    assert newer([marked, unmarked, lower]) is None
+
+
+@pytest.mark.parametrize("mark", [FORMAT + 1, "2", True, "two"])
+def test_a_line_of_a_higher_format_or_no_format_number_is_newer(mark: object) -> None:
+    line = {"seq": 2, "format": mark}
+
+    assert newer([{"seq": 1, "format": FORMAT}, line]) == line
+    # Never read as older, which would have it converted backwards.
+    assert older([line]) is None
+
+
+def test_the_writer_refuses_a_log_holding_a_newer_line(tmp_path: Path) -> None:
+    log = log_file(tmp_path)
+    log.parent.mkdir()
+    written = json.dumps({"seq": 1, "format": FORMAT + 1, "step": "design"}) + "\n"
+    log.write_text(written, "utf-8")
+
+    with pytest.raises(NewerFormat, match=f"format {FORMAT + 1} at seq 1"):
+        note_orchestrator(log, "d", "r", clock=clock)
+    with pytest.raises(NewerFormat, match=f"reading format {FORMAT}"):
+        record_outcome(log, "plan", VALID["finished"], session="s", commit=COMMIT)
+
+    assert log.read_text("utf-8") == written
+
+
+@pytest.mark.parametrize("line,named", [
+    ({"step": "deploy", "outcome": "finished"}, "'deploy' is no step"),
+    ({"step": "review", "kind": "security", "outcome": "question"},
+     "'security' is no kind of review"),
+    ({"step": "review", "outcome": "finished", "next": {"step": "triage", "kind": "design"}},
+     "None is no kind of review"),
+    ({"step": "plan", "outcome": "finished", "next": {"step": "deploy"}},
+     "the plan run's exit names no node: 'deploy' is no node"),
+    ({"step": "triage", "outcome": "returned", "next": {"step": "review", "kind": "x"}},
+     "review:x is no node"),
+    ({"step": "orchestrator", "outcome": "orchestrator", "by": "owner",
+      "next": {"step": "deploy"}}, "the owner's direction names no node"),
+])
+def test_a_line_naming_what_the_graph_does_not_declare_is_named(line: dict,
+                                                                  named: str) -> None:
+    assert named in (undeclared(line) or "")
+
+
+@pytest.mark.parametrize("line", [
+    {"step": "plan", "outcome": "finished", "next": {"step": "round"}},
+    {"step": "review", "kind": "pre-closeout", "outcome": "stopped"},
+    # A run that took no exit names none to check.
+    {"step": "plan", "outcome": "question", "next": {"step": "deploy"}},
+    {"step": "orchestrator", "outcome": "round", "sections": [[1]]},
+    {"step": "orchestrator", "outcome": "orchestrator", "by": "orchestrator"},
+    {"step": "convert", "outcome": "converted", "triaged": []},
+    {"step": "start", "outcome": "opened", "starts": "design", "interactive": True},
+])
+def test_a_line_naming_only_what_the_graph_declares_is_read(line: dict) -> None:
+    assert undeclared(line) is None
+
+
+def test_the_writer_refuses_a_review_of_a_kind_the_graph_does_not_declare(
+        tmp_path: Path) -> None:
+    log = log_file(tmp_path)
+
+    with pytest.raises(StepError, match="'security' is no kind of review"):
+        record_outcome(log, "review", VALID["finished"], session="s", commit=COMMIT,
+                       extra={"kind": "security"})
+
+    assert not log.exists()
+
+
+def test_a_review_kind_added_to_the_graph_is_accepted_with_no_other_list_edited(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A kind is the graph's declaration alone: a node added to its table is what the
+    log's writer, the outcome check, and the triage check then accept."""
+    security = graph.Node("review", "security")
+    monkeypatch.setitem(graph.NODES, security, graph.Declaration(
+        security, (), ("implementation",), "review"))
+    log = log_file(tmp_path)
+    log.parent.mkdir()
+    (log.parent / "07-security.md").write_text("A review.\n", "utf-8")
+    (log.parent / "07-security.triage.md").write_text("Its triage.\n", "utf-8")
+    exit_ = {**VALID["finished"], "next": {"step": "review", "kind": "security"}}
+
+    record_outcome(log, "review", VALID["finished"], session="s", commit=COMMIT,
+                   extra={"kind": "security"})
+    record_outcome(log, "plan", exit_, session="s", commit=COMMIT)
+    record_interactive(log, "triage", {**exit_, "triaged": ["07-security"]}, session="s",
+                       commit=COMMIT)
+
+    assert [entry.get("kind") for entry in read_log(log)] == ["security", None, None]
+    assert triaged_problems(["07-security"], log.parent) == []
+
+
+def test_the_log_is_opened_with_the_format_before_a_step(tmp_path: Path) -> None:
+    log = log_file(tmp_path)
+
+    first = open_log(log, CHANGE, "design", interactive=True, clock=clock)
+    second = open_log(log, CHANGE, "review", interactive=False, clock=clock)
+
+    assert first == {"seq": 1, "at": "2026-10-21T09:15:40Z", "format": FORMAT,
+                     "step": "start", "outcome": "opened", "starts": "design",
+                     "interactive": True}
+    assert (second["seq"], second["interactive"]) == (2, False)
+
+
+def test_a_ledger_alone_is_no_record_of_an_older_format(tmp_path: Path) -> None:
+    log = log_file(tmp_path)
+    log.parent.mkdir()
+    (log.parent.parent / "interventions.jsonl").write_text('{"step": "design"}\n', "utf-8")
+
+    assert open_log(log, CHANGE, "design", interactive=True, clock=clock)["seq"] == 1
+
+
+@pytest.mark.parametrize("prepare,why", [
+    (lambda log: log.write_text('{"seq": 1, "step": "design"}\n', "utf-8"),
+     "an older format at seq 1"),
+    (lambda log: (log.parent / "03-implementation.md").write_text("x", "utf-8"),
+     "numbered records under reviews/ and no workflow log"),
+])
+def test_records_of_an_older_format_are_not_opened(tmp_path: Path, prepare,
+                                                   why: str) -> None:
+    log = log_file(tmp_path)
+    log.parent.mkdir()
+    prepare(log)
+    before = sorted(path.name for path in log.parent.iterdir())
+
+    with pytest.raises(StepError, match=why) as refused:
+        open_log(log, CHANGE, "design", interactive=True, clock=clock)
+
+    assert f"scripts/change-workflow convert {CHANGE}" in str(refused.value)
+    assert sorted(path.name for path in log.parent.iterdir()) == before
+
+
+def test_a_newer_log_is_not_opened(tmp_path: Path) -> None:
+    log = log_file(tmp_path)
+    log.parent.mkdir()
+    log.write_text(json.dumps({"seq": 1, "format": FORMAT + 1}) + "\n", "utf-8")
+
+    with pytest.raises(NewerFormat, match=f"format {FORMAT + 1}"):
+        open_log(log, CHANGE, "design", interactive=False, clock=clock)
+
+    assert len(read_log(log)) == 1
 
 
 @pytest.mark.skipif(not Path("/proc/self/fd").is_dir(),

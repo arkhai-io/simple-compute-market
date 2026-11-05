@@ -22,31 +22,28 @@ the recorded denials before the change moves on. A run whose session took furthe
 turns after an outcome is logged with its last, the earlier ones kept beside it as
 `earlier`.
 
-Contract: openspec/specs/change-workflow/spec.md, "Unattended step runs end with a
-structured outcome".
+Contract: openspec/specs/change-workflow/spec.md, CW-js86, CW-4vma, CW-1a4d,
+CW-k5mk, CW-xgq3, CW-0ia3, CW-ebmo, CW-1dld, CW-tl5v, and CW-yzer.
 """
 
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from change_workflow.common import ORCHESTRATOR, ROOT, Clock, Entry, StepError, utc_now
-from change_workflow.cost import (conversation_file, measured_before, measured_cost,
-                                  read_conversation)
-from change_workflow.harness import (NETWORK_RETRIES, Runner, claude_command, missing_program,
-                                     run_claude, unreachable)
-from change_workflow.log import (last_run, log_path, read_log, record_outcome,
-                                 revisit_direction, revisit_refusal)
-from change_workflow.outcome import SCHEMA, load_schema, outcome_problems
-from change_workflow.records import git_head, next_transcript, triage_outcome_problems
-from change_workflow.running import (recorded_run, runs_directory, termination_deferred,
-                                     termination_ends_the_run)
-from change_workflow.steps import STEP_TABLE, Model, StepRules, load_steps
-from change_workflow.stream import Stream
-from change_workflow.subagents import subagent_denials
+from .common import ORCHESTRATOR, Clock, Entry, StepError, repository_root, utc_now
+from .cost import conversation_file, measured_before, measured_cost, read_conversation
+from .harness import (NETWORK_RETRIES, Runner, claude_command, missing_program, run_claude,
+                      unreachable)
+from .log import last_run, log_path, read_log, record_outcome, revisit_direction, revisit_refusal
+from .outcome import load_schema, outcome_problems, triage_outcome_problems
+from .records import git_head, next_transcript
+from .running import recorded_run, runs_directory, termination_deferred, termination_ends_the_run
+from .steps import Model, StepRules, load_steps
+from .stream import Stream
+from .subagents import subagent_denials
 
 
 def step_prompt(rules: StepRules, change: str, arguments: str = "") -> str:
@@ -143,14 +140,15 @@ def _with_subagent(streamed: dict[str, Any], found: dict[str, Any]) -> dict[str,
 class Wrapper:
     """Runs steps of changes under one repository root, through injected seams."""
 
-    root: Path = ROOT
+    root: Path = field(default_factory=repository_root)
     runner: Runner = run_claude
     head: Callable[[Path], str | None] = git_head
     clock: Clock = utc_now
     # Progress goes to stderr: stdout carries only the outcome line a caller parses.
     echo: Callable[[str], None] | None = lambda shown: print(shown, file=sys.stderr, flush=True)
-    steps_path: Path = STEP_TABLE
-    schema_path: Path = SCHEMA
+    # The step table and the outcome schema; None reads the repository's own.
+    steps_path: Path | None = None
+    schema_path: Path | None = None
     # Where Claude Code keeps a session's conversation, read for the turns it gained
     # outside the wrapper and the time of its last turn.
     conversation: Callable[[Path, str], Path] = conversation_file

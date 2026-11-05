@@ -20,11 +20,22 @@ agreements, and the last outcome. Where the log and the files disagree, the file
 win. It lives in the change's untracked `reviews/` directory and moves with the
 change when it is archived.
 
-Every line this module appends carries the log's format, `"format": 2`, so a line
-another writer appended without it is told apart (`unmarked`). A log may be replaced
-whole, a new file renamed over its name (`replace_log`), so every reader and
-appender checks, once it holds the lock, that the file it locked is still the one
-the name holds.
+Every line this module appends carries the record set's format (`common.FORMAT`),
+which the log is the only authority for. A line with no format, or a lower one, is
+older (`older`): its records are converted before anything routes on them. A line
+with a higher one is newer (`newer`), written by an engine this one predates, and
+nothing here routes on, converts, or appends to such a log (`NewerFormat`). `start`
+opens the log with a line of its own before any step it starts runs (`open_log`),
+so a change worked through the command has its format marked before any other
+record; nothing routes on that line.
+
+A line naming a step, a node, or a kind of review the graph does not declare is
+reported by name (`undeclared`): the graph's vocabulary is closed, and a reader
+does not guess what a newer one meant.
+
+A log may be replaced whole, a new file renamed over its name (`replace_log`), so
+every reader and appender checks, once it holds the lock, that the file it locked
+is still the one the name holds.
 """
 
 from __future__ import annotations
@@ -35,21 +46,28 @@ import os
 import tempfile
 from datetime import timezone
 from pathlib import Path
-from typing import IO, Any, Callable, Sequence
+from typing import IO, Any, Callable, Mapping, Sequence
 
-from change_workflow.common import KINDS, ORCHESTRATOR, STEPS, Clock, Entry, StepError, utc_now
-from change_workflow.graph import (NODES, ROUND, Node, Standing, TargetError, entry_refusal,
-                                   node_of, section_ids)
-from change_workflow.outcome import outcome_problems
-from change_workflow.records import NUMBERED, next_number, triage_outcome_problems
-from find_change import ARCHIVE, ChangeNotFound, change_directory, find_records
+from .common import FORMAT, ORCHESTRATOR, Clock, Entry, StepError, utc_now
+from .find import ARCHIVE, ChangeNotFound, change_directory, find_records
+from .graph import (NODES, ROUND, STEPS, Node, Standing, TargetError, entry_refusal, node_of,
+                    review_phase, section_ids)
+from .outcome import outcome_problems, triage_outcome_problems
+from .records import NUMBERED, has_records, next_number
 
 LOG = "workflow.jsonl"
-FORMAT = 2
+# The lines no step's run writes: the conversion's, and the one `start` opens a
+# step with. Neither names an exit, and nothing routes on either.
+CONVERSION = "convert"
+OPENING = "start"
 
 
 class LogError(StepError):
     """The workflow log cannot be read."""
+
+
+class NewerFormat(LogError):
+    """The log holds a line of a format this engine does not read."""
 
 
 def log_path(root: Path, change: str) -> Path:
@@ -145,10 +163,63 @@ def last_entries(path: Path, count: int) -> list[Entry]:
     return entries[-count:] if count > 0 else []
 
 
-def unmarked(entries: Sequence[Entry]) -> Entry | None:
-    """The first line without the log's format, which a writer of an older format
-    appended; None when every line carries it."""
-    return next((entry for entry in entries if entry.get("format") != FORMAT), None)
+def _readable(mark: Any) -> bool:
+    """Whether a line's `format` is one this engine reads, current or older: absent,
+    or a whole number no higher than its own."""
+    return mark is None or (isinstance(mark, int) and not isinstance(mark, bool)
+                            and mark <= FORMAT)
+
+
+def older(entries: Sequence[Entry]) -> Entry | None:
+    """The first line of an older format: with no `format`, or a lower one, as a
+    writer before this format appended it; None when there is none."""
+    return next((entry for entry in entries if _readable(entry.get("format"))
+                 and entry.get("format") != FORMAT), None)
+
+
+def newer(entries: Sequence[Entry]) -> Entry | None:
+    """The first line of a format this engine does not read: a higher one, which a
+    later engine appended, or a mark that is no format number; None when there is
+    none. Such a line is refused rather than read or converted backwards."""
+    return next((entry for entry in entries if not _readable(entry.get("format"))), None)
+
+
+def refuse_newer(where: Path | str, entries: Sequence[Entry]) -> None:
+    """Refuse the log `where` names, whose lines are `entries`, when one is newer,
+    naming its format."""
+    if (line := newer(entries)) is not None:
+        raise NewerFormat(f"{where} holds a line of format {line.get('format')!r} at seq "
+                          f"{line['seq']}, which this engine, reading format {FORMAT}, does "
+                          "not read: run the engine that wrote it")
+
+
+def undeclared(entry: Entry) -> str | None:
+    """Why `entry` names something the graph does not declare — a step no node runs,
+    a kind of review no node is, an exit or a direction naming no node — or None
+    when every name it carries is declared. Read at the graph's own declaration, so
+    a step, node, or kind added to it is known with nothing else edited."""
+    step = entry.get("step")
+    if step == ORCHESTRATOR:
+        target = entry.get("next") if entry.get("by") == "owner" else None
+        what = "the owner's direction"
+    elif step in (CONVERSION, OPENING):
+        return None
+    elif step not in STEPS:
+        return f"{step!r} is no step of the workflow graph"
+    else:
+        kind = entry.get("kind")
+        if step == "review" and not (isinstance(kind, str) and review_phase(kind)):
+            return f"{kind!r} is no kind of review the workflow graph declares"
+        target = entry.get("next") if entry.get("outcome") in ("finished", "returned") \
+            else None
+        what = f"the {step} run's exit"
+    if not isinstance(target, Mapping):
+        return None
+    try:
+        node_of(target)
+    except TargetError as exc:
+        return f"{what} names no node: {exc}"
+    return None
 
 
 def _refuse_reserved(entry: Entry) -> None:
@@ -183,13 +254,15 @@ def append_entry(path: Path, entry: Entry, clock: Clock = utc_now) -> Entry:
 
     Several processes may append to one change's log at once, so the log is
     locked from reading the last `seq` to writing the new line; without the lock
-    both could take the same number.
+    both could take the same number. A log holding a newer line is refused, since a
+    line of this format after it would mix two formats in one record set.
     """
     _refuse_reserved(entry)
     with _locked_for_writing(path) as stream:
         stream.seek(0)
         text = stream.read()
         entries = _parse(path, text)
+        refuse_newer(path, entries)
         line = numbered(entries, entry, clock)
         stream.seek(0, 2)
         # A last line saved without its newline would otherwise be joined to this one.
@@ -270,7 +343,10 @@ def record_outcome(path: Path, step: str, outcome: Entry, *, session: str | None
                         "twice")
     # The schema admits no field beyond the outcome's own, so nothing a step
     # answers can overwrite what is recorded about its run.
-    return append_entry(path, {**run, **(extra or {}), **outcome}, clock)
+    line = {**run, **(extra or {}), **outcome}
+    if why := undeclared(line):
+        raise StepError(f"the {step} run is refused: {why}")
+    return append_entry(path, line, clock)
 
 
 def record_interactive(path: Path, step: str, outcome: Entry, *, session: str,
@@ -295,6 +371,33 @@ def record_interactive(path: Path, step: str, outcome: Entry, *, session: str,
                         + "; ".join(problems))
     return record_outcome(path, step, outcome, session=session, commit=commit,
                           extra={"interactive": True}, clock=clock)
+
+
+def open_log(path: Path, change: str, step: str, *, interactive: bool,
+             clock: Clock = utc_now) -> Entry:
+    """Open `change`'s log at `path` for a run of `step` that `start` is about to start,
+    creating it if need be: a line carrying the record set's format, so the format is
+    marked before anything the step records — a ledger line, its outcome — and the
+    ledger beside the log is read in it. Nothing routes on the line.
+
+    Refused, writing nothing, where the record set is not in this format: a log
+    holding a newer line, which this engine does not read; and records of an older
+    format — a log holding a line with no format or a lower one, or numbered records
+    under `reviews/` with no line logged — which the owner converts first, since this
+    line would otherwise mark them as current.
+    """
+    entries = read_log(path)
+    refuse_newer(path, entries)
+    if (line := older(entries)) is not None:
+        why = f"its workflow log holds a line of an older format at seq {line['seq']}"
+    elif not entries and has_records(path.parent):
+        why = "it has numbered records under reviews/ and no workflow log"
+    else:
+        return append_entry(path, {"step": OPENING, "outcome": "opened", "starts": step,
+                                   "interactive": interactive}, clock)
+    raise StepError(f"{why}, so its records are not in format {FORMAT}: the owner converts "
+                    f"them with `scripts/change-workflow convert {change}` before a step "
+                    "starts")
 
 
 def note_round(path: Path, sections: Any, by: str, after: int | None = None,
@@ -343,7 +446,7 @@ def standing(path: Path, entries: Sequence[Entry] | None = None) -> Standing:
     triaged = {name for entry in entries
                if (entry.get("step") == "triage"
                    and entry.get("outcome") in ("finished", "returned"))
-               or entry.get("step") == "convert"
+               or entry.get("step") == CONVERSION
                for name in entry.get("triaged") or () if isinstance(name, str)}
     awaiting = set()
     latest: tuple[int, str] | None = None
@@ -353,11 +456,12 @@ def standing(path: Path, entries: Sequence[Entry] | None = None) -> Standing:
         if not record.name.endswith(".md") or not (number := NUMBERED.match(stem)):
             continue
         kind = stem.split("-", 1)[1].removesuffix("-external")
-        if kind in KINDS and (latest is None or int(number[1]) > latest[0]):
+        review = review_phase(kind) is not None
+        if review and (latest is None or int(number[1]) > latest[0]):
             latest = (int(number[1]), kind)
         if stem in triaged:
             continue
-        if kind in KINDS:
+        if review:
             awaiting.add(kind)
         elif kind == "validation":
             validations.append(int(number[1]))

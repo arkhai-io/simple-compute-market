@@ -21,7 +21,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: dist-bare-metal-buyer
 .PHONY: run-e2e run-ci fetch-e2e-logs
 .PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
-.PHONY: check-agent-skills review design-review design orchestrate plan implement validate-local validate-ci validate-helm validate-parallel check-push-ready push-branch validate triage closeout archive-cleanup check-change-index check-tasks check-change install-gitleaks check-public-content check-secrets audit-secrets check-decision-destinations check-history-wording check-version-bumps check-local-imports check-capability-index change-clone change-clone-remove change-history record-capacity change-next change-graph change-watch change-cost round-view round-done round-view-closed review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
+.PHONY: design-review validate-local validate-ci validate-helm validate-parallel check-change install-gitleaks check-public-content check-secrets audit-secrets check-decision-destinations check-history-wording check-version-bumps check-local-imports check-capability-index record-capacity review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -828,6 +828,13 @@ check-comment-hygiene: ## Fail if change-ID/task-number references leak outside 
 check-doc-citations: ## Fail if a document cites a path that is absent or tombstoned (CHANGE=<name> to scope)
 	@python3 scripts/check_doc_citations.py "$(CHANGE)"
 
+# An indexed capability's spec.md held to its index.md
+# (openspec/README.md#capability-documentation-pattern). With CHANGE=<name> that
+# change's deltas count as its archive will leave them, since closeout writes the
+# index before the archive merges them.
+check-spec-index: ## Fail if an indexed capability's spec.md and index.md disagree on its requirement ids (CHANGE=<name> counts its deltas)
+	@python3 scripts/check_spec_index.py "$(CHANGE)"
+
 # Each storefront chart's values schema carries one definition generated from
 # that storefront's typed configuration models; it keeps secret-marked fields
 # out of the chart's pass-through config. Each storefront names the schema files
@@ -859,9 +866,6 @@ check-locks: ## Fail if a lock is not current with its project, the wheels in .d
 
 check-python-version: ## Fail if anything selects a Python version other than .python-version
 	@python3 scripts/check_python_version.py
-
-check-agent-skills: ## Fail if an agent skill is not loaded from its one source under .agents/skills
-	@python3 scripts/check_agent_skills.py
 
 check-project-layout: ## Fail if a distribution is not one package under src/ or cannot install editable
 	@python3 scripts/check_project_layout.py
@@ -969,72 +973,16 @@ review-wheelhouse-scope: ## Print the review projects resolved from REVIEW_PROJE
 	elif [ -n "$${REVIEW_SCOPE_FILE:-}" ]; then args="$$args --scope-file $$REVIEW_SCOPE_FILE"; fi; \
 	$(CURDIR)/scripts/resolve-review-scope.py $$args
 
-REVIEW_BASE ?= dev
-# The review's models are the review row's in .claude/change-steps.toml. Unset by
-# default; given, they are the owner's choice for one run, outside the row's policy:
-# REVIEW_MODEL replaces the whole list, a claude- model running on Claude and any
-# other on Codex, and the record says so. The orchestrating session never sets them.
-REVIEW_MODEL ?=
-REVIEW_EFFORT ?=
-review: round-view-closed ## Review an OpenSpec change read-only, in Codex or, when Codex is unavailable, on Claude (CHANGE=<change> KIND=design|implementation|pre-closeout|closeout [REVIEW_BASE=dev] [REVIEW_MODEL=<any model id, claude-… on Claude; the owner's choice>] [REVIEW_EFFORT=<effort>] [FRESH=1] [UNVALIDATED=1])
-	@python3 scripts/run_change_step.py review "$(CHANGE)" --kind "$(KIND)" --base "$(REVIEW_BASE)" $(if $(strip $(REVIEW_MODEL)),--model "$(REVIEW_MODEL)") $(if $(strip $(REVIEW_EFFORT)),--effort "$(REVIEW_EFFORT)") $(if $(strip $(FRESH)),--fresh) $(if $(filter 1,$(UNVALIDATED)),--unvalidated)
+# The change workflow's targets — each step, the review, the round view, the
+# workflow's checks, and the guarded push — are the engine's make fragment, set to
+# this repository's branches: a change lands on dev, and a review reads it against
+# dev. HELM_ALL_SCENARIOS reaches the validation step as the skill's argument.
+CHANGE_WORKFLOW_MERGE_FROM := dev
+CHANGE_WORKFLOW_REVIEW_BASE := dev
+include scripts/change_workflow/workflow.mk
+validate: ARGUMENTS += $(if $(filter 1,$(HELM_ALL_SCENARIOS)),with HELM_ALL_SCENARIOS=1)
 
-# With UNATTENDED=1, a step's target runs it through scripts/run_change_step.py
-# instead: a headless Claude Code session held to the step's permissions in
-# .claude/change-steps.toml, ending with an outcome logged to the change's
-# reviews/workflow.jsonl. Without it, each target opens an interactive session as
-# the owner's own permission settings allow.
-#
-# ALLOW holds rules the owner grants for that one run, several separated by `;`;
-# each reaches the script as its own `--allow`, single-quoted so the shell passes
-# a rule's spaces, `*`, and quotes as they are (a `$` is make's own, written `$$`),
-# and the run's log line records them as `granted`. An interactive session ignores
-# it: no table restricts that one.
-ALLOW ?=
-STEP_RUN = python3 scripts/run_change_step.py run
-STEP_GRANTS = $(if $(strip $(ALLOW)), --allow '$(subst ;,' --allow ',$(subst ','\'',$(ALLOW)))')
-
-design: ## Open a Claude Code design session for an OpenSpec change; unattended, ARGUMENTS follows the change in the skill's invocation, as the owner's direction to the design (CHANGE=<change> [UNATTENDED=1 [ARGUMENTS=<text>] [ALLOW='<rule>;<rule>']])
-	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
-	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) design "$(CHANGE)"$(if $(strip $(ARGUMENTS)), --arguments '$(subst ','\'',$(ARGUMENTS))')$(STEP_GRANTS),claude "/change-design $(CHANGE)")
-
-# The orchestrating session relays and routes rather than judging, so it needs a
-# large context for a change's relayed turns, not a high effort.
-orchestrate: ## Open the orchestrating Claude Code session for one OpenSpec change, on Opus 5.5 at medium effort (CHANGE=<change>)
-	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
-	@claude --model claude-opus-5-5 --effort medium "/change-orchestrate $(CHANGE)"
-
-plan: ## Open a Claude Code planning session for an OpenSpec change; unattended, it resumes the design session, and ARGUMENTS follows the change in the skill's invocation, as the owner's direction to the plan (CHANGE=<change> [UNATTENDED=1 [FRESH=1] [ARGUMENTS=<text>] [ALLOW='<rule>;<rule>']])
-	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
-	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) plan "$(CHANGE)"$(if $(filter 1,$(FRESH)), --fresh)$(if $(strip $(ARGUMENTS)), --arguments '$(subst ','\'',$(ARGUMENTS))')$(STEP_GRANTS),claude "/change-plan $(CHANGE)")
-
-implement: round-view-closed ## Open a fresh Claude Code session implementing an OpenSpec change; unattended, ARGUMENTS follows the change in the skill's invocation, as a merge's conflicts to resolve, and SESSION_ID continues that implementation session instead (CHANGE=<change> [SECTION=<n>] [SECTIONS=<n-m>] [UNATTENDED=1 [ARGUMENTS=<text>] [SESSION_ID=<id>] [ALLOW='<rule>;<rule>']])
-	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
-	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) implement "$(CHANGE)"$(if $(strip $(SECTIONS)$(SECTION)), --sections "$(or $(strip $(SECTIONS)),$(strip $(SECTION)))")$(if $(strip $(ARGUMENTS)), --arguments '$(subst ','\'',$(ARGUMENTS))')$(if $(strip $(SESSION_ID)), --session '$(subst ','\'',$(strip $(SESSION_ID)))')$(STEP_GRANTS),claude "/change-implement $(CHANGE)$(if $(strip $(SECTIONS)), sections $(SECTIONS),$(if $(strip $(SECTION)), section $(SECTION)))")
-
-triage: round-view-closed ## Open a fresh Claude Code session triaging an OpenSpec change's untriaged reviews, validation, and the owner's notes (CHANGE=<change> [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
-	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
-	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) triage "$(CHANGE)"$(STEP_GRANTS),claude "/change-triage $(CHANGE)")
-
-# The branch a change lands on, which the merge before closeout brings in: the one
-# it was branched from, dev unless the owner names another.
-MERGE_FROM = $(or $(strip $(FROM)),dev)
-
-merge: round-view-closed ## Open a fresh Claude Code session merging the branch an OpenSpec change lands on into its branch once its pre-closeout review is triaged, resolving the conflicts and repairing what that branch's changes broke (CHANGE=<change> [FROM=<branch>, default dev] [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
-	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
-	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) merge "$(CHANGE)" --arguments 'from $(subst ','\'',$(MERGE_FROM))'$(STEP_GRANTS),claude "/change-merge $(CHANGE) from $(MERGE_FROM)")
-
-closeout: round-view-closed ## Open a fresh Claude Code session closing out an OpenSpec change, archiving it last; resumes one archived but not committed (CHANGE=<change> [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
-	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
-	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) closeout "$(CHANGE)"$(STEP_GRANTS),claude "/change-closeout $(CHANGE)")
-
-check-change-index: ## Fail if the change index has a malformed row, an unresolved change link, an unknown status, a dependency it does not list or that is archived, or an active change directory without exactly one row
-	@python3 scripts/check_change_index.py
-
-check-tasks: ## Fail if a task of a change's task list sits under another section's heading: a heading is missing or the task misplaced (CHANGE=<change>)
-	@python3 scripts/check_tasks.py "$(CHANGE)"
-
-check-change: ## Run a change's closing checks — comment hygiene, agent skills, its citations and task list, the change index, the pinned strict OpenSpec validation, decision destinations, history wording, version bumps, local imports, and the capability index — printing only failures and one pass line (CHANGE=<change> [CHANGE_BASE=<the branch it lands on; dev>])
+check-change: ## Run a change's closing checks — comment hygiene, agent skills, its citations and task list, the change index, the indexed capabilities' specifications, the pinned strict OpenSpec validation, decision destinations, history wording, version bumps, local imports, and the capability index — printing only failures and one pass line (CHANGE=<change> [CHANGE_BASE=<the branch it lands on; dev>])
 	@python3 scripts/check_change.py "$(CHANGE)"$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")
 
 check-decision-destinations: ## Fail if a `### D<n>` decision of a change's design has no bullet starting `D<n>` in its proposal's "Knowledge to promote" (CHANGE=<change>)
@@ -1052,44 +1000,8 @@ check-local-imports: ## Fail if an import added inside a function since the merg
 check-capability-index: ## Fail if a capability with a spec.md has no row in openspec/specs/README.md, or a row links nothing
 	@python3 scripts/check_capability_index.py
 
-change-watch: ## Follow the progress of an OpenSpec change's steps as they run, moving to each new step's progress file as it starts; Ctrl+C stops (CHANGE=<change>)
-	@python3 scripts/run_change_step.py watch "$(CHANGE)"
-
-change-clone: ## Create a change's own clone beside the owner's workspace, or finish one left incomplete, and start its bootstrap in the background; run in the workspace (CHANGE=<change> [BRANCH=feat/<change>] [FROM=dev])
-	@python3 scripts/change_clone.py create "$(CHANGE)" $(if $(strip $(BRANCH)),--branch "$(BRANCH)") $(if $(strip $(FROM)),--from "$(FROM)")
-
-change-clone-remove: ## Delete a merged change's clone, copying its history into the workspace first; refuses, deleting nothing, while the clone holds anything else; run in the workspace (CHANGE=<change>)
-	@python3 scripts/change_clone.py remove "$(CHANGE)"
-
 record-capacity: ## Record in helm/validation-capacity.toml the memory a change's latest validation measured, with when and from which change; when it measured none, leave the file as it is and say so; run by archive cleanup (CHANGE=<change>)
 	@python3 scripts/validate_slice.py capacity --change "$(CHANGE)"
-
-change-history: ## Copy an archived change's records and the validation evidence they name from its clone into the owner's workspace, extending files that grew and refusing any that differ; run in the clone (CHANGE=<change>)
-	@python3 scripts/change_history.py sync "$(CHANGE)"
-
-change-next: ## Print the next step of an OpenSpec change as the orchestrator computes it, in plain form: the step, its reason, and for a waiting run its seq and what it asks (CHANGE=<change>)
-	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
-	@python3 scripts/change_next_step.py "$(CHANGE)" --plain
-
-change-graph: ## Report where docs/development/diagrams/change-workflow-graph.drawio departs from the workflow's graph — each box and edge to add, change, or remove — to redraw it from; fails while it does
-	@PYTHONPATH=scripts python3 -m change_workflow.diagram
-
-change-cost: ## Report what an OpenSpec change's unattended runs cost, by step and by round, with partial dollars as a range and the cache misses with their gaps (CHANGE=<change>)
-	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
-	@python3 scripts/change_cost.py "$(CHANGE)"
-
-archive-cleanup: round-view-closed ## Open a fresh Claude Code session cleaning up an archived OpenSpec change once its closeout review's triage has advanced it: dependents released, row set to archived, the capacity figure recorded, its validation namespace torn down, and its history copied into the owner's workspace (CHANGE=<change> [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
-	@python3 scripts/find_change.py --archived "$(CHANGE)" >/dev/null
-	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) archive-cleanup "$(CHANGE)"$(STEP_GRANTS),claude "/change-archive-cleanup $(CHANGE)")
-
-round-view-closed: ## Fail while a round view is open: the branch then points at the round's base, not its commit
-	@python3 scripts/round_view.py check
-
-round-view: ## Show an implementation round as uncommitted changes for the owner's reading: in the owner's workspace, on the branch fetched from the change's clone, or in place for a change with no clone; run again to follow the clone's new commits (CHANGE=<change> [BASE=<commit>])
-	@python3 scripts/round_view.py start "$(CHANGE)" $(if $(BASE),--base "$(BASE)")
-
-round-done: ## Return the branch to the round's commit after round-view, carrying commits made during the view onto it and keeping other edits uncommitted, then return the workspace to where it was
-	@python3 scripts/round_view.py done
 
 design-review: ## Design review of an OpenSpec change in Codex, continuing the last design reviewer (CHANGE=<change> [FRESH=1])
 	@$(MAKE) --no-print-directory review CHANGE="$(CHANGE)" KIND=design
@@ -1112,16 +1024,6 @@ validate-helm: round-view-closed ## Validate HEAD on the Helm charts in the chan
 # six steps' rules allow any `make check-*`, and closeout's `python3 scripts/check_*`.
 validate-parallel: ## Run two changes' clones' Helm parts at the same moment and report whether each kept to its own namespace, tags, and scenario pod, and what it left in its namespace (CLONES="<clone> <clone>" HELM_CONTEXT=docker-desktop)
 	@python3 scripts/validate_parallel.py --context "$(HELM_CONTEXT)" $(CLONES)
-
-check-push-ready: round-view-closed ## Fail unless HEAD is a clean, attached change branch that may be pushed to its own name
-	@python3 scripts/check_push_ready.py check
-
-push-branch: round-view-closed ## Push exactly HEAD, unforced, to the current branch's own name once check-push-ready passes
-	@python3 scripts/check_push_ready.py push
-
-validate: round-view-closed ## Open a Claude Code session validating the commit at HEAD for an OpenSpec change (CHANGE=<change> [HELM_ALL_SCENARIOS=1] [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
-	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
-	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) validate "$(CHANGE)"$(if $(filter 1,$(HELM_ALL_SCENARIOS)), --arguments "with HELM_ALL_SCENARIOS=1")$(STEP_GRANTS),claude "/change-validate $(CHANGE)$(if $(filter 1,$(HELM_ALL_SCENARIOS)), with HELM_ALL_SCENARIOS=1)")
 
 run-e2e: round-view-closed ## Run the E2E GitHub Actions workflow on the current branch.
 	@branch="$$(git branch --show-current)"; \

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
-from change_workflow.common import StepError
+from change_workflow.common import FORMAT, StepError
 from change_workflow.log import record_outcome
-from change_workflow.outcome import harness_schema, load_schema, outcome_problems
+from change_workflow.outcome import harness_schema, load_schema, outcome_problems, schema_format
 from change_workflow_fixtures import COMMIT, VALID, clock, log_file
 
 # Step outcomes as a workflow log carries them, without the fields the wrapper adds
@@ -173,9 +174,31 @@ def test_a_triage_names_the_records_it_triaged_as_strings() -> None:
         "outcome.triaged[0] is not of type string"]
 
 
+def test_the_schemas_id_states_the_record_sets_format() -> None:
+    schema = load_schema()
+
+    assert schema_format(schema) == FORMAT
+    assert schema["$id"].endswith(f":format:{FORMAT}")
+
+
+@pytest.mark.parametrize("identifier", [f"urn:change-workflow:change-outcome:format:{FORMAT + 1}",
+                                        "urn:change-workflow:change-outcome", None])
+def test_a_schema_stating_another_format_is_refused(tmp_path: Path,
+                                                    identifier: str | None) -> None:
+    schema = {key: value for key, value in load_schema().items() if key != "$id"}
+    if identifier is not None:
+        schema["$id"] = identifier
+    path = tmp_path / "schema.json"
+    path.write_text(json.dumps(schema), "utf-8")
+
+    with pytest.raises(StepError, match=f"this engine records format {FORMAT}"):
+        load_schema(path)
+
+
 def test_claude_code_is_given_no_top_level_combinator() -> None:
     schema = load_schema()
     given = harness_schema(schema)
 
     assert not {"allOf", "anyOf", "oneOf"} & given.keys()
-    assert given == {key: value for key, value in schema.items() if key != "allOf"}
+    assert given == {key: value for key, value in schema.items()
+                     if key not in ("allOf", "$id")}

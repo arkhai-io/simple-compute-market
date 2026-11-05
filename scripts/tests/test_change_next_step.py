@@ -2,38 +2,22 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
-import change_clone as clones
+from change_workflow import clone as clones
 from change_workflow import graph
-from change_workflow.common import StepError
+from change_workflow import next_step as nxt
+from change_workflow import round_view as rounds
+from change_workflow.common import FORMAT, StepError
+from change_workflow.find import change_directory
 from change_workflow.log import (append_entry, log_path, note_orchestrator, note_round,
                                  read_log, record_outcome, unused_direction)
-from find_change import change_directory
-
-SCRIPTS = Path(__file__).resolve().parents[1]
-
-
-def _load(name: str):
-    spec = importlib.util.spec_from_file_location(name, SCRIPTS / f"{name}.py")
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    # Registered before it runs: its dataclasses look their module up by name.
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-nxt = _load("change_next_step")
-rounds = sys.modules["round_view"]
 
 CHANGE = "shape-bounds"
 # The review kind the design records below are named for.
@@ -316,7 +300,7 @@ def test_an_interactive_session_that_ended_without_recording_is_in_progress(
     assert (result["step"], result["kind"]) == ("triage", "design")
     assert "if no session of it is open, an interactive one ended without recording" in (
         result["reason"])
-    assert f"run_change_step.py record {CHANGE} triage" in result["reason"]
+    assert f"scripts/change-workflow record {CHANGE} triage" in result["reason"]
 
 
 def test_an_interactive_plan_that_set_its_status_and_recorded_nothing(
@@ -330,7 +314,7 @@ def test_an_interactive_plan_that_set_its_status_and_recorded_nothing(
     # Planning, and no round: the plan's outcome carries its exit and its rounds.
     assert result["step"] == "plan"
     assert "no plan outcome is recorded" in result["disagreement"]
-    assert f"run_change_step.py record {CHANGE} plan" in result["disagreement"]
+    assert f"scripts/change-workflow record {CHANGE} plan" in result["disagreement"]
 
 
 # Implementation rounds.
@@ -1504,7 +1488,7 @@ def test_a_log_not_yet_converted_goes_to_the_owner_with_the_command(tmp_path: Pa
 
     result = _next(root)
 
-    command = f"python3 scripts/run_change_step.py convert {CHANGE}"
+    command = f"scripts/change-workflow convert {CHANGE}"
     assert (result["step"], result["convert"]) == ("owner", command)
     assert "seq 2" in result["reason"] and command in result["reason"]
 
@@ -1545,6 +1529,123 @@ def test_an_older_wrapper_appending_after_the_conversion_needs_it_again(
 
     assert (converted["step"], converted["kind"]) == ("review", "design")
     assert _next(root)["step"] == "owner" and "convert" in _next(root)
+
+
+def test_an_empty_log_beside_numbered_records_is_older(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in design")
+    _record(root, f"03-{KIND}.md", triage="Advance")
+    log_path(root, CHANGE).write_text("\n", "utf-8")
+
+    result = _next(root)
+
+    assert result["step"] == "owner" and "convert" in result
+
+
+def test_a_ledger_with_no_log_is_read_in_this_format(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in design")
+    (change_directory(root, CHANGE) / "interventions.jsonl").write_text(
+        '{"decision": "the owner chose otherwise"}\n', "utf-8")
+
+    assert _next(root) == {"step": "design", "reason": "in design"}
+
+
+# A log of a newer format is refused; a line naming what the graph does not declare
+# routes nothing.
+
+def _newer(root: Path, seq: int) -> None:
+    _unmarked(root, {"seq": seq, "at": "2026-10-20T10:00:00Z", "format": FORMAT + 1,
+                     "step": "design", "outcome": "finished", "message": "Done.",
+                     "next": {"step": "review", "kind": "design"}})
+
+
+def test_a_newer_log_is_refused_naming_its_format(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in design")
+    _log(root, "design", _done(_to("review", "design")))
+    _newer(root, 2)
+
+    result = _next(root)
+
+    assert result["step"] == "unclassified"
+    assert f"format {FORMAT + 1} at seq 2" in result["reason"]
+    assert f"reading format {FORMAT}" in result["reason"]
+
+
+def test_a_newer_log_is_refused_on_the_command_line(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _repository(tmp_path, "in design")
+    _newer(root, 1)
+
+    assert nxt.main([CHANGE], root=root, **HERE) == 1
+
+    out, err = capsys.readouterr()
+    assert json.loads(out)["step"] == "unclassified"
+    assert f"format {FORMAT + 1}" in err
+
+
+def test_the_output_names_its_format_before_anything_routed_on(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _repository(tmp_path, "ready for design")
+
+    assert nxt.main([CHANGE], root=root, **HERE) == 0
+
+    printed = json.loads(capsys.readouterr().out)
+    assert list(printed)[:2] == ["format", "step"]
+    assert (printed["format"], printed["step"]) == (FORMAT, "design")
+
+
+def test_an_exit_naming_an_undeclared_node_names_the_owner_and_routes_no_later_line(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in design")
+    _log(root, "design", _done(_to("review", "design")))
+    append_entry(log_path(root, CHANGE), {"step": "design", "outcome": "finished",
+                                          "message": "Done.", "next": {"step": "deploy"}})
+    # A later exit the computation would otherwise follow.
+    _log(root, "design", _done(_to("review", "design")))
+
+    result = _next(root)
+
+    assert result["step"] == "owner"
+    assert "seq 2" in result["reason"] and "'deploy' is no node" in result["reason"]
+
+
+def test_an_undeclared_line_is_named_before_a_branch_decision_is_read(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in design")
+    _decide(root, "runs here", by="owner", branch="feat/elsewhere", change=CHANGE)
+    append_entry(log_path(root, CHANGE), {"step": "deploy", "outcome": "finished",
+                                          "message": "Done."})
+
+    # Checked out on the branch the decision names, which it would accept.
+    result = _next(root, branch=lambda _: "feat/elsewhere")
+
+    assert result["step"] == "owner" and "'deploy' is no step" in result["reason"]
+
+
+def test_a_newer_log_is_refused_while_a_merge_is_in_progress(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _log(root, "merge", QUESTION)
+    _newer(root, 2)
+
+    result = _next(root, merging=lambda _: True)
+
+    assert result["step"] == "unclassified" and f"format {FORMAT + 1}" in result["reason"]
+
+
+@pytest.mark.parametrize("line,named", [
+    ({"step": "deploy", "outcome": "finished", "message": "Done."}, "'deploy' is no step"),
+    ({"step": "review", "kind": "security", "outcome": "finished", "message": "Done.",
+      "next": {"step": "triage", "kind": "design"}}, "'security' is no kind of review"),
+    ({"step": "orchestrator", "outcome": "orchestrator", "by": "owner", "decision": "d",
+      "reason": "r", "next": {"step": "triage", "kind": "security"}},
+     "the owner's direction names no node"),
+])
+def test_a_line_naming_an_undeclared_step_or_kind_routes_nothing(
+        tmp_path: Path, line: dict, named: str) -> None:
+    root = _repository(tmp_path, "in design")
+    append_entry(log_path(root, CHANGE), line)
+
+    result = _next(root)
+
+    assert result["step"] == "owner" and named in result["reason"]
 
 
 # The round's join is the table's: what it waits for decides what is named.

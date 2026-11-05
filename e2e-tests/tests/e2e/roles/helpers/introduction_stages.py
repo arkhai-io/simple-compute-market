@@ -175,7 +175,9 @@ class Stage01_BackedAndUnbackedSupply:
     ):
         require_state(introduction_state, "unbacked_listing")
         listing = introduction_driver.listing(introduction_state.unbacked_listing)
-        mechanisms = [dict(option)["mechanism"] for option in listing.settlement_options]
+        mechanisms = [
+            dict(option)["settlement"]["schema"] for option in listing.settlement_options
+        ]
         assert mechanisms == [CONTACT_MECHANISM], listing.settlement_options
 
 
