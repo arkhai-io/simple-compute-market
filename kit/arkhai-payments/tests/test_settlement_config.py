@@ -104,6 +104,13 @@ def test_conflicting_key_forms_are_refused_naming_both(overrides, named) -> None
     assert OVERLAY_KEY not in message
 
 
+def test_a_validation_error_never_shows_a_stated_key() -> None:
+    # Short enough that an error would print it whole if it showed its input.
+    with pytest.raises(ValueError) as refused:
+        _config(api_key="tok")
+    assert "tok" not in str(refused.value)
+
+
 @pytest.mark.parametrize("key", ["", "   ", "two\nlines"], ids=["empty", "blank", "multi-line"])
 def test_an_unusable_api_key_is_refused_without_echoing_it(key) -> None:
     with pytest.raises(ValueError, match="api_key must be a nonempty single-line key") as refused:

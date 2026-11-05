@@ -6,6 +6,7 @@ import json
 from market_deal_lifecycle.adapters import DisputeAdapterTable, DisputeBinding, submit_dispute
 from market_deal_lifecycle.terms import DisputeAuthority
 from market_deal_lifecycle_contracts.models import LifecycleCommand
+from pydantic import SecretStr
 
 from market_arkhai_mediation.adapter import MediationAdapter
 from market_arkhai_mediation.client import MediationClient, MediationCredential
@@ -28,9 +29,10 @@ async def main():
     filing = peer.data["filing"]["request"]
     binding = DisputeBinding("negotiation-fixture", filing["transaction"], authority)
     # Public deterministic fixture credential; never use it on a public network.
+    # A role resolves the token from its [[DisputeCredential]] and passes it in.
     async with MediationClient(
-        authority, MediationCredential(authority.identity, "MEDIATION_DEMO_CREDENTIAL"),
-        environ={"MEDIATION_DEMO_CREDENTIAL": "fixture-payee"}, transport=peer.transport(),
+        authority, MediationCredential(authority.identity, token=SecretStr("fixture-payee")),
+        transport=peer.transport(),
     ) as client:
         adapter = MediationAdapter(binding, filing["agreement"], client, clock=lambda: 1800001800)
         table = DisputeAdapterTable([(authority.interface, lambda _: adapter)])

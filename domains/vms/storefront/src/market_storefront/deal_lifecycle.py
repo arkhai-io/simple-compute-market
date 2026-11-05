@@ -160,7 +160,7 @@ class VmDealLifecycle:
             if credential is None:
                 raise ValueError("Agreement authority credential is missing")
             self.clients[key] = MediationClient(
-                authority, MediationCredential(authority.identity, credential.api_key_env),
+                authority, MediationCredential(authority.identity, token=credential.resolve()),
                 transport=self.mediation_transport,
             )
         return self.clients[key]

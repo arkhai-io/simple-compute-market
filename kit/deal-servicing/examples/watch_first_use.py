@@ -15,6 +15,7 @@ from market_deal_lifecycle.adapters import DisputeBinding
 from market_deal_lifecycle.terms import DisputeAuthority
 from market_deal_lifecycle_contracts.models import EvidenceItem
 from market_identity import Identity
+from pydantic import SecretStr
 
 from market_deal_servicing import DeliveryRecord, EndService, EndSession, PhysicalResult
 from market_deal_servicing.evidence import EvidenceSession, transaction
@@ -63,11 +64,11 @@ async def main():
 
         # Public deterministic fixture credentials; never use on a public network.
         async with MediationClient(
-            authority, MediationCredential(authority.identity, "DEMO_PAYER"),
-            environ={"DEMO_PAYER": "fixture-payer"}, transport=peer.transport(),
+            authority, MediationCredential(authority.identity, token=SecretStr("fixture-payer")),
+            transport=peer.transport(),
         ) as buyer, MediationClient(
-            authority, MediationCredential(authority.identity, "DEMO_PAYEE"),
-            environ={"DEMO_PAYEE": "fixture-payee"}, transport=peer.transport(), capture=capture,
+            authority, MediationCredential(authority.identity, token=SecretStr("fixture-payee")),
+            transport=peer.transport(), capture=capture,
         ) as seller_client:
             await buyer.file(Filing.model_validate(filing), idempotency_key="buyer-case")
             adapter = MediationAdapter(binding, filing["agreement"], seller_client, clock=lambda: now)

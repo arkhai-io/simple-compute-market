@@ -4,7 +4,10 @@ Over ``test_payment_settlement``'s harness: the storefront's settle and lifecycl
 routes in an in-process app, with real SQLite persistence and the real lifecycle
 composition, and the payments service replaced at ``PaymentsClient`` by the
 kit's fake. The Agreement pins an authority under ``.invalid``, and the
-storefront holds an identity-bound dispute credential for it that resolves. Every
+storefront holds an identity-bound dispute credential for it that resolves,
+stated either as the token itself (``api_key``, as a secret overlay states it) or
+as a variable; the harness passes the merged dispute document, not the files the
+storefront's loader would merge it from. Every
 mediation client sends through an injected transport raising the connection
 error a name that never resolves produces, so no network is needed. Servicing is
 stepped by calling the lifecycle's cycle, the step the ``settlement-servicing``
@@ -43,14 +46,24 @@ CREDENTIAL = "dev-vm-lane-dispute-credential"
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("form", ["api-key", "variable"])
 async def test_servicing_reads_running_while_the_pinned_authority_is_unreachable(
-    make, monkeypatch, caplog,
+    make, monkeypatch, caplog, form,
 ):
-    monkeypatch.setenv(CREDENTIAL_ENV, CREDENTIAL)
+    # One entry states the token itself and no variable is set; the other names
+    # the variable holding it.
+    if form == "api-key":
+        monkeypatch.delenv(CREDENTIAL_ENV, raising=False)
+        stated = {"api_key": CREDENTIAL}
+    else:
+        monkeypatch.setenv(CREDENTIAL_ENV, CREDENTIAL)
+        stated = {"api_key_env": CREDENTIAL_ENV}
     attempts: list[tuple[str, str]] = []
+    tokens: set[str] = set()
 
     def unresolvable(request: httpx.Request) -> httpx.Response:
         attempts.append((request.url.host, request.url.path))
+        tokens.add(request.headers["Authorization"])
         # What httpx raises when the origin's name does not resolve.
         raise httpx.ConnectError("[Errno -2] Name or service not known", request=request)
 
@@ -58,7 +71,7 @@ async def test_servicing_reads_running_while_the_pinned_authority_is_unreachable
         authority=UNREACHABLE,
         disputes={"DisputeCredential": [{
             key: UNREACHABLE[key] for key in ("interface", "origin", "account", "record_key")
-        } | {"api_key_env": CREDENTIAL_ENV}]},
+        } | stated]},
         mediation_transport=httpx.MockTransport(unresolvable),
     )
     h.serve()
@@ -73,6 +86,7 @@ async def test_servicing_reads_running_while_the_pinned_authority_is_unreachable
     assert {(host, path) for host, path in attempts} == {
         ("dispute.invalid", "/respondent"), ("dispute.invalid", "/record"),
     }
+    assert tokens == {f"Bearer {CREDENTIAL}"}
     assert [
         record.getMessage() for record in caplog.records if record.levelno >= logging.ERROR
     ] == ["VM respondent discovery awaits recovery"]

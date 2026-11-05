@@ -62,7 +62,10 @@ class ArkhaiPaymentsConfigurationError(RuntimeError):
 class ArkhaiPaymentsConfig(BaseModel):
     """Trusted payments-service policy for one buyer or seller role."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    # The section may hold its key, so no validation error shows the input.
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, strict=True, hide_input_in_errors=True,
+    )
 
     enabled: bool = False
     service_url: str | None = None

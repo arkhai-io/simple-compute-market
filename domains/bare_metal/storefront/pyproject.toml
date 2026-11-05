@@ -6,9 +6,9 @@ description = "Seller-side storefront composition for the Arkhai bare-metal doma
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "arkhai-compute>=0.2.0",
-    "arkhai-kit-arkhai-mediation>=0.1.0",
+    "arkhai-kit-arkhai-mediation>=0.2.0",
     "arkhai-kit-deal-servicing>=0.1.0",
-    "arkhai-kit-deal-lifecycle>=0.1.0",
+    "arkhai-kit-deal-lifecycle>=0.2.0",
     "arkhai-kit-deal-lifecycle-contracts>=0.1.0",
     "arkhai-compute-provisioning-contracts>=0.11.0",
     "arkhai-kit-resource-pools-contracts>=0.2.0",

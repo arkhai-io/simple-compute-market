@@ -29,10 +29,26 @@ env -u ALL_PROXY -u all_proxy NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,12
 ## Composition
 
 - Construct `MediationClient` with the Agreement's `DisputeAuthority` and a
-  `MediationCredential(identity, api_key_env)` reference. Identity is the entire
-  interface/origin/account/record-key tuple, not just an account. The referenced
-  environment variable supplies the party's owner-scoped bearer credential.
+  `MediationCredential(identity, token=SecretStr(...))`. Identity is the entire
+  interface/origin/account/record-key tuple, not just an account. The token is the
+  party's owner-scoped bearer credential, which the role resolves through its
+  `[[DisputeCredential]]` entry's `resolve()` (its secret overlay's `api_key`, or
+  the variable `api_key_env` names); the client reads no environment. The token is
+  keyword-only and checked at construction: one that is not a `SecretStr` raises
+  `TypeError`, and an empty one, one with surrounding whitespace, or one with a line
+  break raises `ValueError`, so a positional call passing a variable name fails
+  there rather than sending the name as a token.
   Non-loopback origins require HTTPS. Redirects are never followed.
+
+  ```python
+  # disputes is the role's DisputeConfig; resolve() raises ValueError when the
+  # credential's variable is unset, which a role reads as no usable credential.
+  credential = disputes.credential_for(authority)
+  if credential is not None:
+      client = MediationClient(
+          authority, MediationCredential(authority.identity, token=credential.resolve()),
+      )
+  ```
 - Construct `MediationAdapter(binding, exact_agreement, client)`, then inject it
   into the neutral dispute table. The binding must match the Agreement's authority.
   `effects_request` builds validated free-form requests. `delivery_end` maps the

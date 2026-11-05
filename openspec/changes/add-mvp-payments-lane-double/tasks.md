@@ -1519,6 +1519,10 @@ test_client.py, test_access_check.py, test_access_check_tls.py}`;
   as well as an empty one, since it travels as a header value. `ca_bundle_path` refuses an
   empty value, because `ssl.create_default_context(cafile="")` reads it as none given and
   loads the default store (found by the fresh-context check).
+  Correction (section 7): the "never echoing the key" claim held only because pydantic
+  shortened a long input in the message; a three-character key was shown whole. The
+  model now sets `hide_input_in_errors`, and
+  `test_a_validation_error_never_shows_a_stated_key` holds it.
 - [x] 6.2 One key resolution (D19): a public function in `settlement_config.py`, exported
   from `__init__.py`, returning the `SecretStr` from `api_key`, otherwise from the variable
   `api_key_env` names in the mapping it is given (the process environment by default),
@@ -1654,7 +1658,7 @@ test_lifecycle_ends.py, test_servicing_unreachable_authority.py}`;
 `pyproject.toml` versions and every lock `make lock` rewrites. Scripts under
 `docs/attachments/` keep their wording (D18, D19).
 
-- [ ] 7.1 `DisputeCredential` gains `api_key: SecretStr | None`, refused when empty at
+- [x] 7.1 `DisputeCredential` gains `api_key: SecretStr | None`, refused when empty at
   configuration validation as a malformed `api_key_env` is, and one of `api_key` and
   `api_key_env` is required, both refused as `ArkhaiPaymentsConfig` refuses both key
   forms (D19). `resolve()` returns `api_key` when set, otherwise
@@ -1663,7 +1667,20 @@ test_lifecycle_ends.py, test_servicing_unreachable_authority.py}`;
   `repair_required`). Unit cases in `test_dispute_credential.py`: each form, both or
   neither refused, an empty `api_key` refused, `resolve()` from each form and its
   `ValueError`, and the token absent from `repr`.
-- [ ] 7.2 `MediationCredential(identity, *, token: SecretStr)` (D19's contract): the field
+  Done. Unit (`kit/deal-lifecycle/tests/unit/test_dispute_credential.py`, in `make -C kit
+  test-deal-lifecycle`, pass): each form resolving, a stated key winning over a set
+  variable, an unset or empty variable's `ValueError` naming it, both and neither refused,
+  an empty, padded or multi-line `api_key` refused without showing it, a malformed
+  variable name still refused, the token absent from `repr` and the JSON dump, an
+  `api_key` entry loaded from TOML text through `dispute_config`, and a configuration error
+  never showing a stated token. Differs from the plan: a padded or multi-line `api_key` is
+  refused too, by the rules `MediationCredential` applies, so a stated key that passes
+  validation and resolves is one a client can send; without it, `credential_available`
+  would report the credential usable and client construction would raise instead of the
+  deal reporting `repair_required` (found by the fresh-context check). `DisputeCredential`
+  and `DisputeConfig` set `hide_input_in_errors`, since pydantic prints a short enough
+  input, the token included, in a validation error's message.
+- [x] 7.2 `MediationCredential(identity, *, token: SecretStr)` (D19's contract): the field
   is renamed and keyword-only; `__post_init__` raises `TypeError` for a token that is not a
   `SecretStr`, and `ValueError` for an empty token, one with surrounding whitespace, or one
   containing CR or LF — the checks `MediationClient.__init__` makes today, moved there.
@@ -1672,7 +1689,17 @@ test_lifecycle_ends.py, test_servicing_unreachable_authority.py}`;
   unmigrated positional `MediationCredential(identity, "DEMO_PAYEE")` failing at
   construction; a client built from a valid credential authenticates with exactly that
   token.
-- [ ] 7.3 Migrate every direct constructor (D19): the VM and bare-metal storefronts' and
+  Done: `token` is a keyword-only dataclass field (`field(kw_only=True)`), so a second
+  positional argument raises `TypeError`. Library integration (`test_adapter.py`, against
+  the kit's contract fake, in `make -C kit test-arkhai-mediation` with its mypy over `src`
+  and `examples`, pass): the positional call failing with `TypeError`; a `str` or `bytes`
+  token refused with `TypeError`; an empty, padded, CR/LF or LF token refused with
+  `ValueError` without quoting it; a credential bound to another authority refused; a
+  filing sending `Bearer fixture-payee` and nothing else, read at a recording transport.
+  The refusal cases are single-object edge cases that `TESTING.md` would put in unit
+  tests; the kit has only `tests/integration/` and the task places them there, so they
+  stay.
+- [x] 7.3 Migrate every direct constructor (D19): the VM and bare-metal storefronts' and
   buyers' lifecycle composition obtain the token through `DisputeCredential.resolve()` and
   build `MediationCredential(identity, token=...)`; the `kit/arkhai-mediation` and
   `kit/deal-servicing` examples and the kit and domain tests named above pass
@@ -1683,10 +1710,43 @@ test_lifecycle_ends.py, test_servicing_unreachable_authority.py}`;
   states `api_key` with no variable set, and still reads `state == "running"` with a
   non-`Accepted` dispute outcome, the poll's transport error reaching the cycle, which
   logs it and completes, and no repair mark (D2).
-- [ ] 7.4 Bump the versions of `kit/deal-lifecycle` and `kit/arkhai-mediation` and of any
+  Done: the four compositions build `MediationCredential(identity,
+  token=credential.resolve())`; the buyers' ports resolve inside the existing `try`, so an
+  unresolvable credential is still a `MediationTransportError` at I/O. A search for
+  `MediationCredential(` and `environ=` finds no unmigrated use outside
+  `docs/attachments/` (whose two scripts keep their wording). Application integration
+  (`test_servicing_unreachable_authority.py`, the VM storefront's routes and real lifecycle
+  composition in process, pass): parametrized over an `api_key` entry with no variable set
+  and a variable entry; both read `running`, a non-`Accepted` (`Unknown`) outcome, the
+  poll's error logged once and the cycle completing, no repair, and every mediation request
+  carrying `Bearer <token>`. The harness passes the merged dispute document to
+  `RegistryDisputePolicy.from_document`, not the storefront's files, so this case does not
+  show the secret overlay's merge; the bare-metal unit case
+  `test_payments_and_dispute_keys_are_read_from_the_secret_overlay` (`test_config_loader.py`)
+  does, for both keys: the overlay's `[Settlement.arkhai_payments].api_key` and
+  `[[DisputeCredential]]` `api_key` are read through `load_storefront_settings`, resolve
+  with no variable, and stay out of the settings' `repr`. Unit (both buyers'
+  `test_lifecycle_adoption.py`, pass): the port given a credential whose variable is unset
+  raises `MediationTransportError` naming the credential unavailable and builds no client.
+  Also changed: the bare-metal settings' `settlement` and `disputecredential` fields are
+  `repr=False`, since both now hold secrets when the overlay states them.
+  Not run: the `kit/deal-servicing` examples (`make -C kit/deal-servicing first-use`) and
+  the mediation demo (`make -C kit/arkhai-mediation demo`): both calls were denied in this
+  session, and neither kit's test target runs its examples. The mediation example is
+  type-checked by its suite's mypy; the four deal-servicing examples are not checked by
+  any target run here.
+- [x] 7.4 Bump the versions of `kit/deal-lifecycle` and `kit/arkhai-mediation` and of any
   other package whose public surface changed, and `make lock` (RELEASING.md, "Versioning
   policy").
-- [ ] 7.5 **Verification checkpoint.** Unit and library integration: `make -C kit
+  Done: `kit/deal-lifecycle` 0.1.0 → 0.2.0 (new public API) and `kit/arkhai-mediation`
+  0.1.0 → 0.2.0 (incompatible, pre-1.0 minor); neither was bumped on this branch before.
+  Consumers that use the new forms raise their lower bounds: both storefronts
+  (`arkhai-kit-arkhai-mediation>=0.2.0`, `arkhai-kit-deal-lifecycle>=0.2.0`), both buyers
+  and `kit/deal-servicing`'s dev group (`arkhai-kit-arkhai-mediation>=0.2.0`). The buyers,
+  whose source changed and which were at their `dev` versions, take patch bumps (VM
+  0.10.0 → 0.10.1, bare metal 0.7.0 → 0.7.1); the storefronts were already bumped on this
+  branch. `make lock` rewrote every lock carrying the kits.
+- [x] 7.5 **Verification checkpoint.** Unit and library integration: `make -C kit
   test-deal-lifecycle`, `make -C kit test-arkhai-mediation`, `make -C kit
   test-deal-servicing` (its examples run as tests where they are collected). Application
   integration: `make test-storefront` (the lifecycle and unreachable-authority cases),
@@ -1696,6 +1756,38 @@ test_lifecycle_ends.py, test_servicing_unreachable_authority.py}`;
   Owed by validation: `tests.yml`, jobs `test · test-kits`, `test · test-storefront`,
   `test · test-bare-metal` and `test · test-vms-buyer` — each passes from the relocked
   environments with the migrated constructors.
+  Results: `make -C kit test-deal-lifecycle` 76 passed; `make -C kit test-arkhai-mediation`
+  55 passed with mypy clean; `make -C kit test-deal-servicing` 63 passed (its examples are
+  not collected; see 7.3); `make -C kit test-arkhai-payments` 220 passed. `make
+  test-storefront` 1213 passed, 1 skipped and 526 passed; `make test-bare-metal` 126, 224,
+  583, 32 and 137 passed; `make test-vms-buyer` 215 passed. `make test`: everything passed
+  but the same pre-existing `test_change_workflow_assumptions` failure section 6 records,
+  and the targets after it (`make -C helm test-render`, `make test-payments-lane-double`)
+  passed run alone. `make helm-values-schema` changed nothing. `make check-packaging`
+  passed. `make check-change` failed only on section 10's two runner profiles, as in
+  section 6. End-to-end confirmed as planned: none yet; `e2e_vm_payment_deal`'s stage 2
+  exercises the VM storefront's credential once section 9 states it in Bob's secret
+  overlay.
+
+  Handoff: the fresh-context check also found, and this section fixed, comments claiming a
+  values schema refuses `DisputeCredential.api_key`, the mediation README's change-history
+  wording and a snippet calling `credential_for` on the `dispute_config` function, unsorted
+  imports, and test names that claimed a secret overlay the harness never reads.
+  `ArkhaiPaymentsConfig` now also sets `hide_input_in_errors`: a three-character key was
+  shown whole in its validation error (`test_a_validation_error_never_shows_a_stated_key`
+  failed before the setting and passes after). Left for later sections:
+  - **A plan gap.** The deployment-state delta requires the storefront charts' values
+    schemas to refuse a secret dispute credential setting in `config`, and no task
+    delivers it: the VM schema has no `[[DisputeCredential]]` definition and the
+    bare-metal settings type it `list[dict[str, Any]]`, so `api_key` there passes the
+    schema. It belongs with section 12's chart and schema work, which should add a typed
+    `DisputeCredential` to both storefronts' generated definitions (the field is already
+    marked secret); the triage or a plan amendment should place it.
+  - The closeout's `DEPLOYMENT_AND_CONFIG.md` list now names "Dispute authority
+    preferences", whose credential passage describes variable references only.
+  - Declined: moving the `MediationCredential` refusal cases to a unit directory (see
+    7.2). Not rerun: a second fresh-context check after these fixes, which were local to
+    the files it named.
 
 ## 8. The registry reads profile-shaped env files
 
@@ -2102,6 +2194,11 @@ returns the change to implementation.
       environment files;
     - "Settlement consumer configuration and cutover": the storefront payments check, its
       steps, and `api_key` and `ca_bundle_path`;
+    - "Dispute authority preferences": a `[[DisputeCredential]]` states `api_key` (in a
+      secret overlay) or `api_key_env`, exactly one, resolved only when the authority is
+      used, and the mediation client receives the resolved token (added by section 7's
+      implementation: the passage still describes credentials as variable references
+      only);
     - "Release topology": that a local release configures a service through the same
       values a deployment uses, never development-only modes, with the payments double
       enabled once per namespace;
