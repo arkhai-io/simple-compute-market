@@ -239,6 +239,32 @@ class BareMetalLifecycle:
             actor=event.caller or report.signer, cause=event.cause, controlling_source_ref=controlling,
         )
 
+    async def recover_delivery(self, deal):
+        row = await self.runtime.db.load_bare_metal_fulfillment_lifecycle(
+            negotiation_id=deal.negotiation_id,
+        )
+        if row is None or not row.get("fulfillment_id"):
+            return
+        record = await in_transaction(
+            self.path, lambda conn: EndSession(conn).read(deal.negotiation_id),
+        )
+        if record.progress not in ("unstarted", "active"):
+            return
+        if record.available_at is not None:
+            result = await self.runtime.db.load_bare_metal_result(
+                negotiation_id=deal.negotiation_id,
+            )
+            receipt = await self.runtime.db.load_bare_metal_receipt(
+                negotiation_id=deal.negotiation_id,
+            )
+            if result is not None and receipt is not None:
+                return
+        # Availability and its private result can commit separately. Recovery
+        # completes either missing checkpoint without changing the first instant.
+        await self.runtime.fulfillment_service().status(
+            negotiation_id=deal.negotiation_id, buyer_principal=deal.buyer,
+        )
+
     async def recover_site(self, negotiation_id):
         row = await self.runtime.db.load_bare_metal_fulfillment_lifecycle(negotiation_id=negotiation_id)
         if row is None or not row.get("capacity_reservation_id"):
@@ -404,6 +430,10 @@ class BareMetalLifecycle:
             except Exception:
                 logger.exception("bare-metal respondent recovery failed")
         for deal in deals:
+            try:
+                await self.recover_delivery(deal)
+            except Exception:
+                logger.exception("bare-metal delivery recovery failed for %s", deal.negotiation_id)
             # Physical work is independent of authority availability and payment
             # publication. Always attempt it, including an uncommitted surrender.
             try:

@@ -208,7 +208,7 @@ def test_published_ruling_trace(trace, surface):
                 case = final["answer"]["case"]
                 actual = await clients[peer.payee].case(case["case_ref"],
                     agreement=trace["mandate"]["deal"], transaction=payments.transaction)
-                identical(wire(actual), case)
+                identical(wire(actual), final["answer"])
         finally:
             for client in clients.values():
                 await client.close()

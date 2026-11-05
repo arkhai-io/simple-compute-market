@@ -51,6 +51,29 @@ def test_uncertain_original_refuses_revision_and_allows_equivalent_adoption():
     asyncio.run(drive())
 
 
+def test_existing_case_pending_protection_is_not_refiled():
+    async def drive():
+        peer = MediationContractFake()
+        def handle(request):
+            if request.url.path.startswith("/cases/"):
+                return httpx.Response(200, json={
+                    "status": "pending", "case_ref": next(iter(peer.cases)),
+                })
+            return peer.handle(request)
+        s = Scenario(peer=peer, transport=httpx.MockTransport(handle))
+        intent = DeliveryEndIntent(ended_at=1800000000, delivered=False, cause="payee")
+        try:
+            first = await s.submit("delivery_end", "online", intent.model_dump(mode="json"))
+            assert first.status == "accepted"
+            recovered = await s.submit("delivery_end", "recovery", intent.model_dump(mode="json"))
+            assert recovered.status == "pending" and "protection pending" in recovered.reason
+            assert len(peer.cases) == 1
+            assert len([r for r in peer.requests if r.method == "POST"]) == 1
+        finally:
+            await s.client.close()
+    asyncio.run(drive())
+
+
 def test_concurrent_callers_coordinate_before_authority_write():
     async def drive():
         entered, proceed = asyncio.Event(), asyncio.Event()

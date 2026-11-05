@@ -123,10 +123,24 @@ def _public_principal(principal: Identity) -> dict[str, str]:
     return principal.model_dump(mode="json")
 
 
+def _canonical_public_signer(value: Any) -> bool:
+    if not isinstance(value, Mapping) or set(value) != {"scheme", "identifier"}:
+        return False
+    try:
+        principal = Identity.model_validate(dict(value))
+    except (TypeError, ValueError):
+        return False
+    return _public_principal(principal) == dict(value)
+
+
 def _assert_secret_isolation(value: Any) -> None:
     if isinstance(value, Mapping):
         for key, child in value.items():
             if str(key).lower() in _FORBIDDEN_SECRET_FIELDS:
+                # Signed protocol evidence names its producer by a public
+                # identity, never by a signer object or private carrier.
+                if key == "signer" and _canonical_public_signer(child):
+                    continue
                 raise RunLogError(
                     f"run logs must not contain credential or signer field {key!r}"
                 )

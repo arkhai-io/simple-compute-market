@@ -233,6 +233,15 @@ An unknown `version`, initiator key, or `settles_through` value, a `dispute` who
 - **WHEN** a compute option carries a one-hour dispute window, a three-hour delivery deadline and an authority advertising a one-day minimum window
 - **THEN** publication refuses the option, naming the window that would let its setup part pay out before the seller could be found late, and a buyer offered it refuses it
 
+#### Scenario: A supported shorter authority minimum still covers delivery timing
+
+- **WHEN** an authority advertises a sixty-second minimum and a compute option has a
+  six-hundred-second delivery deadline
+- **THEN** publication and the buyer refuse a dispute window below six hundred and
+  sixty seconds and accept that threshold when all other terms are valid
+- **AND** the payment hold derives from the full accepted window, not only the
+  authority minimum
+
 ### Requirement: Term values agree with the Agreement and the seller's budget
 
 The deal's horizon is the Agreement's `duration_seconds`; `early_termination` MUST NOT carry a maximum term of its own, and every rate part's `end` MUST be `start_utc + duration_seconds`. Seller servicing-budget diagnostics MUST NOT introduce another notice or publication/acceptance refusal. `exposure_seconds` and `stop+exposure` MUST be rejected as retired codec values.
@@ -1110,3 +1119,52 @@ A VM or bare-metal seller's refund of a hosted payment MUST be a `reverse` comma
 
 - **WHEN** a buyer approves a mandate and never sends `commit`
 - **THEN** the reconciliation pass finds the commitment and the seller serves or reverses it
+
+### Requirement: Compute readiness progresses without buyer polling
+
+For a committed VM or bare-metal deal, seller servicing MUST adopt the existing
+fulfillment's validated active delivery and durably record availability without
+a buyer calling a fulfillment status or access route. Adoption MUST preserve
+selected-site and resource identity, source-evidence validation, deadlines and
+end-service admission. It MUST NOT dispatch another fulfillment.
+
+#### Scenario: The buyer disconnects after commit
+
+- **WHEN** the selected site's existing fulfillment becomes active before the delivery deadline after an accepted commitment
+- **THEN** seller servicing records availability and the buyer's signed lifecycle read reports delivery progress without a legacy fulfillment read
+- **AND** repeated servicing preserves one fulfillment and the recorded availability instant
+
+#### Scenario: Readiness observation fails
+
+- **WHEN** the site cannot return or validate its active result during servicing
+- **THEN** availability remains unproved and later servicing retries the same fulfillment
+- **AND** recovery of site end reports and physical teardown remains independently runnable
+
+#### Scenario: A final end precedes adoption
+
+- **WHEN** an end or delivery deadline already refuses disclosure when the active result is observed
+- **THEN** servicing does not mark the resource available or disclose access
+- **AND** the existing fulfillment follows the ordinary physical end path
+
+### Requirement: Mediation case recovery preserves protection outcomes
+
+Recovery of an existing mediation case MUST distinguish accepted case protection
+from pending protection. An accepted answer MUST match the requested case,
+Agreement and transaction; a pending answer MUST match the requested case.
+Neither outcome alone replaces verified signed filing evidence or authorizes a
+duplicate filing.
+
+#### Scenario: Accepted case recovery
+
+- **WHEN** an existing delivery-end filing is recovered and the authority returns an accepted case envelope
+- **THEN** recovery verifies its bindings and adopts the original signed filing without creating another case
+
+#### Scenario: Protection is still pending
+
+- **WHEN** the authority reports pending protection for the requested case
+- **THEN** recovery remains pending and sends no duplicate filing
+
+#### Scenario: Response names another case or deal
+
+- **WHEN** a case answer names a different case, Agreement or transaction
+- **THEN** recovery rejects the response without adopting evidence or sending another filing
