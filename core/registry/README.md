@@ -42,6 +42,35 @@ uv sync
 DATABASE_URL=sqlite:///./indexer.db uv run uvicorn core_registry.main:app --port 8080
 ```
 
+## Configuration files
+
+Every setting below is read by its environment variable name from these
+sources, a later one overriding an earlier one on a key both state:
+
+1. the dotenv files `.env.local`, `.env` and `/app/shared-env/.env`, in that
+   order, each skipped when absent;
+2. one profile env file per entry of `ACTIVE_PROFILES`, a comma-separated list,
+   each read as `config-<profile>.env` from `CONFIG_DIRECTORY` (the working
+   directory when unset), in the listed order and skipped when absent;
+3. the process environment.
+
+`CONFIG_DIRECTORY` and `ACTIVE_PROFILES` are not settings: they select which
+files configure the registry. A profile file has the dotenv form, so a JSON
+value such as `REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES` is written
+on one single-quoted line, and a hex identifier stays a string:
+
+```
+# config-bare-metal-registry.env: public development values (Anvil's well-known
+# account 3), never for a public network
+REGISTRY_AUTHORITY_ID=bare-metal-registry
+REGISTRY_AUTHORITY_IDENTIFIER=0x90f79bf6eb2c4f870365e785982e1f101e93b906
+REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES='[{"account": "...", ...}]'
+```
+
+`REGISTRY_FILTER_SPEC_PATH` names the filter specification the registry serves,
+in a profile file or the environment; unset, it serves the packaged
+`filter-spec.yaml`.
+
 ## API key auth
 
 Read access (discovery, lookups) and write access (publish/update/delete

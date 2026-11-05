@@ -1805,7 +1805,7 @@ filter-specification loader's callers; `core/registry/tests/unit/test_filter_spe
 `core/registry/.env.docker-compose`; `core/registry/README.md`;
 `core/registry/pyproject.toml` and its lock.
 
-- [ ] 8.1 Profile env files (D16). `Settings` loads, after its current dotenv defaults,
+- [x] 8.1 Profile env files (D16). `Settings` loads, after its current dotenv defaults,
   `<CONFIG_DIRECTORY>/config-<profile>.env` for each entry of `ACTIVE_PROFILES` in order,
   a later file overriding an earlier one and the process environment overriding every
   file. Both resolver variables are read from the process environment by the composition
@@ -1817,7 +1817,22 @@ filter-specification loader's callers; `core/registry/tests/unit/test_filter_spe
   no `ACTIVE_PROFILES` loading the defaults alone; a JSON list
   (`REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES`) parsed from a single-quoted line;
   a hex identifier read as a string.
-- [ ] 8.2 The filter-specification path (D16). `registry_filter_spec_path` is a `Settings`
+  Done: `config.profile_env_files(environment)` and `config.load_settings(environment=None)`,
+  which builds `Settings(_env_file=(*DEFAULT_ENV_FILES, *profiles))`; the module's
+  `settings = load_settings()` is the composition reading `CONFIG_DIRECTORY` (the working
+  directory when unset) and `ACTIVE_PROFILES` from the process environment. Profile names
+  parse as `arkhai-kit-config`'s `parse_active_profiles` does (comma-separated, stripped,
+  empties dropped), restated here since the registry does not depend on that kit. The
+  `.env.local` comment now states the real order (a later file overrides an earlier one, so
+  `.env.local` is the lowest). Unit (`core/registry/tests/unit/test_config_profiles.py`,
+  in `make test-registry`, pass), each in an empty working directory with the registry
+  variables cleared: two profiles layering, the later winning; a profile over `.env` over
+  `.env.local`; the process environment over both profiles; no `ACTIVE_PROFILES` loading
+  `.env` alone; the resolver variables read from the process environment when no mapping
+  is given; a missing profile skipped; the JSON list from a single-quoted line; a hex
+  identifier as a string (pydantic's dotenv reader yields strings for a `str` field, so
+  this case documents the form rather than guarding a conversion).
+- [x] 8.2 The filter-specification path (D16). `registry_filter_spec_path` is a `Settings`
   field aliased to `REGISTRY_FILTER_SPEC_PATH`, unset meaning the packaged
   `filter-spec.yaml`. `api/filter_spec.py` resolves its default path from a `Settings` it
   is given, defaulting to the module's `settings`, and no longer reads `os.environ`. The
@@ -1825,19 +1840,68 @@ filter-specification loader's callers; `core/registry/tests/unit/test_filter_spe
   a specification through `monkeypatch.setenv` pass a `Settings` instead (`AGENTS.md`,
   "Tests and diagnostics"). A new case loads a specification a profile file names, with no
   process variable set (the delta's "A profile selects the filter specification").
-- [ ] 8.3 The unread variables (D16). Remove `ENABLE_HEALTH_CHECKS`,
+  Done: `resolve_spec_path(settings=None)` and `load_filter_spec(path=None, *,
+  settings=None)` read `registry_filter_spec_path` from the `Settings` given, else the
+  config module's `settings`; `filter_spec.py` no longer imports `os`. The served spec
+  stays one cached load: `reset_cache(settings=None)` drops it and makes the next load
+  resolve from the `Settings` given, the process's when none is. That extends the
+  existing test seam (`reset_cache` was already the tests' way to swap the spec); routes
+  and `main.py` still call `get_loaded_spec()` with no argument. Unit
+  (`test_filter_spec.py`, pass): the two endpoint cases serve their file through
+  `reset_cache(Settings(_env_file=None, REGISTRY_FILTER_SPEC_PATH=...))` instead of
+  `setenv`; a specification a `config-lane.env` names loads with no process variable; unset,
+  the packaged `filter-spec.yaml` (`compute.market`). Application integration
+  (`test_settled_envelope_across_specs.py`, the real app and database through
+  `RegistryClient` over `ASGITransport`, pass): its fixture writes a profile env file naming
+  the API-credit or introductions specification and serves it through
+  `reset_cache(load_settings({...}))`, with `REGISTRY_FILTER_SPEC_PATH` removed from the
+  process. That proves a profile's path is served by the app; the startup path itself
+  (`settings = load_settings()` at import, from a process's `ACTIVE_PROFILES`) is covered
+  only by 8.1's process-environment unit case, and by the lanes from section 9.
+- [x] 8.3 The unread variables (D16). Remove `ENABLE_HEALTH_CHECKS`,
   `HEALTH_CHECK_INTERVAL`, `ENDPOINT_CHECK_TIMEOUT` and `HEARTBEAT_TTL_SECS` from
   `core/registry/Dockerfile` and `core/registry/.env.docker-compose`, after confirming by
   search that nothing reads them (the chart's copies and `CHAIN_ID` go in section 11).
   Document the profile loading and the setting in `core/registry/README.md`. Bump the
   registry's version and relock if its metadata changed.
-- [ ] 8.4 **Verification checkpoint.** Unit and application integration: `make
+  Done. A search found no reader of the four, in code or settings (lowercase forms
+  included). Removed from `core/registry/Dockerfile` and `core/registry/.env.docker-compose`
+  as planned, and also from the registry's other sample files, which set them for no
+  reader: `core/registry/docker-compose.yml`, `core/registry/.env.sample` and the root
+  `config.registry.env.example`. Left: `domains/vms/provisioning/iac/README.md` still shows
+  them in an example deployment command and describes them as features (lines 1653,
+  1686–1689); it is outside this change's files and should be corrected where that document
+  is next maintained. `core/registry/README.md` gains "Configuration files". The registry
+  goes 0.4.1 → 0.5.0 (new configuration surface; not bumped on this branch before; nothing
+  pins it exactly), relocked.
+- [x] 8.4 **Verification checkpoint.** Unit and application integration: `make
   test-registry`. `make test`. `make check-packaging` when the version or lock changed.
   End-to-end: none yet — the lane registries take profiles in section 9 and the chart in
   section 11; every lane's publication and discovery scenarios exercise the registry from
   then. None is owed here.
   Owed by validation: `tests.yml`, job `test · test-registry` — passes with the new and
   reworked cases.
+  Results: `make test-registry` 139 passed (unit) and 128 passed (application
+  integration). `make test`: every suite passed but the pre-existing
+  `test_change_workflow_assumptions` failure section 6 records; the targets after it
+  (`make -C helm test-render`, `make test-frp-grant-admission`, `make
+  test-payments-lane-double`) passed run alone, and `make test-release-tooling` was rerun
+  after the sample-file edits with the same single failure. `make check-packaging` passed.
+  `make check-change` failed only on section 10's two runner profiles. End-to-end
+  confirmed as planned: none yet.
+
+  Handoff: the fresh-context check found the default-then-profile order untested, tests
+  reading the working directory's dotenv files, an unset-spec case broken by a shell's
+  `REGISTRY_FILTER_SPEC_PATH`, unused parameters, the unread variables surviving in sample
+  files, and a pre-existing task-number reference in
+  `test_settled_envelope_across_specs.py`'s docstring; all fixed. Kept: the
+  `reset_cache(settings)` seam, recorded under 8.2. For section 9: a lane registry's
+  `config-<registry>.env` takes the same `REGISTRY_*` names its `environment:` carries
+  today, `REGISTRY_FILTER_SPEC_PATH` included, and a JSON value goes on one single-quoted
+  line; `/app/shared-env/.env` is still read first if present. For closeout: the
+  registry restates `parse_active_profiles`, which `deployment-state`'s architecture
+  companion ("Configuration bootstrap boundary") places in `arkhai-kit-config`; its
+  promotion should say the registry parses profiles itself until the Dynaconf move.
 
 ## 9. Compose stacks on committed overlays, profiles and secret overlays
 

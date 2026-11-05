@@ -1,10 +1,10 @@
 """The renamed listing envelope is generic, not compute-specific.
 
-`listing_resource` replaced `offer_resource` in all three deployed filter
-specifications. The compute one is covered by
-`test_settled_listing_vocabulary.py`; this closes 5.5 and 9.6 for the other
-two, which have their own schema identities and publish no offering mode at
-all — so the envelope rename has to hold for them independently.
+All three deployed filter specifications name the listing envelope
+`listing_resource`. The compute one is covered by
+`test_settled_listing_vocabulary.py`; this module covers the other two, which
+have their own schema identities and publish no offering mode at all, so the
+envelope has to hold for them independently.
 
 Each case runs the real registry app against the real specification file with
 its database, through the canonical `RegistryClient` over `ASGITransport`.
@@ -18,6 +18,7 @@ import pytest
 
 from registry_client import ListingRequest
 from core_registry.api import filter_spec as filter_spec_module
+from core_registry.config import load_settings
 
 pytestmark = pytest.mark.asyncio
 
@@ -43,21 +44,26 @@ _OPTION = {
 
 
 @pytest.fixture
-def served_spec(monkeypatch):
+def served_spec(monkeypatch, tmp_path):
     """Point the app at one specification file for the duration of a test.
 
-    `reset_cache` exists for exactly this: the loader memoizes one spec per
-    process, so swapping the file without clearing the cache would silently
-    keep serving the compute schema and the test would prove nothing.
+    The file is named by a profile env file, as a lane registry's profile names
+    its specification, with no ``REGISTRY_FILTER_SPEC_PATH`` in the process
+    environment. `reset_cache` takes the settings that profile builds: the loader
+    memoizes one spec per process, so swapping the file without clearing the
+    cache would silently keep serving the compute schema and the test would
+    prove nothing.
     """
+    monkeypatch.delenv("REGISTRY_FILTER_SPEC_PATH", raising=False)
 
     def _use(path: Path):
-        monkeypatch.setenv("REGISTRY_FILTER_SPEC_PATH", str(path))
-        filter_spec_module.reset_cache()
+        (tmp_path / "config-spec.env").write_text(f"REGISTRY_FILTER_SPEC_PATH={path}\n")
+        filter_spec_module.reset_cache(
+            load_settings({"CONFIG_DIRECTORY": str(tmp_path), "ACTIVE_PROFILES": "spec"})
+        )
         return filter_spec_module.get_loaded_spec()
 
     yield _use
-    monkeypatch.delenv("REGISTRY_FILTER_SPEC_PATH", raising=False)
     filter_spec_module.reset_cache()
 
 

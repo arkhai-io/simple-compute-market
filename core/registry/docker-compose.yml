@@ -12,10 +12,6 @@ services:
       - DATABASE_URL=${DATABASE_URL}
       - PORT=${PORT:-8080}
       - HOST=${HOST:-0.0.0.0}
-      - ENABLE_HEALTH_CHECKS=${ENABLE_HEALTH_CHECKS:-false}
-      - HEALTH_CHECK_INTERVAL=${HEALTH_CHECK_INTERVAL:-60}
-      - ENDPOINT_CHECK_TIMEOUT=${ENDPOINT_CHECK_TIMEOUT:-10}
-      - HEARTBEAT_TTL_SECS=${HEARTBEAT_TTL_SECS:-60}
       - LOG_LEVEL=${LOG_LEVEL:-info}
     env_file:
       - .env  # Create this file from .env.sample
