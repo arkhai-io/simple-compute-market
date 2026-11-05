@@ -97,12 +97,17 @@ Every Compose stack the repository runs — each end-to-end lane and the full lo
 
 ### Requirement: The registry reads profile-shaped env files
 
-The registry MUST load, after its default dotenv files, `config-<profile>.env` from `CONFIG_DIRECTORY` for each entry of `ACTIVE_PROFILES` in order, a later file overriding an earlier one and the process environment overriding every file. Its filter specification path MUST be a setting those files can carry. The registry chart MUST render its settings from its values into a ConfigMap profile mounted under `CONFIG_DIRECTORY`, MUST take secret settings as a profile from a named existing Secret (`secretProfile`), MUST refuse the retired `auth.bootstrapKeySecret` and `auth.adminKeySecret` naming `secretProfile`, and MUST set as container environment only the two resolver variables.
+The registry MUST load, after its default dotenv files, `config-<profile>.env` from `CONFIG_DIRECTORY` for each entry of `ACTIVE_PROFILES` in order, a later file overriding an earlier one and the process environment overriding every file. Its filter specification path MUST be a setting those files can carry, and the filter specification loader MUST resolve its default path from that setting, the packaged specification when it is unset. The registry chart MUST render its settings from its values into a ConfigMap profile mounted under `CONFIG_DIRECTORY`, MUST take secret settings as a profile from a named existing Secret (`secretProfile`), MUST refuse the retired `auth.bootstrapKeySecret` and `auth.adminKeySecret` naming `secretProfile`, and MUST set as container environment only the two resolver variables.
 
 #### Scenario: A lane registry layers a lane profile
 
 - **WHEN** a registry runs with `ACTIVE_PROFILES` naming its own profile and then a lane profile
 - **THEN** it takes its identity and descriptor from the first file and the lane's recommended dispute authorities from the second
+
+#### Scenario: A profile selects the filter specification
+
+- **WHEN** a registry's profile names a filter specification path and no `REGISTRY_FILTER_SPEC_PATH` process variable is set
+- **THEN** the registry loads and serves that specification, not the packaged default
 
 #### Scenario: The registry chart renders a release
 

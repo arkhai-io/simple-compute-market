@@ -47,3 +47,8 @@ Arkhai payments registration, typed configuration and owner-scoped client provis
 
 - **WHEN** a storefront's secret overlay states a `[[DisputeCredential]]` with an `api_key` for an authority
 - **THEN** servicing contacts that authority with that token and reads no environment variable for it
+
+#### Scenario: A mediation credential is built from an unusable token
+
+- **WHEN** a mediation credential is constructed with a token that is not a secret value, or is empty, has surrounding whitespace, or contains a line break
+- **THEN** construction fails, and no mediation client authenticates with that value

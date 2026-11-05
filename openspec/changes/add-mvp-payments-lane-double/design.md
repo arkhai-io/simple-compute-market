@@ -158,8 +158,9 @@ the deal's dispute authority, so the VM lane's storefront carries an identity-bo
 `[[DisputeCredential]]` for the pinned authority, its `api_key` a labelled public
 development value in Bob's secrets overlay (D19). A focused storefront-level test proves
 the case: with a resolvable credential and an unresolvable pinned origin, servicing reads
-`state == "running"` with a non-`Accepted` dispute outcome, and the respondent poll
-neither raises nor marks the deal for repair.
+`state == "running"` with a non-`Accepted` dispute outcome. The respondent poll's
+transport error reaches the servicing cycle, which logs it and completes; the deal is not
+marked for repair.
 
 The bare-metal and API-credit lanes' storefronts carry no such credential: no domain
 code branches on `repair_required`, and only the VM scenario asserts the authority state.
@@ -565,7 +566,15 @@ mode (D20); no environment file is generated.
 `core/registry` adopts the resolver variables the provisioning service uses: after its
 current dotenv defaults, it loads `<CONFIG_DIRECTORY>/config-<profile>.env` for each entry
 of `ACTIVE_PROFILES`, in order, a later file winning, the process environment above all.
-`REGISTRY_FILTER_SPEC_PATH` becomes a `Settings` field so a file carries it. Correction
+`REGISTRY_FILTER_SPEC_PATH` becomes a `Settings` field, `registry_filter_spec_path`, so a
+file carries it: its alias is the same variable, so the process environment still
+overrides it, and unset means the packaged `filter-spec.yaml`. `api/filter_spec.py`
+resolves its default path from a `Settings` it is given, defaulting to the module's
+`settings`, rather than from `os.environ`. The tests that select a spec through
+`monkeypatch.setenv("REGISTRY_FILTER_SPEC_PATH", …)` (`test_filter_spec.py`,
+`test_settled_envelope_across_specs.py`) move to that injected seam, as `AGENTS.md`'s
+test guidance prefers to patching the process environment, and a test proves a profile
+naming another specification, with no process variable set, loads it. Correction
 of the misleading `.env.local` comment and removal of the five unread variables from the
 chart, `core/registry/Dockerfile` and `core/registry/.env.docker-compose` go with it. The
 later move onto Dynaconf changes only the files' format.
@@ -693,7 +702,24 @@ cluster, External Secrets writes that file.
 - **Dispute credentials.** `DisputeCredential` gains `api_key: SecretStr` beside
   `api_key_env`, and `resolve()` returns either. `MediationCredential` carries the
   resolved token, and every caller — both storefronts' and both buyers' lifecycle
-  composition — obtains it through `resolve()`.
+  composition — obtains it through `resolve()`. Its contract:
+  - `MediationCredential(identity, *, token: SecretStr)`: the field is renamed and
+    keyword-only. `__post_init__` refuses a token that is not a `SecretStr` with
+    `TypeError`, and an empty token, one with surrounding whitespace, or one containing
+    CR or LF with `ValueError` — the checks `MediationClient` makes today, moved to
+    where the token arrives. An unmigrated positional call such as
+    `MediationCredential(identity, "DEMO_PAYEE")` therefore fails at construction
+    rather than authenticating with a variable name as its bearer token.
+  - `MediationClient` loses its `environ=` parameter; it has no environment to read.
+  - `DisputeCredential.api_key` must be non-empty, refused at configuration validation
+    as a malformed `api_key_env` is. `resolve()` still raises `ValueError` for an unset
+    or empty variable, which the storefronts' `credential_available` reads as no usable
+    credential, so the deal reports `repair_required` (D2).
+  - Every direct constructor migrates: the four lifecycle compositions, the
+    `kit/arkhai-mediation` and `kit/deal-servicing` examples, the kit and domain tests,
+    and `kit/arkhai-mediation/README.md`. Examples and tests pass
+    `token=SecretStr(...)` instead of an `environ` mapping. Scripts under
+    `docs/attachments/` are dated records and keep their wording (D18).
 - **Charts.** Both storefront charts' `paymentsKey` option, its `seller-payments-key`
   Secret and the chart's `api_key_env` check are removed; the CA option derives
   `ca_bundle_path` (D3).
@@ -747,9 +773,12 @@ validation that also covers round 1's triage fixes:
 
 1. **Interfaces:** the kit's `api_key`, `ca_bundle_path`, key resolution and
    `PaymentsClient` CA argument; `check-payments`' configuration step for an unreadable
-   bundle; `DisputeCredential.api_key`, `MediationCredential` carrying the token and its
-   four callers; the registry's profile env-file loader, `filter_spec_path` setting and
-   unread variables removed.
+   bundle; `DisputeCredential.api_key`, `MediationCredential` carrying the token with its
+   validation (D19) and every direct constructor migrated — the four lifecycle
+   compositions, the kit examples, the kit and domain tests, the mediation README; the
+   registry's profile env-file loader, the `registry_filter_spec_path` setting read by
+   `api/filter_spec.py` through an injected `Settings`, its tests moved off
+   `monkeypatch.setenv`, and unread variables removed.
 2. **Compose and Make:** guards out of the base files and literal binds in the overlays
    for the three lanes and the full stack; the registry and provisioning profiles; the
    runner's payments profiles and the helper's token and CA handling; the storefronts'
