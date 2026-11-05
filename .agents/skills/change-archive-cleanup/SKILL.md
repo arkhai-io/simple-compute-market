@@ -25,7 +25,7 @@ is not this skill's to fix — stop and tell the owner.
 Run interactively, as most runs are, this section does not apply but for the
 outcome it describes, which an interactive run records itself ("Running
 interactively"); nothing else in the skill changes.
-When this skill runs through `scripts/run_change_step.py` —
+When this skill runs through `scripts/change-workflow start --unattended` —
 `make archive-cleanup UNATTENDED=1`, or the orchestrating session — nobody can answer in
 the session, and every turn ends with an outcome matching
 `.agents/change-outcome.schema.json`, whose `message` the owner reads as written:
@@ -78,7 +78,7 @@ the slash command — no wrapper records the run, so its last act records the
 outcome it would end with unattended, as "Running unattended" gives it:
 
 ```text
-python3 scripts/run_change_step.py record <change> archive-cleanup --outcome '<the outcome, as JSON>'
+scripts/change-workflow record <change> archive-cleanup --outcome '<the outcome, as JSON>'
 ```
 
 `record` checks the outcome against `.agents/change-outcome.schema.json` and
@@ -102,9 +102,9 @@ again, to be resumed, or its outcome recorded with the command above.
   not carry this change's latest commits, or its name belongs to another change,
   stop and ask the owner — unless the change's log holds the owner's decision
   that it runs on this branch: run `git branch --show-current`, then
-  `python3 scripts/run_change_step.py log <change> --branch <that branch>`; a line
+  `scripts/change-workflow log <change> --branch <that branch>`; a line
   it prints is that decision, and the branch is accepted.
-- **Archived.** `python3 scripts/find_change.py --archived <change>` prints a
+- **Archived.** `scripts/change-workflow find --archived <change>` prints a
   directory under `openspec/changes/archive/`. Read every file of the change from
   there.
 - **Status.** The change's row in `openspec/changes/README.md` is `in closeout`. A
@@ -113,7 +113,7 @@ again, to be resumed, or its outcome recorded with the command above.
   archived row, and a figure step 7 committed would otherwise read as an
   unvalidated change — and go on from step 7, each step after it being safe to
   repeat.
-- **Route.** `python3 scripts/change_next_step.py <change>` names
+- **Route.** `scripts/change-workflow next <change>` names
   `archive-cleanup`: the exit of the latest closeout review's triage, once any
   validation it owes cleared `HEAD`, or the owner's direction to archive cleanup.
   When it names a validation of `HEAD`, or the owner, with archive cleanup as its
@@ -129,8 +129,8 @@ again, to be resumed, or its outcome recorded with the command above.
   the check or not, judging the paths named — as for another change's commit on a
   branch two changes share, which the merge carries all the same. When the
   computation named archive cleanup from the owner's direction — its reason says
-  `the owner directed archive-cleanup at seq <n>`, and `python3
-  scripts/run_change_step.py log <change>` shows that line — the direction is the
+  `the owner directed archive-cleanup at seq <n>`, and `scripts/change-workflow
+  log <change>` shows that line — the direction is the
   waiver, its reason the owner's. Otherwise stop and ask the owner, naming the paths
   and the commits that changed them, whether the correction is validated first
   (`make validate CHANGE=<change>`) or they waive the check. Interactively, the
@@ -138,7 +138,7 @@ again, to be resumed, or its outcome recorded with the command above.
   again, which then names archive cleanup:
 
   ```text
-  python3 scripts/run_change_step.py note <change> orchestrator --by owner --next archive-cleanup --decision "waives archive cleanup's validation" --reason "<the owner's words, naming the paths>"
+  scripts/change-workflow note <change> orchestrator --by owner --next archive-cleanup --decision "waives archive cleanup's validation" --reason "<the owner's words, naming the paths>"
   ```
 
   Record a waiver as one line of the
@@ -146,7 +146,7 @@ again, to be resumed, or its outcome recorded with the command above.
   closeout review's record name, the owner's reason as the disposition), with the
   Edit tool, and commit it with the index edit (step 5). The check itself stands: a
   merge carries every commit on the branch, whichever change wrote it.
-- **Worktree.** It is clean, and `make round-view-closed` passes.
+- **Worktree.** It is clean, and `scripts/change-workflow check round-view` passes.
 
 If any check fails, stop and say why.
 
@@ -189,7 +189,7 @@ it costs the repository nothing, and it is the review history until an export fl
 exists. For a change worked in its own clone, step 10 copies it into the owner's
 workspace.
 
-Run `make check-change-index` and `make check-doc-citations CHANGE=<change>`; both
+Run `scripts/change-workflow check index` and `make check-doc-citations CHANGE=<change>`; both
 must report nothing. The citation check reads only the change's own documents, so
 the index check is the one that sees this edit.
 
@@ -197,8 +197,8 @@ the index check is the one that sees this edit.
 
 Commit the index edit, with a waiver's ledger line when step 1 recorded one, as
 one commit whose message names the change and says its archive is cleaned up and
-which dependents it released. Then push it with `make push-branch`, the guarded
-push of exactly `HEAD`; if it refuses, stop and report its reasons.
+which dependents it released. Then push it with `scripts/change-workflow push`,
+the guarded push of exactly `HEAD`; if it refuses, stop and report its reasons.
 
 ## 6. Draft the merge
 
@@ -254,14 +254,14 @@ with the command to rerun once the cause is gone, and go on.
 
 ## 9. Push
 
-When step 7 committed a figure, push it with `make push-branch`, the guarded push
-of exactly `HEAD`; if it refuses, stop and report its reasons.
+When step 7 committed a figure, push it with `scripts/change-workflow push`, the
+guarded push of exactly `HEAD`; if it refuses, stop and report its reasons.
 
 ## 10. Copy the history, last
 
 A change worked in its own clone — its `.git/config` names a `[remote "workspace"]`
 — keeps its records and evidence only there, untracked. As the last act, after
-everything above, run `make change-history CHANGE=<change>`: it copies the archived
+everything above, run `scripts/change-workflow history <change>`: it copies the archived
 change's `reviews/` and the validation evidence its records name into the owner's
 workspace, at the same paths, where sessions working other changes find them. It is
 safe to repeat: files already there are left, files that grew are extended, and a

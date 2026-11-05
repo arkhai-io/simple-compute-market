@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-import change_next_step as nxt
+from change_workflow import next_step as nxt
 from change_workflow.cli import main
 from change_workflow.common import StepError
 from change_workflow.convert import (ADVANCE, ANOTHER_ROUND, OTHER, RETURNED, convert_change,
@@ -136,7 +136,7 @@ def _design_reviewed(root: Path) -> list[dict]:
 def test_a_change_is_converted(tmp_path: Path) -> None:
     root = _repository(tmp_path)
     older = _design_reviewed(root)
-    assert _next(root)["convert"] == f"python3 scripts/run_change_step.py convert {CHANGE}"
+    assert _next(root)["convert"] == f"scripts/change-workflow convert {CHANGE}"
 
     shown = _convert(root)
 
@@ -182,6 +182,21 @@ def test_a_change_already_converted_is_refused(tmp_path: Path) -> None:
         _convert(root, confirm=True)
 
     assert _log(root).read_text("utf-8") == converted
+
+
+@pytest.mark.parametrize("confirm", [False, True])
+def test_a_log_of_a_newer_format_is_refused_and_nothing_rewritten(tmp_path: Path,
+                                                                    confirm: bool) -> None:
+    root = _repository(tmp_path)
+    _design_reviewed(root)
+    _older(root, {"format": FORMAT + 1, "step": "design", "outcome": "question",
+                  "message": "m", "awaiting": "a"})
+    before = _log(root).read_text("utf-8")
+
+    with pytest.raises(StepError, match=f"format {FORMAT + 1} at seq 7"):
+        _convert(root, confirm=confirm)
+
+    assert _log(root).read_text("utf-8") == before
 
 
 def test_a_change_is_converted_with_a_triage_in_progress(tmp_path: Path) -> None:
@@ -545,7 +560,8 @@ def test_the_command_shows_the_conversion_then_writes_it_on_confirmation(
 
     assert main(["convert", CHANGE], root=root) == 0
     assert "nothing is written" in capsys.readouterr().out
-    assert main(["convert", CHANGE, "--kind", "design"], root=root) == 1
+    # A qualifier without what it qualifies is a malformed argument, a usage error.
+    assert main(["convert", CHANGE, "--kind", "design"], root=root) == 2
     assert "qualify --next" in capsys.readouterr().err
     assert main(["convert", CHANGE, "--confirm", "--next", "review", "--kind", "design",
                  "--reason", "the owner's words"], root=root) == 0

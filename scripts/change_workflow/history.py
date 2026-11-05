@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Copy a cleaned-up change's history from its clone into the owner's workspace.
 
 A change worked in its own clone keeps its history there: its records under
@@ -6,7 +5,7 @@ A change worked in its own clone keeps its history there: its records under
 and the validation evidence they name under `.snapshot/`. None of it is tracked,
 so no merge carries it, and removing the clone would lose it. Archive cleanup
 copies it, as its last act, to the same paths in the owner's workspace, where
-sessions working other changes find it (`find_change.py --records`); removing the
+sessions working other changes find it (`find --records`); removing the
 clone copies it again first.
 
 The copy is a synchronization, safe to repeat. A file the workspace lacks is
@@ -27,8 +26,7 @@ pipeline run (`**Pipeline:** run <id>`). Transcripts are not read for it: they
 cite whatever a session read, another clone's evidence included. Named evidence
 the clone does not hold is reported, not refused.
 
-Contract: openspec/specs/change-workflow/spec.md, "Each change is worked in its
-own clone".
+Contract: openspec/specs/change-workflow/spec.md, CW-hak6 and CW-rf50.
 """
 
 from __future__ import annotations
@@ -42,10 +40,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
 
-from find_change import (REVIEWS, ChangeNotFound, change_directory, is_archived,
-                         workspace_of)
+from .common import StepError, repository_root
+from .find import REVIEWS, ChangeNotFound, change_directory, is_archived, workspace_of
 
-ROOT = Path(__file__).resolve().parents[1]
 VALIDATION = Path(".snapshot/validation")
 E2E_LOGS = Path(".snapshot/e2e-logs")
 _CITED_VALIDATION = re.compile(r"\.snapshot/validation/([0-9a-f]{7,40})(?![0-9A-Za-z])")
@@ -198,12 +195,17 @@ def report(synced: Synced, workspace: Path) -> str:
     return "\n".join(lines)
 
 
-def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
+def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     actions = parser.add_subparsers(dest="action", required=True)
     syncing = actions.add_parser("sync", help="copy the change's history into the workspace")
     syncing.add_argument("change")
     args = parser.parse_args(argv)
+    try:
+        root = repository_root() if root is None else root
+    except StepError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
     workspace = workspace_of(root)
     if workspace is None:
         print(f"ERROR: {root} is not a change's clone: no `workspace` remote names the "
@@ -215,6 +217,9 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     print(report(synced, workspace))
+    for refused in synced.refused:
+        print(f"ERROR: not copied, the workspace's file left as it is: {refused}",
+              file=sys.stderr)
     return 1 if synced.refused else 0
 
 

@@ -27,13 +27,14 @@ review, a validation record, or the owner's notes, or when `make triage` opened 
 session for a change `in implementation`. Before anything else, check as
 `change-implement` does: the checked-out branch carries the change, or the change's
 log holds the owner's decision that it runs on this branch
-(`python3 scripts/run_change_step.py log <change> --branch <branch>` prints it),
-and the worktree is clean, and `make round-view-closed` passes — while the owner reads the
+(`scripts/change-workflow log <change> --branch <branch>` prints it),
+and the worktree is clean, and `scripts/change-workflow check round-view` passes —
+while the owner reads the
 round (`make round-view`), the branch points at its base, and a fix committed then
 would squash the round into it; ask the owner to run `make round-done` first.
 
 The round is the commits from its base — the `commit` on the change's latest
-`round` line, which `python3 scripts/run_change_step.py log <change>` prints — to
+`round` line, which `scripts/change-workflow log <change>` prints — to
 `HEAD`. A repeat pass, after a triage of the round named another implementation
 review as its exit and committed a fix, is the fix alone: its base is the commit that triage's review
 read, and the owner reads it as they read the round, so its notes are an owner
@@ -54,7 +55,7 @@ Record `HEAD` after the pull: it is the base the fixes are made against.
 Run interactively, as most runs are, this section does not apply but for the
 outcome it describes, which an interactive run records itself ("Running
 interactively"); nothing else in the skill changes.
-When this skill runs through `scripts/run_change_step.py` —
+When this skill runs through `scripts/change-workflow start --unattended` —
 `make triage UNATTENDED=1`, or the orchestrating session — nobody can answer in
 the session, and every turn ends with an outcome matching
 `.agents/change-outcome.schema.json`, whose `message` the owner reads as written:
@@ -123,7 +124,7 @@ the session, and every turn ends with an outcome matching
   the fixes so far and the tracked edits its dispositions made, the ledger
   included — as one work-in-progress commit
   naming the change and why it returns, checking no task for it, push it with
-  `make push-branch`, and end with `returned`, `next` the step it returns to,
+  `scripts/change-workflow push`, and end with `returned`, `next` the step it returns to,
   `{"step": "design"}` or `{"step": "plan"}`, `triaged` the records it triaged,
   and `evidence` naming those notes; the owner confirms the return. No
   session is left to commit the work, and a dirty checkout blocks every later
@@ -139,7 +140,7 @@ records the outcome it would end with unattended, as "Running unattended" gives 
 `triaged` included:
 
 ```text
-python3 scripts/run_change_step.py record <change> triage --outcome '<the outcome, as JSON>'
+scripts/change-workflow record <change> triage --outcome '<the outcome, as JSON>'
 ```
 
 `record` checks the outcome against `.agents/change-outcome.schema.json`, and its
@@ -159,7 +160,7 @@ to be resumed, or its outcome recorded with the command above.
 
 ## 1. Find the review and load the context
 
-The change's directory is what `python3 scripts/find_change.py <change>` prints:
+The change's directory is what `scripts/change-workflow find <change>` prints:
 `openspec/changes/<change>/`, or, once closeout has archived it, its dated
 directory under `openspec/changes/archive/` — a closeout review is always of an
 archived change. The reviews to triage are its numbered records in `reviews/` —
@@ -167,7 +168,7 @@ archived change. The reviews to triage are its numbered records in `reviews/` �
 `reviews/transcripts/`: those are raw reviewer sessions, not records.
 
 Another change's records, when a finding or a diagnosis rests on them, are where
-`python3 scripts/find_change.py --records <change>` says: this checkout's, or, from
+`scripts/change-workflow find --records <change>` says: this checkout's, or, from
 a change's clone, the owner's workspace's, which holds the history of every
 cleaned-up change.
 
@@ -388,7 +389,7 @@ work-in-progress commit, with no step 6. It is prose, for whoever reads the
 history: the exit the triage chose, in words and as its target, and the owner's
 words, such as Planning (`{"step": "plan"}`) — the owner: "Advance." Nothing
 routes on it: the triage's outcome names its exit in `next` and the records it
-triaged in `triaged`, and `scripts/change_next_step.py` reads a review whose triage
+triaged in `triaged`, and `scripts/change-workflow next` reads a review whose triage
 file no recorded outcome names as a triage still in progress, whatever the file
 says, so the change does not move on while its fixes are uncommitted. When two
 reviews are triaged together, write the same `## Next` in each review's triage
@@ -475,7 +476,7 @@ whether the round's accepted fixes merit another review round, while still prese
   naming the change and the round: the fixes, the change documents the dispositions
   edited (`design.md`, `proposal.md`, `tasks.md`), and `interventions.jsonl`.
   The triage records stay in `reviews/`, which is untracked. Then push the commit
-  with `make push-branch`, the guarded push of exactly `HEAD`; if it refuses, stop
+  with `scripts/change-workflow push`, the guarded push of exactly `HEAD`; if it refuses, stop
   and report its reasons. The fix commit is validated next (`make validate
   CHANGE=<change>`), which dispatches the pipeline — unless, after a pre-closeout
   review, it changes only paths under `openspec/` and `docs/` (step 6).
@@ -517,7 +518,7 @@ asks nothing: its exit is the advancing one, `## Next` saying there was nothing 
 dispose of, and it finishes.
 
 What follows is the computation's, from that exit
-(`scripts/change_next_step.py`), which checks the guards on it and names the step
+(`scripts/change-workflow next`), which checks the guards on it and names the step
 that satisfies one not yet met: after a design review, planning; after an
 implementation round, validation of the fix commit, then the next planned round or
 the pre-closeout review, once that validation passed; after a pre-closeout review,
@@ -543,7 +544,7 @@ When the triage of a phase-closing review takes its advancing exit, set the chan
 `Status` in `openspec/changes/README.md`, and rewrite the row's `Notes` in the same
 edit so nothing in it still describes the phase being left — a row whose notes
 contradict its status misleads every agent that reads the index — then run
-`make check-change-index`:
+`scripts/change-workflow check index`:
 
 | Review | Status when its triage advances |
 |---|---|
@@ -556,7 +557,7 @@ Whichever exit it names, a triage of any kind then commits what it changed
 and no fix commit (step 5) already holds — the change's documents its
 dispositions edited, `interventions.jsonl`, the index row, and any other tracked
 file an `edit` changed — as one commit naming the change and the review, and
-pushes it with `make push-branch`, so the next step reads a committed change from
+pushes it with `scripts/change-workflow push`, so the next step reads a committed change from
 a clean worktree. After a pre-closeout review such a commit needs no validation
 when it changes only paths under `openspec/` and `docs/`: closeout's own checks
 read them again. Before then it is validated like any commit, unless it changes

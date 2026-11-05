@@ -3,7 +3,8 @@
 
 A step of an OpenSpec change ends by running the same checks: comment hygiene,
 the agent skills, the change's documentation citations and task list, the change
-index, and the pinned OpenSpec validator in strict mode. Run as six commands,
+index, the indexed capabilities' specifications against their indexes, the change's
+deltas counted, and the pinned OpenSpec validator in strict mode. Run as seven commands,
 each is a tool call that replays the step's whole conversation; run here, they
 are one call, and an answer of one line when everything passes. Every check runs
 whatever the others report, and each failing check's own output is printed under
@@ -25,7 +26,7 @@ from typing import Callable, Sequence
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from find_change import ChangeNotFound, change_directory, is_archived  # noqa: E402
+from workflow_command import WorkflowRefused, found_change  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 # The validator version openspec/README.md pins, run through whichever package
@@ -60,6 +61,7 @@ def checks(change: str, archived: bool,
         ("documentation citations", [*make, "check-doc-citations", f"CHANGE={change}"]),
         ("task list", [*make, "check-tasks", f"CHANGE={change}"]),
         ("change index", [*make, "check-change-index"]),
+        ("specification index", [*make, "check-spec-index", f"CHANGE={change}"]),
         ("openspec validate", [*openspec_command(which), *validate]),
     ]
 
@@ -69,8 +71,8 @@ def run_checks(change: str, *, root: Path = ROOT, runner: Runner = _run,
                echo: Callable[[str], None] = print) -> int:
     """Run every check, print each failure with its output, and return the exit status."""
     try:
-        archived = is_archived(root, change_directory(root, change))
-    except ChangeNotFound as exc:
+        archived = bool(found_change(root, change)["archived"])
+    except WorkflowRefused as exc:
         echo(f"ERROR: {exc}")
         return 1
     planned = checks(change, archived, which)

@@ -981,7 +981,15 @@ ARCHIVED_REVIEWS = Path("openspec/changes/archive/2026-10-22-pilot/reviews")
 OLDER = "fedcba9876543210fedcba9876543210fedcba98"
 
 
+def _checkout(root: Path) -> None:
+    """Make `root` a Git repository, as the workflow's command finds a change only in
+    one."""
+    if not (root / ".git").exists():
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+
+
 def _validated(root: Path, number: int, commit: str, *attempts: dict) -> None:
+    _checkout(root)
     reviews = root / ARCHIVED_REVIEWS
     reviews.mkdir(parents=True, exist_ok=True)
     (reviews / f"{number:02d}-validation.md").write_text(
@@ -993,6 +1001,7 @@ def _validated(root: Path, number: int, commit: str, *attempts: dict) -> None:
 
 
 def _figure_file(root: Path) -> Path:
+    _checkout(root)
     path = root / validator.CAPACITY_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     validator.write_capacity(path, validator.CapacityFigure(
@@ -1533,8 +1542,26 @@ def test_make_targets_delegate_to_the_script() -> None:
     assert 'scripts/validate_slice.py helm --context "$(HELM_CONTEXT)"' in makefile
     assert '$(if $(CHANGE),--change "$(CHANGE)")' in makefile
     assert "--all-scenarios" in makefile
-    # The instruction travels with the invocation into the validation session.
-    assert "/change-validate $(CHANGE)$(if $(filter 1,$(HELM_ALL_SCENARIOS))" in makefile
+
+
+def _validate_target(*variables: str) -> str:
+    """What `make -n validate` of the root Makefile runs, with no step variable
+    inherited from the caller, a make that ran these tests among them."""
+    env = {key: value for key, value in os.environ.items()
+           if key not in ("HELM_ALL_SCENARIOS", "UNATTENDED", "ARGUMENTS", "ALLOW",
+                          "MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKELEVEL")}
+    return subprocess.run(
+        ["make", "-n", "--no-print-directory", "-C", str(REPO_ROOT), "validate", "CHANGE=x",
+         *variables], capture_output=True, text=True, check=True, env=env).stdout.strip()
+
+
+@pytest.mark.parametrize("unattended", [[], ["UNATTENDED=1"]])
+def test_all_scenarios_travel_into_the_validation_session(unattended: list[str]) -> None:
+    # The instruction reaches the step as the skill's argument, interactive or not.
+    assert _validate_target("HELM_ALL_SCENARIOS=1", *unattended) == (
+        "scripts/change-workflow start validate \"x\" --arguments 'with "
+        "HELM_ALL_SCENARIOS=1'" + (" --unattended" if unattended else ""))
+    assert _validate_target() == 'scripts/change-workflow start validate "x"'
 
 
 def test_the_command_line_refuses_a_name_that_is_not_a_change(

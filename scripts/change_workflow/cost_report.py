@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Report what an OpenSpec change's unattended runs cost, by step and by round.
 
 Reads the `cost` the wrapper records on each run's line of the change's workflow
@@ -15,8 +14,7 @@ with the gap before each, since a resumed session's first turn after its cache
 expired rewrites its whole context: the cost of openings, of misses, and of warm
 turns can be told apart.
 
-Contract: openspec/specs/change-workflow/spec.md, "Unattended runs record their
-cost".
+Contract: openspec/specs/change-workflow/spec.md, CW-u7da.
 """
 
 from __future__ import annotations
@@ -27,10 +25,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Sequence
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-from change_workflow.common import ORCHESTRATOR, ROOT, STEPS, StepError  # noqa: E402
-from change_workflow.log import history_log_path, read_log  # noqa: E402
+from .common import ORCHESTRATOR, StepError, repository_root
+from .graph import STEPS
+from .log import history_log_path, read_log
 
 BEFORE_ROUNDS = "design and planning"
 CLOSEOUT = "closeout"
@@ -158,11 +155,12 @@ def report(log: Sequence[dict[str, Any]]) -> list[str]:
     return lines
 
 
-def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
+def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("change")
     args = parser.parse_args(argv)
     try:
+        root = repository_root() if root is None else root
         log = read_log(history_log_path(root, args.change))
     except StepError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

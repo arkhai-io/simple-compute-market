@@ -2,18 +2,11 @@
 
 from __future__ import annotations
 
-import importlib.util
-import subprocess
 from pathlib import Path
 
 import pytest
 
-_SPEC = importlib.util.spec_from_file_location(
-    "check_change_index", Path(__file__).resolve().parents[1] / "check_change_index.py"
-)
-assert _SPEC and _SPEC.loader
-checker = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(checker)
+from change_workflow import index as checker
 
 HEADER = "| Change | Status | Depends on | Notes | Acceptance boundary |\n|---|---|---|---|---|\n"
 
@@ -147,12 +140,3 @@ def test_a_table_without_a_status_column_is_checked_only_for_its_shape(tmp_path:
 
     (problem,) = _problems(root)
     assert "1 cells under a header of 2" in problem
-
-
-def test_make_target_runs_the_checker() -> None:
-    command = subprocess.run(
-        ["make", "-n", "--no-print-directory", "check-change-index"],
-        cwd=Path(__file__).resolve().parents[2], capture_output=True, text=True, check=True,
-    ).stdout
-
-    assert "scripts/check_change_index.py" in command

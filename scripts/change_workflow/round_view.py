@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Show an implementation round as uncommitted changes in the owner's workspace.
 
 Implementation commits each section, so by the time the owner reads a round its
@@ -52,8 +51,8 @@ While a view is open the branch it moved does not point at the round's commit,
 so every step that describes a commit refuses in that checkout (`check`). The
 state lives in the Git directory of the checkout whose branch the view moved.
 
-Contract: openspec/specs/change-workflow/spec.md, "Triage of an implementation
-round".
+Contract: openspec/specs/change-workflow/spec.md, CW-aoby, CW-4svs, CW-9mrq,
+CW-78ul, CW-n44s, CW-uq5q, CW-gd24, and CW-rgws.
 """
 
 from __future__ import annotations
@@ -69,15 +68,12 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable, Sequence
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+from .clone import clone_of, workspace_of
+from .common import StepError, repository_root
+from .find import ChangeNotFound, change_directory
+from .log import LOG, read_log
+from .running import Run, runs_in_progress
 
-from change_clone import clone_of, workspace_of  # noqa: E402
-from find_change import ChangeNotFound, change_directory  # noqa: E402
-from change_workflow.common import StepError  # noqa: E402
-from change_workflow.log import LOG, read_log  # noqa: E402
-from change_workflow.running import Run, runs_in_progress  # noqa: E402
-
-ROOT = Path(__file__).resolve().parents[1]
 STATE = "round-view.json"
 _NUMBERED = re.compile(r"^(\d+)-validation\.md$")
 _VALIDATION_COMMIT = re.compile(r"^- \*\*Commit:\*\*\s*([0-9a-f]{7,40})\b", re.M)
@@ -638,7 +634,7 @@ def check(root: Path) -> None:
                          "`make round-done` first")
 
 
-def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
+def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     actions = parser.add_subparsers(dest="action", required=True)
     opening = actions.add_parser("start")
@@ -647,6 +643,11 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
     actions.add_parser("done")
     actions.add_parser("check")
     args = parser.parse_args(argv)
+    try:
+        root = repository_root() if root is None else root
+    except StepError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 1
     try:
         if args.action == "start":
             view = start(root, args.change, args.base)

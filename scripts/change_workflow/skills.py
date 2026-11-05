@@ -19,12 +19,13 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+from .common import StepError, repository_root
+
 SOURCE = Path(".agents/skills")
 HARNESSES = (Path(".claude/skills"), Path(".codex/skills"))
 
 
-def problems(root: Path = ROOT) -> list[str]:
+def problems(root: Path) -> list[str]:
     source = root / SOURCE
     shared = sorted(p.name for p in source.iterdir() if p.is_dir()) if source.is_dir() else []
     found = []
@@ -51,12 +52,18 @@ def problems(root: Path = ROOT) -> list[str]:
     return found
 
 
-def main() -> int:
-    found = problems()
+def main(root: Path | None = None) -> int:
+    try:
+        root = repository_root() if root is None else root
+    except StepError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    found = problems(root)
     for problem in found:
-        print(problem)
+        print(problem, file=sys.stderr)
     if found:
-        print(f"\n{len(found)} agent skill problem(s). Each skill has one source under {SOURCE}.")
+        print(f"\n{len(found)} agent skill problem(s). Each skill has one source under {SOURCE}.",
+              file=sys.stderr)
         return 1
     print("OK: every agent skill is loaded from its one shared source.")
     return 0

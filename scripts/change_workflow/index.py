@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Check the active-change index against the change directories it describes.
 
 `openspec/changes/README.md` is read by every workflow step to decide what may
@@ -23,7 +22,7 @@ remain.
 The dependency graphs are illustrations and are not checked: the legend makes
 the `Depends on` column authoritative.
 
-Run as a script, it prints each problem with its line and exits non-zero, or
+Run as a command, it prints each problem with its line and exits non-zero, or
 prints OK.
 
 Contract: openspec/specs/planning-governance/spec.md.
@@ -36,8 +35,8 @@ import sys
 from pathlib import Path
 from typing import NamedTuple, Sequence
 
-ROOT = Path(__file__).resolve().parents[1]
-CHANGES = Path("openspec/changes")
+from .common import CHANGES, StepError, repository_root
+
 INDEX = CHANGES / "README.md"
 
 PHASES = ("design", "planning", "implementation", "closeout")
@@ -50,6 +49,16 @@ _DEPENDENCY = re.compile(r"^`(?P<name>[a-z0-9-]+)`(?: \((?P<phase>[a-z]+)\))?$")
 _ARCHIVED = re.compile(r"^archive/\d{4}-\d{2}-\d{2}-(?P<name>.+)/$")
 
 
+class Dependency(NamedTuple):
+    """One entry of a row's `Depends on`: the change it names and the phase it gates,
+    None where the entry gives none; both None for an entry that is not a change
+    name with an optional (phase)."""
+
+    entry: str
+    name: str | None
+    phase: str | None
+
+
 class Row(NamedTuple):
     line: int
     name: str
@@ -57,6 +66,16 @@ class Row(NamedTuple):
     status: str
     depends_on: str | None
     notes: str = ""
+
+    @property
+    def dependencies(self) -> tuple[Dependency, ...]:
+        """Each entry of the row's `Depends on`, in order; none where it is absent or `—`."""
+        if self.depends_on in (None, "—"):
+            return ()
+        return tuple(Dependency(entry, match["name"], match["phase"]) if match
+                     else Dependency(entry, None, None)
+                     for entry in (part.strip() for part in self.depends_on.split(","))
+                     for match in (_DEPENDENCY.match(entry),))
 
 
 def _cells(line: str) -> list[str]:
@@ -97,7 +116,7 @@ def _rows(lines: Sequence[str]) -> tuple[list[Row], list[str]]:
     return rows, problems
 
 
-def index_rows(root: Path = ROOT) -> list[Row]:
+def index_rows(root: Path) -> list[Row]:
     """Every change row of the index, as the check reads it; malformed rows are left out."""
     index = root / INDEX
     return _rows(index.read_text("utf-8").splitlines() if index.is_file() else [])[0]
@@ -128,24 +147,21 @@ def _check_dependencies(rows: Sequence[Row]) -> list[str]:
     status = {row.name: row.status for row in rows}
     problems = []
     for row in rows:
-        if row.depends_on in (None, "—"):
-            continue
-        for entry in (part.strip() for part in row.depends_on.split(",")):
-            where = f"{INDEX}:{row.line}: {row.name} depends on {entry}"
-            match = _DEPENDENCY.match(entry)
-            if match is None:
+        for dependency in row.dependencies:
+            where = f"{INDEX}:{row.line}: {row.name} depends on {dependency.entry}"
+            if dependency.name is None:
                 problems.append(f"{where}: not a change name with an optional (phase)")
-            elif match.group("phase") is not None and match.group("phase") not in PHASES:
-                problems.append(f"{where}: {match.group('phase')!r} is not a phase")
-            elif match.group("name") not in status:
+            elif dependency.phase is not None and dependency.phase not in PHASES:
+                problems.append(f"{where}: {dependency.phase!r} is not a phase")
+            elif dependency.name not in status:
                 problems.append(f"{where}: the index lists no such change")
-            elif status[match.group("name")] == "archived":
+            elif status[dependency.name] == "archived":
                 problems.append(
                     f"{where}: that change is archived, so archive cleanup releases it")
     return problems
 
 
-def check(root: Path = ROOT) -> list[str]:
+def check(root: Path) -> list[str]:
     """Every problem in the index, each naming its line."""
     lines = (root / INDEX).read_text("utf-8").splitlines()
     rows, problems = _rows(lines)
@@ -168,7 +184,12 @@ def check(root: Path = ROOT) -> list[str]:
     return problems
 
 
-def main(root: Path = ROOT) -> int:
+def main(root: Path | None = None) -> int:
+    try:
+        root = repository_root() if root is None else root
+    except StepError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
     problems = check(root)
     for problem in problems:
         print(f"ERROR: {problem}", file=sys.stderr)

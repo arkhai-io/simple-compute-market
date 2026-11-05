@@ -22,11 +22,11 @@ and a pattern cannot tell the two apart; the tombstone convention stays a
 judgement-call check.
 
 One line is exempt from the first scan: the definition of `TASKS_FILE` in
-`scripts/change_next_step.py`, which reads a change's task list and so must name
-the file once. Any other mention in that script is still caught. This script and
-its test are scanned like any other file, so neither spells out what the first
-scan looks for: the pattern is written as a pattern, and the test builds its
-samples at run time.
+`scripts/change_workflow/next_step.py`, which reads a change's task list and so
+must name the file once. Any other mention in that module is still caught. This
+script and its test are scanned like any other file, so neither spells out what
+the first scan looks for: the pattern is written as a pattern, and the test
+builds its samples at run time.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ HISTORY_SUFFIXES = (".py", ".yml", ".yaml")
 HISTORY_EXCLUDED_DIRS = frozenset(
     {"openspec", ".git", "__pycache__", ".venv", ".dist", "node_modules", "build"})
 #: The one exempt line: the file name's definition in the script that reads it.
-EXEMPT = ("scripts/change_next_step.py", re.compile(r'^TASKS_FILE = "[^"]*"$'))
+EXEMPT = ("scripts/change_workflow/next_step.py", re.compile(r'^TASKS_FILE = "[^"]*"$'))
 
 NAME_SUFFIXES = (".py", ".toml", ".yml", ".yaml")
 NAME_EXCLUDED_DIRS = HISTORY_EXCLUDED_DIRS | {"docs", ".claude"}

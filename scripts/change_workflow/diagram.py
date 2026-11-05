@@ -1,6 +1,7 @@
 """The change-workflow architecture's diagram of the graph, held to the table.
 
-The architecture shows `change-workflow-graph.svg`, laid out by hand in draw.io and
+The architecture shows `change-workflow-graph.svg`, from the capability's
+`diagrams/` directory, laid out by hand in draw.io and
 exported with its source embedded, so it also opens in draw.io; the source,
 `change-workflow-graph.drawio` beside it, is what is held to the table: each box by
 its id with the lines of its text, and each edge by its source, target, and label,
@@ -10,9 +11,9 @@ by hand: draw.io draws its visible part from the source it embeds, and a test ho
 that copy equal to the source, so an export not redone after the source changed is
 caught there.
 
-`make change-graph` reports where the source departs from the table (`drift`), which
-is what whoever redraws it after a change to the table needs. See
-openspec/specs/change-workflow/architecture.md, "Routing is code, with the model as
+`scripts/change-workflow check graph` reports where the source departs from the table
+(`drift`), which is what whoever redraws it after a change to the table needs. See
+openspec/specs/change-workflow/README.md, "Routing is code, with the model as
 backstop".
 """
 
@@ -25,10 +26,10 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Sequence
 
-from change_workflow import graph
-from change_workflow.common import ROOT
+from . import graph
+from .common import StepError, repository_root
 
-DIAGRAMS = Path("docs/development/diagrams")
+DIAGRAMS = Path("openspec/specs/change-workflow/diagrams")
 SOURCE = DIAGRAMS / "change-workflow-graph.drawio"
 EXPORT = DIAGRAMS / "change-workflow-graph.svg"
 # The legend of guards, which an edge names by number, `G6` or `G7 · G8`.
@@ -83,16 +84,29 @@ def drift(source: str, table: Sequence[graph.Declaration] = graph.TABLE) -> list
     return problems
 
 
-def main(source: Path = ROOT / SOURCE,
-         table: Sequence[graph.Declaration] = graph.TABLE) -> int:
-    problems = drift(source.read_text("utf-8"), table)
-    shown = source.relative_to(ROOT) if source.is_relative_to(ROOT) else source
+def main(source: Path | None = None,
+         table: Sequence[graph.Declaration] = graph.TABLE, root: Path | None = None) -> int:
+    """Report whether the diagram at `source`, the repository's own by default, draws
+    `table`."""
+    try:
+        root = repository_root() if root is None else root
+    except StepError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    source = root / SOURCE if source is None else source
+    shown = source.relative_to(root) if source.is_relative_to(root) else source
+    try:
+        text = source.read_text("utf-8")
+    except OSError as exc:
+        print(f"ERROR: cannot read the graph's diagram {shown}: {exc.strerror}", file=sys.stderr)
+        return 1
+    problems = drift(text, table)
     if not problems:
         print(f"{shown} draws the table.")
         return 0
     print(f"{shown} departs from the table; redraw it, and export its SVG from it "
-          "with the source embedded:")
-    print("".join(f"- {problem}\n" for problem in problems), end="")
+          "with the source embedded:", file=sys.stderr)
+    print("".join(f"- {problem}\n" for problem in problems), end="", file=sys.stderr)
     return 1
 
 
