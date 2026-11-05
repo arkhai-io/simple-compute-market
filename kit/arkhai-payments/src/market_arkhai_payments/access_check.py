@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -133,6 +133,31 @@ def check_payments_access(
     )
 
 
+def check_configured_payments_access(
+    read_section: Callable[[], ArkhaiPaymentsConfig | Mapping[str, Any] | None],
+    account: str,
+    *,
+    environment: Mapping[str, str] | None = None,
+    transport: httpx.BaseTransport | None = None,
+) -> PaymentsAccessOutcome:
+    """Check a role's payments access from its own configuration.
+
+    ``read_section`` reads the role's ``[Settlement.arkhai_payments]`` section
+    from the configuration the role serves with. A ``ValueError`` it raises is a
+    configuration the role cannot read, reported as the ``configuration`` step
+    without its message, which may quote a value. The account is validated before
+    the configuration is read, so a ``ValueError`` this raises is always the
+    caller's malformed account.
+    """
+
+    account = AccountId.model_validate(account).root
+    try:
+        section = read_section()
+    except ValueError:
+        return _failed(account, None, "configuration", "the role's configuration cannot be read")
+    return check_payments_access(section, account, environment=environment, transport=transport)
+
+
 def _failed(account: str, service_url: str | None, step: AccessStep, detail: str, *,
             code: str | None = None) -> PaymentsAccessOutcome:
     return PaymentsAccessOutcome(outcome="failed", account=account, service_url=service_url,
@@ -148,4 +173,9 @@ def _locations(exc: ValidationError) -> str:
     )
 
 
-__all__ = ["AccessStep", "PaymentsAccessOutcome", "check_payments_access"]
+__all__ = [
+    "AccessStep",
+    "PaymentsAccessOutcome",
+    "check_configured_payments_access",
+    "check_payments_access",
+]

@@ -487,7 +487,7 @@ API-credit equivalents, new); `domains/vms/storefront/tests/integration/` (a new
 `test_servicing_unreachable_authority.py`, beside `test_servicing_composition.py`); the
 three storefronts' `pyproject.toml`; every lock `make lock` rewrites.
 
-- [ ] 3.1 `check-payments --account <id>` on `market-storefront`, `bare-metal-storefront`
+- [x] 3.1 `check-payments --account <id>` on `market-storefront`, `bare-metal-storefront`
   and `apicredits-storefront` (D12). Each loads the storefront's configuration exactly as
   its `serve` command does — the same files, chart-rendered layer, overlay and
   environment — takes its `[Settlement.arkhai_payments]` section, calls
@@ -498,7 +498,63 @@ three storefronts' `pyproject.toml`; every lock `make lock` rewrites.
   runner and an injected transport or a stubbed kit call: `ok` prints the outcome and
   exits 0; a configuration without the section, an unset key variable, and a transport
   failure each print their step and exit 1; no output contains the key.
-- [ ] 3.2 The unreachable-authority proof (D2). Application integration in the VM
+  Done. Every case below passes. As built, differing from the plan:
+  - The three commands share one kit call, `check_configured_payments_access(read_section,
+    account)`, added to `access_check.py`. It validates the account first, then calls the
+    command's section reader. A `ValueError` from the reader, meaning a configuration
+    the storefront cannot read, becomes a `configuration` outcome with fixed text. So a
+    `ValueError` escaping the call is always a malformed `--account`, which each command
+    turns into a usage error (exit 2).
+  - Each command module defines two factories, its seams under TESTING.md's
+    command-module convention. `payments_section()` reads the section from the
+    configuration `serve` reads: VM and API credits through `settlement_config_mapping()`,
+    which their settlement composition resolves, and bare metal through
+    `load_storefront_settings().settlement`. `payments_transport()` returns `None` in
+    production. VM and API credits import their config module inside the reader, because
+    their settings resolve on first import and must come after the root `--config` option.
+  - Versions: VM storefront 0.25.0 → 0.26.0, bare-metal storefront 0.25.0 → 0.26.0,
+    API-credit storefront 0.18.0 → 0.19.0, each against `dev`. VM pins the bare-metal
+    storefront exactly, so that pin moved to `==0.26.0`. VM and API credits raised the
+    kit bound to `>=0.6.0`; bare metal already pins `==0.6.0` (1.5). `make lock` rewrote
+    the three storefront locks and `e2e-tests`'.
+  - VM's dev group now declares `arkhai-kit-deal-lifecycle-client`, which its lifecycle
+    integration tests (3.2's among them) import.
+  Tests (the HTTP boundary mocked in every storefront case):
+  - VM, `tests/unit/cli/test_check_payments.py`, beside the other CLI unit tests rather
+    than at the plan's `tests/unit/test_cli_check_payments.py` (8 cases, unit). Both
+    factories are replaced: ok and exit 0 with the bearer request; no section; an
+    unreadable configuration (the reader raising); an unset key; a `ConnectError` naming
+    a certificate failure; a 403 refusal. Each failure exits 1 naming its step, and the
+    key appears in no output even when the exception and refusal carry it. A malformed
+    account exits 2 before any request. One case keeps the real `payments_section` and
+    sets `Settlement` on the storefront's loaded settings (`replaced_setting`): the
+    command reads the section from there and reaches the service.
+  - API credits, `tests/unit/test_cli_check_payments.py` (6 cases, unit), the same shape,
+    including the real section read, without the refusal and usage cases.
+  - Bare metal, `tests/test_check_payments_cli.py` (6 cases): the command in process over
+    real configuration files under a temporary `XDG_CONFIG_HOME`, with only
+    `payments_transport` replaced. It covers ok, no section, unset key, transport, and
+    a file the loader refuses. Its sixth case runs the command in a fresh interpreter
+    against a loopback port nothing listens on and requires the `transport` step, so the
+    client was built and connected: the storefront's `sqlite_client`, `runtime`, `server`
+    and `migrations` modules are never imported, and no database file appears.
+  - Kit, `tests/test_access_check.py`: three cases for the new call (an unreadable
+    configuration, with the key in the reader's message, is `configuration` without it;
+    the configured section is read and checked; a malformed account is refused before
+    the reader runs). Unit.
+  - Kit, `tests/test_access_check_tls.py` (1 case, a real-boundary test in the kit's flat
+    `tests/`, as all its tests are). This settles sections 1–2's follow-up. The real check
+    and client run against a real TLS listener on 127.0.0.1, which serves a certificate
+    the test issues at run time and no trust store holds. The handshake fails, no request
+    reaches the listener, and the outcome is `transport`. It shows that a real certificate
+    verification failure maps to the transport step. It has no trusted control run, and
+    it does not exercise `SSL_CERT_FILE`, which the client ignores for a loopback origin.
+    `cryptography` joined the kit's dev group for it.
+  What no test here exercises: the storefronts' configuration files as a container
+  mounts them for VM and API credits, whose settings load once per process. The lanes'
+  `check-payments` at setup (4.7) runs that in each real container. None of the
+  storefront "untrusted origin" cases runs a TLS handshake; only the kit's does.
+- [x] 3.2 The unreachable-authority proof (D2). Application integration in the VM
   storefront's suite: an Agreement pinned to the `.invalid` authority, the storefront
   configured with an identity-bound `[[DisputeCredential]]` for it whose variable resolves
   to a labelled development value, and servicing stepped: the deal's lifecycle view reads
@@ -507,7 +563,37 @@ three storefronts' `pyproject.toml`; every lock `make lock` rewrites.
   raises the DNS failure an `.invalid` origin produces, so the test needs no network. If
   the view reads otherwise, stop: D2 and the test-compatibility delta are revised
   together before section 4 (design.md D2).
-- [ ] 3.3 **Verification checkpoint.** Unit: the three CLI suites. Application
+  `tests/integration/test_servicing_unreachable_authority.py` (1 case): pass. The view
+  reads as D2 expects, so D2 and the delta stand. It runs over
+  `test_payment_settlement`'s harness, which gained optional `authority`, `disputes` and
+  `mediation_transport` arguments. The harness has the storefront's settle and lifecycle
+  routes in an in-process app, real SQLite and the real `VmDealLifecycle`, with the
+  payments service replaced at `PaymentsClient` by the kit's fake.
+  - Settle and the final read go through the typed clients. The read is the buyer's
+    `LifecycleClient.read`, the call `e2e_vm_payment_deal`'s stage 2 makes.
+  - Servicing is stepped by calling `VmDealLifecycle.cycle()` directly, the step the
+    `settlement-servicing` loop runs, not through the run-cycle route. So the test is
+    the in-process app plus a direct call into its lifecycle composition.
+  - It shows: both the respondent poll (`/respondent`) and the deal's watch (`/record`)
+    reach `dispute.invalid` and fail. The cycle completes. The deal list reads
+    `running`. The buyer's view reads `authority.state == "running"` with an `Unknown`
+    outcome ("mediation transport result is unknown").
+  - Correction to the task's wording: the respondent poll itself does raise.
+    `RespondentPoller.poll` lets the `MediationTransportError` escape, since
+    `MediationAdapter.respondent` does not catch it. `VmDealLifecycle.cycle` catches
+    it and logs "VM respondent discovery awaits recovery" at ERROR, every cycle, and
+    the next cycle retries. The test asserts that log line is the cycle's only error.
+    Nothing is marked for repair, because the poll fails before it reads any case.
+    What D2 relies on holds: servicing does not stop and the deal is not
+    `repair_required`.
+  - New production seam: `VmDealLifecycle(..., mediation_transport=None)` hands one
+    transport to every mediation client it builds (`deal_lifecycle.py`). It is an
+    alternative to writing into `lifecycle.clients` directly, which
+    `test_lifecycle_admin.py` and `test_lifecycle_ends.py` still do.
+  - The authority's values are the lane's pinned ones from
+    `tools/payments-lane-double/fixtures/dispute-authority.toml`, copied into the test
+    and labelled, since the storefront does not depend on the double.
+- [x] 3.3 **Verification checkpoint.** Unit: the three CLI suites. Application
   integration: `test_servicing_unreachable_authority.py`. Run `make test-storefront`,
   `make test-bare-metal`, `make test-apicredits`, then `make test`,
   `make check-packaging` (versions and locks) and `make check-comment-hygiene`.
@@ -516,6 +602,71 @@ three storefronts' `pyproject.toml`; every lock `make lock` rewrites.
   None is owed here.
   Owed by validation: `tests.yml`, jobs `test · test-storefront`, `test · test-bare-metal`
   and `test · test-apicredits` — each passes from the relocked environments.
+
+  Evidence, all local, after the fresh-context fixes:
+  - `make test-storefront`: unit 1213 passed, 1 skipped; integration 525 passed. These
+    include the 8 CLI cases and 3.2's case.
+  - `make test-bare-metal`: storefront 582 passed, with the 6 CLI cases. The domain,
+    IaC, buyer and adapter suites pass.
+  - `make test-apicredits`: storefront 254 passed, with the 6 CLI cases. The other
+    API-credit suites pass.
+  - `make -C kit test-arkhai-payments`: 195 passed, with the TLS case and the three
+    cases for the new call.
+  - `make test`: no failing suite. It ran before the second check's test-only fixes
+    (the real section-read cases, the subprocess's step assertion, docstrings), which
+    the three storefront gates above re-ran.
+  - `make check-packaging`: all eight checks OK after `make lock`.
+  - `make check-uv-version`: OK.
+  - `make check-change`: every check passes, comment hygiene included.
+
+  End-to-end confirmed: no `e2e-tests` marker exercises this section's behaviour yet.
+  Every VM lane already constructs `VmDealLifecycle`, now with `mediation_transport=None`,
+  so it shows only that the default is inert. Section 4's lane setup runs
+  `check-payments` in each payment storefront's container (4.7), and
+  `e2e_vm_payment_deal`'s stage 2 (`test_commit_replay_and_servicing_keep_the_same_hosted_deal`)
+  then exercises 3.2's behaviour against the lane's unanswerable authority.
+  Owed by validation, corrected to add the kit job, since this section changed the
+  kit's `access_check.py`, its tests and its lock:
+  - `tests.yml`, jobs `test · test-storefront`, `test · test-bare-metal` and
+    `test · test-apicredits`: each passes from the relocked environments.
+  - `tests.yml`, job `test · test-kits`: the payments kit suite passes, with
+    `test_access_check_tls.py` and the new `check_configured_payments_access` cases.
+
+  Fresh-context check. It found no layering, comment-hygiene or fixture-labelling
+  defect. Fixed:
+  - 3.2 could not show what it claimed about the respondent poll. It now asserts the
+    paths both reads reach and the one logged error. The poll does raise, as 3.2's
+    correction records.
+  - The command body was copied in three CLIs. It is now one kit call.
+  - The bare-metal suite was labelled "Unit" although it reads real files and starts a
+    subprocess; its docstring now says what it runs.
+  - 3.2's docstring cited the whole lane scenario; it now cites only the servicing part.
+  - VM's dev group was missing `arkhai-kit-deal-lifecycle-client`; it is declared now.
+  Declined:
+  - Moving the kit's TLS test into a `tests/integration/` directory. The kit's suite is
+    flat, and its tests import the shared `payment_terms` module by sibling path.
+  - Showing the bare-metal loader's refusal message in the outcome. Every `detail` is
+    fixed text by the kit's invariant, and the VM and API-credit loaders' messages
+    (TOML decode errors) may quote input. `serve` and `config` still report the reason.
+  A second check found these, all fixed: VM's and API credits' real section read was
+  untested (one case each now); the bare-metal subprocess case did not require the
+  `transport` step; two docstrings cited the untrusted-origin scenario without saying no
+  handshake runs; the TLS test's level label; and three overstatements in these notes.
+
+  Handoff to section 4:
+  - Run the check as `docker compose exec <storefront> <cli> check-payments --account
+    <seller account>`. It exits 0 on ok, 1 on a failed step, and 2 on a malformed
+    account. Its one line on stdout is the JSON outcome. The CLIs are
+    `market-storefront`, `bare-metal-storefront` and `apicredits-storefront`.
+  - The lane CA must reach the storefront through `SSL_CERT_FILE`. The client honours it
+    only for a non-loopback origin such as `https://payments-double:8443`.
+  - The VM lane's storefront logs "VM respondent discovery awaits recovery" at ERROR on
+    every servicing cycle while it holds the `.invalid` authority's credential. That is
+    expected, not a failure; `e2e-tests/README.md` (4.8) may say so.
+  - `e2e_vm_payment_deal`'s stage 2 reads `view.authority.state`, the payment view's
+    state. It reads `running` because the deal's dispute credential resolves (3.2). If
+    the VM lane's `[[DisputeCredential]]` variable is unset or empty, the view reads
+    `repair_required`.
 
 ## 4. Compose lane wiring
 

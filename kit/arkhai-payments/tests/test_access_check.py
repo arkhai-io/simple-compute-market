@@ -8,7 +8,11 @@ from typing import Any
 import httpx
 import pytest
 
-from market_arkhai_payments import ArkhaiPaymentsConfig, check_payments_access
+from market_arkhai_payments import (
+    ArkhaiPaymentsConfig,
+    check_configured_payments_access,
+    check_payments_access,
+)
 
 from payment_terms import PAYEE, SERVICE
 
@@ -123,6 +127,40 @@ def test_a_refusal_names_the_refused_step_and_the_services_code():
 def test_a_malformed_account_is_the_callers_error():
     with pytest.raises(ValueError):
         check_payments_access(ArkhaiPaymentsConfig(**section()), "seller", environment={})
+
+
+def test_a_configuration_the_role_cannot_read_is_a_configuration_outcome_without_its_message():
+    def unreadable():
+        raise ValueError(f"cannot parse api_key = {KEY!r}")
+
+    outcome = check_configured_payments_access(
+        unreadable, PAYEE, environment={KEY_ENV: KEY},
+        transport=httpx.MockTransport(lambda request: pytest.fail("no request expected")),
+    )
+    assert (outcome.outcome, outcome.step, outcome.service_url) == (
+        "failed", "configuration", None)
+    assert KEY not in outcome.json_line()
+
+
+def test_the_configured_check_reads_the_section_the_role_serves_with():
+    requests: list[httpx.Request] = []
+
+    def record(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"available": {}, "held": []})
+
+    outcome = check_configured_payments_access(
+        section, PAYEE, environment={KEY_ENV: KEY}, transport=httpx.MockTransport(record),
+    )
+    assert outcome.ok and [r.url.path for r in requests] == [f"/balances/{PAYEE}"]
+
+
+def test_the_configured_check_refuses_a_malformed_account_before_reading_configuration():
+    with pytest.raises(ValueError):
+        check_configured_payments_access(
+            lambda: pytest.fail("configuration read before the account"), "seller",
+            environment={},
+        )
 
 
 def _leaky_transport(request: httpx.Request) -> httpx.Response:

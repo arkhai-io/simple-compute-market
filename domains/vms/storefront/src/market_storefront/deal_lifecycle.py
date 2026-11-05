@@ -55,7 +55,10 @@ def instant(value: str) -> int:
 
 
 class VmDealLifecycle:
-    def __init__(self, db, signer, payments, disputes, *, clock=lambda: int(time.time()), fulfillment=None):
+    def __init__(
+        self, db, signer, payments, disputes, *, clock=lambda: int(time.time()), fulfillment=None,
+        mediation_transport=None,
+    ):
         self.db = db
         self.path = Path(db.db_path)
         self.signer = signer
@@ -63,6 +66,9 @@ class VmDealLifecycle:
         self.dispute_config = disputes.config
         self.clock = clock
         self.fulfillment = fulfillment
+        # The transport every mediation client sends through; None gives each
+        # client its own connection to the Agreement-pinned origin.
+        self.mediation_transport = mediation_transport
         self.evidence = SQLiteEvidenceStore(self.path)
         with transaction(self.path) as conn:
             create_watch_schema(conn)
@@ -155,6 +161,7 @@ class VmDealLifecycle:
                 raise ValueError("Agreement authority credential is missing")
             self.clients[key] = MediationClient(
                 authority, MediationCredential(authority.identity, credential.api_key_env),
+                transport=self.mediation_transport,
             )
         return self.clients[key]
 

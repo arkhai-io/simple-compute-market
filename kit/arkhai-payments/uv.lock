@@ -62,6 +62,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "cryptography" },
     { name = "datamodel-code-generator" },
     { name = "mypy" },
     { name = "pytest" },
@@ -81,6 +82,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "cryptography", specifier = ">=43" },
     { name = "datamodel-code-generator", specifier = "==0.83.0" },
     { name = "mypy", specifier = ">=1.15.0,<2.0.0" },
     { name = "pytest", specifier = ">=8.3.4,<9" },

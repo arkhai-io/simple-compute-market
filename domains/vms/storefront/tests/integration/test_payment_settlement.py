@@ -120,18 +120,22 @@ def _config(**overrides) -> ArkhaiPaymentsConfig:
     return ArkhaiPaymentsConfig(**values)
 
 
-def _option(*, deposit: bool) -> SettlementOption:
+def _option(*, deposit: bool, authority: dict | None = None) -> SettlementOption:
     params = {"payee_account": PAYEE, "window": "P7D", "deposit_agreement": deposit}
     body = {
         "price": {"asset": "USD/2", "rates": []},
         "settlement": {"schema": "arkhai.payments.v1", **(params or {})},
         "lifecycle": dispute_lifecycle(DISPUTE),
     }
-    body["lifecycle"]["adjudication"]["dispute"] = MediationContractFake().authority
+    body["lifecycle"]["adjudication"]["dispute"] = (
+        MediationContractFake().authority if authority is None else authority
+    )
     return SettlementOption(option_id=derive_settlement_option_id(**body), **body)
 
 
-async def _seed(db: SQLiteClient, stage: PaymentSellerStage, *, deposit: bool):
+async def _seed(
+    db: SQLiteClient, stage: PaymentSellerStage, *, deposit: bool, authority: dict | None = None,
+):
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     provision = make_vm_provision_terms(
         duration_seconds=3600, ssh_public_key="ssh-ed25519 test"
@@ -142,7 +146,7 @@ async def _seed(db: SQLiteClient, stage: PaymentSellerStage, *, deposit: bool):
         listing_hash="0" * 64,
         buyer=BUYER.identity.model_dump(mode="json"),
         seller=SELLER.identity.model_dump(mode="json"),
-        settlement=_option(deposit=deposit),
+        settlement=_option(deposit=deposit, authority=authority),
         settlement_params={"payer_account": PAYER},
         amount=100,
         asset="USD/2",
@@ -240,7 +244,13 @@ class Harness(SimpleNamespace):
         self.payments.serve(build_signed_receipt(signer=signer, mandate=mandate))
 
 
-async def _harness(tmp_path, *, deposit=False, actions=("emit_event",)):
+async def _harness(
+    tmp_path, *, deposit=False, actions=("emit_event",), authority=None, disputes=None,
+    mediation_transport=None,
+):
+    """``authority`` replaces the Agreement's dispute authority, ``disputes`` is
+    the storefront's dispute configuration document, and ``mediation_transport``
+    the network under every mediation client."""
     delivery = Delivery()
     domain = replace(
         build_vm_storefront_domain(),
@@ -250,9 +260,12 @@ async def _harness(tmp_path, *, deposit=False, actions=("emit_event",)):
     db = SQLiteClient(str(tmp_path / "storefront.db"), registry=registry)
     payments = FakePaymentsClient()
     stage = PaymentSellerStage(_config(), client_for_owner=payments)
-    data = await _seed(db, stage, deposit=deposit)
+    data = await _seed(db, stage, deposit=deposit, authority=authority)
     coordinator = VmPaymentsCoordinator(domain=domain, db=db, stage=stage)
-    lifecycle = VmDealLifecycle(db, SELLER, coordinator, RegistryDisputePolicy.from_document({}))
+    lifecycle = VmDealLifecycle(
+        db, SELLER, coordinator, RegistryDisputePolicy.from_document(disputes or {}),
+        mediation_transport=mediation_transport,
+    )
     coordinator.lifecycle = lifecycle
     lifecycle.end.physical = delivery
     _container.resolved_sqlite_client = db

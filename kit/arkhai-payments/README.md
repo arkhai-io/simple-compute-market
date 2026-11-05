@@ -147,6 +147,12 @@ line that never contains the key:
  "account": "00000000-0000-4000-8000-000000000012", "assets": ["USD/6"], "held": 0}
 ```
 
+A role's command runs it through `check_configured_payments_access(read_section,
+account)`, giving it the function that reads the section from the configuration
+the role serves with: a configuration that cannot be read at all is the
+`configuration` step too, its message withheld since it may quote a value. Each
+storefront CLI's `check-payments --account <id>` is this call.
+
 ## Seller servicing
 
 `PaymentSellerStage` requires the full trusted policy at construction, so an
