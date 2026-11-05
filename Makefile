@@ -16,6 +16,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: check-architecture check-architecture-layers check-architecture-scope check-architecture-dependencies check-architecture-kinds check-architecture-change architecture-report
 .PHONY: test-release-tooling test-deployment-packaging test-registry-client test-provisioning-adapter test-e2e-unit
 .PHONY: test-frp-grant-admission test-frp-grant-admission-frp test-frp-grant-admission-floor build-frp-grant-admission
+.PHONY: test-payments-lane-double build-payments-lane-double
 .PHONY: dist-arkhai-core-registry
 .PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits test-provisioning-iac-native
 .PHONY: dist-bare-metal-buyer
@@ -196,7 +197,7 @@ test-deployment-packaging: test-release-tooling ## Run release tooling plus Helm
 dist-clean: ## Remove .dist/ directory
 	rm -rf $(DIST_DIR)
 
-test: test-core test-kits test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-registry-client test-storefront test-provisioning-adapter test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-e2e-unit test-deployment-packaging test-frp-grant-admission ## Run every unit and integration suite; the docker-compose e2e scenarios and cluster `helm test` are separate
+test: test-core test-kits test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-registry-client test-storefront test-provisioning-adapter test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-e2e-unit test-deployment-packaging test-frp-grant-admission test-payments-lane-double ## Run every unit and integration suite; the docker-compose e2e scenarios and cluster `helm test` are separate
 
 test-core:
 	cd core && make test
@@ -239,6 +240,11 @@ test-frp-grant-admission-frp: ## Run the frps admission plugin against the real 
 
 test-frp-grant-admission-floor: ## Run the frps admission plugin's unit tests with its runtime dependencies at their declared floors
 	$(MAKE) -C tools/frp-grant-admission test-floor
+
+# The lanes' payments double under tools/: its committed TLS files, then its unit
+# and in-process library integration suite.
+test-payments-lane-double:
+	$(MAKE) -C tools/payments-lane-double test
 
 # The e2e project's unit tests; its scenarios need the docker-compose stack.
 test-e2e-unit:
@@ -453,10 +459,11 @@ e2e-bare-metal-dev-env: ## Print VAR=value lines for the bare-metal lane's `dock
 	@echo 'BARE_METAL_BUYER_IDENTITY_ENV_FILE=$(E2E_BARE_METAL_DIR)/buyer.identity.env'
 	@echo 'BARE_METAL_BUYER_CONFIG_FILE=$(E2E_BARE_METAL_DIR)/buyer.toml'
 
-build-dev: ## Build everything `build` does, the dev chain image, and the test image
+build-dev: ## Build everything `build` does, the dev chain image, the test image, and the payments double
 	$(MAKE) build
 	$(MAKE) build-dev-env
 	$(MAKE) build-test-image
+	$(MAKE) build-payments-lane-double
 
 # One end-to-end lane's images: the wheels, the dev chain with its baked state,
 # the test image (which installs `market` from the wheels, so no lane needs
@@ -471,13 +478,13 @@ build-e2e-base:
 	$(MAKE) build-test-image
 
 build-e2e-vm: build-e2e-base ## Build the VM end-to-end lane's images
-	$(MAKE) -j3 build-registry build-storefront build-provisioning
+	$(MAKE) -j4 build-registry build-storefront build-provisioning build-payments-lane-double
 
 build-e2e-bare-metal: build-e2e-base ## Build the bare-metal end-to-end lane's images
-	$(MAKE) -j3 build-registry build-provisioning build-bare-metal-storefront
+	$(MAKE) -j4 build-registry build-provisioning build-bare-metal-storefront build-payments-lane-double
 
 build-e2e-apicredits: build-e2e-base ## Build the API-credit end-to-end lane's images
-	$(MAKE) -j4 build-registry build-apicredits-service build-apicredits-storefront build-apicredits-sample-app
+	$(MAKE) -j5 build-registry build-apicredits-service build-apicredits-storefront build-apicredits-sample-app build-payments-lane-double
 
 # Seller-only build: the two runtime images a seller actually needs
 # (`arkhai:storefront`, `arkhai:compute-provisioning`) and just the wheels they
@@ -567,6 +574,14 @@ build-frp-grant-admission: ## Build the frps admission plugin's image
 
 build-test-image:
 	cd e2e-tests && make build IMAGE_SUFFIX=$(IMAGE_SUFFIX)
+
+# The lanes' payments double, built from the repository root so its Dockerfile can
+# copy the wheelhouse its lock resolves from. Lanes and the local release run it;
+# it is never pushed.
+build-payments-lane-double: ## Build the payments double's image
+	docker build --ulimit nofile=65536:65536 \
+		-f tools/payments-lane-double/Dockerfile \
+		-t arkhai:payments-lane-double$(IMAGE_SUFFIX) .
 
 #Init should complete all deployment times set up steps required prior to your standalone run statements
 #The less of these the better but sometimes you get things like helm repo add or terraform init that can't be avoided.

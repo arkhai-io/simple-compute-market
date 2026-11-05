@@ -230,7 +230,7 @@ double.pem, double.key.pem}`; `tests/`; the root `Makefile` (`test-payments-lane
 in `test`, `build-payments-lane-double`, and its place in `build-dev` and the three
 `build-e2e-*` targets); `.github/workflows/tests.yml`'s matrix.
 
-- [ ] 2.1 The project (D1). A wheel-building project at `tools/payments-lane-double`,
+- [x] 2.1 The project (D1). A wheel-building project at `tools/payments-lane-double`,
   import package `payments_lane_double`, depending on `arkhai-kit-arkhai-payments>=0.6.0`,
   `arkhai-kit-identity`, FastAPI and uvicorn, and `cryptography` for the generator, each
   declared in its `pyproject.toml`; internal distributions resolved from the repository
@@ -239,7 +239,17 @@ in `test`, `build-payments-lane-double`, and its place in `build-dev` and the th
   No package anywhere depends on it. The README states what the double is, what it mirrors,
   what it serves and claims (D8), its fixtures and their labels, the TLS generator and its
   check, and how lanes and the local release run it.
-- [ ] 2.2 Fixtures (D4, D8). `fixtures/accounts.toml` holds the buyer, seller and dispute
+  Done; `make check-packaging` passes on it (all eight checks). As built, differing
+  from the plan:
+  - `cryptography` sits in the `dev` group: only the generator and the tests import it.
+    The image still carries it, through the identity kit.
+  - `pydantic` and `starlette` are declared, since `app.py` imports both directly.
+  - `arkhai-kit-deal-lifecycle` and `httpx` are `dev` dependencies, for the tests.
+  - The Makefile's `build` builds the wheel into the project's own `dist/`, as
+    frp-grant-admission's does. Nothing consumes that wheel, because the image
+    installs the project editable (2.6). The project also has `reinit`, `init`,
+    `test-unit`, `check-tls` and `tls` targets.
+- [x] 2.2 Fixtures (D4, D8). `fixtures/accounts.toml` holds the buyer, seller and dispute
   authority accounts (UUIDs in the `AccountId` pattern), the buyer's and seller's bearer
   tokens, the buyer's seed balance in `USD/6`, the fee policy (250 bps), and the
   receipt-signing seed, distinct from `FakePaymentsClient`'s, each labelled. The dispute
@@ -252,7 +262,24 @@ in `test`, `build-payments-lane-double`, and its place in `build-dev` and the th
   one document lanes and the local release render into registry recommendations
   (sections 4, 5). Unit: the fixtures load, the authority's record key parses as an
   Ed25519 identity, and the authority account has no token.
-- [ ] 2.3 TLS (D3). `tls/generate.py` derives the CA and leaf Ed25519 keys from fixed
+  Unit, `tests/unit/test_fixtures.py` (four cases) and `tests/unit/test_authentication.py`
+  (nine cases, among them a whitespace token refused at load): pass. As built:
+  - Accounts are b1 (buyer), b2 (seller) and d1 (dispute authority), in the
+    `00000000-0000-4000-8000-0000000000xx` form D12's example uses. The buyer's
+    funding is `1000000000000` USD/6 minor units.
+  - The receipt seed is `0d` × 32. The fixture also states the identity it yields,
+    `receipt_identity`, so lanes can pin it without deriving it. The loader refuses a
+    file whose two disagree. The identity was derived once with
+    `uv run --project tools/payments-lane-double python -c` over `Ed25519Signer`, and
+    the fixture test re-derives it.
+  - The record key was made by generating a random Ed25519 key once, printing only
+    its public identity, and discarding the private half unrecorded. The file's
+    comment says so. No test can prove there is no private half; the test proves only
+    that the key parses as Ed25519.
+  - The authority file is a `DisputeEntry` (interface, origin, account, record_key,
+    params, advertisement), which the test validates. Its minimum dispute window is
+    0 seconds, so every lane's options meet it.
+- [x] 2.3 TLS (D3). `tls/generate.py` derives the CA and leaf Ed25519 keys from fixed
   seeds, writes the CA certificate (`lane-ca.pem`), the leaf certificate (`double.pem`,
   SANs `payments-double`, `localhost`, `127.0.0.1`) and the leaf key (`double.key.pem`),
   with fixed serials and validity ending 9999-12-31, and never writes the CA key. Commit
@@ -260,7 +287,16 @@ in `test`, `build-payments-lane-double`, and its place in `build-dev` and the th
   regenerates into a temporary directory and fails unless the bytes are identical.
   Unit: the leaf verifies under the CA, its SANs are exactly those three, and an
   `ssl.SSLContext` loaded with the CA accepts the leaf.
-- [ ] 2.4 The app (D8, D5). `app.py` serves, over the engine with wall-clock time injected
+  Unit, `tests/unit/test_tls.py` (six cases, run on `generate()`'s output): pass. The
+  output was committed by `make -C tools/payments-lane-double tls`, and `check-tls`
+  passes. "Accepts" is proven by a real TLS handshake over `ssl.MemoryBIO`, with no
+  socket, once for each of the three names. The client is
+  `ssl.create_default_context(cafile=lane-ca.pem)`, so Python 3.13's strict X.509
+  flags apply. A context with no trust anchors refuses the leaf. The seeds are `CA` ×
+  32 and `D0` × 32, the serials 1 and 2, and validity runs from 2026-01-01 to
+  9999-12-31 23:59:59. The CA is `pathlen:0` with critical basic constraints and key
+  usage; the leaf has server-auth EKU, SKI and AKI.
+- [x] 2.4 The app (D8, D5). `app.py` serves, over the engine with wall-clock time injected
   and one lock serialising requests:
   - `GET /health` → `{"status": "ok"}`;
   - bearer authentication through the account file: missing or unknown token → 401
@@ -285,7 +321,29 @@ in `test`, `build-payments-lane-double`, and its place in `build-dev` and the th
   startup from the fixture file. `__main__.py` serves HTTPS with uvicorn from the TLS and
   fixture paths `settings.py` reads, defaulting to the files built into the image (D3), on
   port 8443.
-- [ ] 2.5 The suite (D8; the delta's scenarios "An approval is retried after its mandate
+  Proven by 2.5's library integration suite and 2.2's authentication unit cases. As
+  built, differing from or adding to the plan:
+  - `PaymentsDouble` is a framework-free service over the engine, and `create_app`
+    binds thin FastAPI routes to it.
+  - The double keeps its own map of approved mandates by transaction. The engine
+    keeps mandates private, and both the repeat check and read authorization need
+    them. An unknown transaction is 404 `transaction_not_found`.
+  - Statuses the repository does not record for the service: 422 for
+    `unsupported_asset` and `fee_mismatch`, following the engine's 422
+    `invalid_mandate`, and 404 for `account_not_found`, as the kit's seller tests
+    use. `admission.py` and the README say so; nothing here proves the service
+    agrees.
+  - Several attachments on one approval: the engine takes one Agreement. The double
+    passes it the first attachment that does not hash to the deal, if there is one,
+    so `deal_mismatch` still comes after the funds check.
+  - A malformed path or `Idempotency-Key` is 400 `invalid_request`. An unmatched
+    route answers its own status with `invalid_request`, and an unexpected error is
+    500 `internal_error`, each in the `ApiError` body.
+  - The `Bearer` scheme name is matched case-insensitively (RFC 7235).
+  - Success statuses are all 200, since the kit's client accepts any 2xx.
+  - Settings come from `PAYMENTS_LANE_DOUBLE_{FIXTURES,TLS,HOST,PORT}`, defaulting to
+    `/opt/payments-lane-double/{fixtures,tls}`, `0.0.0.0` and 8443.
+- [x] 2.5 The suite (D8; the delta's scenarios "An approval is retried after its mandate
   expires" and "The double mirrors a refusal"). Library integration: the real
   `PaymentsClient` against the app through an in-process transport, with an injected
   clock:
@@ -302,7 +360,24 @@ in `test`, `build-payments-lane-double`, and its place in `build-dev` and the th
   - an account named only in a part's authorities may read the snapshot;
   - the dispute authority's account cannot authenticate.
   Unit: `admission.py`'s order. The suite claims nothing about rate parts or holds (D8).
-- [ ] 2.6 The image and the build graph (D1; `docs/development/BUILD_AND_PACKAGING.md`'s
+  Library integration, `tests/integration/test_double.py` (19 cases), and unit,
+  `tests/unit/test_admission.py` (six cases): pass. The integration cases drive the
+  kit's real `PaymentsClient` against the app over an `httpx.MockTransport` that
+  forwards to FastAPI's `TestClient`, at a loopback HTTPS origin so no ambient proxy
+  is mounted. The directory is the committed fixture plus two suite-only accounts
+  with tokens, a stranger and an authority-named watcher; the committed fixture
+  holds no account that could play either role. The suite reads no snapshot of a
+  rate part and submits no event but `reverse`. Exceptions to `TESTING.md`'s "no raw
+  calls" rule, each commented:
+  - the mandate route, which the kit's client has no call for, read for both the
+    403 and the watcher's 200;
+  - three rejection paths the client cannot build: no token, a malformed body, and
+    an approval attaching another Agreement.
+  The rejection paths read the error code through the published `ApiError` model as
+  well as the status, because the code is what the double mirrors.
+  `deal_mismatch` is proven twice: through the client's `attach_agreement`, and on an
+  approval, where it is shown to follow the funds check.
+- [x] 2.6 The image and the build graph (D1; `docs/development/BUILD_AND_PACKAGING.md`'s
   image rules). A `Dockerfile` installing the committed lock from the repository
   wheelhouse, copying `fixtures/` and `tls/` to the fixed path `settings.py` defaults to,
   running `python -m payments_lane_double`, with a healthcheck on `/health` over HTTPS
@@ -312,13 +387,89 @@ in `test`, `build-payments-lane-double`, and its place in `build-dev` and the th
   `test-payments-lane-double` running the project's `make test`, added to the root `test`
   target and to `.github/workflows/tests.yml`'s matrix. Verify the image builds and that
   `docker run` of it answers `/health` over HTTPS with the lane CA.
-- [ ] 2.7 **Verification checkpoint.** Library integration and unit: the double's suite
+  `make build-payments-lane-double` builds the image. The `docker run` check of
+  `/health` is unrun: the implement step's rules allow `make build-*` but not
+  `docker run`. It is left to validation, whose rules allow `docker`; section 4's
+  lanes then start the container and wait on its healthcheck. As built, differing
+  from the plan:
+  - The image installs the project editable at `/repo/tools/payments-lane-double`,
+    from its source, and the runtime stage copies `src/` to the same path. The
+    project's wheel is not in the wheelhouse, so the documented `install-wheel` step
+    cannot find it. `BUILD_AND_PACKAGING.md` documents a kept editable install only
+    for a project one level deep (`e2e-tests`). Closeout's promotion should record
+    this two-level variant there.
+  - The healthcheck is `curl --cacert lane-ca.pem https://localhost:8443/health`.
+  - Because `build-dev` now builds the image, `payments-lane-double` is in
+    `scripts/change_namespace.py`'s `BUILT_IMAGES`, so validation teardown removes
+    it. `build-payments-lane-double` has its row in
+    `scripts/tests/test_change_build_and_helm_targets.py`'s root image targets. The
+    image carries no commit tag and is never pushed.
+- [x] 2.7 **Verification checkpoint.** Library integration and unit: the double's suite
   (`make test-payments-lane-double`, including `check-tls`). The image builds with
   `make build-payments-lane-double`. Run `make test`, `make check-packaging` (a new
   project, lock and image install) and `make check-comment-hygiene`.
   End-to-end: none — no lane runs the double until section 4. None is owed here.
   Owed by validation: `tests.yml`, job `test · test-payments-lane-double` — the job
   exists in the matrix and passes, `check-tls` included.
+
+  Evidence, all local:
+  - `make test-payments-lane-double`: `check-tls` passes, and 44 tests pass (25 unit,
+    19 library integration).
+  - `make build-payments-lane-double`: the image builds. `docker run` against
+    `/health` is unrun (2.6).
+  - `make test`: exit 0. It ran before the review fixes (a token check, a
+    case-insensitive scheme, dependency declarations, comments and test labels).
+    Those touch only the double's project, which the gate above re-ran after them,
+    with its relock.
+  - `make test-release-tooling`: 2177 passed. It includes the tests.yml-matrix check
+    against `make test` and the build-target tests.
+  - `make check-packaging`: all eight checks OK after the relock.
+  - `make check-change`: everything passes, comment hygiene included. Section 1's
+    three citations of this section's files now resolve.
+
+  End-to-end confirmed: none. No `e2e-tests` marker runs the double until section 4
+  wires the lanes. Owed by validation, confirmed: `tests.yml`, job
+  `test · test-payments-lane-double`, which must exist in the matrix and pass with
+  `check-tls`.
+
+  Fresh-context check: the reviewer found no layering, documentation-placement or
+  public-content defects. Fixed:
+  - `pydantic` and `starlette` are now declared, and `cryptography` moved to `dev`;
+  - the generator's and README's claim about who can issue under the lane CA is
+    corrected (its seed is public, so anyone can);
+  - test values are labelled, and an overstated test name is renamed;
+  - the raw mandate read's comment no longer describes a plan;
+  - whitespace tokens are refused at load, and the `Bearer` scheme is matched
+    case-insensitively.
+
+  Declined:
+  - Moving the suite's helpers out of `tests/conftest.py`. `from conftest import`
+    works under pytest's default import mode, as the kit's `payment_terms` import
+    does.
+
+  Recorded here rather than changed:
+  - the raw-call exceptions and the code read on rejection paths (2.5);
+  - the inferred statuses (2.4);
+  - the editable image install (2.6).
+
+  Handoff to sections 3–5:
+  - Lane values: the receipt identity is `receipt_identity` in
+    `fixtures/accounts.toml`. The seller's account and token are `accounts.seller`,
+    the buyer's `accounts.buyer`, and the lane CA is `tls/lane-ca.pem`. The service
+    is `https://payments-double:8443`. The registry recommendation is
+    `fixtures/dispute-authority.toml` as a `DisputeEntry` document, to render as
+    JSON into `REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES`.
+  - Section 1's follow-up stays open: no test yet shows the kit's `transport` step
+    from a real TLS handshake with an untrusted certificate. Section 2's handshake
+    cases are at `ssl` level only. Section 3's CLI tests are the cheaper place, or
+    section 4's lane setup shows it against the running double.
+  - The kit's `PaymentsClient` has no call for `GET /transactions/{id}/mandate`. A
+    `get_mandate` would remove the suite's one happy-path raw call. Left out
+    deliberately: no consumer reads the route, and the kit is not this section's.
+  - Running a generator or a Python one-liner needs owner permission in the
+    implement step. This run was granted the generator and
+    `uv run --project tools/payments-lane-double python -c *`. Sections 4 and 5
+    should read the fixtures with tools the step allows, or ask for the same.
 
 ## 3. Storefront `check-payments` and the VM storefront's unreachable authority
 
