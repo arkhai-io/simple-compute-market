@@ -218,7 +218,15 @@ membership".
   included, and each apply reports it as registered and not named: in the
   startup log, and in the import response's `not_named`. Hosts are never
   deleted. To stop a host, state `enabled: false` in the document or through the
-  API. Disabling a host does not stop its capacity declarations selling.
+  API. Disabling a host keeps new deliveries off it: a capacity declaration
+  naming it, in a backed pool whose provider needs a host, is neither reserved
+  against nor scheduled onto, and is projected not enabled, so storefronts close
+  its listings. Work already placed on the host keeps it: its create waits until
+  the host is enabled, and teardown runs. Enabling the host reopens those
+  listings under their original identities. The capacity listing
+  (`GET /api/v1/capacity/resources`) still reports each declaration's own
+  `enabled`. A declaration naming a host that is not registered is treated the
+  same way, so register a host before declaring its capacity.
 - **The document names a key; it never carries one.** `key_path` is a file on
   the service's filesystem — under Helm a Secret volume you mount, under Compose
   the key file the stack mounts. An entry naming no `key_path` keeps the stored

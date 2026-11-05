@@ -23,8 +23,9 @@ enabled, so its listing is published.
 
 The projection does not help a storefront avoid any of these: it is built from
 capacity declarations alone, and a declaration naming a disabled or unregistered
-host projects enabled
-(`openspec/specs/site-capacity/spec.md#requirement-the-resource-pool-projection-is-built-from-capacity-declarations`).
+host projects enabled (site-capacity's requirement "The resource-pool projection
+is built from capacity declarations", which this change replaces with
+`openspec/specs/site-capacity/spec.md#requirement-the-resource-pool-projection-is-built-from-capacity-declarations-and-offers-only-a-usable-host`).
 
 Those rules separate authorities. They do not require that a listing whose
 delivery has no usable host be sold or published: such a listing is the same as a

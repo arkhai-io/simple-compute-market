@@ -383,6 +383,32 @@ deliverable set in its pool-context session and overwriting `enabled` on each
 declaration before building views. It calls the rule from two places and reads
 hosts in a session apart from the declarations, for no gain.
 
+### 21 F1. The ledger's decisions begin their SQLite transaction before they read
+
+Probe, reserve, `resize_reservation`, the own-session `assign_settlement_resource`,
+and `list_offered_resources` begin `BEGIN IMMEDIATE` on SQLite, through a
+module-private helper in `ledger.py`, after `_expire_stale_holds` (which commits what
+it lapses) and before any read the decision rests on. The helper skips a connection
+already in a transaction, which has written and so holds the writer slot.
+
+*Rationale.* D2's guarantee, that no disable can commit between the read and the
+decision, assumed the Context's "One database" bullet: that admission runs in a write
+transaction a host write cannot interleave with. It does not by itself. The
+production engine is file-backed, one connection per session, and the SQLite driver
+begins a transaction only at the first write, while `HostAuthority`'s writes go
+through their own session without the ledger's lock; so the report could be read,
+and a disable commit, before admission's first write. The scheduler's unit of work
+already issued `BEGIN IMMEDIATE`. The helper is a private copy of `kit/fulfillment`'s,
+which `kit/site` may not import. Read paths take the writer slot too, because
+`_expire_stale_holds` can write in them; a projection read then waits behind another
+writer, within the 30-second busy timeout.
+
+*Evidence.* Library integration on a file-backed database: a report that tries a
+write from another connection at each read finds it locked on all five paths, and
+again after a lapsed hold's commit, and a write proceeds once a decision ends; each
+test failed with the helper disabled, or with reserve's helper moved ahead of the
+lapse.
+
 ### 21 F2. The offered read judges a pool by its deliverable modes, not its backing
 
 The offered read applies the usable-host rule to a declaration only where its
