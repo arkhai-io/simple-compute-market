@@ -7,10 +7,11 @@ registered host, like the VM list, and reports its boot identity, uptime, kernel
 count of running guests, and for `libvirtd.service`, `frpc-buyers.service` and an
 optional caller-named management unit, the unit's active state, invocation ID, main PID,
 restart count, active-enter time and result. A caller-named unit MUST match systemd's
-unit-name syntax or be refused before any job is queued. The operator client MUST
-return the result as a typed value parsed from the succeeded job and MUST refuse a
-malformed fact. In the mock profile the action MUST answer with default output rendered
-from the job's parameters.
+unit-name syntax or be refused before any job is queued. The operator client MUST submit
+the action as it submits every operator action, returning the job's submission, and
+MUST offer a typed parse of a succeeded job's result that refuses a malformed fact,
+naming the field; the client MUST NOT wait on the job. In the mock profile the action
+MUST answer with default output rendered from the job's parameters.
 
 #### Scenario: Diagnostics are read from a real host
 
@@ -22,6 +23,12 @@ from the job's parameters.
 
 - **WHEN** the request names a management unit that is not a systemd unit name
 - **THEN** it is refused and no job is queued
+
+#### Scenario: A diagnostics job reports a malformed fact
+
+- **WHEN** a succeeded diagnostics job's result lacks a reported field or carries one
+  of the wrong type
+- **THEN** the typed parse refuses it naming the field, and returns no partial result
 
 #### Scenario: A mock-profile host is diagnosed
 

@@ -26,7 +26,9 @@ scenario is a blocked skip.
   double from `add-mvp-payments-lane-double`.
 - **Shared post-settlement stages.** The canonical compute deal's stages from fulfillment
   onwards are keyed on the deal's settlement reference, so the Alkahest and
-  buyer-purchase sets share them.
+  buyer-purchase sets share them. A lease's ending is shared only among scenarios that
+  end the same way: the watchdog-expiry stages by the Alkahest set and the VM purchase,
+  while the bare-metal purchase runs its own buyer-teardown stage.
 - **External-topology qualification scenarios** extend those purchases against a
   configured real-provisioning target and payments target, adding only the real-host
   observations:
@@ -39,13 +41,17 @@ scenario is a blocked skip.
   - **Observation 6:** repeat registration and adoption across both hosts. The consumed-UID
     history is read through the existing working-data operator route.
 - **Correlation and payment checks.** Each stage logs the identifiers it reads. Each
+  observation's outcome is made only when every stage it requires passed, and unproven
+  when one it requires skipped. Grant admission is checked against the key recorded for
+  each lease. Each
   transaction is checked against its Agreement and receipt. The buyer's balance drop
   must equal the scenario's own debits, under a dedicated-account precondition.
 - **One listing per real resource** offers every mechanism the stack composes. Adoption
   requires the adopting module's own mechanism.
 - **A host diagnostics VM operator job** reports boot, kernel, running-guest count, and
   systemd facts for libvirtd, the buyer tunnel client and an optional management unit.
-  It is read through a typed `HostDiagnostics` result.
+  The operator client submits it like every operator action, and a typed
+  `HostDiagnostics` parse reads the succeeded job's result.
 - **Target configuration.** The VM host gains an optional `management_unit`. Each relay
   access gains an optional `admission_log`: a harness-local file of the admission
   plugin's documented log lines.

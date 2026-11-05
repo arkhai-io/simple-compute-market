@@ -188,9 +188,21 @@ clients; this is a preference, not a rule.
 - **The management unit:** passed as a job parameter checked against systemd unit-name
   syntax, from the target's optional `management_unit`. The management client is
   operator-owned, so this repository does not know its name.
-- **Interface:** the operator client offers `diagnose_host(host_id, management_unit=None)`
-  and a typed `HostDiagnostics` result parsed from a succeeded job, which refuses a
-  malformed fact, so no caller reads the raw fact.
+- **Interface (settled by review 17 F3):** a submission and a typed parse, as every
+  operator action is.
+  - `diagnose_host(host_id, management_unit=None)` on the operator client returns a
+    `JobSubmitResponse`, like `list_vms`, so the job ID stays visible for D8's logs.
+  - The caller waits on the job with `JobWatch.until_succeeded`, the harness's watcher
+    with its injected clock; the client gains no polling.
+  - `HostDiagnostics.from_job_result(result)`, in the operator client package, turns a
+    succeeded job's result into the typed facts, or raises a named error naming the
+    missing or malformed field. No caller reads the raw fact.
+  - Failures stay distinguishable: an unknown host or an invalid unit name is refused
+    at submission as the route's error; a failed or cancelled job is `JobWatch`'s
+    assertion, carrying the job's error and logs; a malformed fact is the parse's named
+    error.
+  - Rejected: a bounded submit-and-wait `diagnose_host`. It would be the only client
+    operation that waits, duplicate `JobWatch`, and hide the job ID.
 - **Pass criterion:**
   - the management unit keeps one invocation ID, stays active and adds no restarts
     across the before, during and after reads;
@@ -242,8 +254,8 @@ A paid GPU purchase scenario is an unowned roadmap gap, to be verified in a late
   named in the roadmap.
 - An unproven outcome caused by topology is recorded unproven, naming the missing input.
 
-Closeout requires every observation to be made, or failed or unproven with a named cause
-outside this change. The qualification roadmap row closes only if all four are made.
+Each observation's outcome is the per-observation one D8 defines. Closeout requires every
+observation to be made, or failed or unproven with a named cause outside this change. The qualification roadmap row closes only if all four are made.
 
 **The candidate.** It is the `HEAD` closeout will archive, after dev is merged in and the
 merge is validated. "Source" is any path that enters a wheel, an image, a chart or the
@@ -263,11 +275,25 @@ The scenarios assert, skip with a named prerequisite when topology is missing, a
 the identifiers each stage reads: buyer run, Agreement, transaction, reservation, jobs,
 relay port and grant.
 
-| Pytest result | Runbook outcome |
-|---|---|
-| A module passes | made |
-| A failing stage | failed |
-| A skipped stage naming a prerequisite | unproven |
+**Outcomes are per observation, not per module (review 17 F2).** Observations 4 and 5
+share a module, and a pytest run that passes with a skipped stage has not run every
+check its observation requires. The runbook's rule applies: neither outcome is inferred
+from another observation.
+
+- **Made:** every stage the observation requires passed.
+- **Failed:** a stage the observation requires failed.
+- **Unproven:** no required stage failed, and a stage the observation requires skipped
+  naming a prerequisite; the outcome names it.
+
+The conditional stages are required as follows:
+
+- the management-generation reads (`management_unit`) by observation 2;
+- the admission-log check (`admission_log`) by every observation that delivers a
+  relayed lease: 2, 4 and 5.
+
+So a run against a target naming no management unit records observation 2 unproven,
+naming `management_unit`, however its other stages ended. D7's closeout and D12's
+roadmap row use this per-observation outcome.
 
 The operator presents its findings to triage in prose, sanitized by the operator. Raw logs
 and records stay in the operator's restricted storage and never enter the repository.
@@ -284,12 +310,21 @@ The admission plugin's decision log is a documented contract
 `admission_log`: an absolute harness-local path, validated like the working-data key
 path, to a file of the plugin's log lines that the deployment keeps current.
 
-For each delivered lease, the scenario requires an `admit` line with:
+For each delivered lease, the scenario reads the relay's leases
+(`GET /api/v1/relays/{relay_id}/leases`) and finds that lease's record. It requires an
+`admit` line with:
 
 - `verified` true;
 - `jti` equal to the reservation;
-- `remote_port` equal to the leased port;
-- `kid` equal to the relay's active grant key from `get_relay`.
+- `remote_port` equal to the record's `remote_port`;
+- `kid` equal to the record's `grant_key_id`, the key that signed the lease's latest
+  grant.
+
+The relay's active key is not the comparison (review 17 F4): rotation keeps a retired
+key's grants valid on unreleased leases, so an admission before a rotation is correct
+under a key that is no longer active. A job retried across a rotation may leave an
+earlier `admit` under the old key; the lease's recorded key names the latest grant,
+which is the one the check finds.
 
 Without the field, that stage skips, naming it.
 
@@ -334,7 +369,8 @@ needs that first, so `add-mvp-payments-lane-double` owns it.
 
 - **The qualification row.** Goal 1's row on real provisioning not yet being qualified
   gains this change as owner, and narrows to name observations 1 and 3 as still owed
-  elsewhere. At closeout it closes only if observations 2, 4, 5 and 6 are made; otherwise
+  elsewhere. At closeout it closes only if observations 2, 4, 5 and 6 are each made, by
+  D8's per-observation outcome; otherwise
   its prose states each outcome and its owner.
 - **New unowned gaps:**
   - a paid purchase with checked GPU work for each GPU offer;
@@ -389,14 +425,31 @@ it with mediation, rate parts and controls, revising its own D1 and D7.
   with that change's ownership.
 - **A local base settled on Alkahest.** The extension would then not be minimal.
 
-### D15. Post-settlement stages are shared across both stage sets
+### D15. Post-settlement stages are shared across both stage sets, except the ending
 
-`Stage09b`, `09c`, `10a`, `10b`, `11a` and `11b` are keyed on the deal's settlement
-reference rather than `real_escrow_uid`: the Alkahest escrow, or the payments
-negotiation that `wait_for_settlement` already accepts. Each driver supplies its
-reference. So the Alkahest set and the buyer-purchase set run one definition from
-fulfillment onwards, and a compute scenario settling another way keeps only its own
-pre-settlement stages.
+`Stage09b` (settlement readiness), `09c` (the lease record) and `11b` (release, with
+capacity restored) are keyed on the deal's settlement reference rather than
+`real_escrow_uid`: the Alkahest escrow, or the payments negotiation that
+`wait_for_settlement` already accepts. Each driver supplies its reference. So the
+Alkahest set and the buyer-purchase set run one definition of each, and a compute
+scenario settling another way keeps only its own pre-settlement stages.
+
+How a lease ends is not shared across endings, because each ending's trigger and the
+states it asserts differ:
+
+- **Expiry:** `10a`, `10b` and `11a` back-date the lease, step one watchdog cycle to
+  `releasing` and `teardown_dispatch_pending`, and advance convergence to
+  `tearing_down`. They are keyed on the settlement reference too, and run by every
+  scenario whose lease ends by expiry: the Alkahest set and the VM buyer purchase.
+- **Buyer teardown:** the bare-metal buyer purchase runs its own stage, which runs
+  `market bare-metal teardown` and ends in the state `11b` starts from.
+
+Whether `11b`'s entry prerequisites fit unchanged after a buyer teardown is checked
+against the code in planning; the boundary is the one stated here.
+
+**Rejected:** sharing `10a` to `11a` across endings by changing only the reference
+field (review 17 F1). A buyer teardown is a different trigger, and the requirement
+forbids a shared stage whose body differs between lanes.
 
 ## Principles stated for promotion
 

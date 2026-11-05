@@ -10,10 +10,13 @@ fixtures and a per-domain driver. A lane MAY insert stages of its own; a stage w
 body differs between lanes is not shared.
 
 The stages from fulfillment onwards — convergence to active, settlement readiness, the
-lease record, lease expiry, teardown dispatch and teardown completion — MUST be keyed on
-the deal's settlement reference, which the driver supplies, rather than on an Alkahest
-escrow, so the buyer purchase settled through `arkhai.payments.v1` runs the same
-definitions.
+lease record, the lease's ending and teardown completion — MUST be keyed on the deal's
+settlement reference, which the driver supplies, rather than on an Alkahest escrow, so
+the buyer purchase settled through `arkhai.payments.v1` runs the same definitions. How a
+lease ends is not shared across endings: the lease-watchdog expiry and the teardown
+dispatch it starts are shared by every scenario whose lease ends by expiry, and a
+scenario whose lease ends another way, such as by the buyer's teardown, runs its own
+ending stage, which ends in the state teardown completion starts from.
 
 A shared stage MUST NOT depend on the mock profile. Holding a provisioning job before
 its result, releasing it, and evaluating a mock rule are mock gates: they are stages of
@@ -58,7 +61,10 @@ at the gate, and its gate-free part stays shared.
 - **WHEN** a compute buyer purchase settled through `arkhai.payments.v1` has dispatched
   its fulfillment
 - **THEN** it runs the shared stages from fulfillment onwards, keyed on its settlement
-  reference, and keeps its own stages before fulfillment
+  reference, and keeps its own stages before fulfillment; its lease's ending is the
+  shared expiry stages when the lease ends by expiry, as the VM purchase's does, and a
+  stage of its own when it ends by the buyer's teardown, as the bare-metal purchase's
+  does
 
 #### Scenario: A deal outside the canonical deal
 
@@ -165,12 +171,15 @@ never wait out the wall clock for a state it can step to.
 
 - **WHEN** a relayed lease is delivered and the target names the relay's admission log
 - **THEN** the module requires an `admit` line, verified, whose `jti` is the reservation,
-  whose remote port is the leased port and whose `kid` is the relay's active grant key
+  and whose remote port and `kid` are the remote port and grant key that the relay's
+  leases read records for that same lease, not the relay's active key
 
 #### Scenario: A topology input is absent
 
 - **WHEN** the target names no management unit or no admission log
-- **THEN** the stage that needs it skips naming the field, and every other stage runs
+- **THEN** the stage that needs it skips naming the field, every other stage runs, and
+  each observation that requires the skipped stage is recorded unproven naming the
+  field, even when its other stages pass
 
 #### Scenario: The refusal is observed
 
