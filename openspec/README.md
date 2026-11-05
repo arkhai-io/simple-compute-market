@@ -49,7 +49,7 @@ OpenSpec validates and synchronizes `spec.md` but ignores companion files and `i
 
 ### A capability organized by an index
 
-A capability may organize its documentation by an index of requirement ids. One that does keeps:
+A capability's documentation follows its specification: its documents take the organization its requirements have. A component's `README.md` is its most human-readable document, the one a reader new to the component starts from; the procedural index of its requirements is a separate `index.md`. A capability may organize its documentation by an index of requirement ids. One that does keeps:
 
 ```text
 openspec/specs/<capability>/
@@ -90,6 +90,8 @@ Every non-trivial `proposal.md` should identify permanent documentation impact:
 ```
 
 Every implementation-ready `tasks.md` should name the exact promotion work rather than using a generic "update docs" task.
+
+A change to the change workflow names, in its proposal, each public interface of the workflow's engine it changes — a subcommand, a flag, an output field, a skill or its argument form, a graph node or review kind, the record set's format, or a role an adopting repository provides — and whether each change is compatible, as [`change-workflow`'s compatibility requirement](specs/change-workflow/index.md) judges it (`CW-c2tw`); review checks it. The engine carries no version of its own until it is extracted, so the proposal is where an incompatible change is declared.
 
 ## Open questions and prescribed tasks
 

@@ -1,7 +1,9 @@
 # Design: specify the change workflow and its engine
 
 Status: design settled, revised by the triages of design reviews 18 (F1–F4) and
-25 (F1–F3), and of pre-closeout review 71 (F1, F2); ready for planning. The decisions below are the owner's, reached in
+25 (F1–F3), and of pre-closeout review 71 (F1, F2); implemented, closed out, and
+archived, each decision's permanent location in the design-promotion record at the
+end. The decisions below are the owner's, reached in
 the design discussion and those triages. The ledger (`interventions.jsonl`) records
 where the owner decided otherwise than the agent recommended.
 
@@ -200,6 +202,26 @@ engine unable to load outside this repository; leaving the scan to Git's pre-pus
 hook, which each checkout enables by hand, so a clone without it would push
 unchecked.
 
+Settled in implementation (sections 2 and 3): `start` reads which steps refuse an
+archived change from the graph — every node of a step carrying the `NOT_ARCHIVED`
+entry guard, archive cleanup's `ARCHIVED` refusing an active one — and runs the
+round-view check for the steps whose make targets had `round-view-closed`
+(implementation, triage, the merge, closeout, validation, archive cleanup), not
+design, planning, or orchestration. Where it differs from the targets it replaced:
+`--allow`, `--session`, and `--fresh` are refused without `--unattended`; sections
+are named by how many they expand to (`section 2`, `sections 1-3`); interactive
+sections are checked. `clone where <change>` shares `clone`'s parser, so a change
+named `where` cannot be cloned by name. The four importers reach the command through
+one repository helper, `scripts/workflow_command.py`, which runs it as a process and
+raises its refusal; `validate_parallel.py`'s tests wait for a clone's bootstrap by
+polling `clone where`'s report text, which is outside the promise, so a rewording
+would end the wait early. The root `Makefile` gives a fragment variable a
+repository value for one target by a target-specific assignment after the include
+(`validate: ARGUMENTS += …` for `HELM_ALL_SCENARIOS`). The post-compaction hook runs
+`cd "$CLAUDE_PROJECT_DIR" && scripts/change-workflow hook post-compaction` (38 F1), and
+the orchestrating skill runs a clone's command as `cd <clone> && scripts/change-workflow
+…`, since the command acts on its working directory's repository.
+
 Rejected: classifying only, which would make the surface eight script paths
 extraction breaks; fixing the defects and leaving the scripts in place, for the
 same reason.
@@ -235,6 +257,14 @@ Recorded:
    replaced by `sandbox-unattended-workflow-steps` and
    `add-workflow-harness-adapters`.
 8. `convert` is ported as a provisional subcommand (D11).
+
+Settled in implementation (section 1): `STEPS` and `KINDS` are declared in `graph`
+itself, since `common` cannot import `graph`, which imports it; the triage-outcome
+checks moved from `records` to `outcome` for the same cycle, and the computation's
+step-to-phase map is derived from the table too. The repository is `git rev-parse
+--show-toplevel` of the working directory, resolved once by `cli`; the step table, the
+outcome schema, and the diagram source are paths relative to it, so the engine's tests
+pass only when pytest runs inside a checkout, as every make target runs it.
 
 Rejected: fixing every behaviour-preserving structural defect, whose extent no
 reviewer could bound in advance.
@@ -284,6 +314,15 @@ clone (25 F2), tells four cases apart:
 
 so that neither a broken clone nor a misspelled name is taken for a change worked
 in place.
+
+Settled in implementation (section 2): the statuses that moved into the categories
+are `check tasks` exiting 1, not 2, for an unknown change; `push` exiting 1 for any
+failed `git push` rather than Git's status; and a backwards section range and
+`convert`'s qualifiers without `--next` exiting 2. A harness that cannot be started is
+a refusal naming it. Pre-closeout review 62 (62 F1) held the exit-1 rule on every
+path: each check's failures, `history`'s refusals, a stopped run's reason, an
+interactive session's status, and a failed push name their reason on standard error,
+OK lines staying on standard output.
 
 Rejected: everything reachable public, which would freeze plumbing and the
 fragment; only what a repository's files name, which would leave `record`,
@@ -348,6 +387,15 @@ of this format follows one; the next-step computation refuses a newer log as it
 refuses an unknown change, exit 1 with the reason on standard error; and `start
 orchestrate` opens no log, since the orchestrating session is no step. A mark that is
 no whole number is read as newer, never converted backwards.
+
+Also settled in section 4: `FORMAT` lives in `common`, since `find` cannot import
+`log`; the outcome schema's `$id` is `urn:change-workflow:change-outcome:format:2`,
+`outcome.load_schema` refuses a schema stating another format or none, and the copy
+given to Claude Code leaves the `$id` out, since it constrains nothing a step writes.
+`start` writes its opening line before the wrapper's own refusals, so an unattended
+start the wrapper refuses leaves the line: it marks the format, not a run, and moving
+it into the wrapper would add a line to every wrapper run's log for a run that never
+started either way.
 
 The step table is
 provisional and unversioned; the change index and the task list are public inputs
@@ -466,6 +514,20 @@ the destinations only with the trace in round 2 (18 F1), which would leave the
 change's largest authority boundary unreviewed until written; mapping every MUST
 clause here, which is the trace's first half written twice.
 
+Settled in implementation (sections 8 and 9): 136 requirements joined the nine the
+design wrote, in the outline's order; two of the design's were over 500 characters,
+so CW-5qne's exit statuses became CW-m7fk and CW-x7jd was tightened. The trace covers
+MAY, SHALL, and SHOULD clauses as well as MUST and drops nothing; the two scenarios
+the table names in neither column, "A plan owes a workflow that publishes" and "A
+dispatched run is cancelled", go with the CI dispatch to `market-change-workflow`,
+and the form of owed CI evidence is MCW-gvqb. MCW-7hr1's scenario names the real job,
+`test · test-deployment-packaging`. Declined: splitting CW-r9d2, CW-a6ow, and
+CW-3tvs, and MCW-7ts3 and MCW-8h0r, each two clauses of one subject. The 500-character
+limit is 1.14.1's, which the pinned validator does not apply, so each body was counted
+by hand. Review 49's triage (49 F2) moved the code's `Contract:` citations to the ids
+that hold their rules, since `make check-doc-citations` checks paths, not headings,
+and would not report a citation of a removed requirement's name.
+
 ### D11. No hard dependency on the changes editing `change-workflow`
 
 Neither this change nor `remove-workflow-log-conversion`,
@@ -477,6 +539,12 @@ Each of the three index rows' `Notes` says this change rewrites `change-workflow
 `shorten-long-requirements` leaves `change-workflow` out, since this change brings
 it and `market-change-workflow` under the length rule. Whichever change lands
 second designs against the other's result.
+
+Settled in implementation (section 8): the conversion's ids are CW-qj77, CW-h12x,
+CW-42me, CW-o1ca, CW-zniv, CW-ajcm, CW-95xp, and CW-v8mq, the converter's refusal of a
+newer log moved out of CW-x7jd into CW-h12x so removing `convert` touches no format
+requirement; the round view's are CW-aoby, CW-4svs, CW-9mrq, CW-78ul, CW-n44s,
+CW-uq5q, CW-gd24, CW-rgws, and CW-te38.
 
 Rejected: dependencies gating those changes' design, which would hold unrelated
 work behind this change; waiting for `remove-workflow-log-conversion`, whose
@@ -527,6 +595,18 @@ file now, which is the configuration file that change owns; extending the test t
 the engine's modules by category with AST scans (18 F4), heuristics the owner
 would rather the engine's tests not carry; gathering the engine's assumptions into
 one module of constants, a structural fix D5 leaves to that change.
+
+Settled in implementation (section 7): seventeen roles, each replaced by
+`add-workflow-capability-contract` but the make fragment's, which
+`extract-change-workflow-repository` replaces. The test reads only a skill's code —
+inline spans and fenced blocks — so prose names nothing; every rule of the step
+table; and the fragment's whole text with its own targets. A target keeps the
+directory `-C` names and a wildcard as the table grants it; a path is a word under a
+directory Git tracks at the root, or a root file but `README.md`. A path Git does not
+track (`.snapshot/…`) or outside the repository is not collected, and a provision no
+source names any longer is not reported, since D13 asks only that every named one is
+listed. The engine's report text names fragment targets (`make round-done`, `make
+change-clone`); they are listed in the fragment's provision, not as a role.
 
 ### D14. Implementation cadence
 
@@ -581,6 +661,17 @@ that resolves may still reach another requirement). The deltas clause lets
 closeout's promotion write `index.md` before the archive puts the requirement in
 `spec.md`.
 
+Settled in implementation (sections 5 and 10): the index declares its prefix on a
+`Prefix:` line, upper-case, without which nothing else in the capability is checked;
+an entry's first cell is the id's link; the retired ids are the items under `##
+Retired ids`, each beginning with the id. With a change named, its deltas count as
+the archive will leave them — ADDED and MODIFIED names and a rename's new name
+resolve in `spec.md`, a REMOVED requirement and a rename's old name do not — so this
+change's own closeout can index requirements whose old names carry no id. Ids are
+unlikely, not certain, to collide across branches; the check catches a collision.
+Closeout's part 9 also moves a renamed requirement's link and revises a modified
+one's summary, without which a rename would fail the check on its old anchor.
+
 `README.md` takes the companion's role in an indexed capability, so until every
 capability is converted the companion is `README.md` where `index.md` exists and
 `architecture.md` elsewhere; `AGENTS.md`, `openspec/README.md`,
@@ -618,3 +709,32 @@ organization or collide across branches.
 - **Shipping the make fragment.** At extraction the CLI prints the installed
   fragment's path for the root `Makefile`'s `include`; the subcommand is
   `extract-change-workflow-repository`'s.
+
+## Design promotion record
+
+`spec.md` rows name the requirements the archive merges from this change's deltas;
+every other location was written by hand at closeout.
+
+| Accepted decision | Permanent location |
+|---|---|
+| Principle: documentation follows the specification, and a component's `README.md` is its most human-readable document | `openspec/README.md#a-capability-organized-by-an-index` |
+| Principle: a diagram is held to code only when generated deterministically from a well-structured source | `AGENTS.md#diagrams` |
+| Principle: this repository is the workflow's first adopter | `openspec/specs/market-change-workflow/README.md#this-repository-is-the-workflows-first-adopter` |
+| Principle: the engine's promise is its command | `openspec/specs/change-workflow/spec.md` CW-r3ka, CW-h8vm; `openspec/specs/change-workflow/README.md#the-command-and-its-tiers` |
+| D1 One change | Change history; no permanent destination |
+| D2 One `change-workflow` capability, organized by its index | `openspec/specs/change-workflow/index.md`; `openspec/specs/change-workflow/README.md`, its parts following the index's; `openspec/specs/change-workflow/spec.md#purpose` |
+| D3 This repository's requirements in `market-change-workflow` | `openspec/specs/market-change-workflow/spec.md` (MCW ids, through the archive), its Purpose and Evidence; `openspec/specs/market-change-workflow/index.md`; `openspec/specs/market-change-workflow/README.md#validations-parts` and `#branches-models-and-the-clones-bootstrap`; `openspec/specs/README.md` |
+| D4 The engine consolidated behind one command, the make fragment, the pre-push check run as a command | `openspec/specs/change-workflow/spec.md` CW-r3ka, CW-h8vm, CW-p7kq, and Evidence; MCW-q8vd; `openspec/specs/change-workflow/README.md#its-parts` and `#the-command-and-its-tiers`; `docs/agents/change-workflow.md#the-engines-command`; the lesser goal's current state in `openspec/changes/README.md` |
+| D5 Fixes limited to what blocks the surface | Fixes: CW-9fbu (vocabulary from the graph), CW-r3ka (repository from the working directory), CW-w2ld (the `[orchestrator]` row); recorded defects: `openspec/specs/change-workflow/README.md#current-limits` (`scripts/` outside the architecture checks, hardcoded repository paths, the step table's provisional syntax) and `convert` as provisional in `#interfaces-are-tiered` |
+| D6 Interfaces tiered; repositories call only the command | CW-5qne, CW-m7fk; `openspec/specs/change-workflow/README.md#interfaces-are-tiered`; `docs/agents/change-workflow.md#the-engines-command` |
+| D7 The graph's vocabulary is public and closed | CW-9fbu; `openspec/specs/change-workflow/README.md#the-graphs-vocabulary-is-closed` and `#current-limits` |
+| D8 One format version for a change's record set | CW-x7jd, CW-k6qa, CW-lyr4, CW-qj77, CW-h12x; `openspec/specs/change-workflow/README.md#a-changes-records-carry-one-format-version`; a ledger with no log in `#current-limits` |
+| D9 Semantic versioning | CW-c2tw; `openspec/specs/change-workflow/README.md#compatibility-is-judged-by-semantic-versioning`; `openspec/README.md#change-documentation-requirements` |
+| D10 The specification rewritten against its outline | `openspec/specs/change-workflow/spec.md` (every CW requirement, through the archive; Purpose and Evidence by hand); `openspec/specs/change-workflow/index.md`; `trace.md` stays in this change as its history |
+| D11 No hard dependency on the changes editing `change-workflow` | Change history, and those changes' rows' `Notes` in `openspec/changes/README.md` |
+| D12 Four diagrams; only a generated diagram is held to code | `openspec/specs/change-workflow/diagrams/` (the graph, the engine's parts, a step run's life, where a change's state lives), embedded in `openspec/specs/change-workflow/README.md#its-parts`, `#a-step-runs-life`, `#where-a-changes-state-lives`, and `#routing-is-code-with-the-model-as-backstop`; CW-66kx; `AGENTS.md#diagrams` |
+| D13 The assumptions inventory, two-sided | CW-m4ps, MCW-5tgp; `openspec/specs/change-workflow/README.md#what-an-adopting-repository-provides`; `openspec/specs/market-change-workflow/README.md#how-this-repository-provides-the-workflows-roles`; held by `scripts/tests/test_change_workflow_assumptions.py` |
+| D14 Implementation cadence | Change history; no permanent destination |
+| D15 A capability's documentation organized by an index of requirement ids | `openspec/specs/planning-governance/spec.md` "Indexed capability documentation" (added) and "Permanent capability architecture companions" (modified), through the archive; `openspec/README.md#a-capability-organized-by-an-index`; `AGENTS.md#documentation-ownership`; `openspec/specs/README.md`; `openspec/config.yaml` |
+| Roadmap currency | No goal of `docs/development/ROADMAP.md` covers the workflow: no edit |
+| Campaign index currency | `openspec/changes/README.md`: this change's row; the lesser goal "Make the change workflow a tool any repository can adopt"'s current state; its gap "The engine is documented as this repository's contract" removed, closed by this change |

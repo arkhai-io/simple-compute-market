@@ -8,8 +8,12 @@ in [`openspec/README.md`](../../openspec/README.md); the status a change is in, 
 what it waits on, are in its row of the
 [change index](../../openspec/changes/README.md). The workflow's contract is the
 [`change-workflow` specification](../../openspec/specs/change-workflow/spec.md),
-and why it is shaped as it is, its
-[`README.md`](../../openspec/specs/change-workflow/README.md).
+organized by its [`index.md`](../../openspec/specs/change-workflow/index.md); how
+the workflow and its engine work, and why they are shaped as they are, its
+[`README.md`](../../openspec/specs/change-workflow/README.md). This repository's own
+part — its validation parts, its Helm validation namespace, and how it provides each
+role the workflow asks of a repository — is
+[`market-change-workflow`](../../openspec/specs/market-change-workflow/README.md).
 
 ## Skills
 
@@ -120,7 +124,7 @@ That order is a graph: one table in `scripts/change_workflow/graph.py` declares
 each step — a review by its kind, a triage by the kind of review it triages — its
 exits, the records a join waits for, the guards on each exit with the step that
 satisfies each, and the entry guards without which a step cannot do its work.
-The `change-workflow` architecture shows it as a diagram laid out by hand,
+The `change-workflow` `README.md` shows it as a diagram laid out by hand,
 `openspec/specs/change-workflow/diagrams/change-workflow-graph.drawio` and its SVG
 export, and a test fails when the source, or the copy of it the export embeds, draws a box or an
 edge the table does not, or misses one. A change to the table redraws the source in
@@ -129,7 +133,7 @@ or remove — and exports the SVG again with the source embedded; the SVG is nev
 edited by hand.
 `scripts/change-workflow next` routes on the exit the last step named, and on your
 latest direction, checking each against the table, as the `change-workflow`
-specification's "The next step is computed from the files" requires: an unmet
+specification's CW-4rqr, "The next step is computed from the files", requires: an unmet
 guard names the step that satisfies it, and an exit the table does not allow comes
 to you.
 
@@ -153,6 +157,49 @@ heading; the steps that act on a task list run it first.
 
 Ask the owner questions in prose, never through a multiple-choice selector
 (`AGENTS.md`, "Asking the owner").
+
+## The engine's command
+
+Everything the workflow's engine does is reached through one executable,
+`scripts/change-workflow`, whose package is `scripts/change_workflow/`; nothing in
+the repository imports the package. Its subcommands:
+
+```text
+scripts/change-workflow start <step> <change> [--unattended] [--allow …] [--sections …] [--session …] [--arguments …] [--fresh]
+scripts/change-workflow next | record | note | review | find | clone | clone-remove | clone where
+scripts/change-workflow resume | log | watch | denials | round-view | round-done | cost | history | push
+scripts/change-workflow check index | check tasks | check push | check skills | check round-view | check graph
+scripts/change-workflow hook post-compaction | convert
+```
+
+`start` opens a step: interactively by default, headless with `--unattended`. It
+refuses an archived change for design, planning, implementation, and the merge, and
+refuses while a round view is open; it opens the change's workflow log with a line
+carrying the log's format before any step runs. `start orchestrate <change>` opens
+the orchestrating session on the step table's `[orchestrator]` row. Every subcommand
+exits 0 on success, 1 on a refusal or a failed check with its reason on standard
+error, and 2 on a usage error. `find --json <change>` prints the change's `name`,
+`directory`, `archived`, `records`, and the record set's `format`; `clone where
+<change>` prints the change's clone, or nothing when it is worked in place, and
+refuses an unknown change or an unusable clone.
+
+The workflow's make targets — `make design`, `make review`, `make change-next`, and
+the rest — are a fragment of the package, `scripts/change_workflow/workflow.mk`,
+which the root `Makefile` includes after setting this repository's values
+(`CHANGE_WORKFLOW_MERGE_FROM` and `CHANGE_WORKFLOW_REVIEW_BASE`, both `dev`). Each
+target is a thin call of the command.
+
+Which of these another party may rely on is tiered in the `change-workflow`
+specification (CW-5qne) and its
+[`README.md`](../../openspec/specs/change-workflow/README.md): the subcommands, their
+flags, exit-status categories, and structured outputs, and the skills' names and
+argument forms, are public; `hook post-compaction` and `convert` are provisional;
+`check graph` and the unattended-run marker are internal; a report written for a
+person carries no promise; and the make targets and `CHANGE_WORKFLOW_*` variables
+are a convenience outside the surface, changed without a compatibility promise. A
+change to the workflow names, in its proposal, each public interface it changes and
+whether the change is compatible (`openspec/README.md`, "Change documentation
+requirements").
 
 ## Orchestrating a change
 

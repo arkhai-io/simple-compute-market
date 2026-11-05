@@ -46,7 +46,7 @@ problem through and writing the answer that fits it.
 
 - `docs/development/ARCHITECTURE.md` is the repository-wide architecture reference: system shape, dependency layers, authority boundaries, shared vocabulary, major flows, deployment topology, packaging rules, and testing philosophy.
 - `openspec/specs/<subsystem>/spec.md` contains authoritative current subsystem behavior, invariants, ownership, and lifecycle semantics.
-- `openspec/specs/<subsystem>/architecture.md` may contain durable current-state conceptual models, design motivation, trade-offs, relationships, and limitations. It does not replace normative requirements.
+- `openspec/specs/<subsystem>/architecture.md` may contain durable current-state conceptual models, design motivation, trade-offs, relationships, and limitations. It does not replace normative requirements. In a capability organized by an `index.md`, that companion is its `README.md`, the component's human-readable description with its diagrams, and it has no `architecture.md` (`openspec/README.md#a-capability-organized-by-an-index`).
 - `openspec/specs/README.md` is the canonical capability documentation index.
 - `docs/development/DEPLOYMENT_AND_CONFIG.md` holds configuration resolution and deployment conventions; `docs/operator-handbook.md` holds what an operator needs to run a deployment: document formats, procedures, and upgrade and recovery steps. Neither replaces a specification's normative requirements.
 - `openspec/changes/` contains proposed deltas, design exploration, migration notes, implementation tasks, and temporary compatibility concerns.
@@ -101,6 +101,17 @@ Avoid:
 ```
 
 A bare documentation pointer is not a substitute for a useful local explanation.
+
+## Diagrams
+
+A diagram is held to code only when it is generated deterministically from a
+well-structured source. Otherwise it is documentation, maintained by review like the
+prose around it: no check holds its boxes to the modules or files it draws, since
+nothing derives one from the other. A diagram drawing a structured source by hand,
+such as the change workflow's graph drawn from its graph table, may be compared with
+that source until a deterministic layout reads as well as the hand-laid one. Keep a
+diagram's `.drawio` source beside its `.svg` export, and embed the export in the
+document that explains it.
 
 ## Package and dependency discipline
 

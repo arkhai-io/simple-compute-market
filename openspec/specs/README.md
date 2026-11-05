@@ -16,7 +16,7 @@ An architecture companion does not replace a normative requirement. When explana
 |---|---|---|
 | API credits | [Spec](api-credits/spec.md) | [Architecture](api-credits/architecture.md) |
 | Buyer orchestration | [Spec](buyer-orchestration/spec.md) | [Architecture](buyer-orchestration/architecture.md) |
-| Change workflow | [Spec](change-workflow/spec.md) | [README](change-workflow/README.md) |
+| Change workflow | [Spec](change-workflow/spec.md) | [README](change-workflow/README.md), [index](change-workflow/index.md) |
 | CLI query language | [Spec](cli-query-language/spec.md) | [Architecture](cli-query-language/architecture.md) |
 | Compute provisioning contract | [Spec](compute-provisioning-contract/spec.md) | — |
 | Deal lifecycle | [Spec](deal-lifecycle/spec.md) | [Architecture](deal-lifecycle/architecture.md) |
@@ -24,6 +24,7 @@ An architecture companion does not replace a normative requirement. When explana
 | frp grant admission | [Spec](frp-grant-admission/spec.md) | [Architecture](frp-grant-admission/architecture.md) |
 | Fulfillment | [Spec](fulfillment/spec.md) | [Architecture](fulfillment/architecture.md) |
 | Introduction delivery | [Spec](introduction-delivery/spec.md) | [Architecture](introduction-delivery/architecture.md) |
+| Market change workflow | [Spec](market-change-workflow/spec.md) | [README](market-change-workflow/README.md), [index](market-change-workflow/index.md) |
 | Market composition | [Spec](market-composition/spec.md) | [Architecture](market-composition/architecture.md) |
 | Marketplace identity | [Spec](marketplace-identity/spec.md) | [Architecture](marketplace-identity/architecture.md) |
 | Negotiation protocol | [Spec](negotiation-protocol/spec.md) | [Architecture](negotiation-protocol/architecture.md) |
