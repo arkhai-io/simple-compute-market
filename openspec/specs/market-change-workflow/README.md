@@ -273,7 +273,7 @@ review.
 | The outcome schema, at a fixed path | `.agents/change-outcome.schema.json` |
 | The skills' one source, linked into each harness's directory | `.agents/skills`, under `.agents/`, linked from `.claude/` and `.codex/` |
 | The harness's local settings, which a clone links to the workspace's | `.claude/settings.local.json` |
-| The changes' directory, its archive, and each change's records under `reviews/` | `openspec/changes/`, each change at `openspec/changes/<change>/`, archived under `openspec/changes/archive/` as `openspec/changes/archive/<date>-<change>/`; the step table names `openspec/changes/**/reviews/*-validation.md`, `openspec/changes/archive/*/interventions.jsonl`, and `openspec/changes/archive/*/reviews/pull-request.md` |
+| The changes' directory, its archive, and each change's records under `reviews/` | `openspec/changes/`, each change at `openspec/changes/<change>/`, archived under `openspec/changes/archive/` as `openspec/changes/archive/<date>-<change>/`, beside the guidance reviews' untracked period ledger `openspec/changes/archive/guidance-reviews.jsonl`, which no reader of the archive takes for a change; the step table names `openspec/changes/**/reviews/*-validation.md`, `openspec/changes/archive/*/interventions.jsonl`, and `openspec/changes/archive/*/reviews/pull-request.md` |
 | The graph diagram's place in this capability | `openspec/specs/change-workflow/diagrams/`, the workflow's own specification being `openspec/specs/change-workflow/spec.md` |
 | The branch a new change's clone starts from, and the merge's default | `dev` |
 | The clone's bootstrap command, run as the clone is made | `make init` |

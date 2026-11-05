@@ -247,6 +247,9 @@ mise.local.toml
 
 # Review records written while an OpenSpec change is worked; never tracked.
 openspec/changes/**/reviews/
+# The guidance reviews' period ledger, beside the archived changes it measures in
+# the owner's workspace; never tracked.
+openspec/changes/archive/guidance-reviews.jsonl
 
 # Windows download metadata (an NTFS alternate data stream that some copy and
 # archive tools write out as a separate file). It records where a file was

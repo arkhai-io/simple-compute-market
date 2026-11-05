@@ -1077,7 +1077,7 @@ links under `.claude/skills/` and `.codex/skills/`, `.gitignore`, and, for the r
 test, `openspec/specs/market-change-workflow/README.md`, "How this repository provides
 the workflow's roles".
 
-- [ ] 8.1 Write `.agents/skills/guidance-review/SKILL.md`: run interactively by the
+- [x] 8.1 Write `.agents/skills/guidance-review/SKILL.md`: run interactively by the
   owner in their workspace, outside any change's steps; read every ledger, triage
   record and workflow log since the end of the last period in
   `openspec/changes/archive/guidance-reviews.jsonl`, or from a date the owner gives
@@ -1093,24 +1093,107 @@ the workflow's roles".
   change's records through `scripts/change-workflow find --records <change>`, as every
   skill does since the merge. Verify: the skill states each of D20's six steps and the
   period ledger's path and line fields.
-- [ ] 8.2 Link the skill from `.claude/skills/guidance-review` and
+  Done: steps 1–6 are D20's six, and a step 7 reports. It defines the default rule by
+  CW-d5ac and the guide, and Rule E as the name it was measured under. It refuses to
+  run unattended or in a clone (`git remote` lists `workspace`), whose archive is lost
+  with it. Its period is UTC timestamps, a record belonging to it after the start and
+  at or before the end, and a finding counted in the period of its first triage. It
+  reads each change's records through `scripts/change-workflow find --records`, and
+  through `scripts/change-workflow clone where` for a change still in its clone, and
+  every ledger entry added in the period, placed by its commit, design and planning
+  corrections included. `design.md`'s "Evidence" method is in steps 2–4: the
+  disposition labels and splits, the presented-text features and topics, Rule E's
+  baseline (2.7%, about 10% held out), the advancing exit and its revisits, the
+  classification audit, waivers by criterion and the merge's, the terms asked about,
+  the three clusters with copies counted once, and the held-out test for a proposed
+  rule. Only aggregates and principles reach the repository. A proposal is written in
+  a worktree from `origin/dev`, as `change-design` writes a prerequisite's. The ledger
+  line's fields: `start`, `end`, `changes`, `findings`, `default_acceptances`,
+  `revisits_before_fix`, `revisits_after_fix`, `advancing_revisits`, `audit_sample`,
+  `audit_disagreements`, `waivers` by criterion (`paths`, `environmental`, `commits`,
+  `design`, and `merge`), and `proposal`, a change's name or `"none"`; D20's fields,
+  with `changes`, `findings`, `advancing_revisits` and the merge's waivers beyond it.
+- [x] 8.2 Link the skill from `.claude/skills/guidance-review` and
   `.codex/skills/guidance-review`, and add `openspec/changes/archive/guidance-reviews.jsonl`
   to `.gitignore` (D20). Every step is denied edits under `.claude/`, so the
   `.claude/skills/guidance-review` link is the orchestrator's, made on the owner's word
   before this section's session starts; the session makes the `.codex/` link, checks
   both resolve, and commits them with the section. Verify: `make check-agent-skills` passes; `git check-ignore`
   reports the ledger path ignored.
-- [ ] 8.3 Keep the roles statement whole (`MCW-5tgp`): every make target and repository
+  Done: the `.gitignore` entry beside the review records' rule; `git check-ignore -v`
+  reports the ledger ignored by `.gitignore:252`. Both links were made by the
+  orchestrator on the owner's word, the session being unable to make the `.codex/`
+  one (the stop note below): `.claude/skills/guidance-review` and
+  `.codex/skills/guidance-review`, each `-> ../../.agents/skills/guidance-review`,
+  committed with the section. `make check-agent-skills` passes.
+- [x] 8.3 Keep the roles statement whole (`MCW-5tgp`): every make target and repository
   path the new skill names in code spans or fenced blocks — the period ledger's path
   among them — is listed in `openspec/specs/market-change-workflow/README.md`'s tables,
   the period ledger beside the changes' archive in "The engine's own assumptions"; no
   new role is added, since the ledger lives in the archive the engine already assumes.
   Verify: `pytest -q scripts/tests/test_change_workflow_assumptions.py` (unit) passes.
-- [ ] 8.4 Verification: `make check-agent-skills` passes;
+  Done: the archive's row names `openspec/changes/archive/guidance-reviews.jsonl`,
+  which no reader of the archive takes for a change; no role added. Outside the plan,
+  a found defect fixed here (D6): the roles test collected only `change-*/SKILL.md`,
+  so it never read the new skill and this task's verification would have passed
+  whatever the skill named, though `MCW-5tgp` covers every workflow skill. It now
+  reads `WORKFLOW_SKILLS`, the `change-*` skills and `guidance-review`, and still not
+  OpenSpec's own `openspec-*` skills. The skill's other code spans name only paths
+  already listed; it names the proposal's change by name and the vocabulary's homes
+  through `AGENTS.md`, so no path the tables cannot list. Tests,
+  `test_change_workflow_assumptions.py` (unit; 11 passed, run as `uv run --no-project
+  --with pytest pytest`, since a bare `pytest` is denied to this step): the real tables
+  against the real skills, now the new one among them, and
+  `test_the_guidance_review_is_read_and_openspecs_own_skills_are_not`, which collects a
+  `guidance-review` skill's path and nothing from an `openspec-propose` skill over a
+  temporary tree, failing with the old glob and with `*/SKILL.md` alike.
+- [x] 8.4 Verification: `make check-agent-skills` passes;
   `pytest -q scripts/tests/test_change_workflow_assumptions.py` passes; `make
   check-change CHANGE=act-on-owner-intervention-patterns` passes every check, the
   citation of the new skill now resolving. End-to-end: none; no scenario exercises the
   skills.
+  Done, on the resume: `make check-agent-skills` passes; the roles and command suites
+  (`test_change_workflow_assumptions.py`, `test_change_workflow_command.py`; unit, and
+  the command run as a real process) 25 passed; `make check-change` passes all twelve
+  checks, the new skill's citation resolving; `make test` passed, its scripts suite
+  2367 passed, rewriting no lock. End-to-end confirmed: none. No CI evidence is owed.
+  Handoff: for sections 9 and 10, the skills they edit may cite `guidance-review` for
+  what a guidance review reads (the `Classification:` audit, waivers by criterion);
+  any make target or path they newly name in code must be listed in the roles tables,
+  which the roles test now checks for `guidance-review` too.
+
+Stopped, 2026-11-05, before committing: the `.claude/skills/guidance-review` link,
+which 8.2 gives the orchestrator to make before the session, is not in the worktree,
+and this step could not make the `.codex/skills/guidance-review` link either: `ln -s
+../../.agents/skills/guidance-review .codex/skills/guidance-review` was denied (no
+rule allows `ln`), and no tool the step has makes a symlink, while
+`check-agent-skills` refuses a copy. Done and uncommitted: the skill (8.1), the
+`.gitignore` entry, which `git check-ignore -v` reports ignoring the ledger
+(`.gitignore:252`), the roles row and the roles test's glob (8.3). The fresh-context
+check ran on this work; fixed: design and planning corrections had been dropped (only
+ledger entries naming a triaged record were read), "Rule E" was undefined, the
+widening test demanded no correction at all where D21 sets no threshold, the
+Evidence method's features and topics, held-out test and advancing-exit revisits were
+missing, a change worked in its clone was skipped for good, the period's whole-date
+ends let a boundary day count twice, the opening understated what step 5 writes, the
+term rule waited for a second question, merge waivers had no bucket, step 5 invited a
+branch switch in the owner's workspace, nothing refused a run in a clone, and the
+skill let a correction's wording reach the repository where D20 allows aggregates
+only. Declined: D11's "tallied from the workflow logs", since the owner's questions
+are read from the step sessions, as the skill says. Checks so far: the roles suite 11
+passed; `make check-comment-hygiene` passes; `make check-agent-skills` fails only on
+the two missing links, and so does `make test-release-tooling`, 2366 passed and one
+failed, `test_change_workflow_command.py`'s
+`test_the_command_acts_on_its_working_directorys_repository`, which runs `check
+skills`. For the resumed session, once both links exist (made by the orchestrator, or
+the `.codex/` one by this step under a granted `Bash(ln -s *)`): run `make
+check-agent-skills`, `make test`, and `make check-change
+CHANGE=act-on-owner-intervention-patterns`, which should then pass every check, its
+citation of the new skill resolving; check 8.2 and 8.4 with their evidence; and commit
+section 8 with both links, then push. End-to-end: none; no scenario exercises the
+skills. No CI evidence is owed.
+Resumed, the same day: the owner had both links made, and the section's checks
+passed as 8.2 and 8.4 record; section 8 was committed and pushed with them.
 
 ## 9. Triage accepts uncontested findings by default (D1–D3, D6, D16, D18, D19, D22)
 
