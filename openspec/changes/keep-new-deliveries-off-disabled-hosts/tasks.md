@@ -13,7 +13,7 @@ through (D6, D7; site-capacity "Admission applies the pool provider's host
 requirement", fulfillment "A provider declares whether its delivery needs a
 host"). Touches `kit/resource-pools` only.
 
-- [ ] 1.1 In `kit/resource-pools/src/market_resource_pools/host_requirement.py`,
+- [x] 1.1 In `kit/resource-pools/src/market_resource_pools/host_requirement.py`,
   beside `HostRequirement` and `pool_needs_host`, add the `DeliverableHosts`
   protocol (`deliverable_host_ids(db: Session) -> frozenset[str]`, the registered,
   enabled hosts read in the caller's session) and
@@ -26,14 +26,40 @@ host"). Touches `kit/resource-pools` only.
   `market_resource_pools/__init__.py`, and extend the module docstring with the
   rule and its link to `openspec/specs/site-capacity/spec.md#requirement-admission-applies-the-pool-providers-host-requirement`.
   Verify with 1.2.
-- [ ] 1.2 Unit (`kit/resource-pools/tests/unit/test_host_requirement.py`): one
+  *Done:* as D6 shows; `sqlalchemy.orm.Session` is imported at module level
+  (the package already depends on SQLAlchemy). An empty-string `host_id` is
+  treated as naming no host, as the existing no-host checks treat it. The
+  docstrings claim only that the report is read in the caller's transaction,
+  not that no disable can commit meanwhile: that is a property of the caller's
+  transaction (one SQLite database), not of the protocol. *Beyond the plan:*
+  two new public names take a minor bump under `RELEASING.md`'s versioning
+  policy, so `arkhai-kit-resource-pools` is 0.9.0 and every lock was refreshed
+  (`make dist`, `make lock`); sections 2 and 3 raise `kit/site`'s and
+  `kit/fulfillment`'s lower bounds on it to `>=0.9.0` when they import the
+  names.
+- [x] 1.2 Unit (`kit/resource-pools/tests/unit/test_host_requirement.py`): one
   case per row of D3/D12's table — registered and enabled, disabled (absent from
   the set), unregistered (absent from the set), no host — plus an unbacked pool,
   a provider needing no host, a provider the requirement does not name, no
   requirement supplied, and a requirement with no deliverable set (D7).
-- [ ] 1.3 Verification: the unit suite of `kit/resource-pools` passes
+  *Done:* every case listed, plus an empty report (no host usable). The
+  disabled and unregistered cases are one case to this function — an id absent
+  from the report; that the host authority leaves both out of its report is
+  section 4's evidence (4.1).
+- [x] 1.3 Verification: the unit suite of `kit/resource-pools` passes
   (`uv run pytest kit/resource-pools/tests/unit`). No end-to-end scenario
   exercises this section on its own; section 5's do.
+  *Done:* run from `kit/resource-pools` (the root environment has no pytest):
+  unit, `uv run pytest tests/unit` — 54 passed; the whole suite (unit and
+  library integration) — 141 passed. `make check-packaging` passed (locks,
+  layers, scope, kinds); `make test` passed; `make check-change` passed.
+  End-to-end: none on its own, confirmed — nothing deployed calls the rule
+  until sections 2–4 wire it in; then `e2e_bare_metal_publication` and
+  `e2e_bare_metal_introduction` (section 5) exercise it. Nothing is owed by
+  validation.
+  *Handoff:* `make test` reinstalls internal packages from `.dist` but does
+  not build them, so run `make dist` after changing a kit and before
+  `make test`, or consumers test the previous wheel.
 
 ## 2. The site ledger: admission, the rebind recheck, and the offered read
 
