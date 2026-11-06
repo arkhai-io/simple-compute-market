@@ -59,7 +59,7 @@ from .evidence import evidence_store
 from .lifecycle import buyer_lifecycle, run_sync
 from market_arkhai_payments import PaymentApproval
 
-from .settlement_composition import BUYER_STAGES, validate_authority
+from .settlement_composition import BUYER_STAGES, buyer_lifecycle_disclosure, validate_authority
 from .settlement_stages import purchase_quote, require_quoted_agreement
 
 # The commands build their collaborators through the factories below: a Typer
@@ -423,6 +423,10 @@ def buy_bare_metal(
     option_id: str = typer.Option(...),
     ssh_public_key: str = typer.Option(..., "--ssh-public-key"),
     duration_seconds: int = typer.Option(3600, min=1),
+    allow_unprotected_terms: bool = typer.Option(
+        False, "--allow-unprotected-terms",
+        help="Explicitly waive default delivery-deadline, penalty and returned-period recommendations. Does not waive codec capabilities or authority acceptance.",
+    ),
     payment_timeout_seconds: float = typer.Option(300.0, min=1.0, max=3600.0),
     config: str | None = typer.Option(None, "--config"),
 ) -> None:
@@ -467,7 +471,7 @@ def buy_bare_metal(
     try:
         stage = BUYER_STAGES[selected.settlement_schema]
         stage.validate_option(selected)
-        validate_authority(selected, buyer_config)
+        validate_authority(selected, buyer_config, allow_unprotected_terms=allow_unprotected_terms)
     except (KeyError, ValueError) as exc:
         raise typer.BadParameter(
             f"buy requires a supported priced settlement option: {exc}"
@@ -476,6 +480,9 @@ def buy_bare_metal(
         amount = purchase_quote(selected, duration_seconds)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"Selected option {selected.option_id}: lifecycle terms", err=True)
+    for name, value in buyer_lifecycle_disclosure(selected):
+        typer.echo(f"  {name}: {value}", err=True)
     approval = payment_approval(buyer_config)
 
     def validate_acceptance(accepted: Any) -> None:
@@ -491,6 +498,7 @@ def buy_bare_metal(
         listing_id=listing_id,
         option_id=option_id,
         duration_seconds=duration_seconds,
+        allow_unprotected_compute_terms=allow_unprotected_terms,
         seller_url=listing.storefront_url,
         storefront_url=listing.storefront_url,
         publisher_id=str(listing.publisher_id),
@@ -560,6 +568,9 @@ def buy_bare_metal(
             plan=outcome.settlement_plan,
         ),
     )
+    typer.echo("Accepted Agreement: lifecycle terms before approval", err=True)
+    for name, value in buyer_lifecycle_disclosure(outcome.agreement.settlement):
+        typer.echo(f"  {name}: {value}", err=True)
     transaction, fulfillment = stage.settle(
         outcome=outcome,
         approval=approval,

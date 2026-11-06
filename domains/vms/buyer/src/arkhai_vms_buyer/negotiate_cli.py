@@ -26,7 +26,7 @@ from rich.table import Table
 
 from .buy_orchestrator import fetch_listing_dict
 from .buyer_client import ResumeState, load_buyer_chain, negotiate_with_seller
-from .cli_helpers import resolve_prices_from_matches
+from .cli_helpers import emit_lifecycle_disclosure, resolve_prices_from_matches
 from .common import resolve_negotiation_config
 from .deal_helpers import (
     load_negotiation_resume_point,
@@ -38,6 +38,7 @@ from .run_log import RunLog
 from .settlement_composition import (
     buyer_stage,
     resolve_buyer_settlement_policy,
+    buyer_lifecycle_disclosure,
 )
 
 
@@ -131,6 +132,10 @@ def register(app: typer.Typer) -> None:
             "last counter into the strategy and continues. Useful "
             "when the buyer crashed mid-round but the seller's "
             "thread state is still live.",
+        ),
+        allow_unprotected_terms: bool = typer.Option(
+            False, "--allow-unprotected-terms",
+            help="Explicitly waive default delivery-deadline, penalty and returned-period recommendations. Does not waive codec capabilities or authority acceptance.",
         ),
         duration_hours: float | None = typer.Option(
             None,
@@ -242,6 +247,7 @@ def register(app: typer.Typer) -> None:
                     identity=identity,
                     action_capable=True,
                     registry_urls=registry_urls,
+                    allow_unprotected_terms=allow_unprotected_terms,
                 )
             except ValueError as exc:
                 raise typer.BadParameter(str(exc)) from exc
@@ -379,6 +385,10 @@ def register(app: typer.Typer) -> None:
                     "settlement option"
                 )
 
+            emit_lifecycle_disclosure(
+                buyer_lifecycle_disclosure(selected_settlement.option),
+                title=f"Selected option {selected_settlement.option.option_id}: lifecycle terms",
+            )
             selected_stage = buyer_stage(
                 selected_settlement.selection.settlement_schema
             )
@@ -448,6 +458,7 @@ def register(app: typer.Typer) -> None:
             listing_record = None
         run_log = RunLog.start(
             command="market negotiate",
+            allow_unprotected_compute_terms=allow_unprotected_terms,
             profile_id=identity.profile_id,
             principal=identity.principal,
             seller_url=seller_url,

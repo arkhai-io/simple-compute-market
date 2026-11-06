@@ -5,17 +5,29 @@ from market_core import SettlementStageTable
 from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from market_deal_lifecycle.selection import AuthoritySelection
 from market_deal_lifecycle.terms import TermContext
+from market_settlement_runtime.buyer_terms import BuyerTermsPolicy, lifecycle_disclosure
 
 from .settlement_stages import PaymentStage
 
 BUYER_STAGES = SettlementStageTable({ARKHAI_PAYMENTS_MECHANISM: PaymentStage()})
 
 
-def validate_authority(option, config) -> None:
-    """An explicit option ID does not bypass the buyer's authority policy."""
-    AuthoritySelection(config.dispute_authorities_by_registry, contexts={
-        ARKHAI_PAYMENTS_MECHANISM: TermContext(
-            mechanism=ARKHAI_PAYMENTS_MECHANISM, has_adapter=True, compute=True,
-            dispute_interfaces=frozenset({MEDIATION_INTERFACE}),
+def buyer_term_context(mechanism: str, *, allow_unprotected_terms: bool = False) -> TermContext:
+    return TermContext(
+        mechanism=mechanism, has_adapter=mechanism == ARKHAI_PAYMENTS_MECHANISM, compute=True,
+        dispute_interfaces=frozenset({MEDIATION_INTERFACE}),
+        allow_missing_delivery_deadline=allow_unprotected_terms,
+    )
+
+
+def buyer_lifecycle_disclosure(option):
+    return lifecycle_disclosure(option, context=buyer_term_context(option.settlement_schema))
+
+
+def validate_authority(option, config, *, allow_unprotected_terms: bool = False) -> None:
+    """An explicit option ID does not bypass the buyer's authority or rights policy."""
+    BuyerTermsPolicy(AuthoritySelection(config.dispute_authorities_by_registry, contexts={
+        ARKHAI_PAYMENTS_MECHANISM: buyer_term_context(
+            ARKHAI_PAYMENTS_MECHANISM, allow_unprotected_terms=allow_unprotected_terms,
         ),
-    }).rank(option.settlement_schema, option.lifecycle, registry_url=config.registry_url)
+    }), allow_unprotected_terms=allow_unprotected_terms).rank(option, registry_url=config.registry_url)

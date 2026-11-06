@@ -13,6 +13,7 @@ from core_buyer.registry_config import registry_descriptors, resolve_indexer_url
 from market_deal_lifecycle.configuration import authorities_by_registry, dispute_config
 from market_deal_lifecycle.selection import AuthoritySelection
 from market_deal_lifecycle.terms import TermContext
+from market_settlement_runtime.buyer_terms import BuyerTermsPolicy, lifecycle_disclosure
 from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from core_buyer.settlement import BuyerSettlementPolicy, SelectedSettlementOption
 from market_alkahest import create_alkahest_registration
@@ -29,6 +30,7 @@ from market_settlement_runtime import (
     SettlementConfigurationRegistry,
 )
 
+from .cli_helpers import emit_lifecycle_disclosure
 from .chain_cli import chain_app
 from .common import refuse_retired_address_book_keys
 from .escrow_cli import escrow_app
@@ -82,10 +84,26 @@ def accepted_listing_record(match: Mapping[str, Any], _proposal: Any) -> dict[st
     return record
 
 
+def buyer_term_context(mechanism: str, *, allow_unprotected_terms: bool = False) -> TermContext:
+    return TermContext(
+        mechanism=mechanism, has_adapter=mechanism == "arkhai.payments.v1", compute=True,
+        dispute_interfaces=frozenset({MEDIATION_INTERFACE}),
+        allow_missing_delivery_deadline=allow_unprotected_terms,
+    )
+
+
+def buyer_lifecycle_disclosure(option):
+    return lifecycle_disclosure(option, context=buyer_term_context(option.settlement_schema))
+
+
 def validate_buyer_acceptance(outcome) -> None:
     if outcome.agreement is None or outcome.agreement.settlement is None:
         raise RuntimeError("accepted work has no Agreement settlement option")
     buyer_stage(outcome.agreement.settlement.settlement_schema).validate_acceptance(outcome)
+    emit_lifecycle_disclosure(
+        buyer_lifecycle_disclosure(outcome.agreement.settlement),
+        title="Accepted Agreement: lifecycle terms before approval",
+    )
 
 
 def _alkahest_command_group():
@@ -158,6 +176,7 @@ def resolve_buyer_settlement_policy(
     identity: ResolvedBuyerIdentity | None = None,
     action_capable: bool = True,
     registry_urls: str | None = None,
+    allow_unprotected_terms: bool = False,
 ) -> BuyerSettlementPolicy:
     """Strictly resolve the common buyer ``[Settlement]`` hierarchy."""
 
@@ -192,14 +211,14 @@ def resolve_buyer_settlement_policy(
         config=settlement,
         registry=registry,
         stages=buyer_settlement_stages(),
-        option_preference=AuthoritySelection(authorities, contexts={
-            "arkhai.payments.v1": TermContext(
-                mechanism="arkhai.payments.v1", has_adapter=True, compute=True,
-                dispute_interfaces=frozenset({MEDIATION_INTERFACE}),
+        option_preference=BuyerTermsPolicy(AuthoritySelection(authorities, contexts={
+            "arkhai.payments.v1": buyer_term_context(
+                "arkhai.payments.v1", allow_unprotected_terms=allow_unprotected_terms,
             ),
-        }, report=logging.getLogger(__name__).info),
+        }, report=logging.getLogger(__name__).info), allow_unprotected_terms=allow_unprotected_terms),
         public_context={
             "dispute_authorities_by_registry": authorities,
+            "allow_unprotected_compute_terms": allow_unprotected_terms,
         },
     )
 
