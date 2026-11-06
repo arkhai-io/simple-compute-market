@@ -5,11 +5,14 @@ value**. None of it is secret, none of it was ever secret, and none of it may
 ever be used on a public network or against a real chain, registry, or
 settlement authority.
 
-The directory exists because the compose files guard their signer and wallet
-mounts with `${VAR:?...}`, so `docker compose up` refuses to start until each
-one is supplied. Committing the development values is what lets anyone — a
-contributor, a fork, or a CI job with no repository secrets — run
-`make -C e2e-tests test-e2e`.
+The directory exists because the base compose files hold topology only and
+give no service a fallback identity: each stack's development overlay binds the
+files here, so its services start, and without an overlay they refuse to.
+Committing the development values is what lets anyone — a contributor, a fork,
+or a CI job with no repository secrets — run `make -C e2e-tests test-e2e`.
+Beside it, `dev-env/registry/` holds the registries' profiles and
+`dev-env/provisioning/` the provisioning services' site profiles, public
+development values of the same kind, each labelled inline.
 
 ## Why the credential files carry no comment
 
@@ -26,51 +29,65 @@ So the rule for this directory is: if a file is consumed as a single opaque
 value, it holds only that value and its provenance is documented here; if it
 is consumed as shell-format key/value pairs, it carries the statement inline.
 
-## What this directory has to satisfy
+## What each stack binds
 
 `docker compose up` resolves `include:` transitively and merges every `-f`
-overlay, so each stack's required variables come from all of its files. Each
-stack has its own environment target, which supplies all of them:
+overlay in order. Every stack's configuration is in its committed files: the
+overlays bind this directory's files by paths relative to the repository root,
+the registries load their profiles from `dev-env/registry/` by
+`ACTIVE_PROFILES`, and the provisioning services load their site profiles from
+`dev-env/provisioning/`. The one value a run supplies is `PROVISIONING_MODE`,
+`mock` unless it says `real`, which the provisioning services take as their
+last profile.
 
-| Stack | Files | Values |
-|---|---|---|
-| VM lane | `compose.vms.yml` (with `compose.dev.yml` and `domains/vms/compose.yml`), `compose.vms-local.yml` | `make e2e-vms-dev-env` |
-| API-credit lane | `compose.apicredits.yml` (with `compose.dev.yml` and `domains/apicredits/compose.yml`), `compose.apicredits-local.yml`, `compose.apicredits-lane.yml` | `make e2e-apicredits-dev-env` |
-| Bare-metal lane | `compose.bare-metal.yml`, `compose.dev.yml`, `compose.bare-metal-local.yml` | `make e2e-bare-metal-dev-env` |
-| Full local stack | `docker-compose.yml`, `compose.vms-local.yml`, `compose.apicredits-local.yml` | `make e2e-dev-identities-env` |
+| Stack | Files | Registry profiles | Site profiles | Secret overlays |
+|---|---|---|---|---|
+| VM lane | `compose.vms.yml` (with `compose.dev.yml` and `domains/vms/compose.yml`), `compose.vms-local.yml`, `compose.payments-double.yml`, `compose.vms-lane.yml` | `registry-a`, `registry-b`, each with `payments-lane` | `vms-bob-site`, `vms-alice-site` | `bob.storefront.secrets.toml`, `alice.storefront.secrets.toml` |
+| API-credit lane | `compose.apicredits.yml` (with `compose.dev.yml` and `domains/apicredits/compose.yml`), `compose.apicredits-local.yml`, `compose.payments-double.yml`, `compose.apicredits-lane.yml` | `api-credits-registry`, `compute-registry`, each with `payments-lane` | — | `api-credits.storefront.secrets.toml` |
+| Bare-metal lane | `compose.bare-metal.yml`, `compose.dev.yml`, `compose.payments-double.yml`, `compose.bare-metal-local.yml` | `bare-metal-registry` with `payments-lane` | `bare-metal-site` | `bare-metal.storefront.secrets.toml` |
+| Full local stack | `docker-compose.yml`, `compose.vms-local.yml`, `compose.apicredits-local.yml` | `registry-a`, `registry-b`, `api-credits-registry` | `vms-bob-site`, `vms-alice-site` | `bob.storefront.secrets.toml`, `alice.storefront.secrets.toml`, `api-credits.storefront.secrets.toml` |
 
-Not all are paths. `VMS_REGISTRY_ADMIN_API_KEY` and
-`VMS_REGISTRY_BOOTSTRAP_API_KEY` are bearer tokens for `registry-b`, which runs
-with read and write gates both on. The bootstrap token must be byte-equal in
-three places — the registry's seed, `bob.storefront.secrets.toml`, and
-`buyer.config.toml` — so all three derive from one `Makefile` constant. A
-mismatch shows up as a `401` during discovery or publication, well away from
-its cause.
+Not every value is a file. `registry-b` runs with read and write gates both on,
+and its admin and bootstrap bearer tokens are in its profile,
+`dev-env/registry/config-registry-b.env`. The bootstrap token must be byte-equal
+in four places — that profile, `bob.storefront.secrets.toml`,
+`buyer.config.toml`, and the test runner's `registry.bootstrap_api_key` in
+`e2e-tests/config/config-docker.yml`. A mismatch shows up as a `401` during
+discovery or publication, well away from its cause.
+
+A storefront's secrets — its wallet key, and where it settles payments, its
+payments key and dispute credentials — are settings in its secret overlay,
+`storefront.secrets.toml`, never variables in its environment. The one secret
+in the environment is the signing credential, `ARKHAI_IDENTITY_CREDENTIAL`,
+which each `*.identity.env` here carries and which the loader never reads.
 
 ## Where each value comes from
 
 `*.eip191` credentials are the standard Anvil development accounts from the
 default `test test test ... junk` mnemonic. Their private keys are published in
 Foundry's own documentation and already appear in this repository — for example
-`domains/vms/storefront/.env.bob.docker` and
-`core/registry/tests/integration/conftest.py`. The compose files pin the
-matching addresses, and `core/registry/src/core_registry/main.py` refuses to start if a
-credential does not derive the pinned identifier, so these assignments are not
-interchangeable:
+`core/registry/tests/integration/conftest.py`. The registry and site profiles
+pin the matching addresses, and `core/registry/src/core_registry/main.py`
+refuses to start if a credential does not derive the pinned identifier, so these
+assignments are not interchangeable. Repository tests
+(`scripts/tests/test_committed_stack_values.py`) hold each profile's pins to the
+credential its stack binds:
 
 | File | Anvil account | Pinned as |
 |---|---|---|
-| `registry-a.eip191` | 3 (`0x90f79bf6…`) | `compose.vms.yml` `registry-a` |
-| `registry-b.eip191` | 4 (`0x15d34aaf…`) | `compose.vms.yml` `registry-b` |
-| `provisioning.eip191` | 0 (`0xf39fd6e5…`) | `compose.vms.yml` `provisioning` |
-| `bob.env` | 2 (`0x3c44cddd…`) | `storefront.bob.toml` |
-| `alice.env` | 4 (`0x15d34aaf…`) | `storefront.alice.toml` |
+| `registry-a.eip191` | 3 (`0x90f79bf6…`) | `dev-env/registry/config-registry-a.env` |
+| `registry-b.eip191` | 4 (`0x15d34aaf…`) | `dev-env/registry/config-registry-b.env` |
+| `provisioning.identity.env` | 0 (`0xf39fd6e5…`) | `identity` in `dev-env/provisioning/config-vms-bob-site.yml` |
+| `bob.identity.env` | 2 (`0x3c44cddd…`) | `storefront.bob.toml`, and `storefront_identity` in `config-vms-bob-site.yml` |
+| `alice.identity.env` | 4 (`0x15d34aaf…`) | `storefront.alice.toml`, and `storefront_identity` in `config-vms-alice-site.yml` |
 | `buyer.eip191` | 1 (`0x70997970…`) | not pinned; the buyer declares its own profile |
-| `provisioning-admin.eip191` | 5 (`0x9965507d…`) | `compose.vms-local.yml` `PROVISIONING_ADMIN_IDENTITY__IDENTIFIER` |
+| `provisioning-admin.eip191` | 5 (`0x9965507d…`) | `admin_identity` in each site profile |
 | `storefront-bob-admin.eip191` | 6 (`0x976ea740…`) | `storefront.bob.toml` `[Identity.administrators.operator]` |
 | `storefront-alice-admin.eip191` | 7 (`0x14dc7996…`) | `storefront.alice.toml` `[Identity.administrators.operator]` |
 | `api-credits.identity.env` | 3 (`0x90f79bf6…`) | `[identity]` in `storefront.credits.toml` |
-| `api-credits.wallet.env` | 3 (`0x90F79bf6…`) | `[wallet].address` in `storefront.credits.toml` |
+| `api-credits.storefront.secrets.toml` | 3 (`0x90F79bf6…`) | `[wallet].address` in `storefront.credits.toml` |
+| `bob.storefront.secrets.toml` | 2 (`0x3C44CdDd…`) | `[Wallet].address` in `storefront.bob.toml` |
+| `alice.storefront.secrets.toml` | 4 (`0x15d34AAf…`) | `[Wallet].address` in `storefront.alice.toml` |
 | `bare-metal.storefront.secrets.toml` | 2 (`0x3C44CdDd…`) | `[Wallet].address` in `domains/bare_metal/storefront/storefront.dev.toml` |
 
 The three administrator credentials are separate principals from the sellers
@@ -89,9 +106,9 @@ registry signs `ed25519` as `_NUDEN…`. The shared name prefix makes them easy 
 conflate, and `create_signer` refuses the wrong scheme outright rather than
 producing a subtly wrong signature.
 
-`bob.storefront.secrets.toml`, `buyer.config.toml`, and
-`api-credits-buyer.config.toml` are configuration rather than identity, and each
-carries its own explanation inline.
+The `*.storefront.secrets.toml` overlays, `buyer.config.toml`, and
+`api-credits-buyer.config.toml` are TOML configuration, and each carries its own
+explanation inline.
 
 `api-credits-registry.ed25519` is the one value that had to be generated. The
 identity previously pinned in the compose files had no committed private half
@@ -104,10 +121,10 @@ so any reader can reproduce it and confirm no secret is involved:
       ).rstrip(b'=').decode())"
 
 Its public identifier `_NUDENxVX6u4cMd0xzoYyQAt10QDI47bfnYnu2lTVho` is pinned in
-`compose.apicredits-local.yml`, `domains/apicredits/storefront/storefront.credits.toml`,
+`dev-env/registry/config-api-credits-registry.env`, `domains/apicredits/storefront/storefront.credits.toml`,
 and the buyers' pins (`api-credits-buyer.config.toml` and the e2e settings). The
-registry fails startup unless its credential derives the identifier the overlay
-binds, and the storefront and buyers refuse a registry that answers as another.
+registry fails startup unless its credential derives the identifier its profile
+pins, and the storefront and buyers refuse a registry that answers as another.
 
 ## The API-credits site authority and its gated application
 
@@ -158,8 +175,10 @@ authority's trust set names it with an explicit scheme for that reason.
 
 The bare-metal end-to-end lane (`make -C e2e-tests test-e2e-bare-metal`) is a
 separate stack on its own dev chain, so it reuses the committed credentials
-above rather than adding more. `make e2e-bare-metal-dev-env` binds them, the
-storefront's development configuration
+above rather than adding more. `compose.bare-metal-local.yml` binds them, with
+the registry's profile `config-bare-metal-registry.env` and the site's
+`config-bare-metal-site.yml` pinning their identities; the storefront's
+development configuration
 (`domains/bare_metal/storefront/storefront.dev.toml`, with
 `bare-metal.storefront.secrets.toml` as its secrets overlay) names the public
 principals, and the lane's settings in `e2e-tests/config/config-docker.yml` pin
@@ -197,10 +216,56 @@ API-credit registry. It reuses a committed credential rather than adding one:
 Anvil 3 is also the credits storefront's principal, as it is in the full local
 stack, where VM's `registry` signs with the same key: a registry and a storefront
 authenticate different roles, so sharing a development key does not let either
-stand in for the other. `make e2e-apicredits-dev-env` binds the credential, and
-the lane's settings in `e2e-tests/config/config-docker.yml` pin the same
-identifier. The full local stack has VM's compute registry and never layers
+stand in for the other. `compose.apicredits-lane.yml` binds the credential, its
+profile `dev-env/registry/config-compute-registry.env` pins the identifier, and
+the lane's settings in `e2e-tests/config/config-docker.yml` pin the same one. The full local stack has VM's compute registry and never layers
 `compose.apicredits-lane.yml`.
+
+## The payments lane double
+
+Each lane runs the payments lane double (`compose.payments-double.yml`), and its
+payment storefront — Bob's VM storefront, the bare-metal storefront, the credits
+storefront — settles against it. The double's own values live with it, in
+`tools/payments-lane-double/fixtures/` and `tls/`, documented in its
+[README](../../tools/payments-lane-double/README.md): the receipt-signing seed and
+identity, the buyer's and seller's payments accounts and bearer tokens, the
+pinned dispute authority, and the lane CA. Where a stack needs one of them, a
+committed file here or beside a stack restates it, and repository tests hold
+each restatement to its fixture:
+
+| Restated value | Where | Role |
+|---|---|---|
+| the seller's bearer token | `[Settlement.arkhai_payments].api_key` in `bob.storefront.secrets.toml`, `bare-metal.storefront.secrets.toml` and `api-credits.storefront.secrets.toml` | each lane storefront's payments key at the double |
+| the pinned dispute authority | `dev-env/registry/config-payments-lane.env` | the lanes' registries' recommended dispute authorities, one JSON line |
+| the lane CA's path | `ca_bundle_path` in each lane storefront configuration | where each lane overlay binds `tools/payments-lane-double/tls/lane-ca.pem` |
+
+The test runner reads the lanes' payments settings from committed profiles,
+which restate the double's values too: `e2e-tests/config/config-payments-lane.yml`
+the target, the accounts, the CA path and the buyer's token, and each
+`config-<lane>-lane.yml` the seller credential of the lane's storefront, its key
+in `bob.identity.env` or `api-credits.identity.env`.
+`tools/payments-lane-double/tests/integration/test_lane_env.py` holds each to its
+source.
+
+The lane values that are not the double's:
+
+| Value | Where | Role |
+|---|---|---|
+| 32 bytes of `0xb1`, as unpadded base64url | `buyer_marketplace_credential` in `e2e-tests/config/config-payments-lane.yml` | the payment scenarios' wallet-free Ed25519 buyer marketplace seed |
+| `bob.identity.env`, `api-credits.identity.env` | this directory, restated in each `config-<lane>-lane.yml` | the seller credential a payment scenario refunds with: each lane storefront's own key, in its own scheme |
+| `vm-lane-dispute-public-development-credential` | `[[DisputeCredential]]` in `bob.storefront.secrets.toml`, which `helm/scripts/topology-secrets.sh` copies into the local Helm release's `arkhai-bob-runtime` | Bob's credential toward the pinned dispute authority; nothing at its `.invalid` origin ever reads it |
+
+The full local stack mounts the same secret overlays. There the storefront
+configurations leave payments off, and its registries recommend no dispute
+authority, so the payments key and Bob's dispute credential are never used.
+
+The VM and API-credit lanes run their own copies of the storefront profiles the
+full local stack runs, `domains/vms/storefront/storefront.bob.lane.toml` and
+`domains/apicredits/storefront/storefront.credits.lane.toml`, which add payments
+and nothing else, so the full stack keeps running without them; each lane
+overlay mounts its copy in place of the profile. The bare-metal lane's
+`domains/bare_metal/storefront/storefront.dev.toml` is the only deployment that
+file configures, so it carries payments itself.
 
 ## Alice's provisioning authority
 
@@ -209,8 +274,8 @@ SHA-256 of the UTF-8 string `arkhai-development-alice-provisioning-v1`, encoded
 as unpadded base64url. It must never be used on a public network. Its public
 identifier is `3NPn0gInwKKqVkrFl5_C07yYcjLOfVszbq51kw6EnPw`.
 
-`compose.vms-local.yml`, Alice's storefront profile, and the Docker test
-profile pin that identity. Alice's authority trusts Alice's seller principal
+Alice's site profile, `dev-env/provisioning/config-vms-alice-site.yml`, her
+storefront profile, and the Docker test profile pin that identity. Alice's authority trusts Alice's seller principal
 (Anvil 4) and the provisioning administrator (Anvil 5); Bob's authority retains
 its own signer (Anvil 0). The two services have separate databases, process-local job queues,
 and callback destinations. Sharing an administrator does not share a service

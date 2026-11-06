@@ -1,0 +1,43 @@
+{{- /*
+  The registry's settings, rendered from this chart's values as the profile env
+  file its loader reads from CONFIG_DIRECTORY under ACTIVE_PROFILES. Every value
+  is single-quoted for its dotenv reader by registry.envLine, which refuses the
+  two values that reader cannot read back; the dispute authorities are one JSON
+  line, which the registry parses as its list setting.
+*/}}
+{{- $identity := .Values.identity -}}
+{{- $descriptor := .Values.descriptor -}}
+{{- $config := .Values.config | default dict -}}
+{{- $lines := list -}}
+{{- $lines = append $lines (include "registry.envLine" (list "REGISTRY_AUTHORITY_ID" (required "registry identity authority is required" $identity.authority))) -}}
+{{- $lines = append $lines (include "registry.envLine" (list "REGISTRY_AUTHORITY_SCHEME" (required "registry identity principal scheme is required" $identity.principal.scheme))) -}}
+{{- $lines = append $lines (include "registry.envLine" (list "REGISTRY_AUTHORITY_IDENTIFIER" (required "registry identity principal identifier is required" $identity.principal.identifier))) -}}
+{{- $lines = append $lines (include "registry.envLine" (list "REGISTRY_AUTHORITY_CREDENTIAL_FILE" (include "registry.credentialFile" .))) -}}
+{{- $lines = append $lines (include "registry.envLine" (list "REGISTRY_FILTER_SPEC_PATH" (required "registry filter specification path is required" $config.filterSpecPath))) -}}
+{{- $lines = append $lines (include "registry.envLine" (list "REGISTRY_DESCRIPTOR_BASE_URL" (required "registry descriptor base URL is required" $descriptor.baseUrl))) -}}
+{{- $lines = append $lines (include "registry.envLine" (list "REGISTRY_DESCRIPTOR_DISPLAY_NAME" (required "registry descriptor display name is required" $descriptor.displayName))) -}}
+{{- $lines = append $lines (include "registry.envLine" (list "REGISTRY_DESCRIPTOR_OPERATOR_IDENTITY" (required "registry descriptor operator identity is required" $descriptor.operatorIdentity))) -}}
+{{- if $descriptor.accessAcquisitionPointer -}}
+{{- $lines = append $lines (include "registry.envLine" (list "REGISTRY_DESCRIPTOR_ACCESS_ACQUISITION_POINTER" $descriptor.accessAcquisitionPointer)) -}}
+{{- end -}}
+{{- if $descriptor.recommendedDisputeAuthorities -}}
+{{- $lines = append $lines (include "registry.envLine" (list "REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES" ($descriptor.recommendedDisputeAuthorities | toJson))) -}}
+{{- end -}}
+{{- $lines = append $lines (include "registry.envLine" (list "DATABASE_URL" $config.databaseUrl)) -}}
+{{- $lines = append $lines (include "registry.envLine" (list "PORT" .Values.service.port)) -}}
+{{- $lines = append $lines (include "registry.envLine" (list "HOST" $config.host)) -}}
+{{- $lines = append $lines (include "registry.envLine" (list "LOG_LEVEL" $config.logLevel)) -}}
+{{- /* The gateway path prefix behind which the registry serves its OpenAPI
+  schema; empty for a host-routed or direct deployment. */}}
+{{- $lines = append $lines (include "registry.envLine" (list "ROOT_PATH" ($config.rootPath | default ""))) -}}
+{{- $lines = append $lines (include "registry.envLine" (list "REGISTRY_REQUIRE_READ_API_KEY" ($config.requireReadApiKey | default false))) -}}
+{{- $lines = append $lines (include "registry.envLine" (list "REGISTRY_REQUIRE_WRITE_API_KEY" ($config.requireWriteApiKey | default false))) -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "registry.configMapName" . }}
+  labels:
+    {{- include "registry.labels" . | nindent 4 }}
+data:
+  config-production.env: |
+    {{- compact $lines | join "\n" | nindent 4 }}

@@ -17,6 +17,7 @@ from market_deal_lifecycle_contracts.models import (
     Accepted, AuthorityView, EndDeliveryMessage, LifecycleCommand, Rejected,
 )
 from market_identity import Ed25519Signer, RequestEnvelope, canonical_body_hash, canonical_json, sign_request
+from pydantic import SecretStr
 from market_deal_servicing import (
     DealWatch, DeliveryIngress, DeliveryRecord, EndSession, SellerDeal, SellerServicing, SellerSession,
     SQLiteOperationStore, create_schema,
@@ -113,8 +114,8 @@ def test_semantic_adoption_coordinates_reconstructed_durable_callers(tmp_path):
         authority = DisputeAuthority.model_validate(peer.authority)
         filing = peer.data["filing"]["request"]
         binding = DisputeBinding("deal", filing["transaction"], authority)
-        async with MediationClient(authority, MediationCredential(authority.identity, "FIXTURE_TOKEN"),
-            environ={"FIXTURE_TOKEN": "fixture-payee"}, transport=httpx.MockTransport(handle)) as client:
+        async with MediationClient(authority, MediationCredential(authority.identity, token=SecretStr("fixture-payee")),
+            transport=httpx.MockTransport(handle)) as client:
             table = DisputeAdapterTable([(authority.interface, lambda _: MediationAdapter(binding, filing["agreement"],
                                                                                        client, clock=lambda: 1800001800))])
             async def submit(key):

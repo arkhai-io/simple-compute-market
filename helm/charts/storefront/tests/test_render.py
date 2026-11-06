@@ -782,8 +782,14 @@ def test_a_removed_value_the_release_knows_carries_the_releases_value() -> None:
 def test_a_removed_required_setting_renders_absent_and_the_storefront_refuses_it() -> None:
     """The local release starts on its Settlement (its own test shows it); with
     that Settlement removed, the document holds none and the storefront refuses
-    it naming the section."""
-    removed = _render_layers(_bob(config={"Settlement": None}), files=(UMBRELLA / "local-values.yaml",), release=LOCAL_RELEASE)
+    it naming the section. The CA bundle goes with it, since the chart derives
+    its path into that Settlement's payments section and refuses a bundle with
+    none."""
+    removed = _render_layers(
+        _bob(config={"Settlement": None}, caBundle=None),
+        files=(UMBRELLA / "local-values.yaml",),
+        release=LOCAL_RELEASE,
+    )
     config = _config(_ok(removed))
 
     assert "Settlement" not in config and "settlement" not in config
@@ -923,13 +929,21 @@ def test_the_local_release_names_only_the_dev_chains_mounted_address_book() -> N
     assert book == json.loads(ANVIL_ADDRESS_BOOK.read_text())
 
 
-def test_the_local_release_enables_alkahest_and_contact_exchange_and_the_defaults_nothing() -> None:
+def test_the_local_release_enables_alkahest_contact_exchange_and_payments_and_the_defaults_nothing() -> None:
     defaults = _config(_ok(_render_local(overlay=False)))
     local = _config(_ok(_render_local()))
 
     assert defaults["Settlement"] == {"priority": []}
-    assert local["Settlement"]["priority"] == ["alkahest.v1", "contact-exchange.v1"]
+    assert local["Settlement"]["priority"] == ["alkahest.v1", "contact-exchange.v1", "arkhai.payments.v1"]
     assert local["Settlement"]["alkahest"]["enabled"] is True
+    # Payments through the values a deployment supplies: trust through the CA
+    # bundle's derived path, the key in the Secret overlay, never development
+    # authentication (helm/tests/test_release_topology.py holds the values to the
+    # payments lane double's fixtures).
+    payments = local["Settlement"]["arkhai_payments"]
+    assert payments["enabled"] is True and payments["livemode"] is False
+    assert payments["ca_bundle_path"] == CA_FILE
+    assert not {"api_key", "api_key_env", "development_auth"} & set(payments)
     assert local["Settlement"]["contact"]["enabled"] is True
     assert local["Settlement"]["contact"]["origins"]["default"]["contact_payload"] == {
         "email": "bob-sales@seller.invalid"
@@ -940,6 +954,312 @@ def test_the_local_release_enables_alkahest_and_contact_exchange_and_the_default
     # The overlay changes only what it states; the rest is Bob's default agent.
     differing = {key for key in set(defaults) | set(local) if defaults.get(key) != local.get(key)}
     assert differing == {"Wallet", "Chains", "pricing", "Settlement"}, differing
+
+
+# --- payments access: the CA bundle, the payments key, the check ------------
+
+CA_FILE = "/etc/arkhai/ca/ca-bundle.pem"
+
+
+def _yaml_block(document: str, key: str) -> str:
+    """The lines nested under the first ``<key>:`` line of ``document``, dedented,
+    without the template's comment lines."""
+    match = re.search(rf"^( *){re.escape(key)}:$", document, re.MULTILINE)
+    assert match, f"{key} not rendered"
+    indent = len(match.group(1))
+    lines = []
+    for line in document[match.end() + 1 :].splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        if line.strip() and len(line) - len(line.lstrip()) <= indent:
+            break
+        lines.append(line)
+    return textwrap.dedent("\n".join(lines)).strip("\n")
+
+
+def _items(block: str) -> dict[str, str]:
+    """Each ``- name: <name>`` list item of ``block``, by its name."""
+    items: dict[str, str] = {}
+    for item in re.split(r"^(?=- )", block, flags=re.MULTILINE):
+        if item.strip():
+            name = re.match(r"- name: \"?([^\"\n]+)\"?", item)
+            assert name, item
+            items[name.group(1)] = item.strip("\n")
+    return items
+
+
+def _env_names(document: str) -> list[str]:
+    """The names of a rendered container's environment variables, in order."""
+    return list(_items(_yaml_block(document, "env")))
+
+
+def _ca_bundle(document: str, config: dict) -> tuple[str, str, str] | None:
+    """The CA bundle's source kind, name, and key, asserted together with its
+    mount and the `ca_bundle_path` derived into the agent's rendered `config`,
+    all present or all absent; no environment variable names it either way."""
+    mounts = _items(_yaml_block(document, "volumeMounts"))
+    volumes = _items(_yaml_block(document, "volumes"))
+    payments = config.get("Settlement", {}).get("arkhai_payments", {})
+    assert _env_names(document) == ["XDG_CONFIG_HOME", "ARKHAI_IDENTITY_CREDENTIAL"]
+    if "ca-bundle" not in volumes:
+        assert "ca-bundle" not in mounts and "ca_bundle_path" not in payments
+        return None
+    assert mounts["ca-bundle"] == '- name: ca-bundle\n  mountPath: "/etc/arkhai/ca"\n  readOnly: true'
+    assert payments["ca_bundle_path"] == CA_FILE
+    source = re.fullmatch(
+        r'- name: ca-bundle\n  (configMap|secret):\n    (?:name|secretName): "([^"]+)"\n'
+        r'    items:\n      - key: "([^"]+)"\n        path: ca-bundle.pem',
+        volumes["ca-bundle"],
+    )
+    assert source, volumes["ca-bundle"]
+    return source.groups()
+
+
+def _with_payments(**agent) -> dict:
+    """An overlay of Bob's agent giving him a `[Settlement.arkhai_payments]`
+    section, beside ``agent``'s other changes."""
+    overlay = _with_config(Settlement={"arkhai_payments": {"enabled": False}})
+    return {**overlay, **agent}
+
+
+def test_a_ca_bundle_mounts_from_a_configmap_or_a_secret_and_its_path_is_derived_into_the_configuration() -> None:
+    """The deployment-state scenarios "The option names a ConfigMap key" and
+    "The option names a Secret key"."""
+    for kind, stated in (("configMap", "configMapName"), ("secret", "secretName")):
+        manifest = _ok(_render(agent=_with_payments(caBundle={stated: "deployment-ca", "key": "bundle.pem"})))
+        assert _ca_bundle(_source(manifest, "deployment.yaml"), _config(manifest)) == (kind, "deployment-ca", "bundle.pem"), kind
+
+
+def test_no_ca_bundle_is_mounted_or_derived_unless_one_is_named() -> None:
+    """The deployment-state scenario "The option is unset"."""
+    for agent in (
+        None,
+        _with_payments(),
+        _with_payments(caBundle={"configMapName": "", "secretName": "", "key": "ca-bundle.pem"}),
+    ):
+        manifest = _ok(_render(agent=agent))
+        assert _ca_bundle(_source(manifest, "deployment.yaml"), _config(manifest)) is None, agent
+
+
+def test_a_configuration_stating_the_mounted_path_keeps_it_and_another_is_refused_naming_both() -> None:
+    """The deployment-state scenario "The configuration states another bundle
+    path"; the key is matched in any spelling, as the loader matches it."""
+    bundle = {"configMapName": "deployment-ca", "key": "bundle.pem"}
+    same = _with_config(Settlement={"Arkhai_Payments": {"CA_BUNDLE_PATH": CA_FILE}})
+    config = _config(_ok(_render(agent={**same, "caBundle": bundle})))
+    assert config["Settlement"]["Arkhai_Payments"] == {"CA_BUNDLE_PATH": CA_FILE}
+    other = _with_config(Settlement={"arkhai_payments": {"ca_bundle_path": "/etc/ssl/other.pem"}})
+    _refused(_render(agent={**other, "caBundle": bundle}), '"/etc/ssl/other.pem" differs from "/etc/arkhai/ca/ca-bundle.pem"')
+
+
+def test_a_ca_bundle_without_a_payments_section_is_refused() -> None:
+    """Only the payments client reads the bundle, so the chart gives it no
+    section of its own, whether `config` states none or an empty one."""
+    bundle = {"configMapName": "deployment-ca", "key": "bundle.pem"}
+    for agent in (_agent(caBundle=bundle), {**_with_config(Settlement={"arkhai_payments": {}}), "caBundle": bundle}):
+        _refused(
+            _render(agent=agent),
+            "names caBundle, which only its payments client reads, but its config states no Settlement.arkhai_payments section",
+        )
+
+
+def test_a_ca_bundle_naming_both_sources_or_no_key_is_refused() -> None:
+    _refused(
+        _render(agent=_with_payments(caBundle={"configMapName": "a", "secretName": "b", "key": "ca.pem"})),
+        "caBundle names both configMapName",
+    )
+    _refused(_render(agent=_with_payments(caBundle={"configMapName": "a"})), "caBundle.key is required")
+
+
+def test_no_payments_key_option_or_public_payments_key_is_accepted() -> None:
+    """The deployment-state scenario "The public configuration states a payments
+    key": the key belongs in the Secret overlay, so the values schema refuses it
+    in `config`, and the chart offers no option exposing it as a variable."""
+    key = {"secretName": "payments-key", "key": "api-key"}
+    for rendered, dotted in (
+        (_render(agent=_with_config(Settlement={"arkhai_payments": {"api_key": "x"}})), "agents.bob.config.Settlement.arkhai_payments.api_key"),
+        (_render(agent=_agent(paymentsKey=key)), "agents.bob.paymentsKey"),
+        # The chart alone, so its own schema refuses the option, not only the
+        # umbrella's copy of the agent definition.
+        (_render_chart({"agents": {"carol": {**CAROL, "paymentsKey": key}}}), "agents.carol.paymentsKey"),
+    ):
+        assert rendered.returncode != 0, dotted
+        assert _names_path(rendered.stderr, dotted), rendered.stderr
+
+
+# A development dispute authority's public binding, on a reserved domain.
+DISPUTE_CREDENTIAL = {
+    "interface": "arkhai.mediation.v1",
+    "origin": "https://dispute.example",
+    "account": "acct_example",
+    "record_key": "ed25519:example",
+}
+
+
+def test_a_payments_key_named_by_variable_is_refused() -> None:
+    """The deployment-state scenario "The public configuration names a payments
+    key's variable": the key reaches the storefront only through its Secret
+    overlay, and no variable the chart sets holds it. Refused by
+    the umbrella's copy of the definition and the chart's own."""
+    named = {"api_key_env": "ARKHAI_PAYMENTS_API_KEY"}
+    carol_settlement = {**CAROL["config"].get("Settlement", {}), "arkhai_payments": named}
+    for rendered, dotted in (
+        (_render(agent=_with_config(Settlement={"arkhai_payments": named})), "agents.bob.config.Settlement.arkhai_payments.api_key_env"),
+        (
+            _render_chart({"agents": {"carol": {**CAROL, "config": {**CAROL["config"], "Settlement": carol_settlement}}}}),
+            "agents.carol.config.Settlement.arkhai_payments.api_key_env",
+        ),
+    ):
+        assert rendered.returncode != 0, dotted
+        assert _names_path(rendered.stderr, dotted), rendered.stderr
+
+
+def test_a_dispute_credential_is_refused_in_public_configuration() -> None:
+    """The deployment-state scenario "The public configuration states a dispute
+    credential": the whole entry belongs in the Secret overlay, so `config`
+    refuses one whether it states its token or names a variable for it, by the
+    umbrella's copy of the definition and the chart's own."""
+    for credential in ({"api_key": "x"}, {"api_key_env": "DISPUTE_API_KEY"}):
+        entries = [{**DISPUTE_CREDENTIAL, **credential}]
+        for rendered, dotted in (
+            (_render(agent=_with_config(DisputeCredential=entries)), "agents.bob.config.DisputeCredential"),
+            (
+                _render_chart({"agents": {"carol": {**CAROL, "config": {**CAROL["config"], "DisputeCredential": entries}}}}),
+                "agents.carol.config.DisputeCredential",
+            ),
+        ):
+            assert rendered.returncode != 0, (credential, dotted)
+            assert _names_path(rendered.stderr, dotted), rendered.stderr
+
+
+def _payments_only() -> subprocess.CompletedProcess[str]:
+    """The local release with Bob selling through payments alone: Wallet, Chains,
+    and Alkahest removed, with the Alkahest clause and address book that need
+    them, contact exchange off, and the release's chain RPC off."""
+    removed = _bob(
+        alkahestAddressBook=None,
+        config={
+            "Wallet": None,
+            "Chains": None,
+            "pricing": {"settlements": None},
+            "Settlement": {"priority": ["arkhai.payments.v1"], "alkahest": None, "contact": None},
+        },
+    )
+    removed["global"] = {"rpc": {"enabled": False}}
+    return _render_layers(removed, files=(UMBRELLA / "local-values.yaml",), release=LOCAL_RELEASE)
+
+
+def test_a_storefront_offering_only_payments_renders_its_payments_access_and_nothing_removed() -> None:
+    manifest = _ok(_payments_only())
+    config = _config(manifest)
+    deployment = _source(manifest, "deployment.yaml")
+
+    assert "Wallet" not in config and "Chains" not in config
+    assert "settlements" not in config.get("pricing", {})
+    assert sorted(config["Settlement"]) == ["arkhai_payments", "priority", "schema_version"]
+    assert config["Settlement"]["priority"] == ["arkhai.payments.v1"]
+    assert config["Settlement"]["arkhai_payments"]["service_url"] == "https://payments-double:8443"
+    # The CA bundle and its derived path; the pod's environment carries no
+    # payments variable, the key being in the Secret overlay the pod mounts.
+    assert _ca_bundle(deployment, config) == ("configMap", "payments-ca-bundle", "ca-bundle.pem")
+    assert "arkhai-secrets" in _items(_yaml_block(deployment, "volumeMounts"))
+    assert "alkahest-address-book" not in deployment
+    rpc = re.search(r"RPC_URL|CHAIN_ID|rpc_url|chain_id", deployment + json.dumps(config))
+    assert not rpc, rpc
+    python = os.environ.get("STOREFRONT_PYTHON")
+    if not python:
+        print("skip: STOREFRONT_PYTHON unset; the storefront startup check did not run")
+        return
+    refusal = _startup_refusal(config, python)
+    assert refusal is None, refusal
+
+
+_REFUSAL_PROBE = """
+import json, warnings; warnings.simplefilter('ignore')
+from market_storefront.startup_refusal import StorefrontStartupError, require_publishable_storefront
+try:
+    require_publishable_storefront()
+except StorefrontStartupError as exc:
+    print(json.dumps(str(exc)))
+else:
+    print(json.dumps(None))
+"""
+
+
+def _startup_refusal(config: dict, python: str) -> str | None:
+    """What the storefront's own startup refusal reports for one rendered
+    document, or None when it would start."""
+    with tempfile.TemporaryDirectory() as home:
+        directory = Path(home) / "arkhai"
+        directory.mkdir()
+        (directory / "storefront.json").write_text(json.dumps(config))
+        loaded = subprocess.run(
+            [python, "-c", _REFUSAL_PROBE],
+            env={**os.environ, "XDG_CONFIG_HOME": home},
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    return json.loads(loaded.stdout.strip().splitlines()[-1])
+
+
+def _payments_check_pods(manifest: str) -> list[str]:
+    return _documents(manifest, "tests/payments-check-test.yaml")
+
+
+def test_the_payments_check_pod_runs_the_command_with_the_deployments_payments_access() -> None:
+    """The pod's environment, configuration mounts, and their volumes are the
+    Deployment's, less the data volume and the ZeroTier device; it runs the CLI
+    directly, with no probes or capabilities, and carries no workload selector."""
+    manifest = _ok(_render_local())
+    deployment = _source(manifest, "deployment.yaml")
+    (pod,) = _payments_check_pods(manifest)
+    lines = {line.strip() for line in pod.splitlines()}
+
+    assert f"name: {LOCAL_RELEASE}-storefront-bob-payments-check" in lines
+    assert _yaml_block(pod, "command").splitlines() == [
+        "- market-storefront", "- check-payments", "- --account", '- "00000000-0000-4000-8000-0000000000b2"'
+    ]
+    assert re.search(r"^ +image: (\S+)$", pod, re.MULTILINE).group(1) == re.search(
+        r"^ +image: (\S+)$", deployment, re.MULTILINE
+    ).group(1)
+    assert _yaml_block(pod, "env") == _yaml_block(deployment, "env")
+    unshared = {"tun-device", "arkhai-data"}
+    deployment_mounts = _items(_yaml_block(deployment, "volumeMounts"))
+    deployment_volumes = _items(_yaml_block(deployment, "volumes"))
+    assert unshared <= set(deployment_mounts) and unshared <= set(deployment_volumes)
+    assert _items(_yaml_block(pod, "volumeMounts")) == {
+        name: item for name, item in deployment_mounts.items() if name not in unshared
+    }
+    assert _items(_yaml_block(pod, "volumes")) == {
+        name: item for name, item in deployment_volumes.items() if name not in unshared
+    }
+    # Persistence is on in the local release: the Deployment mounts its claim,
+    # which the pod must not, and the pod has no probe or ZeroTier addition.
+    assert "persistentVolumeClaim" in deployment and "persistentVolumeClaim" not in pod
+    assert "/var/lib/arkhai" not in pod
+    for absent in ("Probe", "NET_ADMIN", "SYS_MODULE", "/dev/net/tun", "entrypoint.sh", "securityContext"):
+        assert absent not in pod, absent
+    assert {'"helm.sh/hook": test', "app.kubernetes.io/component: test", "enableServiceLinks: false"} <= lines
+    assert not any(line.startswith("app.kubernetes.io/name:") for line in lines)
+    # Every payments-deciding piece is present, so the comparison above is not
+    # between two empty lists: the CA bundle with its derived path in the
+    # configuration both mount, the Secret overlay holding the key, and the
+    # credential; and no payments variable.
+    assert _ca_bundle(pod, _config(manifest)) == ("configMap", "payments-ca-bundle", "ca-bundle.pem")
+    assert {"arkhai-config", "arkhai-secrets", "alkahest-address-book"} <= set(_items(_yaml_block(pod, "volumes")))
+
+
+def test_the_payments_check_pod_renders_only_with_payments_and_an_account() -> None:
+    assert not _payments_check_pods(_ok(_render()))
+    assert not _payments_check_pods(_ok(_render(agent=_agent(tests={"paymentsAccount": "acct"}))))
+    configured = _with_config(Settlement={"arkhai_payments": {"enabled": True}})
+    assert not _payments_check_pods(_ok(_render(agent=configured)))
+    configured["tests"] = {"paymentsAccount": "acct"}
+    (pod,) = _payments_check_pods(_ok(_render(agent=configured)))
+    assert '- "acct"' in pod
+    removed = _render_layers(_bob(tests={"paymentsAccount": None}), files=(UMBRELLA / "local-values.yaml",), release=LOCAL_RELEASE)
+    assert not _payments_check_pods(_ok(removed))
 
 
 _PROBE = """

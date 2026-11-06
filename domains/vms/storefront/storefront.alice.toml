@@ -1,7 +1,8 @@
 # Alice (seller) local Compose profile. Public marketplace identity and EVM
-# mechanism address are configuration; signing credentials are injected by
-# Compose env files through ARKHAI_IDENTITY_CREDENTIAL and
-# STOREFRONT_WALLET__PRIVATE_KEY. Never use these Anvil values publicly.
+# mechanism address are configuration; the signing credential arrives as
+# ARKHAI_IDENTITY_CREDENTIAL, and the wallet key in the secret overlay,
+# dev-env/identities/alice.storefront.secrets.toml. Never use these Anvil values
+# publicly.
 #
 # Account #4 (not #3): account #3 (0x90F7...b906) is reserved as a
 # sentinel agent. Reusing it for Alice would collide — her

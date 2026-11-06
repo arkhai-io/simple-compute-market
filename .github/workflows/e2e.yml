@@ -27,14 +27,17 @@ permissions:
 # - e2e-apicredits: the API-credit market and a compute registry of its own
 #   (`make -C e2e-tests test-e2e-apicredits`).
 #
-# Each lane's targets name its compose project, files, and environment file;
-# the log collection and teardown below go through the same targets, so a job
-# names none of them itself.
+# Every lane's stack also runs the payments double (`tools/payments-lane-double`),
+# the stand-in Arkhai Payments service its payment scenarios settle against.
 #
-# PROVISIONING_MODE selects mock provisioning for the compute lanes: their
-# environment targets turn it into the provisioning services' `mock` profile,
-# whose `/test` controls the scenarios hold jobs through. No storefront reads
-# it, and the API-credit stack has no provisioning service.
+# Each lane's targets name its compose project and files; the log collection
+# and teardown below go through the same targets, so a job names none of them
+# itself.
+#
+# PROVISIONING_MODE selects mock provisioning for the compute lanes: the lane
+# targets hand it to Compose, whose overlays make it the provisioning services'
+# last profile, `mock`, whose `/test` controls the scenarios hold jobs through.
+# No storefront reads it, and the API-credit stack has no provisioning service.
 env:
   PROVISIONING_MODE: mock
 

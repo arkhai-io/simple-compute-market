@@ -211,13 +211,17 @@ pipeline is by far the slowest part, so it runs while everything else does:
    finish (step 3).
 
 Run long commands in the background and wait for them to finish, rather than
-inside a call that will time out. Wait inside one Bash call, with a blocking
-read-only `tail -f … | grep -m1` on the command's output matching the line it
-prints when it ends — a part's result line, the fetch's run-and-conclusion line
-— never by ending the turn: under the wrapper a turn's end is an outcome, so a
-turn ended with a part in flight is logged as a stop. A single call blocks for
-at most ten minutes, and the pipeline can take longer, so when the `tail` times
-out, repeat it, still without ending the turn. Never a shell loop: `bash -c` has
+inside a call that will time out. Wait inside one Bash call, with
+`scripts/change-workflow wait <output-file> '<pattern>'` on the command's output,
+the pattern matching the line it prints when it ends — a part's result line, the
+fetch's run-and-conclusion line — never by ending the turn: under the wrapper a
+turn's end is an outcome, so a turn ended with a part in flight is logged as a
+stop. The wait returns that line as soon as it is in the file, even if it was
+written before the wait began, and gives up after nine minutes, inside one call's
+ten-minute limit, so give its call that limit; the pipeline can take longer, so
+when the wait gives up, run it again, still without ending the turn. No step
+follows a file with `tail -f`: it hangs when the line waited for is the last one
+written, and no rule allows it. Never a shell loop: `bash -c` has
 no allow rule unattended and will not get one, since no rule admits a loop
 without admitting any command. The Helm part can outlast one call too — its
 scenarios may take up to thirty minutes, and another change's validation may share

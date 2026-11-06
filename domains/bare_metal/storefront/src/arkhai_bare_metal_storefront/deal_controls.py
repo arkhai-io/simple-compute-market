@@ -12,7 +12,7 @@ records. Verify and evaluate write nothing.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
 from market_deal_servicing import EndSession
@@ -61,8 +61,15 @@ async def _listing_context(
 
 def settlement_admin_routes(
     runtime: "BareMetalStorefrontRuntime",
+    *,
+    poll_seconds: float | None = None,
+    clock: Callable[[], float] | None = None,
 ) -> SettlementAdminRouteService:
-    """Verify, evaluate, and wait, over this storefront's settlements."""
+    """Verify, evaluate, and wait, over this storefront's settlements.
+
+    ``poll_seconds`` and ``clock`` replace the settle wait's own, as a test
+    driving the wait in fake time does; left unset, the wait keeps its defaults.
+    """
 
     async def verify(escrow_uid: str, request: Mapping[str, Any]) -> dict[str, Any]:
         # Checked as settlement verifies it: against the plan the accepted deal
@@ -173,11 +180,17 @@ def settlement_admin_routes(
             return {"status": "failed", "fulfillment_state": state}
         return {"status": str(escrow.get("status") or ""), "fulfillment_state": state}
 
+    timing: dict[str, Any] = {}
+    if poll_seconds is not None:
+        timing["poll_seconds"] = poll_seconds
+    if clock is not None:
+        timing["clock"] = clock
     return SettlementAdminRouteService(
         verify=verify,
         preview_fulfillment=preview,
         settle_status=settle_status,
         is_terminal=lambda status: status.get("status") in {"ready", "failed"},
+        **timing,
     )
 
 

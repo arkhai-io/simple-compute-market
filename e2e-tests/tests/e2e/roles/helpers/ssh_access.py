@@ -306,6 +306,7 @@ class SshSession:
         sleep: Callable[[float], None] = time.sleep,
         connect_retry_seconds: float = CONNECT_RETRY_SECONDS,
         attempt_seconds: float = CONNECT_TIMEOUT_SECONDS + COMMAND_SECONDS,
+        run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
     ) -> None:
         self.directory = directory
         if host_key is not None and known_hosts_file is not None:
@@ -320,6 +321,7 @@ class SshSession:
         self._sleep = sleep
         self._connect_retry_seconds = connect_retry_seconds
         self._attempt_seconds = attempt_seconds
+        self._run = run
         self._heartbeats: list[SshHeartbeat] = []
 
     # -- keys ---------------------------------------------------------------
@@ -427,7 +429,7 @@ class SshSession:
         connection has not finished.
         """
         try:
-            result = subprocess.run(
+            result = self._run(
                 self.argv(endpoint, key, command),
                 capture_output=True,
                 text=True,

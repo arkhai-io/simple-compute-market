@@ -202,7 +202,7 @@ scripts/change-workflow start <step> <change> [--unattended] [--allow …] [--se
 scripts/change-workflow next | record | note | review | find | clone | clone-remove | clone where
 scripts/change-workflow resume | stop | log | watch | denials | round-view | round-done | cost | history | push
 scripts/change-workflow check index | check tasks | check push | check skills | check round-view | check graph
-scripts/change-workflow hook post-compaction | convert
+scripts/change-workflow hook post-compaction | convert | wait
 ```
 
 `start` opens a step: interactively by default, headless with `--unattended`. It
@@ -214,7 +214,13 @@ exits 0 on success, 1 on a refusal or a failed check with its reason on standard
 error, and 2 on a usage error. `find --json <change>` prints the change's `name`,
 `directory`, `archived`, `records`, and the record set's `format`; `clone where
 <change>` prints the change's clone, or nothing when it is worked in place, and
-refuses an unknown change or an unusable clone.
+refuses an unknown change or an unusable clone. `wait <file> <pattern>
+[--timeout <seconds>]` is how a step waits on a background command inside one call:
+it prints the file's first line matching the pattern as soon as that line is there,
+including one written before it began, and exits 1 after its bound, nine minutes by
+default, inside a call's ten-minute limit. It replaces following the output with
+`tail -f … | grep -m1`, which hangs when the matching line is the command's last,
+and the step table denies every step the `tail` follow forms.
 
 The workflow's make targets — `make design`, `make review`, `make change-next`, and
 the rest — are a fragment of the package, `scripts/change_workflow/workflow.mk`,
@@ -227,7 +233,7 @@ specification (CW-5qne) and its
 [`README.md`](../../openspec/specs/change-workflow/README.md): the subcommands, their
 flags, exit-status categories, and structured outputs, and the skills' names and
 argument forms, are public; `hook post-compaction` and `convert` are provisional;
-`check graph` and the unattended-run marker are internal; a report written for a
+`check graph`, `wait` and the unattended-run marker are internal; a report written for a
 person carries no promise; and the make targets and `CHANGE_WORKFLOW_*` variables
 are a convenience outside the surface, changed without a compatibility promise. A
 change to the workflow names, in its proposal, each public interface it changes and

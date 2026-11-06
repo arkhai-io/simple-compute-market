@@ -1,11 +1,19 @@
+import os
+from collections.abc import Mapping
+from pathlib import Path
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# The dotenv files every registry reads first. A later file overrides an earlier
+# one on a key both state, and the process environment overrides every file, so
+# `.env.local` is the lowest-priority file, not an override.
+DEFAULT_ENV_FILES: tuple[str, ...] = (".env.local", ".env", "/app/shared-env/.env")
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        # Load local overrides, then the committed shared-env/.env (cross-service addresses)
-        env_file=[".env.local", ".env", "/app/shared-env/.env"],
+        env_file=DEFAULT_ENV_FILES,
         env_file_encoding="utf-8",
         case_sensitive=False,
         # Tolerate unknown env vars (e.g. stale cross-service entries in
@@ -20,8 +28,8 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     # root_path: set to the gateway path prefix for this service (e.g. "/registry").
     # Used by FastAPI to generate correct OpenAPI schema URLs when behind a
-    # reverse proxy that strips the prefix. Set via ROOT_PATH env var in the
-    # Helm values overlay in the ops repo.
+    # reverse proxy that strips the prefix. A deployment states it as ROOT_PATH
+    # in a profile env file; the registry chart renders it from config.rootPath.
     root_path: str = ""
 
     registry_authority_id: str | None = Field(
@@ -60,6 +68,13 @@ class Settings(BaseSettings):
     registry_descriptor_recommended_dispute_authorities: list[dict] = Field(
         default_factory=list,
         validation_alias="REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES",
+    )
+
+    # The filter specification this registry serves; unset, the packaged
+    # filter-spec.yaml.
+    registry_filter_spec_path: str | None = Field(
+        default=None,
+        validation_alias="REGISTRY_FILTER_SPEC_PATH",
     )
 
     # Optional ZeroTier configuration (used by deployment/Makefile, not by app logic)
@@ -112,4 +127,34 @@ class Settings(BaseSettings):
         return self.database_url.startswith("sqlite://")
 
 
-settings = Settings()
+def profile_env_files(environment: Mapping[str, str]) -> tuple[Path, ...]:
+    """The profile env files the resolver variables select, in layering order.
+
+    ``ACTIVE_PROFILES`` is a comma-separated list of profile names, each loaded
+    as ``config-<profile>.env`` from ``CONFIG_DIRECTORY`` (the working directory
+    when unset), a later profile overriding an earlier one. Neither variable is a
+    setting: they choose which files configure the registry.
+    """
+    directory = Path(environment.get("CONFIG_DIRECTORY") or ".")
+    profiles = (
+        profile.strip()
+        for profile in environment.get("ACTIVE_PROFILES", "").split(",")
+        if profile.strip()
+    )
+    return tuple(directory / f"config-{profile}.env" for profile in profiles)
+
+
+def load_settings(environment: Mapping[str, str] | None = None) -> Settings:
+    """Build the registry's settings from its dotenv files and selected profiles.
+
+    The profile files follow the default dotenv files in one list, so a profile
+    overrides every default file, a later profile an earlier one, and the
+    process environment every file; a listed file that does not exist is
+    skipped, as a missing default file is. ``environment`` supplies only the
+    resolver variables, the process environment by default.
+    """
+    source = os.environ if environment is None else environment
+    return Settings(_env_file=(*DEFAULT_ENV_FILES, *profile_env_files(source)))
+
+
+settings = load_settings()

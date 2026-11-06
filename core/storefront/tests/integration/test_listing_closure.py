@@ -215,6 +215,18 @@ async def test_connection_level_write_applies_the_same_guard(client):
     assert (await client.load_listing(listing_id=listing_id))["status"] == "closed"
 
 
+async def test_a_bound_source_names_its_listing_even_once_closed(client):
+    """Closing a listing never releases its binding, so a refused publication
+    can still name the closed listing that holds the source."""
+    listing_id = await _persist(client)
+    key = _binding(listing_id).derivation_key
+
+    assert await client.listing_id_for_derivation_key(key) == listing_id
+    await client.update_listing(listing_id=listing_id, status="closed", closed_by="seller")
+    assert await client.listing_id_for_derivation_key(key) == listing_id
+    assert await client.listing_id_for_derivation_key("no-such-key") is None
+
+
 async def test_divergence_is_every_configured_record_disagreeing_with_local_status(
     client,
 ):

@@ -64,6 +64,7 @@ async def run_payment_reconciliation(
     logger: logging.Logger,
     paused: Callable[[], bool] | None = None,
     wait: Callable[[float], Awaitable[None]] | None = None,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
 ) -> None:
     """Run ``reconcile_once`` every interval until the task is cancelled.
 
@@ -71,6 +72,10 @@ async def run_payment_reconciliation(
     storefront's loop controller, which returns early on a pause request. The
     first pass is due one interval after start, as for the storefront's other
     timer loops; an operator who wants one sooner steps the loop.
+
+    A held pass polls the gate through ``sleep`` rather than ``wait``: the
+    controller's wait returns at once while a pause is requested, so a held
+    loop polling through it would spin.
     """
 
     if paused is not None and wait is None:
@@ -80,7 +85,7 @@ async def run_payment_reconciliation(
         await idle(interval_seconds)
         try:
             if paused is not None and paused():
-                await asyncio.sleep(_HELD_POLL_SECONDS)
+                await sleep(_HELD_POLL_SECONDS)
                 continue
             await reconcile_once()
         except asyncio.CancelledError:

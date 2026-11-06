@@ -397,9 +397,11 @@ class TestWaitForJob:
         assert result["status"] in {"succeeded", "failed"}
 
     async def test_wait_404_unknown_job(self, client_and_queue):
+        """A job absent at the deadline is unknown; a deadline of now asks that
+        without waiting for another process that could still create it."""
         _, _, _, test_client = client_and_queue
         with pytest.raises(AsyncProvisioningTestClientError) as exc_info:
-            await test_client.wait_for_job("does-not-exist", timeout=2.0)
+            await test_client.wait_for_job("does-not-exist", timeout=0)
         assert exc_info.value.status_code == 404
 
     async def test_wait_timeout_returns_408(self, client_and_queue):
@@ -411,8 +413,10 @@ class TestWaitForJob:
             vm_disk_size="20G", ssh_pubkey="ssh-ed25519 AAAA test",
         ))
         await asyncio.wait_for(dispatched.wait(), timeout=5.0)
+        # The job is held at the mock's gate, so it is not terminal at a
+        # deadline of now.
         with pytest.raises(AsyncProvisioningTestClientError) as exc_info:
-            await test_client.wait_for_job(submit.job_id, timeout=0.5)
+            await test_client.wait_for_job(submit.job_id, timeout=0)
         assert exc_info.value.status_code == 408
         mock.resume_rule("block-all")
 

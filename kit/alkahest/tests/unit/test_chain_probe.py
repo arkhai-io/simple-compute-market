@@ -398,15 +398,25 @@ async def test_a_construction_that_finishes_late_is_adopted_by_the_next_probe() 
         return f"client:{chain_name}"
 
     clients: dict[str, object] = {}
+    bound_passed = True
+
+    async def wait_for_construction(pending: asyncio.Future, _timeout: float) -> None:
+        # The first step's bound passes at once, with the construction held;
+        # the next waits for the construction it adopts to finish.
+        if not bound_passed:
+            await asyncio.wait((pending,))
+
     probe = _probe(
-        Rpc(timeout=1.0), build_client=build, clients=clients, rpc_timeout_seconds=1.0
+        Rpc(), build_client=build, clients=clients,
+        wait_for_construction=wait_for_construction,
     )
     try:
         await probe.step()
         assert probe.result("anvil").result == CHAIN_UNREACHABLE
 
+        bound_passed = False
         release.set()
-        await probe.step()
+        await asyncio.wait_for(probe.step(), timeout=5)
 
         assert probe.result("anvil").result == CHAIN_REACHABLE
         assert clients == {"anvil": "client:anvil"}

@@ -204,6 +204,7 @@ async def run_introduction_retention_sweep(
     paused: Callable[[], bool] | None = None,
     wait: Callable[[float], Awaitable[None]] | None = None,
     logger: logging.Logger | None = None,
+    clock: Callable[[], float] | None = None,
 ) -> None:
     """Run the sweep on the policy's interval until the task is cancelled.
 
@@ -213,6 +214,10 @@ async def run_introduction_retention_sweep(
     every sweep, so a pause requested during the wait is observed before the
     next sweep. The first sweep is due one interval after start, as for the
     storefront's other timer loops; an operator who wants one sooner steps it.
+
+    A sweep is due by ``clock``, the running loop's time unless given, not by
+    the wait having returned: a wait that ends early on a pause request must
+    not bring the next sweep forward.
     """
 
     if paused is not None and wait is None:
@@ -221,13 +226,14 @@ async def run_introduction_retention_sweep(
         raise TypeError("a gated retention sweep requires an interruptible wait")
     active_logger = logger or logging.getLogger(__name__)
     interval = float(service.policy.sweep_interval_seconds)
-    sweep_not_before = asyncio.get_running_loop().time() + interval
+    now = clock or asyncio.get_running_loop().time
+    sweep_not_before = now() + interval
     while True:
         try:
             if paused is not None and paused():
                 await asyncio.sleep(_HELD_POLL_SECONDS)
                 continue
-            if asyncio.get_running_loop().time() >= sweep_not_before:
+            if now() >= sweep_not_before:
                 report = await service.sweep_once()
                 if report.get("deleted"):
                     active_logger.info(

@@ -232,10 +232,12 @@ async def test_the_runner_sweeps_once_due_and_waits_between_cycles() -> None:
     service = _service(store, interval=1)
     swept = asyncio.Event()
     waits: list[float] = []
+    elapsed = [0.0]
 
     async def wait(seconds: float) -> None:
         waits.append(seconds)
-        await asyncio.sleep(seconds)
+        elapsed[0] += seconds
+        await asyncio.sleep(0)
 
     original = service.sweep_once
 
@@ -246,7 +248,9 @@ async def test_the_runner_sweeps_once_due_and_waits_between_cycles() -> None:
 
     service.sweep_once = sweep_once  # type: ignore[method-assign]
     task = asyncio.create_task(
-        run_introduction_retention_sweep(service, paused=lambda: False, wait=wait)
+        run_introduction_retention_sweep(
+            service, paused=lambda: False, wait=wait, clock=lambda: elapsed[0]
+        )
     )
     await asyncio.wait_for(swept.wait(), timeout=5)
     task.cancel()

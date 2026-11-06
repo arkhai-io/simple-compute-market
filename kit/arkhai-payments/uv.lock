@@ -47,7 +47,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-arkhai-payments"
-version = "0.5.0"
+version = "0.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-core" },
@@ -62,6 +62,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "cryptography" },
     { name = "datamodel-code-generator" },
     { name = "mypy" },
     { name = "pytest" },
@@ -81,6 +82,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "cryptography", specifier = ">=43" },
     { name = "datamodel-code-generator", specifier = "==0.83.0" },
     { name = "mypy", specifier = ">=1.15.0,<2.0.0" },
     { name = "pytest", specifier = ">=8.3.4,<9" },
@@ -88,7 +90,7 @@ dev = [
 
 [[package]]
 name = "arkhai-kit-deal-lifecycle"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-kit-deal-lifecycle-contracts" },
@@ -96,7 +98,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_lifecycle-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_lifecycle-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]

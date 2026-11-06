@@ -39,3 +39,7 @@ dependencies:
     version: "0.1.0"
     repository: "file://charts/e2e-tests"
     condition: e2e-tests.enabled
+  - name: payments-lane-double
+    version: "0.1.0"
+    repository: "file://charts/payments-lane-double"
+    condition: payments-lane-double.enabled

@@ -22,6 +22,21 @@ When every gap for a goal closes, the goal moves to [Completed goals](#completed
 
 ---
 
+## Goal Index
+
+Each goal links to its campaign in the [active-change index](../../openspec/changes/README.md), where its changes' readiness lives.
+
+| Goal | Campaign in the change index |
+|---|---|
+| [Goal 1 — Consolidate physical-resource authority in the provisioning service](#goal-1--consolidate-physical-resource-authority-in-the-provisioning-service) | [campaign](../../openspec/changes/README.md#roadmap-goal--consolidate-physical-resource-authority-in-the-provisioning-service) |
+| [Goal 2 — Negotiate full compute capability, not GPU count alone](#goal-2--negotiate-full-compute-capability-not-gpu-count-alone) | [campaign](../../openspec/changes/README.md#roadmap-goal--negotiate-full-compute-capability-not-gpu-count-alone) |
+| [Goal 3 — One storefront serving several compute-family domains](#goal-3--one-storefront-serving-several-compute-family-domains) | [campaign](../../openspec/changes/README.md#roadmap-goal--one-storefront-serving-several-compute-family-domains) |
+| [Goal 4 — Make a domain a composition of kit](#goal-4--make-a-domain-a-composition-of-kit) | [campaign](../../openspec/changes/README.md#roadmap-goal--make-a-domain-a-composition-of-kit) |
+| [Goal 5 — Make capacity exclusivity compensated](#goal-5--make-capacity-exclusivity-compensated) | [campaign](../../openspec/changes/README.md#roadmap-goal--make-capacity-exclusivity-compensated) |
+| [Goal 6 — Make the settlement mechanism a composed choice](#goal-6--make-the-settlement-mechanism-a-composed-choice) | [campaign](../../openspec/changes/README.md#roadmap-goal--make-the-settlement-mechanism-a-composed-choice) |
+| [Goal 8 — Sell compute by the period until either party stops](#goal-8--sell-compute-by-the-period-until-either-party-stops) | [campaign](../../openspec/changes/README.md#roadmap-goal--sell-compute-by-the-period-until-either-party-stops) |
+| [Completed goals](#completed-goals) | |
+
 ## Goal 1 — Consolidate physical-resource authority in the provisioning service
 
 **Value.** One authority for physical state removes a whole class of divergence bugs, and — less obviously but more consequentially — it is what makes the storefront substitutable. A storefront that owns hardware inventory cannot become a multi-domain storefront (Goal 3), cannot be replaced by a different commercial front-end over the same hardware, and forces every seller to maintain the same facts in two places. It also shrinks the seller's operational surface: hardware inventory stops being something an operator imports into a commercial service.
@@ -73,7 +88,7 @@ service and the storefronts calling it upgrade together.
 | Emergency rotation across live hosts must reissue active grants under the newly active signing key and rotate the shared client token; each operation may interrupt every affected session once | Unowned — needs a new change before serving buyers whose operator cannot accept the per-incident choice, or at first credential compromise |
 | The real-provisioning modules `e2e_vm_real_provisioning` and `e2e_bare_metal_real_provisioning` have never run against a target, so relay-backed delivery is evidenced only by accepted live observations whose raw output is kept outside this repository, and the modules may drift unnoticed | Unowned — run both against a development cluster before relying on them as regression evidence, or at the next change to relay delivery |
 | Real provisioning is not yet qualified: none of the [observations the qualification owes](VALIDATION_RUNBOOK.md#observations-the-qualification-owes) has been made against a frozen, reviewed candidate, so the accepted live observations are not qualification evidence and the offers stay closed to general buyers | Unowned — make them on a development cluster once relay provisioning is on `dev`, beside the real-provisioning modules' first run |
-| A hosted deployment has no controllable dispute authority. Payment purchases on a real-provisioning deployment pin an authority identity that no service answers, so the buyer's delivery-end filing, case holds and rulings are unexercised there; the lane mediation double serves local lanes only, and production configuration refuses its fixture identities | Unowned — needs a new change when a hosted scenario exercises a dispute |
+| A hosted deployment has no controllable dispute authority. Payment purchases on a real-provisioning deployment pin an authority identity that no service answers, so the buyer's delivery-end filing, case holds and rulings are unexercised there. No lane runs a mediation double either: the lanes pin a fixture authority at a `.invalid` origin that nothing can answer, whose record key has no usable private half. No role configuration refuses the lanes' fixture identities; whether one should is [`add-arkhai-payments-lane-double`](../../openspec/changes/add-arkhai-payments-lane-double/)'s decision, since its mediation double needs a usable public signing key | Unowned — needs a new change when a hosted scenario exercises a dispute |
 | The relay role takes the admission-plugin wheel on the operator's word rather than checking its digest | Unowned — pin the release version and digest when the plugin publishes a distributable release |
 | Every provisioning route admits the administrator; whether every other service should take the same stance has not been decided | Unowned — needs a repository-wide decision |
 | Under a bare-metal delivery conflict — the site reporting a delivery other than the recorded result — the buyer's teardown answers the 409 `delivery_conflict` refusal instead of ending the lease, since it reads the fulfillment's status first. Whether teardown proceeds past a conflict is undecided | Unowned — needs a new change |
@@ -332,7 +347,7 @@ Demand arrives through Arkhai payments on fiat rails: a prepaid balance the serv
 
 **Current state.** Both compute domains compose a shared post-commitment lifecycle: exact-byte evidence, per-option dispute authority and holds, signed receipt-time buyer surrender through the canonical client, attributed earliest-end admission/physical effects, respondent sign-or-contest and verified authority observation. The site records signed intended-end events atomically and delivers them by event-keyed outbox with lease-read recovery; capacity return remains separately proven. VM administrator ends use accepted rights or independently journal teardown and a seller-failure case. These are implemented and archived.
 
-Payments and mediation schemas/vectors, including delivery_end concurrence/respondent models, are published and vendored. Hosted development mediation still runs an older revision; vendoring is not deployment qualification. Fresh isolated branch-built lanes with real local authorities passed VM delivery/CLI, bare-metal mock/payment, API-credit payment and a hosted VM end-case journey. No real bare-metal host was qualified. The current payment adapter is once-only: no production rate start/stop, renewable funding timer, unified compute delivery, or deployed rate/ruling-execution matrix is claimed. Those remain the later Goal 8 changes below. Storefront retention eligibility is composed but has no production prune trigger; unresolved counterparty cases hold their per-deal dispute cursor. VM/bare-metal respondent lifetime and term-end handling still differ.
+Payments and mediation schemas/vectors, including delivery_end concurrence/respondent models, are published and vendored. Hosted development mediation still runs an older revision; vendoring is not deployment qualification. Fresh isolated branch-built lanes with real local authorities passed VM delivery/CLI, bare-metal mock/payment, API-credit payment and a hosted VM end-case journey. No real bare-metal host was qualified. Every pipeline run settles the once-only payment scenarios — VM, bare metal and API credits — against an in-lane HTTP double of the payments service that mirrors its API over the payments kit's engine and signs only test-mode receipts; the VM scenario's case stages skip, naming the missing mediation target. The current payment adapter is once-only: no production rate start/stop, renewable funding timer, unified compute delivery, or deployed rate/ruling-execution matrix is claimed. Those remain the later Goal 8 changes below. Storefront retention eligibility is composed but has no production prune trigger; unresolved counterparty cases hold their per-deal dispute cursor. VM/bare-metal respondent lifetime and term-end handling still differ.
 
 The implemented lifecycle's option/authority/end/evidence model and accepted limits live in [deal-lifecycle architecture](../../openspec/specs/deal-lifecycle/architecture.md). Product/rate alternatives and remaining activation decisions stay in their owning changes.
 
@@ -341,7 +356,7 @@ The changes, in dependency order (foundation archives first, the site's activati
 | Open gap | Owned by | Its closeout shows |
 |---|---|---|
 | Archived: canonical compute buyer delivery ends, option-owned authorities, retained evidence and attributed site-signed reports; stop/ruling execution remains later work | [`agreed-evidence-and-early-termination`](../../openspec/changes/archive/2026-11-03-agreed-evidence-and-early-termination/) | both buyer paths ending delivery, backed by a stop or a case; ends attributed; the signed site report retrieved; cases filed and held per part; delivery_end for either filer, signed receipts/concurrence and durable respondent sign-or-contest |
-| Payment scenarios skip without a target, and hostile payment and dispute-authority cases cannot be driven deterministically | [`add-arkhai-payments-lane-double`](../../openspec/changes/add-arkhai-payments-lane-double/) | the existing payment scenarios running against isolated HTTP payment and mediation doubles, with signed records, controllable failures and the shared published/proposed qualification classes, never relabelled as live evidence |
+| The lanes' payments double serves only the once-only surface its suite claims, with no controls; no lane runs a mediation double, so the VM payment scenario's case stages skip without a mediation target; and hostile payment and dispute-authority cases cannot be driven deterministically | [`add-arkhai-payments-lane-double`](../../openspec/changes/add-arkhai-payments-lane-double/) | the payment and dispute scenarios running against the lanes' payments double, extended with controls, and a mediation double beside it, with signed records, controllable failures and the shared published/proposed qualification classes, never relabelled as live evidence |
 | No listing can say how a deal is billed or whether the seller may end it; the buyer CLIs require a duration; the Agreement's price has no stated unit | [`negotiate-open-ended-compute-terms`](../../openspec/changes/negotiate-open-ended-compute-terms/) | per-period and spot options published, and refused at every door where servicing is undeclared |
 | A buyer cannot find a per-period or preemptible option or the seller's bounds | [`discover-open-ended-compute-listings`](../../openspec/changes/discover-open-ended-compute-listings/) | the registry filters and `--class` finding them |
 | The payments kit derives only `once` parts and has no rate-part lifecycle calls; a seller cannot preempt under the terms the buyer accepted | [`spot-deals-through-arkhai-payments`](../../openspec/changes/spot-deals-through-arkhai-payments/) | a rate part and setup part derived in both domains, every operation proven against the double, a spot deal preempted with notice, a rotation re-anchored |
@@ -369,47 +384,6 @@ Work this goal found and leaves unowned:
 | Servicing API-credit disputes: the API-credit roles compose no seller half, evidence store, `watch` or buyer filing path, although their hosted options carry `adjudication` and the authorities hold and rule on them; and no decision says what a ruling that reverses payment does to credits already issued — revoke the unconsumed balance, let them stand as the seller's loss, or let the ruling say | Unowned — API credits is not launched and this would stand in the way of a viable Goal 8 launch; until owned, the API-credit buyer client states that it offers no filing and the terms are enforceable at the authorities; `move-settle-out-of-core` gives API credits its lifecycle binding and no lifecycle behaviour |
 | Compound payment-service termination authority | Deferred/unowned — revisit with hosted bonds; would need a dispute-authority record of every termination, not a payment-adapter shortcut |
 | Independent attestation of contested delivery beyond the seller's signed end | Unowned — receipt concurrence and respondent signing are implemented; broader automated evidence waits for a managed metering gateway. Contested and unanswered cases remain triaged |
-
----
-
-## Buyer identity lifecycle status
-
-Buyer marketplace identity is now a core-owned durable profile rather than
-repeated domain-local `[Identity]` configuration. The XDG profile store keeps a
-stable random UUID, canonical principal history, redacted credential-provider
-references, lifecycle/selection, and opaque authority bindings. Fresh VM and
-API-credit work uses the selected primary; version-3 run recovery resolves the
-recorded retained principal. Installed buyer plugins must declare the shared
-resolved-identity injection contract.
-
-The implemented change mapping is
-[`add-persistent-buyer-profiles`](../../openspec/changes/add-persistent-buyer-profiles/).
-Remaining external operational evidence belongs to that change's unchecked
-verification tasks; it does not restore legacy identity precedence.
-
----
-
-## Payment qualification boundaries
-
-Local focused suites exercise Agreement retention, mandate validation, signed receipts, retryable pending, and idempotent physical/grant progress. The controlled VM smoke reaches pending → provisioning → ready with one delivery; it is not live-ledger or hardware acceptance. Bare-metal and API-credit package tests likewise do not establish external payments or delivery qualification.
-
-A qualified payment run needs the intended owned payments target, owner-scoped credentials, observed readiness, and the actual domain delivery authority. VM delivery, API-key use and top-up, and bare-metal authenticated access, revocation, teardown, and capacity release remain separate outcomes. Unavailable service or hardware prerequisites remain named evidence gaps, not permission to claim a simulated result.
-
-Two compute purchases have been qualified that way, each on its own host in test mode, through the buyer commands as they ship: a whole bare-metal GPU machine and a GPU guest on an x86-64 host. Both used relayed delivery, reached the paid guest over SSH with a pinned host key, completed bounded GPU work without CPU fallback, ended through ordinary lifecycle handling, refused fresh access after teardown, and returned capacity. VM leases also reached natural expiry without an operator retry. Their correlated signed payment records are separate evidence from physical delivery.
-
-Separate controlled CPU direct and relay pairs establish concurrent-session and create/release behavior, not external buyer identity or GPU acceptance. Independent observations also cover invalid relay admission, same-run recovery without another debit, repeated canonical adoption, bounded bare-metal cleanup and same-job refusal recovery. The supplemental host-network probe came from an operator-only CPU guest bound to the paid deployment's guest base, bridge, NIC and loaded policy; it covers only finite paths exercised and says nothing about paid-tenant setup or universal isolation. These observations do not claim the original named Alkahest drivers ran.
-
-Earlier signed snapshots showed released VM holds and still-held bare-metal contract holds. A subsequent automated TEST bare-metal journey established readiness without legacy fulfillment reads, ordinary teardown and access denial, automatic payee-signed case closure, and natural financial release under its accepted terms. Recovery of earlier interrupted attempts required operator action and does not establish unassisted closure. A held balance is not a refund or cashout. Pipeline lanes do not replace external proof: none configures a payments target or runs a real host.
-
-Seller servicing adopts validated existing compute readiness without buyer polling. Buyer logs preserve canonical public signer evidence while settlement progress excludes private delivery. Mediation case reads retain accepted or pending protection with strict deal binding, and authority advertisements can carry a supported shorter minimum without bypassing compute delivery timing. These implementation results do not establish LIVE financial processing or an unrestricted production-readiness claim.
-
-What this qualification leaves open:
-- A teardown job that exhausts its retries is not re-run: the lease waits for an operator to verify the host and force-release it.
-- Where two live lanes share a machine, they run in sequence, each pausing the other's listings. That relies on a precondition no permanent requirement states: a refresh or reopen under the same identity keeps a listing's pause. Its limits are untested:
-  - successor listings are created unpaused;
-  - no test closes a paused listing by reconciliation and reopens it;
-  - bare metal has no test of a paused listing refusing an opening.
-- Live API-credit purchase/top-up qualification remains separate; consumer wire compatibility does not establish an external API-credit delivery. Current producer vectors and their signature/framing checks are now available in the payment kit; this gap is closed.
 
 ---
 

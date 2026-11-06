@@ -1,0 +1,35 @@
+# The payments lane double's account directory and policy.
+#
+# Every value in this file is a public deterministic development value, committed
+# for end-to-end lanes and local releases. Never use one on a public network, and
+# never configure a real payments deployment with one.
+
+# The one asset the double admits, and its fee policy in basis points.
+asset = "USD/6"
+fee_bps = 250
+
+# The double's receipt-signing seed, distinct from the payments kit's
+# FakePaymentsClient seed, and the Ed25519 identity it yields, which lanes pin as
+# the payments service identity. The double refuses to start if they disagree.
+receipt_seed = "0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d"
+
+[receipt_identity]
+scheme = "ed25519"
+identifier = "kaKKC3Q4FZOk2UaVeSCJJq_IrYLIg5t2RDWbnrqaSzo"
+
+# The payer every lane's buyer acts as, funded once when the double starts, in
+# USD/6 minor units (1000000 is one dollar).
+[accounts.buyer]
+account = "00000000-0000-4000-8000-0000000000b1"
+token = "payments-lane-double-buyer-public-development-token"
+funding = "1000000000000"
+
+# The payee every lane's storefront acts as.
+[accounts.seller]
+account = "00000000-0000-4000-8000-0000000000b2"
+token = "payments-lane-double-seller-public-development-token"
+
+# The pinned dispute authority's account (fixtures/dispute-authority.toml). It has
+# no token: nothing can authenticate at the double as the dispute authority.
+[accounts.dispute_authority]
+account = "00000000-0000-4000-8000-0000000000d1"

@@ -1217,6 +1217,7 @@ used only by the engine and its shipped skills.
 | `hook post-compaction` | provisional: the installer and the harness adapters take its wiring |
 | `convert` | provisional: removed once no change needs converting |
 | `check graph` | internal: it holds the engine's own graph diagram to the graph table, which no adopter, person, or runner relies on |
+| `wait` | internal: the shipped skills' bounded wait on a background command's output |
 | The unattended-run marker in a step's environment | internal |
 | The make fragment's targets and its `CHANGE_WORKFLOW_*` variables | a convenience outside the surface, with no compatibility promise |
 

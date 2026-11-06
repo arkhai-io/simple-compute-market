@@ -6,10 +6,14 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
+from typing import Any
 
+import httpx
 import typer
+from market_arkhai_payments import check_configured_payments_access
 
 from .admin_cli import reporting_failures
+from .config import load_storefront_settings
 from .config_migration import config_app
 from .pool_override_cli import pool_override_app
 from .publication_cli import close_all_open_listings, run_publication_cycle
@@ -111,6 +115,48 @@ def publish_cmd(
         else:
             report = run_publication_cycle(storefront_url, dry_run=dry_run)
     typer.echo(json.dumps(report, sort_keys=True))
+
+
+def payments_section() -> Any:
+    """The storefront's ``[Settlement.arkhai_payments]`` section, read from the
+    configuration files ``serve`` reads, or ``None`` when it configures none.
+
+    A configuration that cannot be read raises ``ValueError``.
+    """
+    return load_storefront_settings().settlement.get("arkhai_payments")
+
+
+def payments_transport() -> httpx.BaseTransport | None:
+    """The transport the check reaches the payments service through; ``None``
+    gives the payments client its own."""
+    return None
+
+
+@app.command("check-payments")
+def check_payments_cmd(
+    account: str = typer.Option(
+        ...,
+        "--account",
+        help="The payments account whose balance is read, normally the seller's "
+        "payee account: the service answers only for the credential's own account.",
+    ),
+) -> None:
+    """Read one account's balance with the storefront's payments configuration.
+
+    Prints one JSON outcome, which never carries the credential, and exits 1
+    naming the failing step: configuration, credential, transport, or the
+    service's refusal. Starts no server, opens no database, and contacts
+    nothing but the payments service.
+    """
+    try:
+        outcome = check_configured_payments_access(
+            payments_section, account, transport=payments_transport()
+        )
+    except ValueError as exc:
+        raise typer.BadParameter("not a payments account id", param_hint="--account") from exc
+    typer.echo(outcome.json_line())
+    if not outcome.ok:
+        raise typer.Exit(code=1)
 
 
 @app.command("redeliver-introduction")

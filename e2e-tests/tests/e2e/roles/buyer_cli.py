@@ -428,13 +428,16 @@ def create_profiled_buyer_cli(
     registry_authorities: Mapping[str, Mapping[str, Any]] | None = None,
     toml_sections: Iterable[str] = (),
     credential_variable: str | None = None,
+    credential_environment: Mapping[str, str] | None = None,
 ) -> BuyerCli:
     """Create one hermetic buyer over the shared profile/config boundary.
 
-    Domain scenarios supply only their public configuration sections. This
-    helper owns the persistent profile, exact credential reference, XDG
-    directories, and registry list without assuming a VM wallet, listing
-    shape, provisioning service, result carrier, or teardown mechanism.
+    Domain scenarios supply only their public configuration sections, and in
+    `credential_environment` any further credential the buyer reads from a
+    variable its configuration names, such as its payments key. This helper
+    owns the persistent profile, exact credential reference, XDG directories,
+    and registry list without assuming a VM wallet, listing shape, provisioning
+    service, result carrier, or teardown mechanism.
     """
     if not marketplace_credential:
         raise ValueError(f"{domain_identity} marketplace credential is missing")
@@ -511,7 +514,7 @@ def create_profiled_buyer_cli(
         state_dir=state_dir,
         data_dir=data_dir,
         home_dir=home_dir,
-        credential_env={variable: marketplace_credential},
+        credential_env={**(credential_environment or {}), variable: marketplace_credential},
     )
 
 

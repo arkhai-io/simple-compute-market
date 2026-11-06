@@ -115,7 +115,7 @@ registry_b:
 
 # The bare-metal end-to-end lane (`make test-e2e-bare-metal`): one mock-profile
 # site, the bare-metal storefront, its registry, and the dev chain, with the
-# development identities `make e2e-bare-metal-dev-env` and the storefront's
+# development identities compose.bare-metal-local.yml and the storefront's
 # development configuration (domains/bare_metal/storefront/storefront.dev.toml)
 # bind. Every credential here is a well-known Anvil development key; see
 # dev-env/identities/README.md, "The bare-metal lane". Kept apart from

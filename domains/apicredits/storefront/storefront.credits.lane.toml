@@ -1,0 +1,177 @@
+# API-credits seller in the API-credit end-to-end lane: storefront.credits.toml,
+# the full local stack's profile, plus payments settled against the lane's
+# payments double and a payment publication clause, so the seeded listing offers
+# a payment option beside its Alkahest one. The two files differ only in those
+# additions, which e2e-tests/tests/unit/test_domain_stack_configuration.py holds
+# them to, so a change to one is made to both. compose.apicredits-lane.yml mounts
+# this file in place of storefront.credits.toml, which the full local stack
+# keeps.
+#
+# Anvil default account #3; deterministic local chain. DO NOT use these
+# keys on any public network. Every payments value below is likewise a public
+# development value, never for a public network.
+#
+# Mounted into the credits-storefront container at
+# /etc/arkhai/storefront.toml (XDG_CONFIG_HOME=/etc).
+
+agent_id      = "tokenseller"
+port          = 8000
+base_url      = "http://credits-storefront:8000/"
+db_path       = "/app/data/storefront.db"
+
+# Registry discovery (seller-side). Matches the shipped default in
+# apicredits_storefront/settings.toml, stated explicitly because this
+# deployment profile replaces those defaults rather than layering over
+# them, and `server.py` reads the key unconditionally.
+enable_registry_discovery = true
+
+[identity]
+scheme     = "eip191"
+identifier = "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+
+[identity.admin_principals]
+identities = [
+  { scheme = "eip191", identifier = "0x90f79bf6eb2c4f870365e785982e1f101e93b906" },
+]
+
+[wallet]
+address     = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
+private_key = "" # stated in the secret overlay, storefront.secrets.toml
+
+# Which settlement mechanisms this seller will actually service. Without
+# this section `mechanism_config("alkahest")` is None, `alkahest_enabled`
+# is false, and no chain probe is composed, so no chain client is ever
+# built -- the storefront starts cleanly, publishes, negotiates and accepts,
+# and then refuses `POST /api/v1/settle/...` with
+# `chain 'anvil' not configured on this storefront — available chains: []`.
+# Only that probe builds chain clients, so without this section the chain
+# table below yields none: configuring one without the other leaves it
+# inert, and the absence produces no startup warning.
+[settlement]
+schema_version = 1
+priority = ["alkahest.v1", "arkhai.payments.v1"]
+
+[settlement.alkahest]
+enabled = true
+# Each chain's Alkahest address book: the same anvil book the VM storefront
+# uses (one anvil deployment), bind-mounted into this container.
+address_books = { anvil = "/app/alkahest_anvil_addresses.json" }
+release_models = ["recipient"]
+trusted_oracle_addresses = []
+# `interruptible`/`interruptible_oracle_addresses` are deliberately absent.
+# They configure VM spot interruption, which this domain does not sell, and
+# `AlkahestSettlementConfig` defaults both to off.
+
+# Payments, settled against the lane's payments double over HTTPS, trusting the
+# lane CA alone, which compose.apicredits-lane.yml mounts at ca_bundle_path. The
+# receipt identity is the double's, from
+# tools/payments-lane-double/fixtures/accounts.toml, and the double signs test
+# receipts only, so livemode stays false. The seller's token at the double is
+# api_key in the secret overlay, dev-env/identities/api-credits.storefront.secrets.toml.
+# The dispute authority comes from the lane registry's recommendation.
+[settlement.arkhai_payments]
+enabled = true
+service_url = "https://payments-double:8443"
+service_identity = { scheme = "ed25519", identifier = "kaKKC3Q4FZOk2UaVeSCJJq_IrYLIg5t2RDWbnrqaSzo" }
+fee_bps = 250
+livemode = false
+ca_bundle_path = "/run/payments-lane-double/lane-ca.pem"
+
+[chains.anvil]
+rpc_url  = "ws://anvil:8545"
+chain_id = 31337
+
+[registry]
+# Only the api-credits registry: this seller's listings speak the
+# api_credits schema, and the buyer plugin's schema filter routes its
+# discovery to this registry. (The public vms.compute registry is also
+# in the buyer's config — that's what makes the schema filter
+# load-bearing.)
+urls              = ["http://api-credits-registry:8080"]
+discovery_timeout = 5.0
+
+[registry.authorities."http://api-credits-registry:8080"]
+authority = "api-credits-registry"
+identities = [
+  { scheme = "ed25519", identifier = "_NUDENxVX6u4cMd0xzoYyQAt10QDI47bfnYnu2lTVho" },
+]
+
+[credits]
+# The credits service this storefront sells for. It hosts the quota ledger
+# selected explicitly below and the separate issuance/keys mechanism API.
+service_url         = "http://credits-service:8082"
+admin_key_file      = "/run/secrets/arkhai/api-credits-admin-key"
+
+[capacity]
+# Poll fast — the suite waits on delta-driven listing reconciliation.
+poll_interval = 1
+seed_site     = "default"
+# Deliberately overrides the shipped default of 0; see storefront.bob.toml.
+# Local compose profile with no untrusted buyers, kept on so the
+# two-phase reserve path stays under e2e coverage.
+hold_ttl_seconds = 900
+
+[capacity.sites.default]
+url = "http://credits-service:8082"
+
+[capacity.sites.default.expected_authorities]
+# The credits service, which is this storefront's `default` capacity site --
+# `[capacity.sites.default].url` above points at it.
+#
+# Public half of dev-env/identities/api-credits-service.ed25519. It must match
+# what that service resolves as its own principal, or this storefront rejects
+# every response it gets from its own site.
+identities = [
+  { scheme = "ed25519", identifier = "MheGyI4OZPRUijPSgdBucxha4zXw5mJ5hSELYon6x_c" },
+]
+
+[credits.expected_authorities]
+# The credits service's own principal, for verifying the signed responses
+# to this storefront's issuance and key-administration calls. Same service
+# and same value as [capacity.sites.default.expected_authorities] above,
+# deliberately pinned separately: that key belongs to the
+# capacity-publication subsystem and is a merged list, so appending a
+# capacity authority there must not widen what the credits boundary
+# accepts. A unit test asserts the two agree while both exist.
+#
+# Public half of dev-env/identities/api-credits-service.ed25519. Setting
+# this is half of the signed-authentication flip; the other half is
+# APICREDITS_SITE_SIGNING_KEY_FILE on the service in
+# domains/apicredits/compose.yml.
+identities = [
+  { scheme = "ed25519", identifier = "MheGyI4OZPRUijPSgdBucxha4zXw5mJ5hSELYon6x_c" },
+]
+
+[negotiation]
+# Empty: the API-credits guards (api_credits_round_zero_guard,
+# buyer_counter_guard, credit_quota_guard, key_owned_by_buyer_principal,
+# escrow_shape_guard) prepend automatically; the terminal default is
+# listed_price.
+policies = []
+
+[pricing]
+# Fallback only — the seeded listing carries its own per-token rate.
+default_min_price = "1"
+# The payment option every listing created without its own clauses offers, the
+# seeded one included: 1000 USD/6 base units per token to the seller's payee
+# account at the double, tools/payments-lane-double/fixtures/accounts.toml's
+# seller account. The seed's Alkahest escrow is offered beside it.
+settlements = [
+  { mechanism = "arkhai.payments.v1", asset = "USD/6", rate = "1000", per = "token", mechanism_input = { payee_account = "00000000-0000-4000-8000-0000000000b2", asset = "USD/6", window = "P7D", dispute_window_seconds = 1296000 } },
+]
+
+[seed]
+# Demo self-seed (e2e): the storefront's listing-seed loop registers this
+# quota resource in the credits-service ledger and publishes a listing from
+# it once the credits service and the chain answer, so a fresh `compose up`
+# has something to discover. The listing's base_url points at the gated
+# sample app the buyer will consume.
+resource_id     = "weather-quota"
+total_units     = 100
+service_name    = "weather-api"
+price_per_token = "1"
+token           = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
+chain           = "anvil"
+base_url        = "http://sample-app:8085"
+openapi_url     = "http://sample-app:8085/openapi.json"
+description     = "Prepaid weather-API credits"

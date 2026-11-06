@@ -5,10 +5,14 @@ Subcommands:
     publish    Create + publish a listing backed by a quota resource, through
                the running storefront.
     listings   List the running storefront's local listings.
+    check-payments
+               Read one account's balance from the payments service with the
+               storefront's own configuration, credential and trust.
 
 ``publish`` and ``listings`` are clients of a running storefront: a listing
 created with no storefront serving it is one no buyer can negotiate, so neither
-command builds the storefront's services or opens its database.
+command builds the storefront's services or opens its database, and neither does
+``check-payments``, which contacts only the payments service.
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ from typing import Any
 import httpx
 import typer
 from market_alkahest.alkahest import get_erc20_escrow_obligation_default
+from market_arkhai_payments import check_configured_payments_access
 from market_identity import Signer, TrustedIdentitySet
 from storefront_client import StorefrontClientError, SyncStorefrontClient
 
@@ -265,6 +270,52 @@ def listings_cmd(
     except (StorefrontClientError, httpx.HTTPError) as exc:
         raise _refused(url, exc) from exc
     typer.echo(json.dumps(dataclasses.asdict(page), indent=2, default=str))
+
+
+def payments_section() -> Any:
+    """The storefront's ``[Settlement.arkhai_payments]`` section, read from the
+    configuration ``serve`` reads, or ``None`` when it configures none.
+
+    A configuration that cannot be read raises ``ValueError``.
+    """
+    # Imported only once ``--config`` has run: the storefront's settings
+    # resolve when its config module is first imported.
+    from apicredits_storefront.utils.config import settlement_config_mapping
+
+    return settlement_config_mapping().get("arkhai_payments")
+
+
+def payments_transport() -> httpx.BaseTransport | None:
+    """The transport the check reaches the payments service through; ``None``
+    gives the payments client its own."""
+    return None
+
+
+@app.command("check-payments")
+def check_payments_cmd(
+    account: str = typer.Option(
+        ...,
+        "--account",
+        help="The payments account whose balance is read, normally the seller's "
+        "payee account: the service answers only for the credential's own account.",
+    ),
+) -> None:
+    """Read one account's balance with the storefront's payments configuration.
+
+    Prints one JSON outcome, which never carries the credential, and exits 1
+    naming the failing step: configuration, credential, transport, or the
+    service's refusal. Starts no server, opens no database, and contacts
+    nothing but the payments service.
+    """
+    try:
+        outcome = check_configured_payments_access(
+            payments_section, account, transport=payments_transport()
+        )
+    except ValueError as exc:
+        raise typer.BadParameter("not a payments account id", param_hint="--account") from exc
+    typer.echo(outcome.json_line())
+    if not outcome.ok:
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":

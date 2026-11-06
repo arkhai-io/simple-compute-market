@@ -75,6 +75,8 @@ FAKE_SSH = """\
 import json, sys
 from pathlib import Path
 
+TIMED_OUT = 124
+
 here = Path(__file__).parent
 plan = json.loads((here / "plan.json").read_text())
 calls = json.loads((here / "calls.json").read_text())
@@ -88,6 +90,8 @@ if step.get("elapse"):
 if step.get("hang"):
     import time
     time.sleep(step["hang"])
+if step.get("times_out"):
+    sys.exit(TIMED_OUT)
 
 args = sys.argv[1:]
 options = {}
@@ -115,6 +119,9 @@ sys.stdout.write(step.get("stdout", ""))
 sys.stderr.write(step.get("stderr", ""))
 sys.exit(step.get("rc", 0))
 """
+
+
+_TIMED_OUT = 124
 
 
 class Clock:
@@ -163,6 +170,18 @@ def fake_ssh(tmp_path: Path):
         @staticmethod
         def calls() -> list[list[str]]:
             return json.loads((bin_dir / "calls.json").read_text())
+
+        timeouts: list[float] = []
+
+        @staticmethod
+        def run(argv: list[str], **options) -> subprocess.CompletedProcess[str]:
+            """``subprocess.run`` over the fake, where a ``times_out`` step runs out of
+            the attempt's time at once instead of hanging until it does."""
+            result = subprocess.run(argv, **options)
+            if result.returncode == _TIMED_OUT:
+                Fake.timeouts.append(options["timeout"])
+                raise subprocess.TimeoutExpired(argv, options["timeout"])
+            return result
 
     return Fake
 
@@ -280,28 +299,45 @@ def test_the_first_host_key_is_trusted_and_logged(
 
 @pytest.fixture
 def hanging_session(tmp_path: Path, fake_ssh, clock: Clock) -> SshSession:
-    """A session whose attempts run out of time after half a second of real time."""
+    """A session whose attempts run out of time when the fake plans ``times_out``."""
     directory = tmp_path / "hung"
     directory.mkdir(mode=0o700)
     return SshSession(
         directory, ssh=fake_ssh.path, clock=clock, sleep=clock.sleep,
+        connect_retry_seconds=60, run=fake_ssh.run,
+    )
+
+
+def test_an_attempt_that_really_hangs_is_retried_as_a_connection_failure(
+    tmp_path: Path, fake_ssh, clock: Clock
+):
+    """The one test that spends real time: an ``ssh`` still running at the
+    attempt's limit is stopped by the real subprocess timeout and retried."""
+    directory = tmp_path / "really-hung"
+    directory.mkdir(mode=0o700)
+    session = SshSession(
+        directory, ssh=fake_ssh.path, clock=clock, sleep=clock.sleep,
         connect_retry_seconds=60, attempt_seconds=0.5,
     )
+    fake_ssh.plan({"hang": 5}, {"host_key": HOST_KEY, "stdout": "up"})
+    assert session.run(ENDPOINT, session.new_key("buyer"), "true") == "up"
+    assert len(fake_ssh.calls()) == 2
 
 
 def test_an_attempt_that_hangs_is_retried_as_a_connection_failure(
     hanging_session: SshSession, fake_ssh
 ):
-    fake_ssh.plan({"hang": 5}, {"host_key": HOST_KEY, "stdout": "up"})
+    fake_ssh.plan({"times_out": True}, {"host_key": HOST_KEY, "stdout": "up"})
     assert hanging_session.run(ENDPOINT, hanging_session.new_key("buyer"), "true") == "up"
     assert len(fake_ssh.calls()) == 2
+    assert len(fake_ssh.timeouts) == 1
 
 
 def test_an_attempt_that_hangs_is_not_a_refusal_but_is_retried(
     hanging_session: SshSession, fake_ssh, clock: Clock
 ):
     """Something answered and stayed connected: only ``ssh`` failing later refuses."""
-    fake_ssh.plan({"hang": 5}, {"rc": 255, "stderr": "Connection refused"})
+    fake_ssh.plan({"times_out": True}, {"rc": 255, "stderr": "Connection refused"})
     key = hanging_session.new_key("buyer")
     assert hanging_session.assert_refused(ENDPOINT, key) == "Connection refused"
     assert len(fake_ssh.calls()) == 2
@@ -311,7 +347,7 @@ def test_an_attempt_that_hangs_is_not_a_refusal_but_is_retried(
 def test_access_still_hanging_at_the_bound_fails(
     hanging_session: SshSession, fake_ssh
 ):
-    fake_ssh.plan({"hang": 5})
+    fake_ssh.plan({"times_out": True})
     with pytest.raises(SshAccessError, match="not shown to refuse buyer within 10s"):
         hanging_session.assert_refused(ENDPOINT, hanging_session.new_key("buyer"), bound=10)
     assert len(fake_ssh.calls()) == 10 // RETRY_INTERVAL_SECONDS
@@ -320,7 +356,7 @@ def test_access_still_hanging_at_the_bound_fails(
 def test_access_accepted_after_a_hang_fails_as_still_accepted(
     hanging_session: SshSession, fake_ssh
 ):
-    fake_ssh.plan({"hang": 5}, {"host_key": HOST_KEY})
+    fake_ssh.plan({"times_out": True}, {"host_key": HOST_KEY})
     with pytest.raises(SshAccessError, match="still accepted buyer after 10s"):
         hanging_session.assert_refused(ENDPOINT, hanging_session.new_key("buyer"), bound=10)
 
@@ -389,10 +425,12 @@ def test_an_attempt_cut_short_by_the_bound_is_not_a_refusal(
     directory.mkdir(mode=0o700)
     session = SshSession(
         directory, ssh=fake_ssh.path, clock=clock, sleep=clock.sleep, attempt_seconds=5,
+        run=fake_ssh.run,
     )
-    fake_ssh.plan({"host_key": HOST_KEY, "elapse": 24.5}, {"hang": 10})
+    fake_ssh.plan({"host_key": HOST_KEY, "elapse": 24.5}, {"times_out": True})
     with pytest.raises(SshAccessError, match="not shown to refuse buyer within 30s"):
         session.assert_refused(ENDPOINT, session.new_key("buyer"), bound=30)
+    assert fake_ssh.timeouts == [pytest.approx(0.5)]
 
 
 @pytest.mark.parametrize("call", ["run", "assert_key_refused"])
@@ -721,15 +759,9 @@ def test_scenarios_and_other_helpers_do_not_build_their_own_ssh_commands():
     assert not forbidden, f"SSH commands must use helpers/ssh_access.py: {forbidden}"
 
 
-def test_single_access_probe_timeout_is_not_revocation(session, clock, monkeypatch):
-    attempts = []
-
-    def timed_out(argv, **options):
-        attempts.append(argv)
-        raise subprocess.TimeoutExpired(argv, options["timeout"])
-
-    monkeypatch.setattr(subprocess, "run", timed_out)
+def test_single_access_probe_timeout_is_not_revocation(hanging_session, fake_ssh, clock):
+    fake_ssh.plan({"times_out": True})
     with pytest.raises(SshAccessError, match="neither access nor revocation: timed out"):
-        session.access_outcome(ENDPOINT, session.new_key("buyer"))
-    assert len(attempts) == 1
+        hanging_session.access_outcome(ENDPOINT, hanging_session.new_key("buyer"))
+    assert len(fake_ssh.calls()) == 1
     assert clock.sleeps == []

@@ -14,6 +14,7 @@ import os
 import re
 import signal
 import subprocess
+import tomllib
 from pathlib import Path
 from typing import Sequence
 
@@ -58,6 +59,7 @@ ROOT_IMAGE_TARGETS = {
     "build-apicredits-service": ["arkhai:apicredits-service"],
     "build-apicredits-storefront": ["arkhai:apicredits-storefront"],
     "build-apicredits-sample-app": ["arkhai:apicredits-sample-app"],
+    "build-payments-lane-double": ["arkhai:payments-lane-double"],
 }
 # Each subproject's image target, and the root target that delegates to it.
 SUBPROJECT_IMAGE_TARGETS = {
@@ -214,15 +216,26 @@ def _executable(directory: Path, name: str, body: str) -> None:
 
 
 def _fake_kubectl(bin_dir: Path, log: Path, *, refuse_ports: Sequence[int] = (),
-                  namespaces: str = "") -> None:
+                  namespaces: str = "", secrets: Path | None = None) -> None:
     refusals = "".join(
         f'case "$*" in *" {port}:{port}"*) '
         f'echo "Unable to listen on port {port}: bind: address already in use" >&2; '
         "exit 1;; esac\n" for port in refuse_ports)
+    # With `secrets`, each `create secret generic <name> --from-file=<key>=<file>`
+    # copies its file to <secrets>/<name>/<key>, so a test reads what the Secret
+    # would hold after the caller's own files are gone.
+    copies = "" if secrets is None else f"""if [ "$1 $2" = "create secret" ]; then
+  mkdir -p "{secrets}/$4"
+  for argument in "$@"; do
+    case "$argument" in --from-file=*) source="${{argument#--from-file=}}"
+      cp "${{source#*=}}" "{secrets}/$4/${{source%%=*}}";; esac
+  done
+fi
+"""
     # A forward that listens takes a second to exit once signalled, as a real one
     # closing its connections may, so a stop that did not wait would find it alive.
     _executable(bin_dir, "kubectl", f"""echo "$*" >> {log}
-{refusals}case "$1" in
+{refusals}{copies}case "$1" in
   port-forward) echo $$ >> {log}.pids; echo "Forwarding from 127.0.0.1:$5"
     trap 'sleep 1; kill $!; exit 0' TERM; sleep 60 & wait;;
   get) case " {namespaces} " in *" $3 "*) exit 0;; esac; exit 1;;
@@ -501,10 +514,71 @@ def test_topology_secrets_creates_the_namespace_only_when_absent(tmp_path: Path,
     assert calls[0] == f"get namespace {NAMESPACE}"
     namespace_created = [call for call in calls if call == f"create namespace {NAMESPACE}"]
     assert namespace_created == ([] if exists else [calls[1]])
-    # Each Secret is rendered and applied in the namespace, and so is the deal
-    # test's buyer-profile volume, created when absent.
+    # Each Secret and ConfigMap is rendered and applied in the namespace, and so is
+    # the deal test's buyer-profile volume, created when absent.
     secrets = [call for call in calls if call.startswith("create secret")]
+    configmaps = [call for call in calls if call.startswith("create configmap")]
     applied = [call for call in calls if call.startswith("apply")]
-    assert secrets and len(applied) == len(secrets) + 1
-    assert all(f"--namespace {NAMESPACE}" in call for call in secrets + applied)
+    assert secrets and len(applied) == len(secrets) + len(configmaps) + 1
+    assert [call.split()[2] for call in configmaps] == ["payments-ca-bundle"]
+    assert all(f"--namespace {NAMESPACE}" in call for call in secrets + configmaps + applied)
     assert f"get pvc arkhai-buyer-profiles --namespace {NAMESPACE}" in calls
+
+
+def test_topology_secrets_writes_the_payments_key_into_each_storefronts_overlay(tmp_path: Path) -> None:
+    """Each storefront's runtime Secret's overlay states the payments lane
+    double's seller token as `[Settlement.arkhai_payments].api_key`, beside its
+    wallet key, and no Secret carries the token on its own."""
+    stored = tmp_path / "secrets"
+    _fake_kubectl(tmp_path, tmp_path / "kubectl.log", namespaces=NAMESPACE, secrets=stored)
+    # Development values only: cast answers every derivation with Anvil account 0's
+    # published key and address, never for a public network.
+    _executable(tmp_path, "cast", 'case "$2" in\n'
+                "  private-key) echo 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;;\n"
+                "  address) echo 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;;\n"
+                "esac\n")
+
+    created = _make("topology-secrets", "CHANGE=pilot", path=tmp_path)
+
+    assert created.returncode == 0, created.stderr
+    with (REPO_ROOT / "tools/payments-lane-double/fixtures/accounts.toml").open("rb") as handle:
+        token = tomllib.load(handle)["accounts"]["seller"]["token"]
+    for secret in ("arkhai-bob-runtime", "arkhai-bare-metal-storefront-runtime"):
+        overlay = tomllib.loads((stored / secret / "storefront.secrets.toml").read_text())
+        assert overlay["Settlement"] == {"arkhai_payments": {"api_key": token}}, secret
+        assert overlay["Wallet"]["private_key"].startswith("0x"), secret
+    holding = {path.parent.name for path in stored.glob("*/*") if token in path.read_text()}
+    assert holding == {"arkhai-bob-runtime", "arkhai-bare-metal-storefront-runtime"}
+
+
+def test_topology_secrets_gives_bob_his_compose_dispute_credential(tmp_path: Path) -> None:
+    """Bob's runtime overlay states the Compose overlay's dispute credential,
+    bound to the pinned dispute authority release 1's registry recommends; the
+    bare-metal storefront, whose lane carries none, gets none."""
+    stored = tmp_path / "secrets"
+    _fake_kubectl(tmp_path, tmp_path / "kubectl.log", namespaces=NAMESPACE, secrets=stored)
+    # Development values only: cast answers every derivation with Anvil account 0's
+    # published key and address, never for a public network.
+    _executable(tmp_path, "cast", 'case "$2" in\n'
+                "  private-key) echo 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;;\n"
+                "  address) echo 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;;\n"
+                "esac\n")
+
+    created = _make("topology-secrets", "CHANGE=pilot", path=tmp_path)
+
+    assert created.returncode == 0, created.stderr
+    with (REPO_ROOT / "dev-env/identities/bob.storefront.secrets.toml").open("rb") as handle:
+        compose = tomllib.load(handle)["DisputeCredential"]
+    with (REPO_ROOT / "tools/payments-lane-double/fixtures/dispute-authority.toml").open("rb") as handle:
+        authority = tomllib.load(handle)
+    bob = tomllib.loads((stored / "arkhai-bob-runtime" / "storefront.secrets.toml").read_text())
+    assert bob["DisputeCredential"] == compose
+    (credential,) = bob["DisputeCredential"]
+    assert credential["api_key"]
+    assert {key: credential[key] for key in ("interface", "origin", "account", "record_key")} == {
+        key: authority[key] for key in ("interface", "origin", "account", "record_key")
+    }
+    bare_metal = tomllib.loads(
+        (stored / "arkhai-bare-metal-storefront-runtime" / "storefront.secrets.toml").read_text()
+    )
+    assert "DisputeCredential" not in bare_metal

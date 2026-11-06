@@ -30,6 +30,16 @@ secretName: arkhai-e2e-credentials
 scenarios:
   markers: ""
 
+# ---------------------------------------------------------------------------
+# The PAYMENTS settings the test pods read, in the keys e2e-tests/settings.toml's
+# [default.payments] declares; the umbrella writes them into the shared
+# test-config's "helm" profile. That profile is a ConfigMap, so only public
+# settings are accepted here: the parties' marketplace credentials, development
+# authentication, and any key the schema does not name are refused. Empty adds
+# no payments settings.
+# ---------------------------------------------------------------------------
+payments: {}
+
 # Public EIP-191 principals used by topology/render checks. The corresponding
 # wallet and identity credentials remain in the referenced Secret.
 seller:
