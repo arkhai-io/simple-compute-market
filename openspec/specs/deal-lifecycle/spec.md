@@ -604,6 +604,15 @@ Non-delivery MUST be established when `available` is not durably recorded by the
 - **WHEN** an Agreement's term ends before its delivery deadline and `available` was never recorded
 - **THEN** non-delivery is established at the term end
 
+### Requirement: The storefront records availability without a buyer read
+
+A VM or bare-metal storefront MUST discover a committed deal's activated fulfillment through its own recovery pass, validate the delivered access, and durably record `available` and the delivery result. No buyer read, neither the lifecycle read nor a fulfillment status read, MAY be required for delivery to become available before its deadline.
+
+#### Scenario: A bare-metal fulfillment activates and the buyer reads only the lifecycle route
+
+- **WHEN** a committed bare-metal deal's fulfillment becomes active at the site and the buyer reads only the lifecycle route
+- **THEN** the storefront's next delivery-recovery cycle validates the SSH delivery, records `available` with the ready result and receipt, and the lifecycle read reports delivery `active`
+
 ### Requirement: Cause classification is owned by end service
 
 End service MUST classify verified evidence as lawful (entitled stop, term end/exhaustion, ruling, surrender), seller failure (unentitled withdrawal, provisioning/start failure, activation lapse, established non-delivery) or pending, and correlate site reports with their controllers. It MUST follow evidence and entitlements, never event kind or arrival order; admission refusal or a later stop MUST NOT erase earlier non-delivery or alone create a penalty. Physical work MUST NOT wait for it.

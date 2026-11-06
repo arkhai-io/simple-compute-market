@@ -15,6 +15,7 @@ from market_deal_lifecycle_contracts.models import CommitMessage
 from market_deal_servicing import EndSession
 from market_deal_servicing.evidence import transaction
 from market_deal_servicing.journal import stable_ref
+from market_core import VersionedEnvelope
 from market_identity import Ed25519Signer, TrustedIdentitySet, canonical_json
 from site_trust import seeded_sites
 from storefront_client import StorefrontClient, StorefrontClientError
@@ -67,6 +68,46 @@ async def test_end_during_create_adopts_and_terminates_once_without_waiting(harn
         assert end.selected_end(h.negotiation_id).actor == BUYER.identity
         assert not [intent for intent in end.intents(h.negotiation_id) if intent.kind == "filing"]
     assert h.payments.count("reverse") == 0
+
+
+@pytest.mark.asyncio
+async def test_recovery_records_an_activated_fulfillment_available_without_a_status_read(harness):
+    h = harness
+    h.serve()
+    async with peer(h) as buyer:
+        committed = await buyer.commit(CommitMessage(
+            negotiation_id=h.negotiation_id, commitment_ref=h.data.transaction_id,
+            operation_key="commit",
+        ))
+        assert committed.outcome.status == "accepted"
+        await h.runtime.lifecycle.cycle()
+        assert (await buyer.read(h.negotiation_id)).delivery.progress == "unstarted"
+
+        async def active(fulfillment_id, *, capacity_reservation_id):
+            return SimpleNamespace(state="active", failure_reason=None, failure_message=None)
+
+        async def result(fulfillment_id, *, capacity_reservation_id):
+            return VersionedEnvelope(kind="fulfillment.result.v1", schema_version=1, payload={
+                "fulfillment_id": fulfillment_id, "capacity_reservation_id": capacity_reservation_id,
+                "state": "active", "provisioned_resources": [],
+                "domain_result": {"kind": "compute.access-delivery", "schema_version": 1, "payload": {
+                    "endpoints": [{"protocol": "ssh", "host": "203.0.113.10", "port": 22, "user": "buyer"}],
+                    "credentials": [], "ready_at": "2030-01-01T00:00:01+00:00",
+                }},
+            })
+
+        async def lease(_):
+            return SimpleNamespace(end_reports=[], status="leased")
+
+        h.provisioning.get_fulfillment_status = active
+        h.provisioning.get_fulfillment_result = result
+        h.provisioning.get_lease = lease
+        # Only the recovery cycle runs; nothing reads the fulfillment status route.
+        await h.runtime.lifecycle.cycle()
+        assert (await buyer.read(h.negotiation_id)).delivery.progress == "active"
+    receipt = await h.runtime.db.load_bare_metal_receipt(negotiation_id=h.negotiation_id)
+    assert receipt.status == "ready"
+    assert (await h.runtime.db.load_bare_metal_result(negotiation_id=h.negotiation_id)).ssh_user == "buyer"
 
 
 @pytest.mark.asyncio
