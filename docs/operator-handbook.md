@@ -238,6 +238,9 @@ membership".
   nothing until it is submitted again at version 2: through the host API's
   update (`PUT /api/v1/hosts/{host_id}`), restating every stored public field,
   `key_path` included where the host has one, or an import naming the same key.
+  Until then, once any Ansible executor is real, system status's `ansible`
+  component is not ready, its reasons naming the host and the version served,
+  and the host has no `ssh_keys` entry.
 - **A host record describes how to reach a machine, not its hardware.** No host
   write, from a document, an import route, or the host API, declares capacity;
   declare the machine in a capacity document or through the capacity API, naming
@@ -322,6 +325,43 @@ rejects its entry with a warning, while the other entries are imported. An
 entry's `gpus=` and `gpu_model=`, like every variable the parser does not read,
 are ignored without a warning.
 
+#### A host's protected key no longer decrypts
+
+A key registered with a host is protected under the service's
+`ssh_decryption_key` and decrypted only for the operation that uses it. Under
+another key — after the key is rotated, or the database is restored into a
+deployment holding a different one — or with none configured, it cannot be
+decrypted, and every surface names the host with one message, carrying no
+ciphertext or key material:
+
+```text
+host 'kvm1': its protected private key cannot be decrypted under the configured ssh_decryption_key; restore the ssh_decryption_key it was protected under, or submit the host's private key again
+```
+
+- **A job against the host fails and is not retried**, its error carrying the
+  message after `Internal error: `, since a retry meets the same configuration.
+  No playbook starts, and nothing the job wrote remains.
+- **Its connectivity check** (`GET /api/v1/hosts/{host_id}/connectivity`)
+  answers `reachable: false` with the message as its `detail`, and runs no
+  ping.
+- **System status** (`GET /api/v1/system/status`) reports the `ansible`
+  component's `ssh_keys` entry for the host, `<encrypted>`, with `exists:
+  false`. Once any Ansible executor is real, the message is among the
+  component's `not_ready_reasons` and the component is not ready; every other
+  host is reported as it would be without this one. Readiness decrypts each
+  enabled host's key in memory to say so, and writes nothing.
+
+To recover, restore the `ssh_decryption_key` the key was protected under, or
+submit the host's private key again under the configured key: update the host
+through `PUT /api/v1/hosts/{host_id}` with a connection carrying the key in its
+`secrets`, which replaces the whole connection, or import it through the INI
+import route's `embedded` mode. A host document cannot carry a key. With no
+`ssh_decryption_key` configured, the message says so. No private key can be
+submitted until a key is configured to protect it, but it need not be the
+original: configure the key the host's key was protected under, which recovers
+every host it protected, or configure a new one and submit each affected host's
+private key again.
+
 ### Capacity definitions
 
 A capacity document holds a top-level `resources` list. It is configured by
@@ -385,6 +425,35 @@ storefront publishes from a declaration is in the
   it, holds its listing, and reports it by name. The machine's pool must state
   a `region`. Do not put authoritative hardware in `bare_metal_publication`:
   publication-only data is never a source of the listing's shape.
+
+## Ansible configuration
+
+The provisioning service runs every playbook and connectivity check under the
+Ansible configuration it exports as `ANSIBLE_CONFIG` at startup: the file the
+profile's `ansible_cfg` names, used as it is, or, when `ansible_cfg` is empty,
+the configuration packaged with the service's Ansible distribution. The
+contract is the `physical-provisioning` requirement "Ansible output is kept only
+redacted unless an operator configures otherwise".
+
+- **The packaged configuration keeps no log file.** Ansible's output is kept
+  only where the service redacts it: a job's logs, and a connectivity check's
+  result.
+- **A job's logs are redacted** with the value of every `password` field and of
+  the secret fields the job's domain names, an SSH identity-file argument, and
+  an `sshpass` password replaced.
+- **A connectivity check's result is redacted** the same way, with the generic
+  fields only: its detail, whether Ansible's output or the text of an error
+  running it, carries no `password` value, identity-file path or `sshpass`
+  password. A probe runs no domain's playbook and names a key only by the path
+  of a transient file, so no other secret reaches it.
+- **To keep Ansible's own log, name a configuration of your own.** Point
+  `ansible_cfg` at an `ansible.cfg` stating `log_path`. The service exports it
+  unchanged and sets no `ANSIBLE_LOG_PATH`, so Ansible writes its log where
+  that file says. The log receives Ansible's unredacted output, including any
+  value a role prints, and it is written in the provisioning container, which
+  is the Ansible controller, never on a managed host: whoever can read that
+  container's filesystem can read it. Your file replaces the packaged one whole,
+  so restate any of its settings you rely on.
 
 ## Payments access
 

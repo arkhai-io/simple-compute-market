@@ -130,6 +130,42 @@ def test_lookup_hands_executors_the_protected_envelope(authority) -> None:
     assert authority.lookup("missing") is None
 
 
+def test_execution_hosts_carry_each_enabled_hosts_full_envelope_in_id_order(authority) -> None:
+    authority.register_host(HostCreate(host_id="h2", connection=_connection(token="s3cret")))
+    authority.register_host(
+        HostCreate(
+            host_id="h1",
+            connection=ConnectionSubmission(
+                kind="fake", public={"address": "192.0.2.11", "key_path": "/keys/h1"}
+            ),
+        )
+    )
+
+    hosts = authority.execution_hosts()
+
+    assert [host.host_id for host in hosts] == ["h1", "h2"]
+    key_file, embedded = hosts
+    assert key_file.connection.public["key_path"] == "/keys/h1"
+    assert key_file.connection.protected == {}
+    assert embedded.connection.protected["token"] == ProtectedValue("reverse-v1", "terc3s")
+    # The ordinary listing of the same host still names the value by scheme.
+    (listed,) = [host for host in authority.list_hosts() if host.host_id == "h2"]
+    assert listed.connection.protected == {"token": "reverse-v1"}
+    assert "terc3s" not in listed.model_dump_json()
+
+
+def test_execution_hosts_leave_out_a_disabled_host_unless_asked(authority) -> None:
+    authority.register_host(HostCreate(host_id="h1", connection=_connection()))
+    authority.register_host(HostCreate(host_id="h2", connection=_connection(), enabled=False))
+
+    assert [host.host_id for host in authority.execution_hosts()] == ["h1"]
+    assert [host.host_id for host in authority.execution_hosts(enabled_only=False)] == ["h1", "h2"]
+
+
+def test_execution_hosts_of_an_empty_registry_are_none(authority) -> None:
+    assert authority.execution_hosts() == []
+
+
 def test_a_connection_its_codec_refuses_is_not_stored(authority) -> None:
     with pytest.raises(ValueError, match="needs an address"):
         authority.register_host(
