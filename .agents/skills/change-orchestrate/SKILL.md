@@ -34,8 +34,9 @@ the owner, who may interrupt it or revisit a finished triage through you
 
 ## Recover from the files
 
-On every start and after compaction, read `AGENTS.md` and its required documents,
-this skill, and the result contract in `scripts/change_workflow/next_step.py`. Run:
+On every start and after compaction, read the documents `scripts/change-workflow
+config load common` prints — the repository's guidance every session reads — this
+skill, and the result contract in `scripts/change_workflow/next_step.py`. Run:
 
 ```text
 scripts/change-workflow next <change>
@@ -119,11 +120,13 @@ The computation names where the change is worked before any step:
 - **`clone`** — the change's branch is checked out neither in the workspace nor in
   a clone of its own, or its clone was left unfinished. Run, in the workspace,
   `make change-clone` with the result's `arguments` (`CHANGE=<change>
-  BRANCH=<branch> FROM=<ref>`, or the change alone to finish a clone), with any
-  `BRANCH` or `FROM` the owner names instead — a change whose branch starts from
-  another change's branch rather than `dev`. It clones
-  the workspace, checks out the branch — creating it from `FROM` when it does not
-  exist — and starts the clone's bootstrap, `make init`, in the background. It
+  BRANCH=<branch>`, or the change alone to finish a clone), with any `BRANCH` or
+  `FROM` the owner names instead — a change that lands on another branch than the
+  one the workspace has checked out. It clones the workspace, records `FROM`, or
+  else the workspace's checked-out branch, as the branch the change lands on,
+  checks out the branch — creating it from that branch when it does not exist —
+  and starts the clone's bootstrap, the configuration's `post-clone`, in the
+  background. It
   refuses, deleting nothing, a directory that is not a clone of the workspace, has
   another branch checked out, or has uncommitted changes: bring its message to the
   owner. Recompute.
@@ -333,7 +336,7 @@ Recompute: the computation names planning, and planning's entry check, which ask
 the computation, accepts it.
 
 When the computation names validation, or the owner, before archive cleanup —
-`HEAD` changes a path outside `openspec/` and `docs/` since the closeout review —
+`HEAD` changes a path outside the repository's inert paths since the closeout review —
 the owner may waive that validation, judging the paths its reason names. Only on
 the owner's word, record `--by owner --next archive-cleanup` with no `resolves`,
 the paths in its reason; archive cleanup finds the direction in the log and writes

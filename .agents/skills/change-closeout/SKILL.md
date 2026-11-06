@@ -9,7 +9,7 @@ Closeout turns a change into the permanent record of what the system now is. It
 works through the change's closeout task — the eleven parts in
 `openspec/README.md#plan-closeout-requirements`, which the plan made specific to
 this change as its last `tasks.md` section — and ends by archiving the change:
-`openspec archive` merges the change's spec deltas into `openspec/specs/` and moves
+OpenSpec's archive merges the change's spec deltas into `openspec/specs/` and moves
 the change under `openspec/changes/archive/`. Archival is the last step, so the
 closeout review that follows reads the change, and the specifications, as they will
 land. Archive cleanup (`change-archive-cleanup`) — releasing dependents and
@@ -141,9 +141,9 @@ describes implementation.
 
 Read in full, even if you believe you know it:
 
-- `AGENTS.md` and every document it requires: `docs/development/ARCHITECTURE.md`,
-  `docs/development/TESTING.md`, `docs/development/DEPLOYMENT_AND_CONFIG.md`, and
-  `openspec/README.md`; and `docs/development/ROADMAP.md`.
+- The documents `scripts/change-workflow config load closeout` prints, and, for
+  the closeout task's roadmap part, the roadmap `openspec/README.md`'s
+  documentation placement names.
 - The change's `proposal.md`, `design.md`, `specs/`, `tasks.md`, and
   `interventions.jsonl`. The proposal's "Knowledge to promote" and the closeout
   section's promotion task name what must reach permanent documentation.
@@ -191,11 +191,13 @@ list its parts in another order; work in this order, and note it on the section.
   (`openspec/README.md#plan-closeout-requirements` part 6). The
   status stays `in closeout`: archive cleanup writes `archived`. Run
   `scripts/change-workflow check index` after the edit.
-- **Packaging.** Run `make check-packaging`, then `make check-architecture-change
-  CHANGE=<change>`, and `make check-agent-skills` when the change touched
-  `.agents/`, `.claude/`, or `.codex/`. A failure that needs a code or lock change
-  stops closeout as above. An architecture exception or override row the change
-  still owns is deleted with its edge, which is code, or reassigned in
+- **Packaging.** Run `scripts/change-workflow run pre-archive <change>`, the
+  repository's checks before the archive: in this repository the packaging check
+  and the change's architecture exceptions. With no `pre-archive` declared it is
+  skipped, saying so; record that. The skills check runs among `run pre-commit`'s
+  defaults (step 4), whatever the change touched. A failure that needs a code or
+  lock change stops closeout as above. An architecture exception or override row
+  the change still owns is deleted with its edge, which is code, or reassigned in
   `docs/development/ARCHITECTURE.toml` to the open change that now owns the
   divergence; reassigning is the owner's decision, so put it to them.
 - **End-to-end pipeline.** Record the run the latest passing validation names, its
@@ -228,19 +230,19 @@ In a capability organized by an `index.md`
 index before the archive merges the deltas: an entry for each id the change's deltas
 add — its link to the requirement's heading in `spec.md` and its summary line, under
 the part and group it belongs to — and, for each requirement the deltas remove, its
-id moved to the retired ids with where its rule went. `make check-change` runs the
-index check with the change's deltas counted, so an id a delta adds is accepted
-before the archive puts it in `spec.md`.
+id moved to the retired ids with where its rule went. The repository's closing
+checks run the index check with the change's deltas counted, so an id a delta adds
+is accepted before the archive puts it in `spec.md`.
 
 **Checks against the promoted state.** Now that every document the change cites
 exists:
 
-- `make check-change CHANGE=<change>` must report nothing failing: its citations
-  check finds every document the change cites, so fix the documents until it
-  does, and it runs `openspec validate <change> --strict` with the validator
-  `openspec/README.md` pins. A change with no spec deltas cannot pass that
-  validation — the validator rejects a change with none — so record on the
-  citations task that it has none, and take that one failure as expected.
+- `scripts/change-workflow run pre-commit <change>` must report nothing failing:
+  its citations check finds every document the change cites, so fix the
+  documents until it does, and its default OpenSpec check runs `validate <change>
+  --strict` through the configured command. A change with no spec deltas cannot
+  pass that validation — the validator rejects a change with none — so record on
+  the citations task that it has none, and take that one failure as expected.
 
 **Archive** — the last change to the change's files. Check every other closeout
 part is checked first.
@@ -251,8 +253,9 @@ part is checked first.
    archive with `--skip-specs`, and note that on the promotion task; merging them
    again would duplicate requirements. A change with no deltas archives with
    `--skip-specs` too.
-2. Run `openspec archive <change> -y`, adding `--skip-specs` where step 1 decided
-   it, with the pinned validator. It validates the change, merges the deltas, and
+2. Run `scripts/change-workflow openspec archive <change> -y`, adding
+   `--skip-specs` where step 1 decided it; it runs the OpenSpec command the
+   repository's configuration names. It validates the change, merges the deltas, and
    moves the change — its untracked `reviews/` with it — to
    `openspec/changes/archive/<date>-<change>/`.
 3. Read the diff of every permanent `spec.md` the archive wrote. Each requirement
@@ -262,9 +265,9 @@ part is checked first.
 4. Point the change's row in `openspec/changes/README.md` at the directory
    `scripts/change-workflow find <change>` now prints, and update any other link
    to the change's directory in the index.
-5. Run `make check-change CHANGE=<change>`, which for an archived change runs
-   `openspec validate --specs --strict` with the pinned validator, and checks the
-   change index among the rest.
+5. Run `scripts/change-workflow run pre-commit <change>`, whose default OpenSpec
+   check, for an archived change, validates every specification strictly, and
+   which checks the change index among the rest.
 
 If the archive fails, nothing has moved: fix what it reports, or, when the fix is
 not closeout's to make, stop and tell the owner.

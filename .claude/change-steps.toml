@@ -30,7 +30,7 @@ allow = [
   "Bash(git rev-parse*)", "Bash(git branch --show-current)", "Bash(git ls-files*)",
   "Bash(git merge-base*)", "Bash(git check-ignore*)",
   "Bash(scripts/change-workflow next*)", "Bash(scripts/change-workflow cost*)",
-  "Bash(scripts/change-workflow log*)",
+  "Bash(scripts/change-workflow log*)", "Bash(scripts/change-workflow config *)",
   "Bash(scripts/change-workflow record*)",
   "Bash(scripts/change-workflow check round-view)", "Bash(scripts/change-workflow check index)",
   "Bash(openspec validate *)", "Bash(openspec instructions *)", "Bash(openspec list*)",
@@ -61,6 +61,7 @@ deny = [
   "Bash(make round-view)", "Bash(make round-view *)", "Bash(make round-done*)",
   "Bash(scripts/change-workflow round-view*)", "Bash(scripts/change-workflow round-done*)",
   "Edit(.claude/**)", "Write(.claude/**)",
+  "Edit(.agents/workflow.toml)", "Write(.agents/workflow.toml)",
   # A rule marked "Write-steering" refuses only a shell form that writes a file,
   # so the write goes through the Edit or Write tool; such a write is a gap, not
   # a workaround. Every other deny rule forbids the work itself.
@@ -74,12 +75,6 @@ deny = [
   "Bash(sed -i*)", "Bash(sed * -i*)", "Bash(sed *--in-place*)",
 ]
 
-# The orchestrating session runs interactively, with the owner's own permissions,
-# so its row names only its model and effort.
-[orchestrator]
-model = "claude-opus-5-5"
-effort = "medium"
-
 # Design commits and pushes its own settled design. A design blocked on a
 # prerequisite writes the prerequisite's proposal in a worktree on a new branch
 # from dev, never on the blocked branch.
@@ -88,24 +83,19 @@ effort = "medium"
 # read-only commands.
 [steps.review]
 skill = "change-review"
-models = [
-  { harness = "codex",  model = "gpt-6-sol",       effort = "high" },
-  { harness = "claude", model = "claude-opus-5-5", effort = "high" },
-]
 allow = ["Bash(make check-doc-citations*)", "Bash(make check-comment-hygiene)",
          "Bash(make check-tasks*)", "Bash(make check-architecture)",
-         "Bash(make check-agent-skills)"]
+         "Bash(make check-agent-skills)", "Bash(scripts/change-workflow run *)"]
 deny = ["Edit"]
 
 [steps.design]
 skill = "change-design"
-models = [{ harness = "claude", model = "claude-opus-5-5", effort = "high" }]
 allow = [
   "Edit(openspec/**)", "Edit(docs/**)",
   # Read-only lens vocabulary extraction from intervention ledgers on stdin.
   "Bash(python3 -c \"import sys,json; print(sorted({json.loads(l)['lens'] for l in sys.stdin if l.strip()}))\")",
-  "Bash(bunx @fission-ai/openspec@1.14.0 *)",
-  "Bash(npx --yes @fission-ai/openspec@1.14.0 *)", "Bash(npx -y @fission-ai/openspec@1.14.0 *)", "Bash(make check-*)",
+  "Bash(scripts/change-workflow openspec *)", "Bash(scripts/change-workflow run *)",
+  "Bash(make check-*)",
   "Bash(git worktree add ../*-proposal -b propose-* origin/dev)",
   "Bash(make -C ../*-proposal check-change-index)",
   # A prerequisite's or follow-up's proposal is new files in a new directory of
@@ -123,12 +113,12 @@ allow = [
 # Planning resumes the design step's session, which holds the design's context.
 [steps.plan]
 skill = "change-plan"
-models = [{ harness = "claude", model = "claude-opus-5-5", effort = "high" }]
 resume_from = "design"
 allow = [
   "Edit(openspec/**)", "Edit(docs/**)",
-  "Bash(bunx @fission-ai/openspec@1.14.0 *)",
-  "Bash(npx --yes @fission-ai/openspec@1.14.0 *)", "Bash(npx -y @fission-ai/openspec@1.14.0 *)", "Bash(make check-*)",
+  "Bash(scripts/change-workflow check tasks *)",
+  "Bash(scripts/change-workflow openspec *)", "Bash(scripts/change-workflow run *)",
+  "Bash(make check-*)",
   "Bash(git add *)", "Bash(git commit *)", "Bash(scripts/change-workflow push)",
 ]
 
@@ -136,11 +126,10 @@ allow = [
 # rules beside design's.
 [steps.triage]
 skill = "change-triage"
-models = [{ harness = "claude", model = "claude-opus-5-5", effort = "high" }]
 allow = [
   "Edit", "Write", "Task",
-  "Bash(bunx @fission-ai/openspec@1.14.0 *)",
-  "Bash(npx --yes @fission-ai/openspec@1.14.0 *)", "Bash(npx -y @fission-ai/openspec@1.14.0 *)", "Bash(make check-*)",
+  "Bash(scripts/change-workflow openspec *)", "Bash(scripts/change-workflow run *)",
+  "Bash(make check-*)",
   "Bash(make test*)", "Bash(make -C * test*)", "Bash(make lock*)", "Bash(make dist*)",
   "Bash(make reinit*)", "Bash(uv run pytest *)",
   "Bash(uv run --no-project --with pytest pytest *)", "Bash(uv sync*)",
@@ -155,7 +144,6 @@ deny = ["Bash(make run-e2e*)", "Bash(make validate-parallel*)"]
 
 [steps.implement]
 skill = "change-implement"
-models = [{ harness = "claude", model = "claude-opus-5-5", effort = "high" }]
 allow = [
   "Edit", "Write", "Task",
   "Bash(make check-*)", "Bash(make test*)", "Bash(make -C * test*)", "Bash(make lock*)",
@@ -163,6 +151,7 @@ allow = [
   "Bash(uv run --no-project --with pytest pytest *)", "Bash(uv sync*)",
   "Bash(git add *)", "Bash(git commit *)", "Bash(git mv *)", "Bash(git rm *)",
   "Bash(make typecheck*)", "Bash(scripts/change-workflow push)", "Bash(make helm-values-schema)",
+  "Bash(scripts/change-workflow run *)",
   "Bash(git pull --ff-only workspace *)",
   "Bash(make init*)", "Bash(make -C * init*)", "Bash(make validate-*)", "Bash(helm version*)",
 ]
@@ -172,14 +161,10 @@ deny = ["Bash(make run-e2e*)"]
 # one push is the guarded push of the change's branch.
 [steps.validate]
 skill = "change-validate"
-models = [{ harness = "claude", model = "claude-sonnet-5-5", effort = "medium" }]
 allow = [
   "Edit(openspec/changes/**/reviews/*-validation.md)",
-  "Bash(make validate-*)", "Bash(scripts/change-workflow check push)",
-  "Bash(make check-uv-version)",
-  "Bash(scripts/change-workflow push)",
-  "Bash(make run-e2e)", "Bash(make run-ci *)", "Bash(make fetch-e2e-logs*)",
-  "Bash(make dist-clean)",
+  "Bash(scripts/change-workflow check push)",
+  "Bash(scripts/change-workflow push)", "Bash(scripts/change-workflow run *)",
   "Bash(gh run list*)", "Bash(gh run view *)", "Bash(gh auth status*)",
   "Bash(docker *)", "Bash(kubectl *)", "Bash(helm *)",
 ]
@@ -194,7 +179,6 @@ deny = ["Bash(make lock*)", "Bash(git commit*)", "Bash(git add*)",
 # owner; it is never aborted.
 [steps.merge]
 skill = "change-merge"
-models = [{ harness = "claude", model = "claude-opus-5-5", effort = "high" }]
 allow = [
   "Edit", "Write", "Task",
   "Bash(git fetch origin *)", "Bash(git fetch workspace *)",
@@ -204,6 +188,7 @@ allow = [
   "Bash(uv run --no-project --with pytest pytest *)", "Bash(uv sync*)",
   "Bash(git add *)", "Bash(git commit *)", "Bash(git mv *)", "Bash(git rm *)",
   "Bash(make typecheck*)", "Bash(scripts/change-workflow push)", "Bash(make helm-values-schema)",
+  "Bash(scripts/change-workflow run *)",
   "Bash(make init*)", "Bash(make -C * init*)", "Bash(make validate-*)", "Bash(helm version*)",
 ]
 deny = ["Bash(make run-e2e*)", "Bash(git merge --abort*)", "Bash(git merge --quit*)"]
@@ -212,12 +197,11 @@ deny = ["Bash(make run-e2e*)", "Bash(git merge --abort*)", "Bash(git merge --qui
 # to implementation.
 [steps.closeout]
 skill = "change-closeout"
-models = [{ harness = "claude", model = "claude-opus-5-5", effort = "high" }]
 allow = [
   "Edit(openspec/**)", "Edit(docs/**)",
   "Edit(AGENTS.md)",
-  "Bash(bunx @fission-ai/openspec@1.14.0 *)",
-  "Bash(npx --yes @fission-ai/openspec@1.14.0 *)", "Bash(npx -y @fission-ai/openspec@1.14.0 *)", "Bash(openspec archive *)",
+  "Bash(scripts/change-workflow openspec *)", "Bash(scripts/change-workflow run *)",
+  "Bash(openspec archive *)",
   "Bash(make check-*)", "Bash(python3 scripts/check_*)", "Bash(scripts/change-workflow check *)",
   "Bash(git add *)", "Bash(git commit *)", "Bash(scripts/change-workflow push)",
 ]
@@ -225,14 +209,11 @@ allow = [
 # Archive cleanup drafts the pull request; the orchestrating session opens it.
 [steps.archive-cleanup]
 skill = "change-archive-cleanup"
-models = [{ harness = "claude", model = "claude-sonnet-5-5", effort = "medium" }]
 allow = [
   "Edit(openspec/changes/README.md)",
   "Edit(openspec/changes/archive/*/reviews/pull-request.md)",
   "Edit(openspec/changes/archive/*/interventions.jsonl)",
   "Bash(make check-*)", "Bash(git add *)", "Bash(git commit *)", "Bash(scripts/change-workflow push)",
-  "Bash(scripts/change-workflow history*)",
-  "Bash(make -C helm teardown*)",
-  "Bash(make record-capacity*)",
+  "Bash(scripts/change-workflow history*)", "Bash(scripts/change-workflow run *)",
 ]
 deny = ["Bash(gh pr create*)"]

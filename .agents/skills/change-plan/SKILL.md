@@ -135,14 +135,17 @@ Set the change's `Status` to `in planning`.
 
 ## 2. Load what the plan needs
 
-If this session did not hold the design discussion, read `AGENTS.md` and every
-document it requires first. Then read, whether or not you have seen it before —
+If this session did not hold the design discussion, read the documents
+`scripts/change-workflow config load plan` prints first. Then read, whether or not
+you have seen it before —
 the files are what the implementer will see:
 
 - the change's `proposal.md`, `design.md`, `specs/`, and current `tasks.md`;
 - `openspec/README.md#plan-closeout-requirements`, and `openspec/config.yaml`'s
   rules for tasks;
-- `openspec instructions tasks --change <change>` for the tasks template;
+- `scripts/change-workflow openspec instructions tasks --change <change>` for the
+  tasks template; every OpenSpec command runs so, through the command the
+  repository's configuration names;
 - the permanent spec and architecture companion of every capability the change
   touches, and `openspec/specs/README.md`;
 - the code each decision changes: enough to name the files, the package
@@ -217,8 +220,9 @@ design.
 - ends at a verification point — the focused suites that prove it, each named with
   its level as `docs/development/TESTING.md` defines them (unit, library
   integration, application integration through the typed client, system), at the
-  lowest level that can prove the behavior; `make test`; and the packaging check
-  when it changes a dependency or lock. A section whose title promises a behavior
+  lowest level that can prove the behavior; and the repository's functional
+  checks, which `scripts/change-workflow run pre-commit` runs before a commit
+  changing a path outside the inert paths. A section whose title promises a behavior
   of the running application — publication, a write refused — includes at least one
   application-integration case for it, not only lower-level evidence of its parts;
 - names the end-to-end scenarios (pytest markers in `e2e-tests/`) that exercise
@@ -292,11 +296,12 @@ Before presenting it:
   (`openspec/README.md#open-questions-and-prescribed-tasks`);
 - every section has a verification point, its covering end-to-end scenarios or a
   statement that none covers it, and a size its verification point can prove;
-- `make check-change CHANGE=<change>` reports no failure but its citations
-  check's, which may name only files the change will create. Among its checks,
-  the strict OpenSpec validation passes, and the task-list check holds every
-  numbered task under its own section's heading, which is how every later step
-  reads the plan.
+- `scripts/change-workflow run pre-commit <change>` reports no failure but its
+  citations check's, which may name only files the change will create. Among its
+  default checks, the strict OpenSpec validation passes, and the task-list check,
+  which `scripts/change-workflow check tasks <change>` also runs alone, holds
+  every numbered task under its own section's heading, which is how every later
+  step reads the plan.
 
 ## 6. Report the plan
 

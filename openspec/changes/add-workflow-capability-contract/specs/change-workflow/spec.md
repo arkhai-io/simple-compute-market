@@ -252,7 +252,8 @@ it for one run. A step needing it, with none recorded or given, MUST refuse.
 ### Requirement: CW-l7hn A step's documents to load come from the configuration
 
 The documents a step's skill loads MUST be `load.common` and `load.<step>`, printed
-together by `config load <step>`, and the post-compaction hook MUST have a session
+together by `config load <step>`; `config load common` MUST print `load.common`
+alone, for a session no step runs; and the post-compaction hook MUST have a session
 re-read `load.common`.
 
 #### Scenario: Design loads the roadmap

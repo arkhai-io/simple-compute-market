@@ -27,7 +27,8 @@ The others reach the module that holds them: `next` the next-step computation,
 a change's clone, `round-view` and `round-done` the round view, `history` the copy
 of a change's history, `cost` its cost report, `push` the guarded push, `config`
 how the repository's workflow configuration resolved, `config load` a step's
-documents, and `config parts` validation's plan for a change, `run` and `openspec`
+documents, or with `common` those every session reads, and `config parts`
+validation's plan for a change, `run` and `openspec`
 the repository's hooks and its OpenSpec command (`hooks`), `check` the
 configuration's, index, task-list, push, skill, and round-view checks, a change's
 default checks (`check change`), and the graph diagram's comparison with the graph
@@ -370,8 +371,9 @@ def _parser() -> argparse.ArgumentParser:
                        help="the remote to push to, in place of the branch's upstream's")
     config_ = commands.add_parser(
         "config", help="list how every field of the repository's workflow configuration "
-                       "resolved; `config load <step>` a step's documents; `config parts "
-                       "<change>` validation's plan")
+                       "resolved; `config load <step>` a step's documents, `config load "
+                       "common` those every session reads; `config parts <change>` "
+                       "validation's plan")
     config_.add_argument("action", nargs="?", choices=("load", "parts"), default=None)
     config_.add_argument("subject", nargs="?", default=None, metavar="step|change")
     config_.add_argument("--json", action="store_true", help="print it as JSON")
@@ -622,8 +624,8 @@ def delegated(args: argparse.Namespace) -> Delegated | None:
     if args.command == "config" and args.action != "parts":
         if args.action == "load":
             if args.subject is None or args.json:
-                raise _Usage("config load takes the step whose documents it prints, and no "
-                             "--json")
+                raise _Usage("config load takes the step whose documents it prints, or "
+                             "`common`, and no --json")
             return config.main, ["load", args.subject]
         if args.subject is not None:
             raise _Usage("config alone takes no argument; `config load <step>` and `config "

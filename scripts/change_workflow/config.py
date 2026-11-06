@@ -63,13 +63,15 @@ HOOKS = ("after-functional-change", "pre-commit", "pre-commit-functional", "pre-
 DEFAULT_CHECKS = ("index", "tasks", "skills", "openspec")
 # The OpenSpec command when the configuration names none.
 DEFAULT_OPENSPEC = "openspec"
+# The documents every session reads as it starts, which a step's own add to.
+COMMON_DOCUMENTS = "common"
 _PART_KEYS = ("run", "start", "collect", "owed", "after", "evidence", "cleanup")
 _TABLES: dict[str, tuple[str, ...]] = {
     "repository": ("protected-branches", "inert-paths"),
     "hooks": HOOKS,
     "defaults": ("disable",),
     "openspec": ("command",),
-    "load": ("common", *STEPS),
+    "load": (COMMON_DOCUMENTS, *STEPS),
     "models": (ORCHESTRATOR, *STEPS),
     "validation": ("preflight", "parts"),
 }
@@ -165,7 +167,8 @@ class Configuration:
     def documents(self, step: str) -> list[str]:
         """The documents a step's skill reads: `load.common`, then `load.<step>`,
         each once."""
-        return list(dict.fromkeys((*self.load.get("common", ()), *self.load.get(step, ()))))
+        return list(dict.fromkeys((*self.load.get(COMMON_DOCUMENTS, ()),
+                                   *self.load.get(step, ()))))
 
     def step_models(self, step: str) -> tuple[Model, ...]:
         """The models a step's unattended runs use, in order of preference; refused,
@@ -601,15 +604,19 @@ def plan_json(configuration: Configuration, runs: Sequence[PlannedRun]) -> str:
 
 
 def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
-    """`config [--json]`, `config load <step>`, and `check config`, as `cli` hands
-    them on; `config parts`, which reads a change's task list, is `cli`'s."""
+    """`config [--json]`, `config load <step>` or `config load common`, and `check
+    config`, as `cli` hands them on; `config parts`, which reads a change's task
+    list, is `cli`'s."""
     parser = argparse.ArgumentParser(prog="change-workflow config")
     parser.add_argument("action", choices=("show", "load", "check"))
     parser.add_argument("step", nargs="?", default=None)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
-    if args.action == "load" and args.step not in STEPS:
-        print(f"usage: config load <step>, a step of: {', '.join(STEPS)}", file=sys.stderr)
+    # `common` names no step: it is for a session no step of the graph runs, such
+    # as the orchestrating session, which reads `load.common` alone.
+    if args.action == "load" and args.step not in (*STEPS, COMMON_DOCUMENTS):
+        print(f"usage: config load <step>, a step of: {', '.join(STEPS)}, or "
+              f"{COMMON_DOCUMENTS}", file=sys.stderr)
         return 2
     try:
         configuration = load(repository_root() if root is None else root)

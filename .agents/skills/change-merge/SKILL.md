@@ -16,9 +16,10 @@ the change with it, and hand the merged `HEAD` to the validation before closeout
 which then tests the change as it will land.
 
 **The branch you merge** — the *base* below — is the one your invocation names
-after the change: `<change> from <branch>`. `make merge` names the branch the owner
-gives it, or its default. Invoked with no branch, ask the owner which branch the
-change will land on; never assume one.
+after the change: `<change> from <branch>`. The engine names the branch the owner
+gives it (`make merge FROM=<branch>`), or else the branch the change's clone
+recorded as the one it lands on, and refuses to start with neither. Invoked with
+no branch, ask the owner which branch the change will land on; never assume one.
 
 You also decide what the merge needs next, and the owner confirms what costs more
 than the default:
@@ -116,7 +117,7 @@ present, settles in the session. When the owner waived the validation of the mer
 
 ## 2. Load the context
 
-Read in full: `AGENTS.md` and every document it requires; the change's
+Read in full: the documents `scripts/change-workflow config load merge` prints; the change's
 `proposal.md`, `design.md`, and `tasks.md`, the section notes above all, which say
 which files each section owns and which suites and end-to-end scenarios prove it;
 the latest pre-closeout review and its triage; and the latest validation record.
@@ -146,11 +147,11 @@ commits made it (`git log --merge -p -- <file>` shows each side).
   branch has it — this change's from this branch, every other row from the base.
 - **Change documents** under `openspec/changes/`: this change's from this branch,
   another change's from the base.
-- **Locks** (`uv.lock`): take the base's side of the conflicted hunks with the Edit
-  tool, then regenerate them with `make lock`, which settles the change's own
-  dependencies against the base's. A `pyproject.toml` conflict is resolved by hand
-  first: both sides' dependencies, and the higher of two version bumps of one
-  package.
+- **Locks and other derived files** (`uv.lock`): take the base's side of the
+  conflicted hunks with the Edit tool; step 5's `after-functional-change` rebuilds
+  them, which in this repository relocks, settling the change's own dependencies
+  against the base's. A `pyproject.toml` conflict is resolved by hand first: both
+  sides' dependencies, and the higher of two version bumps of one package.
 - **Code, tests, and configuration**: edit each file so both sides hold, with
   comments describing the system that results. Where the two cannot both hold, the
   resolution is a decision: ask the owner, with the options and your
@@ -185,12 +186,19 @@ decision: ask the owner.
 
 Run each, and fix what it reports:
 
-- `make lock`, when a lock or a `pyproject.toml` merged, then `make
-  check-packaging`;
 - the suites the verification tasks name of the sections owning each file you
   resolved or reconciled;
-- `make test`;
-- `make check-change CHANGE=<change>`.
+- `scripts/change-workflow run pre-commit <change>`. The paths the worktree
+  changes decide what it runs: with resolutions or reconciliations outside the
+  inert paths there, it runs `after-functional-change`, which rebuilds a lock
+  whose side you took, then `pre-commit-functional` and `pre-commit`; otherwise
+  `pre-commit` alone. So when the base brought a path outside the inert paths
+  that the worktree no longer shows, because the merge concluded itself, run
+  `scripts/change-workflow run after-functional-change <change>` first: if it
+  changed a path outside the inert paths, `run pre-commit` then runs every hook;
+  if not, run `scripts/change-workflow run pre-commit-functional <change>` by name
+  before `run pre-commit`, so the suites run once. `git add` what the hooks
+  rebuilt.
 
 A failure the base alone causes — failing on the base as well — is not the
 merge's: say so in the report, and do not fix the base here.
@@ -218,8 +226,8 @@ Judge the merge, then take the exit it merits:
   locks, and version bumps, and the reconciliations moved the change's calls to
   what the base renamed or reshaped, which a reviewer would only confirm.
 - **Validation.** The merged `HEAD` is validated before the review or closeout that
-  follows, unless the merge changed only paths under `openspec/` and `docs/`,
-  which the guard exempts by itself. Recommend waiving it only when nothing the
+  follows, unless the merge changed only the repository's inert paths, which the
+  guard exempts by itself. Recommend waiving it only when nothing the
   base brought can reach what the change ships or how it is tested — no shared
   package, lock, image, chart, or harness — and say what you checked. Never
   recommend waiving it after a reconciliation of the change's own code.
@@ -241,7 +249,7 @@ Then:
   ```
 
 When the exit is closeout and the latest validation passed for `HEAD`, or for an
-ancestor `HEAD` differs from only under `openspec/` and `docs/`, set the change's
+ancestor `HEAD` differs from only in the inert paths, set the change's
 `Status` in `openspec/changes/README.md` to `ready for closeout`, rewrite the row's
 `Notes` in the same edit so nothing in them describes the implementation phase,
 run `scripts/change-workflow check index`, and commit and push the row. Otherwise leave the

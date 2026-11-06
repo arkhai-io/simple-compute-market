@@ -964,10 +964,12 @@ review-wheelhouse-scope: ## Print the review projects resolved from REVIEW_PROJE
 
 # The change workflow's targets — each step, the review, the round view, the
 # workflow's checks, and the guarded push — are the engine's make fragment, which
-# reads the branch a change lands on from the change's clone.
-# HELM_ALL_SCENARIOS reaches the validation step as the skill's argument.
+# reads the branch a change lands on from the change's clone. A value of the
+# owner's machine, such as HELM_ALL_SCENARIOS or HELM_CONTEXT given to `make
+# validate`, reaches the Helm part's command through the environment: make exports
+# a variable set on its command line to every command it runs, the validation
+# session included, and the part's own make reads it there.
 include scripts/change_workflow/workflow.mk
-validate: ARGUMENTS += $(if $(filter 1,$(HELM_ALL_SCENARIOS)),with HELM_ALL_SCENARIOS=1)
 
 check-change: ## Run a change's closing checks — comment hygiene, agent skills, its citations and task list, the change index, the indexed capabilities' specifications, the pinned strict OpenSpec validation, decision destinations, history wording, version bumps, local imports, and the capability index — printing only failures and one pass line (CHANGE=<change> [CHANGE_BASE=<the branch it lands on; dev>])
 	@python3 scripts/check_change.py "$(CHANGE)"$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")

@@ -10,7 +10,7 @@ import pytest
 
 from change_workflow import config, steps
 from change_workflow.common import StepError
-from change_workflow.graph import STEPS
+from change_workflow.graph import HOOK_STEPS, STEPS
 from change_workflow.steps import Model, load_steps
 from change_workflow_fixtures import CHANGE, OPUS, SONNET
 
@@ -142,22 +142,82 @@ COMMITTING = {"design", "plan", "implement", "triage", "merge", "closeout", "arc
 
 
 def test_each_committing_step_pushes_only_through_the_guarded_push() -> None:
-    """Validation pushes the commit it validates and dispatches the pipeline; every
-    step that commits work pushes it; the review pushes nothing."""
+    """Validation pushes the commit it validates; every step that commits work pushes
+    it; the review pushes nothing. The pipeline's dispatch is a validation part, run
+    through the command, so no step names its make target."""
     for name, rules in load_steps().items():
         assert "Bash(git push*)" in rules.deny
         allowed = [command for command in PUSHES if _allows(rules, command)]
-        assert allowed == (["scripts/change-workflow push", "make run-e2e"]
-                           if name == "validate"
-                           else ["scripts/change-workflow push"] if name in COMMITTING
-                           else []), name
+        assert allowed == (["scripts/change-workflow push"]
+                           if name in COMMITTING | {"validate"} else []), name
 
 
 def test_only_validation_dispatches_a_ci_workflow() -> None:
-    """The dispatch itself refuses a workflow off its list; the table keeps every
-    other step from dispatching at all."""
+    """No step's rules name a dispatch's make target: validation dispatches through
+    `run`, which the engine's hook table holds to the validate step (CW-u4pc)."""
     for name, rules in load_steps().items():
-        assert _allows(rules, "make run-ci WORKFLOW=tests.yml") == (name == "validate"), name
+        assert not _allows(rules, "make run-ci WORKFLOW=tests.yml"), name
+    assert _allows(load_steps()["validate"],
+                   f"scripts/change-workflow run validation {CHANGE} ci start --owed tests.yml")
+    assert HOOK_STEPS["validation"] == {"validate"}
+
+
+HOOK_COMMANDS = {
+    "validate": [f"validation {CHANGE} preflight", f"validation {CHANGE} local run",
+                 f"validation {CHANGE} pipeline start", f"validation {CHANGE} pipeline collect"],
+    "archive-cleanup": [f"cleanup {CHANGE}", f"pre-commit {CHANGE}"],
+    "closeout": [f"pre-archive {CHANGE}", f"pre-commit {CHANGE}"],
+    "implement": [f"pre-commit {CHANGE}", f"after-functional-change {CHANGE}"],
+}
+
+
+def test_every_step_runs_the_repositorys_hooks_through_the_command() -> None:
+    """Each step reaches a hook through `run`, which holds it to the engine's table;
+    the rules that ran a hook's commands directly are gone, while the grants for
+    engineering work stay (CW-u4pc)."""
+    steps = load_steps()
+    for name, rules in steps.items():
+        for command in HOOK_COMMANDS.get(name, [f"pre-commit {CHANGE}"]):
+            assert _allows(rules, f"scripts/change-workflow run {command}"), (name, command)
+    for command in ("make validate-local", f"make validate-helm CHANGE={CHANGE}", "make run-e2e",
+                    "make fetch-e2e-logs E2E_AFTER_RUN=1", "make dist-clean",
+                    "make check-uv-version", "make validate-ci WORKFLOW=tests.yml"):
+        assert not _allows(steps["validate"], command), command
+    for command in (f"make record-capacity CHANGE={CHANGE}",
+                    f"make -C helm teardown CHANGE={CHANGE}"):
+        assert not _allows(steps["archive-cleanup"], command), command
+    for name in ("implement", "triage", "merge"):
+        for command in ("make test", "make lock", "make check-packaging",
+                        "uv run pytest -q scripts/tests"):
+            assert _allows(steps[name], command), (name, command)
+
+
+def test_openspec_runs_through_the_configured_command() -> None:
+    """The steps that validate or archive a change run OpenSpec through the command,
+    which runs the configured `openspec.command` (CW-i2we); no rule pins a version."""
+    for name, rules in load_steps().items():
+        runs = name in ("design", "plan", "triage", "closeout")
+        assert _allows(rules, f"scripts/change-workflow openspec validate {CHANGE} --strict") \
+            == runs, name
+        for pinned in (f"bunx @fission-ai/openspec@1.14.0 validate {CHANGE} --strict",
+                       f"npx --yes @fission-ai/openspec@1.14.0 validate {CHANGE} --strict"):
+            assert not _allows(rules, pinned), (name, pinned)
+
+
+def test_every_step_may_read_the_configurations_resolution() -> None:
+    for name, rules in load_steps().items():
+        for command in ("config load design", f"config parts {CHANGE}", "config --json"):
+            assert _allows(rules, f"scripts/change-workflow {command}"), (name, command)
+
+
+def test_no_step_may_edit_the_configuration() -> None:
+    """CW-z5me: no step changes what its own hooks run, while a workflow change may
+    still edit the skills beside the configuration."""
+    for name, rules in load_steps().items():
+        assert {"Edit(.agents/workflow.toml)", "Write(.agents/workflow.toml)"} <= set(rules.deny)
+        assert not any(_allows_edit(rules, tool, ".agents/workflow.toml")
+                       for tool in ("Edit", "Write")), name
+    assert _allows_edit(load_steps()["implement"], "Edit", ".agents/skills/change-plan/SKILL.md")
 
 
 def test_every_step_that_commits_its_work_may_commit_and_no_other() -> None:
@@ -304,9 +364,12 @@ def test_a_steps_own_workflow_commands_are_the_ones_its_skill_runs() -> None:
     assert _allows(steps["closeout"], f"scripts/change-workflow check tasks {CHANGE}")
     assert _allows(steps["closeout"], "scripts/change-workflow check push")
     assert _allows(steps["archive-cleanup"], f"scripts/change-workflow history {CHANGE}")
+    # Planning checks the task list it writes.
+    assert _allows(steps["plan"], f"scripts/change-workflow check tasks {CHANGE}")
     for name in ("design", "plan", "implement", "triage", "merge", "archive-cleanup",
                  "review"):
         assert not _allows(steps[name], "scripts/change-workflow check push"), name
+    for name in ("design", "implement", "triage", "merge", "archive-cleanup", "review"):
         assert not _allows(steps[name], f"scripts/change-workflow check tasks {CHANGE}"), name
     for name in ("design", "plan", "implement", "triage", "merge", "validate", "closeout",
                  "review"):

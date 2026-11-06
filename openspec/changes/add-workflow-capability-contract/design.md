@@ -303,7 +303,9 @@ the repository's preference with permissions the sandbox change replaces.
 `[load] common` lists the documents every step's skill reads as it starts, and
 `[load] <step>` a step's additions. `scripts/change-workflow config load <step>`
 prints the resolved list, so no skill merges the two itself, and the post-compaction
-hook re-reads `common`, not knowing the session's step. The entries are paths;
+hook re-reads `common`, not knowing the session's step. A session no step of the
+graph runs — the orchestrating session, a guidance review — reads `common` alone,
+through `config load common`. The entries are paths;
 `layer-engineering-guidance`'s tags can replace them later, since a tag resolves to
 what a path names.
 

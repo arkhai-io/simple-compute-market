@@ -336,6 +336,20 @@ def test_config_load_takes_a_step(tmp_path: Path) -> None:
     assert main(["config", "load"], root=tmp_path) == 2
 
 
+def test_a_session_that_is_no_step_loads_the_common_documents(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """The orchestrating session and a guidance review run no step of the graph, so
+    `config load common` prints `load.common` alone for them."""
+    configured(tmp_path, """
+[load]
+common = ["AGENTS.md", "openspec/README.md"]
+design = ["docs/development/ROADMAP.md"]
+""")
+
+    assert main(["config", "load", "common"], root=tmp_path) == 0
+    assert capsys.readouterr().out.splitlines() == ["AGENTS.md", "openspec/README.md"]
+
+
 # `config parts <change>`: validation's plan.
 
 PARTS = """

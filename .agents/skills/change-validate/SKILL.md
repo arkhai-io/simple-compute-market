@@ -1,6 +1,6 @@
 ---
 name: change-validate
-description: Validate the commit at HEAD of an OpenSpec change before its implementation is triaged — push it and run the end-to-end pipeline and every CI workflow its complete sections owe, run the local and Helm validation parts meanwhile, skipping any part the owner waived in the change's log, diagnose every failure from its logs, settle environmental failures with the owner, and write reviews/NN-validation.md. Never edits, relocks, commits, or fixes the commit. Use after implementation sections are committed, beside an implementation review, when the owner says "validate <change>", or when `make validate` invokes you.
+description: Validate the commit at HEAD of an OpenSpec change before its implementation is triaged — push it, learn validation's parts from the engine's plan, and run each through the engine, the dispatched parts and every CI workflow its complete sections owe first and the long parts meanwhile, skipping any part the owner waived in the change's log, diagnose every failure from its logs, settle environmental failures with the owner, and write reviews/NN-validation.md. Never edits, relocks, commits, or fixes the commit. Use after implementation sections are committed, beside an implementation review, when the owner says "validate <change>", or when `make validate` invokes you.
 ---
 
 # Validating a committed slice
@@ -116,11 +116,14 @@ the owner to run `make round-done`.
 A view the owner opens in their workspace for a change worked in its own clone
 moves nothing here, and validation runs beside it.
 
-- **uv.** `make check-uv-version`, first: it fails, naming both versions, when the
-  installed uv is older than the repository's minimum, since an older uv writes
-  locks the repository's would not and every environment it builds is suspect. A
-  failure is environmental (section 5): a `question` naming the installed version
-  and the remedy, installing a uv at least the minimum, which is the owner's call.
+- **Preflight.** `scripts/change-workflow run validation <change> preflight`,
+  first: the repository's checks of the machine before any part, or skipped,
+  saying so, when it declares none. In this repository it fails, naming both
+  versions, when the installed uv is older than the repository's minimum, since an
+  older uv writes locks the repository's would not and every environment it builds
+  is suspect. A failure is environmental (section 5): a `question` naming what it
+  reported and the remedy — here, installing a uv at least the minimum — which is
+  the owner's call.
 - **Branch.** The checked-out branch carries the change: its directory and latest
   commits are on it. Several changes are often in flight in one checkout; if the
   branch belongs to another change, stop and ask the owner — unless the change's
@@ -144,9 +147,20 @@ moves nothing here, and validation runs beside it.
   validation started by hand outside the route — record that, and name the round's
   triage: in a round's join that is the target the computation gives, and anywhere
   else the computation brings it to the owner as a target it did not give.
-- **Instructions.** If the invocation says `HELM_ALL_SCENARIOS=1`, the Helm part
-  runs every pipeline scenario and the served list together, to find which the
-  charts serve now (step 3).
+- **Plan.** `scripts/change-workflow config parts <change>` prints validation's
+  plan, which the repository's configuration declares and the engine reads: the
+  preflight, then each run of a part in declaration order, with its shape — `run`,
+  one long command, or `start, collect`, a dispatch that returns at once and a wait
+  for what it started — the part it comes `after`, and its evidence directory. An
+  owed part is listed once for each workflow a complete section's `Owed by
+  validation:` line owes, named by the part and the workflow (`ci tests.yml`), or
+  once as `not owed`, and the sections owing each run named; `--json` gives the
+  same, structured.
+  Record it: the runs below are the plan's, never read from the configuration
+  itself. A value of the owner's machine — in this repository `HELM_CONTEXT`, and
+  `HELM_ALL_SCENARIOS=1`, with which the Helm part runs every pipeline scenario
+  and the served list together to find which the charts serve now — reaches a
+  part's command through the environment; never pass one yourself.
 - **Waivers.** Any part may be waived, and only by the owner. A waiver for later
   validations is the owner's decision in the change's workflow log — a line
   `"by": "owner"` in `workflow.jsonl` beside the change's records, which Grep finds
@@ -169,78 +183,87 @@ moves nothing here, and validation runs beside it.
   remedies.
 - **Owed CI evidence.** Evidence only a push produces — a CI workflow's run, which a
   change branch's push does not trigger — is owed by validation rather than gating a
-  task. Read the change's `tasks.md`, as the clean worktree holds it at `HEAD`, and
-  note every `Owed by validation:` line of a section whose tasks are all checked:
-  the workflow, the job, what the job must show, and the section and task owing
-  it. Every validation of the change dispatches them, a fix commit's included,
-  since a later commit can break what an earlier one showed — unless the owner
-  waived the `ci` part (above). With none, the record's
-  CI part is `ci not owed` and nothing is dispatched. Only the workflows
-  `scripts/ci_evidence.py` lists (`DISPATCHABLE`) can be dispatched; none publishes.
-  A line owing another is refused by `make run-ci`, which names the list: its
-  observation is then absent, a `V<n>` of unknown cause for triage to take to
-  design, since only the owner extends the list.
+  task. For each owed run the plan lists, read its `Owed by validation:` lines in
+  `tasks.md`, as the clean worktree holds it at `HEAD`: the job, what the job must
+  show, and the section and task owing it. Every validation of the change runs
+  them, a fix commit's included, since a later commit can break what an earlier
+  one showed — unless the owner waived the part (above). A part the plan lists as
+  `not owed` is not started, and the record says so. In this repository only the
+  workflows `scripts/ci_evidence.py` lists (`DISPATCHABLE`) can be dispatched; none
+  publishes. A line owing another is refused by the `ci` part's start, which names
+  the list: its observation is then absent, a `V<n>` of unknown cause for triage
+  to take to design, since only the owner extends the list.
 
-## 2. Start the pipeline first
+## 2. Start the dispatched parts first
 
-A part waived (step 1) is not started, here or in step 3: a waived pipeline is
-not dispatched, a waived owed workflow not run, and the push still made. The
-pipeline is by far the slowest part, so it runs while everything else does:
+A part waived (step 1) is not started, here or in step 3: a waived part is not
+dispatched, a waived owed run not started, and the push still made. Every `start`
+returns at once, so the parts it dispatches — the slowest, such as this
+repository's end-to-end pipeline — run while everything else does:
 
-1. `gh auth status` — without it the dispatch fails after the push.
+1. `gh auth status` — without it a dispatch fails after the push.
 2. `scripts/change-workflow push` — the guarded push of exactly `HEAD`, never forced. If it
-   refuses, stop and report its reasons.
-3. Record the newest end-to-end run ID —
-   `gh run list --workflow e2e.yml --limit 1 --json databaseId --jq '.[0].databaseId'`
-   — then `make run-e2e`, which dispatches the workflow on the branch. The steps
-   that commit push their commits, but a push starts no run: the pipeline runs on
-   dispatch and nightly, so the run that describes `HEAD` is the one you dispatch.
-4. `make fetch-e2e-logs E2E_AFTER_RUN=<that ID>`, in the background. It waits for
-   a run of `HEAD` newer than that ID to be listed — so a commit validated before
-   never fetches its earlier run — then for it to finish, and downloads its logs
-   under `.snapshot/e2e-logs/<run-id>/`. Its last lines name the run and its
-   conclusion; a successful fetch means the logs arrived, not that the run passed.
-   Run it as written, with no shell redirect of its output: a redirect is a
-   write no rule admits unattended, and the harness keeps a background command's
-   output in a file, which is what the wait below reads.
-5. For each workflow owed (step 1), `make run-ci WORKFLOW=<file>`: it dispatches
-   the workflow on the branch, refusing one off the list, and first prints the
-   newest run of it there as `CI_AFTER_RUN=<id>`. Then `make validate-ci
-   WORKFLOW=<file> CI_AFTER_RUN=<that ID>`, in the background, beside the pipeline:
-   the `ci` part waits for the run of `HEAD` newer than that ID, and for it to
-   finish (step 3).
+   refuses, stop and report its reasons. The steps that commit push their
+   commits, but a push starts no run: this repository's pipeline runs on dispatch
+   and nightly, so the run that describes `HEAD` is the one you dispatch.
+3. For each `start, collect` run of the plan, in its order:
+   `scripts/change-workflow run validation <change> <part> start`, adding
+   `--owed <workflow>` for an owed run. It dispatches the part's work for `HEAD`
+   and returns; the engine keeps the marker the dispatch printed last for the
+   commit, the part, and the workflow, a retried start replacing it, so no two
+   runs share one. A start that failed keeps none, and its collect then refuses,
+   naming the start to run: the failure is diagnosed like any (step 4).
+4. Then each started run's collect, in the background:
+   `scripts/change-workflow run validation <change> <part> collect`, with the
+   same `--owed`. The engine gives it the kept marker, so it waits for the run of
+   `HEAD` newer than the marker — a commit validated before never collects its
+   earlier run — then for it to finish, and keeps its evidence under the part's
+   evidence directory. In this repository the pipeline's collect downloads the
+   run's logs under `.snapshot/e2e-logs/<run-id>/`, its last lines naming the run
+   and its conclusion: a passed collect means the logs arrived, not that the run
+   passed. The `ci` part's collect judges its run against `dev`'s (step 3). Run
+   each as written, with no shell redirect of its output: a redirect is a write
+   no rule admits unattended, and the harness keeps a background command's output
+   in a file, which is what the wait below reads.
 
-Run long commands in the background and wait for them to finish, rather than
-inside a call that will time out. Wait inside one Bash call, with a blocking
-read-only `tail -f … | grep -m1` on the command's output matching the line it
-prints when it ends — a part's result line, the fetch's run-and-conclusion line
-— never by ending the turn: under the wrapper a turn's end is an outcome, so a
-turn ended with a part in flight is logged as a stop. A single call blocks for
-at most ten minutes, and the pipeline can take longer, so when the `tail` times
-out, repeat it, still without ending the turn. Never a shell loop: `bash -c` has
-no allow rule unattended and will not get one, since no rule admits a loop
-without admitting any command. The Helm part can outlast one call too — its
-scenarios may take up to thirty minutes, and another change's validation may share
-the machine — so it runs in the background and is waited for the same way, on its
-`<part> validation of <commit>, attempt <n>: PASSED` or `FAILED` line, or the
-`ERROR:` line of a part that could not start. A running
-part prints one line as each step starts, naming the step's log under
+Every `run validation` ends with the engine's closing line, whatever its commands
+printed: `[change-workflow] validation <part>[ <workflow>] <phase> at <commit>:
+passed, exit 0; evidence <directory>`, or `failed, exit <n>:` and each failed
+command with its exit status. A run `run` refuses before running anything — a
+collect with no kept marker, a missing `--owed`, a value its command names that
+the run lacks — prints an `ERROR:` line instead. Run long commands in the
+background and wait for them to finish, rather than inside a call that will time
+out. Wait inside one Bash call, with a blocking read-only `tail -f … | grep -m1`
+on the command's output matching the closing line or an `ERROR:` line — never by
+ending the turn: under the wrapper a turn's
+end is an outcome, so a turn ended with a part in flight is logged as a stop. A
+single call blocks for at most ten minutes, and the pipeline can take longer, so
+when the `tail` times out, repeat it, still without ending the turn. Never a shell
+loop: `bash -c` has no allow rule unattended and will not get one, since no rule
+admits a loop without admitting any command. A long `run` part can outlast one
+call too — this repository's Helm scenarios may take up to thirty minutes, and
+another change's validation may share the machine — so it runs in the background
+and is waited for the same way. In this repository a running local or Helm part
+prints one line as each step starts, naming the step's log under
 `.snapshot/validation/`, and one as it ends, so its output shows how far it has
 got.
 
-## 3. Run the local and Helm parts
+## 3. Run the long parts
 
-Run them one after the other while the pipeline runs: they share the machine's
-Docker and CPU. Both start with `make dist-clean`, so every wheel tested is built
-from this commit rather than left in `.dist` by another branch.
+Run each `run` part of the plan in its order, one after another while the
+dispatched parts run, never one beside another, and each after the part its `after`
+names: `scripts/change-workflow run validation <change> <part> run`. In this
+repository they are the local part, then the Helm part, which share the machine's
+Docker and CPU. Both start by clearing the wheelhouse, so every wheel tested is
+built from this commit rather than left in `.dist` by another branch.
 
-1. `make validate-local` — `make check-packaging`, then `make test`.
-2. `make validate-helm CHANGE=<change>`, adding `HELM_ALL_SCENARIOS=1` when the
-   invocation asked for it. It runs in the change's own namespace,
+1. `local` — the packaging check, then every suite.
+2. `helm` — it runs in the change's own namespace,
    `validate-<change>` (a name longer than a namespace allows is cut and ends in
-   a short hash), which its summary names. Preflights first,
+   a short hash), which its summary names, with every pipeline scenario when the
+   owner's environment sets `HELM_ALL_SCENARIOS=1`. Preflights first,
    before anything slow: the kube context (`HELM_CONTEXT`, `docker-desktop` unless
-   the owner names another), the VM and bare-metal storefront environments the
+   the owner's environment names another), the VM and bare-metal storefront environments the
    chart-to-loader checks run in (`make init` creates both), the Docker daemon, a
    `Ready` node, Foundry's `cast`, which derives the namespace's Secrets, a
    warning if the Docker credential helper does not answer, and the capacity
@@ -265,13 +288,16 @@ from this commit rather than left in `.dist` by another branch.
    `default`, refuses first a release volume carrying
    `helm.sh/resource-policy: keep`, which an owner's own deploy left there.
 
-Run the Helm part even when the local part failed, so one triage sees every
-failure — unless the local part failed because the worktree was not clean or
-`HEAD` moved, which the scripts check after every step and report as "the worktree
-changed" or "HEAD is now …": the tree is no longer the commit, so stop.
+Run a part even when the part it comes after failed, so one triage sees every
+failure — unless that part failed because the worktree was not clean or `HEAD`
+moved, which this repository's scripts check after every step and report as "the
+worktree changed" or "HEAD is now …": the tree is no longer the commit, so stop.
 
-Each attempt of a part writes its summary and every step's log under
-`.snapshot/validation/<short commit>/<part>/<attempt>/`, and prints that path. The
+Each part keeps its evidence under the evidence directory its closing line names.
+In this repository each attempt of a local or Helm part writes its summary and
+every step's log under `.snapshot/validation/<short commit>/<part>/<attempt>/`, and
+prints that path, its last line `<part> validation of <commit>, attempt <n>:
+PASSED` or `FAILED`, or an `ERROR:` line when it could not start. The
 Helm part lists the pipeline scenarios it did not run because the charts cannot
 serve them; those are never passes. Its attempt also keeps the namespace's
 evidence: the scenario pod's log and exit status (`scenarios.log`,
@@ -286,9 +312,8 @@ and whether they changed since the namespace's previous validation
 (`evidence.resources.changed`); and the namespace's sampled memory, when a metrics
 source measured it (`memory.peak_bytes`).
 
-The `ci` part started in step 2 runs beside these, waiting on GitHub rather than
-the machine; it is waited for like them, on its `ci validation of <commit>,
-attempt <n>:` line. It reads only the dispatch's run, never a pull request's run
+The `ci` part's collect, started in step 2, runs beside these, waiting on GitHub
+rather than the machine, and is waited for like them. It reads only the dispatch's run, never a pull request's run
 of the same commit, which tests a merge. Its attempt keeps, under `runs/<run>/`,
 the run's whole log (`actions.log`), its jobs and steps as GitHub reports them
 (`run.json`), and each job's log (`jobs/<job>.log`); and the same for the
@@ -389,7 +414,8 @@ so a `V<n>`, and triaged. A run that produced no evidence for a reason the logs
 place outside the commit — `gh` not signed in, a runner outage, a run cancelled by
 a newer dispatch on the same branch, a run never listed — is environmental (step
 5): its remedy is signing in, waiting out the outage, or dispatching again, and
-the rerun is `make run-ci`, then `make validate-ci` with the new `CI_AFTER_RUN`.
+the rerun is the run's `start` again, then its `collect`, which waits past the new
+dispatch's marker.
 A fetch that kept no run, or a run that could not be read, is diagnosed from the
 `fetch` and `run` steps' logs like any failure, and is of unknown cause when they
 do not place it.
@@ -468,7 +494,7 @@ backticks or emphasis around either.
 
 - **Commit:** <full commit> on <branch>
 - **Result:** passed | failed | inconclusive — <one line why>
-- **Parts:** local <result> · helm <result> · pipeline <result> · ci <result> | ci not owed (each result passed, failed, inconclusive, or waived)
+- **Parts:** <each run of the plan by its name, then its result, as `pipeline passed · ci tests.yml passed · local passed · helm waived`, and a part not owed as `ci not owed`> (each result passed, failed, inconclusive, or waived)
 - **Pipeline:** run <id>, <conclusion> | waived
 - **CI:** <workflow> run <id>, <conclusion> — <the owed jobs' result>; <the jobs failing not owed, and whether every failure is also in dev's run> (omit when nothing is owed)
 
@@ -542,7 +568,9 @@ that names the wrong job or workflow is reported, and the plan's correction is
 implementation's. Environmental failures go under `## Environment` and are never
 findings.
 
-When the run used `HELM_ALL_SCENARIOS=1`, the scenarios outside the served list
+When the Helm part ran every pipeline scenario, because the owner's environment
+set `HELM_ALL_SCENARIOS=1` — its summary then lists no scenario as not run against
+Helm — the scenarios outside the served list
 (`HELM_SCENARIOS` in `scripts/validate_slice.py`) ran to test the list, not the
 commit, and the script's `e2e` step fails whenever one of them does. Judge the Helm
 part by the served scenarios alone. Under `## Helm`, list each other scenario with

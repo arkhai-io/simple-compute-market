@@ -54,7 +54,7 @@ def _documents(root: Path) -> list[str]:
     """What to re-read: the configuration's `load.common`, or, when the configuration
     cannot be read, what to do about that, so the session is still told."""
     try:
-        documents = config.load(root).documents("common")
+        documents = config.load(root).documents(config.COMMON_DOCUMENTS)
     except StepError as exc:
         return [f"The workflow configuration cannot be read, so the documents to re-read "
                 f"are unknown: {exc}",

@@ -132,8 +132,9 @@ different reading of a handful of findings would move.
 Extract each correction's general principle — from the ledger's entries, and from
 accepted judgement findings — and cluster them. Where several changes carry copies of
 the same dispositions, such as changes planned together from one plan, count them
-once, and say so. Check each cluster against the guidance (`AGENTS.md` and the
-documents it requires, `docs/agents/change-workflow.md`, the skills) and the
+once, and say so. Check each cluster against the guidance (the documents
+`scripts/change-workflow config load common` prints, `docs/agents/change-workflow.md`,
+the skills) and the
 repository's `check-*` targets, and place it in one of three kinds:
 
 - **guidance that is false:** the guidance says one thing and the owner repeatedly

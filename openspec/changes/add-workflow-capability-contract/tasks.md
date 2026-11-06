@@ -800,7 +800,7 @@ halves of CW-g4oz, CW-ikmm, CW-l7hn, CW-i2we, and CW-e1sg. Touches
 `.agents/skills/change-*/SKILL.md`, `.agents/skills/guidance-review/SKILL.md`, and
 `.claude/change-steps.toml` (the orchestrator's).
 
-- [ ] 7.1 Orchestrator's, on the owner's word, before this section's session
+- [x] 7.1 Orchestrator's, on the owner's word, before this section's session
   starts, committed by the session with its section: in `.claude/change-steps.toml`,
   remove every row's `models` and the `[orchestrator]` row (D5); add
   `Edit(.agents/workflow.toml)` and `Write(.agents/workflow.toml)` to `[common]`'s
@@ -814,6 +814,24 @@ halves of CW-g4oz, CW-ikmm, CW-l7hn, CW-i2we, and CW-e1sg. Touches
   grant for engineering work. Verify: `scripts/change-workflow check config` and the
   step table's tests in `scripts/tests/test_change_workflow_steps.py` pass against the
   edited table.
+  - Done: the orchestrator's edit was in the worktree and is committed here. Beyond
+    the task's text it also gives planning `Bash(scripts/change-workflow check tasks
+    *)`, which `change-plan` now names. `scripts/change-workflow check config` was
+    denied this session (implementation's rules allow `config *`, not `check
+    config`); substitutes: `scripts/change-workflow config load implement`, which
+    loads and checks the whole file, and the config suite's
+    `test_the_repositorys_own_configuration_passes_its_check`. The steps suite
+    (unit, 42 pass) now holds the edited table: validation pushes only through the
+    guarded push and dispatches through `run`, which `graph.HOOK_STEPS` holds to
+    the validate step; every step reaches its hooks through `run`, validation's and
+    archive cleanup's hook targets are refused, and implementation's, triage's, and
+    the merge's engineering grants stay; design, planning, triage, and closeout run
+    OpenSpec through the command and no step a pinned version; every step reads
+    `config load`, `config parts`, and `config --json`; and no step may edit
+    `.agents/workflow.toml` while implementation may still edit a skill (CW-z5me;
+    its "recorded on the run's line" is the wrapper's existing denial record).
+    Validation keeps `gh run list*`, which its skill no longer runs: the table's to
+    trim, by the owner.
 - [ ] 7.2 Every skill that commits runs `scripts/change-workflow run pre-commit
   <change>` where it ran `make check-change`, and stages what the hooks rebuilt
   (D7, D17, CW-e1sg); implementation, triage, and the merge drop their own `make
@@ -825,6 +843,27 @@ halves of CW-g4oz, CW-ikmm, CW-l7hn, CW-i2we, and CW-e1sg. Touches
   read-only (CW-y6mj). Verify: `grep -n "make check-change\|make lock\|make
   check-packaging\|make test\b\|bunx @fission-ai\|npx --yes @fission-ai"
   .agents/skills/*/SKILL.md` finds no invocation, only references for the owner.
+  - Done: implementation (step 5, the merge-resolution run's test step),
+    triage, the merge, design, planning, and closeout run `scripts/change-workflow
+    run pre-commit <change>` and stage what the hooks rebuilt; implementation's
+    step 5 says which hooks the worktree's paths run, and that a change with no
+    recorded landing branch gives `--base`. The merge takes one side of a
+    conflicted lock and lets `after-functional-change` rebuild it; a merge that
+    concluded itself leaves nothing in the worktree for the tier to see, so the
+    skill runs `run after-functional-change` and `run pre-commit-functional` by
+    name first. Closeout runs `run pre-archive` for packaging, saying so when it
+    is skipped, and `scripts/change-workflow openspec archive`; design and
+    planning run OpenSpec through `scripts/change-workflow openspec`. The review
+    may run `run pre-commit` on its clean checkout. The grep (Grep tool) finds only
+    validation's "never … `make lock`", a prohibition.
+  - Outside the plan: the skills' sentences naming `openspec/` and `docs/` as the
+    paths that need no new validation (triage, the merge, the review, archive
+    cleanup, the orchestrating session) now name the repository's inert paths,
+    which the engine reads since section 4; the merge skill says the engine
+    supplies the recorded landing branch, which section 5 made true; and the
+    orchestrating session's clone paragraph describes section 5's clone — `FROM`,
+    else the workspace's branch, recorded as the landing branch — and the
+    `post-clone` bootstrap.
 - [ ] 7.3 Validation learns its parts from `scripts/change-workflow config parts
   <change>` and runs each through `run validation` — the preflight, every `start`
   dispatched first after the guarded push, then the `run` parts in order keeping each
@@ -838,6 +877,28 @@ halves of CW-g4oz, CW-ikmm, CW-l7hn, CW-i2we, and CW-e1sg. Touches
   `change-validate/SKILL.md` and `change-archive-cleanup/SKILL.md`, every command
   they run is a subcommand of `scripts/change-workflow`, `git`, or `gh auth status`,
   besides the diagnosis's read-only `kubectl`, `docker`, and `helm` calls.
+  - Done: validation runs `run validation <change> preflight` first, records
+    `config parts <change>`, starts every `start, collect` run after the push and
+    collects each in the background, then runs the `run` parts in order keeping
+    each `after`, and waits on the engine's closing line; its record's `Parts:`
+    line names the plan's runs. Each collect starts in the background right after
+    its start, as the pipeline's fetch did, and is waited for after the `run`
+    parts: the task's "then every collect". A refused `run` prints `ERROR:` and no
+    closing line, so the wait matches either. `HELM_ALL_SCENARIOS` and
+    `HELM_CONTEXT` reach the Helm part through the environment, so the root
+    `Makefile` no longer appends `with HELM_ALL_SCENARIOS=1` to `make validate`'s
+    arguments (outside the plan's files, D8); `test_validate_slice.py` shows `make
+    -n validate HELM_ALL_SCENARIOS=1` passes no argument and `validate-helm` takes
+    `--all-scenarios` from its environment (library integration, a real `make
+    -n`). That make exports a command-line variable to the session it starts is
+    GNU make's documented behaviour, which no test here shows, and `HELM_CONTEXT`
+    is not exercised. Archive cleanup runs `run cleanup <change>`, commits any tracked file it
+    wrote on its own, and checks its index edit with `run pre-commit` (D9 lists
+    it) where it ran `check index` and `make check-doc-citations`. Read: every
+    command the two skills run is `scripts/change-workflow` (`push`, `config
+    parts`, `run`, `next`, `log`, `note`, `find`, `record`, `history`, `check
+    round-view`), `git`, or `gh auth status`, besides validation's diagnosis and
+    the owner-named `kubectl scale` remedy.
 - [ ] 7.4 Every skill loads its documents from `scripts/change-workflow config load
   <step>` where it named `AGENTS.md`, `ARCHITECTURE.md`, `TESTING.md`,
   `DEPLOYMENT_AND_CONFIG.md`, `openspec/README.md`, and the roadmap as its reading
@@ -845,12 +906,54 @@ halves of CW-g4oz, CW-ikmm, CW-l7hn, CW-i2we, and CW-e1sg. Touches
   sentence naming `make code-snapshot` is removed (D20). Verify: `make
   check-agent-skills` passes; the delta scenario "Design loads the roadmap" holds for
   `change-design`.
-- [ ] 7.5 Verification: `make check-agent-skills` passes;
+  - Done: design, planning, implementation (and its fresh-context check), triage,
+    the merge, closeout, and the review read `config load <their step>`. Closeout
+    and the review keep the roadmap as a read for a purpose — closeout's roadmap
+    part, the goal the change serves — since `load` names it only for design, and
+    a `load.closeout` row would be the owner's edit of the protected file. `make
+    check-agent-skills` passes; `config load design` prints the common documents
+    and the roadmap in this repository, and the config suite's existing CW-l7hn
+    test shows `plan` without it (unit).
+  - Outside the plan: the orchestrating session and a guidance review run no step
+    of the graph, and `config load` refused anything else, so `config load common`
+    prints `load.common` alone (`config.COMMON_DOCUMENTS`, which the
+    post-compaction hook reads too); a config-suite unit test covers it. Both
+    skills read it. Recorded in D6 and CW-l7hn's delta, so closeout's promotion
+    names it; the `cli` help and usage say it.
+  - Closeout and the review name the roadmap as the one `openspec/README.md`'s
+    documentation placement names, which `load.common` holds, so a reviewer can
+    find it. The fresh-context check judged these reads a private exception to
+    CW-l7hn; declined, since each is a read for a part's work, not the guidance a
+    session loads as it starts. The owner may instead give `load.review` and
+    `load.closeout` the roadmap, an edit of the protected configuration.
+- [x] 7.5 Verification: `make check-agent-skills` passes;
   `scripts/tests/test_change_workflow_assumptions.py` is run and its failures are
   only those section 8 resolves (`.agents/workflow.toml` and the new subcommands'
   rules unlisted); `make test` passes but for those. End-to-end: none in
   `e2e-tests/`; the round's validation is run by the moved validation skill, and its
   record is the evidence for 7.3.
+  - Done: `make check-agent-skills` passes; the assumptions suite fails only on
+    `.agents/workflow.toml` unlisted (named in the step table), which 8.4 lists.
+    `make test` ran every suite to `test-release-tooling`, which failed on that
+    one test alone (2595 passed); make stopped there, so `helm test-render` and
+    `test-frp-grant-admission`, which the section does not touch, did not run
+    (section 8's `make test` runs them). The steps, config, CLI, validate-slice,
+    and assumptions suites pass but for that test. `make check-change` fails only
+    on the specification index (10.9). End-to-end: confirmed none in
+    `e2e-tests/`.
+  - Until section 8 adds `make check-repository`, every `run pre-commit` the skills
+    now run fails at the `pre-commit` hook in this repository; sections 7 and 8
+    are committed one after the other in one session, so no step runs between
+    them.
+  - For the review and triage, found by the fresh-context check and not the
+    implementer's to settle: archive cleanup commits what a cleanup wrote, such as
+    `helm/validation-capacity.toml`, a path outside the inert paths, with no
+    functional hooks, as D3 and CW-ikmm say; CW-e1sg says such a commit runs the
+    functional tier and that only implementation, triage, and the merge make
+    functional commits, and the hook table refuses archive cleanup that tier. One
+    of the two needs the owner's wording. The step table, the owner's to trim,
+    still allows validation `gh run list*` and closeout the bare `openspec
+    archive *`, which no skill runs now.
 
 ## 8. The closing checks, the step table's loader, and the inventory (D5, D11, D18, D20)
 
