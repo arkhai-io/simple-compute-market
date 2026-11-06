@@ -18,7 +18,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: test-frp-grant-admission test-frp-grant-admission-frp test-frp-grant-admission-floor build-frp-grant-admission
 .PHONY: test-payments-lane-double build-payments-lane-double
 .PHONY: dist-arkhai-core-registry
-.PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits test-provisioning-iac-native test-bare-metal-iac-native
+.PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits build-e2e-native-gate test-provisioning-iac-native test-bare-metal-iac-native
 .PHONY: run-e2e run-ci fetch-e2e-logs
 .PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
 .PHONY: design-review validate-local validate-ci validate-helm validate-parallel check-change check-repository install-gitleaks check-public-content check-secrets audit-secrets check-decision-destinations check-history-wording check-version-bumps check-local-imports check-capability-index record-capacity review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks pre-push
@@ -267,6 +267,15 @@ build-e2e-bare-metal: build-e2e-base ## Build the bare-metal end-to-end lane's i
 
 build-e2e-apicredits: build-e2e-base ## Build the API-credit end-to-end lane's images
 	$(MAKE) -j5 build-registry build-apicredits-service build-apicredits-storefront build-apicredits-sample-app build-payments-lane-double
+
+# The native Ansible gate's image: only the provisioning image and the wheels it
+# installs, since the gate composes no stack, so no dev chain and no test image.
+# The pipeline runs it on a fresh checkout, so the wheels come first, as the lane
+# targets make them.
+build-e2e-native-gate: ## Build the provisioning image the native Ansible gate runs in
+	$(MAKE) init-prerequisites
+	$(MAKE) dist
+	$(MAKE) build-provisioning
 
 # Seller-only build: the two runtime images a seller actually needs
 # (`arkhai:storefront`, `arkhai:compute-provisioning`) and just the wheels they

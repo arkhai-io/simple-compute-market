@@ -30,14 +30,18 @@ Delivers the gate as its own E2E job and takes it off the VM lane (D1, D10).
 
 Files: `.github/workflows/e2e.yml`; the root `Makefile`.
 
-- [ ] 1.1 Add the root target `build-e2e-native-gate` (D10): `$(MAKE) init-prerequisites`,
+- [x] 1.1 Add the root target `build-e2e-native-gate` (D10): `$(MAKE) init-prerequisites`,
   `$(MAKE) dist`, `$(MAKE) build-provisioning`, in that order, beside the
   `build-e2e-<lane>` targets, with a comment saying it builds only the provisioning image
   and the wheels it installs, wheels first because the pipeline runs on a fresh checkout,
   and no dev chain or test image. Add it to `.PHONY`, with a `##` help line.
   Verify: `make -n build-e2e-native-gate` prints the three steps in order and no
   `build-dev-env`, `build-test-image`, or other image build.
-- [ ] 1.2 In `.github/workflows/e2e.yml` (D1, D10): add the job `native-ansible-gate`
+  Done. The dry run, as `make build-e2e-native-gate -n` (the unattended step allows
+  `make build-*`, not `make -n …`), prints `make init-prerequisites`, `make dist`,
+  `make build-provisioning` at the top level and no other image build; the only
+  `docker build` is the provisioning service's.
+- [x] 1.2 In `.github/workflows/e2e.yml` (D1, D10): add the job `native-ansible-gate`
   (`runs-on: ubuntu-latest`, `timeout-minutes: 30`) with steps checkout, `setup-uv`
   pinned as the lanes pin it, `make build-e2e-native-gate`, and
   `make test-provisioning-iac-native`; no foundry step and no artifact upload. Remove the
@@ -50,13 +54,42 @@ Files: `.github/workflows/e2e.yml`; the root `Makefile`.
   yaml.safe_load(open(sys.argv[1]))' .github/workflows/e2e.yml`); `e2e-vm` has no step
   running `test-provisioning-iac-native`; the new job's steps call only targets that exist
   (`make -n` of each).
-- [ ] 1.3 Verification point. Locally, where Docker is available:
+  Done. `e2e-vm` has no step running the gate; the dry runs of `build-e2e-native-gate`
+  (1.1) and `test-provisioning-iac-native` resolve. Not run: the `python3 -c` YAML
+  parse, which the unattended step's rules refuse; the file was checked by reading,
+  and the round's validation, which dispatches `e2e.yml`, is the first parse by
+  GitHub. The header keeps `PROVISIONING_MODE` at workflow level; the gate job ignores
+  it.
+- [x] 1.3 Verification point. Locally, where Docker is available:
   `make build-e2e-native-gate` builds `arkhai:compute-provisioning`, then
   `make test-provisioning-iac-native` passes against it. `scripts/change-workflow run
   pre-commit shorten-the-end-to-end-pipeline` passes.
   End-to-end: the pipeline run shows job `native-ansible-gate` passing; `e2e-vm` runs no
   gate step and passes its lane's markers; record each job's duration (the VM lane
   expected about 6.5 minutes, from 12).
+  Done on the section's local evidence. `make build-e2e-native-gate` built
+  `arkhai:compute-provisioning`; `make test-provisioning-iac-native` passed against it
+  (the native Ansible integration tests, real `ansible-playbook` in the image: VM IaC 3
+  in 5.8 s, compute family 19 in 131.9 s serially on this host; image syntax gate
+  passed). Pre-commit: `after-functional-change` and `pre-commit-functional` (every
+  suite, packaging) passed; `pre-commit` failed only on the citations check's three
+  files sections 3 and 4 create (`e2e-tests/tests/e2e/roles/helpers/buy.py`,
+  `e2e-tests/tests/unit/test_buy_helper.py`,
+  `e2e-tests/tests/unit/test_scenario_lane_holds.py`), expected until those sections
+  land. Unrun: the end-to-end evidence, which the round's validation produces when it
+  dispatches the pipeline.
+  Outside the plan: `scripts/tests/test_image_publication_contract.py` failed on the
+  base (`cf4db5b7f` moved `push-images` onto `scripts/publish_artifacts.py`, and the
+  test still expected a `docker tag` line in the Makefile's dry run). It now reads the
+  `image` arguments from `push-images`' dry-run command line and gives them to
+  `push_image` with a recording runner, so the build's tag and the tag pushed from must
+  agree; a static check of the Makefile's dry runs with a unit check of `push_image`,
+  passing. It does not run `publish_artifacts.py`'s argument parser. Also outside the
+  plan's file list: `domains/vms/provisioning/iac/README.md` said the VM lane runs the
+  root gate target; it now names the `native-ansible-gate` job.
+  End-to-end scenarios: no `e2e-tests` marker exercises this section. Its pipeline
+  evidence is the job list: `native-ansible-gate` passing, `e2e-vm` running no gate
+  step, and each job's duration.
 
 ## 2. The compute gate runs its native tests concurrently
 
