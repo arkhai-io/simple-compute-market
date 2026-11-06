@@ -471,6 +471,10 @@ class Listing(BaseModel):
             "the legacy accepted_escrows contract."
         ),
     )
+    rate_structure: dict[str, list[dict[str, Any]]] | None = Field(
+        default=None,
+        description="Published listing-level family rates used to derive VM shape quotes.",
+    )
     demands: list[EscrowDemand] | None = Field(
         default=None,
         description=(

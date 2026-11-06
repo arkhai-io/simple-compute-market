@@ -260,6 +260,47 @@ anything; exit performs no reference pricing, so withdrawn or unpriceable terms
 cannot prevent the buyer leaving. Revisit the scale bridge at the 2b conversion:
 quote derivation and upward rounding then have one shared amount contract.
 
+### Slice B scalar and payment boundary
+
+Shape-priced scalar negotiations use the multiplier; flat-priced and hidden-reserve
+paths retain their exact absolute-amount/truncation behavior. This is the delta's
+"where a domain's offering carries a resolvable rate structure" boundary, not a
+conversion of every market or of an amountless selection into multiplier bargaining.
+`core/tests/unit/test_rate_helpers.py` therefore stays unchanged: its generic
+`compute_rate_total` still serves legacy and other-domain consumers. Only the VM
+multiplier quote rounds up, once after the complete rational product.
+
+The buyer's public per-hour price surface remains monetary. The VM codec divides
+it by the selected option's advertised-shape hourly reference to form basis-point
+bounds, rounding those bounds down so quantization cannot exceed the caller's
+monetary bound. That anchor does not change on shape revision. The core buyer owns
+an optional schema-opaque codec; transcripts stay scalar, while `agreed_amount`
+on a buyer outcome remains monetary for aggregation, confirmation and settlement.
+`negotiated_scalar` records the separate policy quantity. Resume records retain the
+listing rate carrier and exact integer prices, not floats; the VM codec replays
+buyer shape revisions against the recorded terms without changing price bounds.
+
+The seller's `negotiation.multiplier_floor_bps` defaults to 10,000. The VM composition
+clamps sub-floor policy counter/accept decisions to a counter at that floor, and
+refuses acceptance below it; bisection itself remains unchanged. Its existing five
+percent convergence tolerance is not permission to undercut a strict seller floor.
+A buyer can accept the floor; repeated sub-floor counters terminate under the
+existing stale-round rule rather than re-anchoring on each shape.
+
+The shared quote helper evaluates selected-asset advertised and requested shapes,
+uses their exact ratio to preserve the selected option's materialized base-unit
+scale, applies duration and multiplier, and rounds upward once. The resulting
+uint256 payment enters the VM settlement build context, escrow/hosted obligation,
+and Agreement. A materialized escrow proposal must not overwrite the scalar
+`proposal` in the terminal round response; its monetary form remains in
+`accepted_escrow_proposal`. A buyer revision instruction is not echoed as an
+instruction to revise again when accepting a seller counter.
+
+Revisit the public-price adapter if the buyer gains explicit multiplier flags;
+revisit the scale bridge if publication supports fractional-base-unit hourly
+references. Permanent promotion remains the negotiation-protocol specification
+and repository architecture at the final slice's post-review closeout.
+
 ### The agreed shape reaches the claim through the accepted artifacts
 
 `build_vm_accepted_artifacts` writes the settlement order from the listing
@@ -332,6 +373,7 @@ drain.
 |---|---|
 | A buyer-requested round-0 VM shape differing from the listing is rejected outright until a round can carry a shape | Temporary; lifted by Section 2. Never promoted |
 | Revised terms are a child of `proposal`; core reuses `ProvisionTerms` rather than adding vocabulary; durable seller-quoted terms survive continuation and acceptance | `openspec/specs/negotiation-protocol/spec.md` — "A round may revise the capacity shape" |
+| A schema-opaque buyer amount codec keeps transcript scalars separate from monetary outcomes and normalizes effective revised terms | `docs/development/ARCHITECTURE.md` — buyer negotiation composition; `openspec/specs/negotiation-protocol/spec.md` — "Rate-multiplier negotiation" |
 | The negotiated quantity is a multiplier in basis points; amounts stay exact | `openspec/specs/negotiation-protocol/spec.md` — "Rate-multiplier negotiation" |
 | A requested shape's feasibility, quantitative and categorical, is evaluated before pricing | `openspec/specs/negotiation-protocol/spec.md` — "Seller feasibility precedes pricing" |
 | The agreed shape is what the claim reserves | `openspec/specs/vm-storefront-fulfillment/spec.md` — "The agreed shape is reserved" |

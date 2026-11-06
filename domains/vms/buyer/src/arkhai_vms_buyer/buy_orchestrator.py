@@ -54,6 +54,7 @@ from .settlement_composition import (
     validate_buyer_acceptance,
 )
 from .settlement_stages import BuyerStageContext
+from .negotiation_amounts import amount_codec
 
 
 def make_legacy_negotiate_hook(
@@ -85,6 +86,7 @@ def make_legacy_negotiate_hook(
         validate_acceptance=validate_buyer_acceptance,
         advertised_plan_validator=advertised_plan_validator,
         accepted_listing_record=accepted_listing_record,
+        amount_codec_factory=amount_codec,
         capture=capture,
     )
 
