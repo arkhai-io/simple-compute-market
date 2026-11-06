@@ -33,19 +33,20 @@ memory.
 | Planning | `change-plan` | `make plan CHANGE=<change>`, once the design review's triage advances the change | `tasks.md`, ending with the closeout task, one commit |
 | Implementation | `change-implement` | `make implement CHANGE=<change> [SECTION=<n> \| SECTIONS=<n-m>]` | each section's code and tests, its task notes, one commit per section |
 | Implementation review | `change-review` | `make review CHANGE=<change> KIND=implementation` | `reviews/NN-implementation.md` |
-| Validation | `change-validate` | `make validate CHANGE=<change>` | `reviews/NN-validation.md`; pushes `HEAD`, runs the pipeline (`make run-e2e`, `make fetch-e2e-logs`), and dispatches and reads each CI workflow the change's complete sections owe (`make run-ci`, `make validate-ci`) |
+| Validation | `change-validate` | `make validate CHANGE=<change>` | `reviews/NN-validation.md`; pushes `HEAD`, then runs the preflight and each part of the plan `scripts/change-workflow config parts <change>` prints through `scripts/change-workflow run validation` — here the uv version check, the pipeline, each CI workflow the change's complete sections owe, the local part, and the Helm part |
 | Triage | `change-triage` | `make triage CHANGE=<change>` | `reviews/NN-<kind>.triage.md` ending with `## Next`, the exit it chose in prose; an outcome naming that exit and the records it triaged; `interventions.jsonl`, accepted fixes in one commit, the index row when a phase-closing review's triage advances the change; whatever it edited that no fix commit holds, in one commit of its own |
 | Pre-closeout review | `change-review` | `make review CHANGE=<change> KIND=pre-closeout` | `reviews/NN-pre-closeout.md` |
-| Merge | `change-merge` | `make merge CHANGE=<change> [FROM=<branch>]`, once the pre-closeout triage advances the change | the branch the change lands on — `dev` unless `FROM` names another — merged into the change's branch, its conflicts resolved and the change's code reconciled with it, in the merge commit or one after it; the index row (`ready for closeout`) when it advances with `HEAD` validated |
+| Merge | `change-merge` | `make merge CHANGE=<change> [FROM=<branch>]`, once the pre-closeout triage advances the change | the branch the change lands on — the one its clone recorded, unless `FROM` names another — merged into the change's branch, its conflicts resolved and the change's code reconciled with it, in the merge commit or one after it; the index row (`ready for closeout`) when it advances with `HEAD` validated |
 | Closeout | `change-closeout` | `make closeout CHANGE=<change>` | permanent documents, the promotion record, the archived change, one commit |
 | Closeout review | `change-review` | `make review CHANGE=<change> KIND=closeout` | `reviews/NN-closeout.md` |
-| Archive cleanup | `change-archive-cleanup` | `make archive-cleanup CHANGE=<change>` | the index (dependents released, row `archived`), any waiver as a ledger line, one commit, `reviews/pull-request.md`; the capacity figure its latest validation measured (`make record-capacity`), in a commit of its own, or none when nothing was measured; then tears down the change's validation namespace and images (`make -C helm teardown`) and, for a change worked in its own clone, copies its history into your workspace (`make change-history`) |
+| Archive cleanup | `change-archive-cleanup` | `make archive-cleanup CHANGE=<change>` | the index (dependents released, row `archived`), any waiver as a ledger line, one commit, `reviews/pull-request.md`; runs every validation part's cleanup (`scripts/change-workflow run cleanup <change>`) — here recording the capacity the latest validation measured, then tearing down the change's validation namespace and images — and commits any tracked file it wrote, here the capacity figure, on its own; then, for a change worked in its own clone, copies its history into your workspace (`make change-history`) |
 | Orchestration | `change-orchestrate` | `make orchestrate CHANGE=<change>` | the change's clone and branch, `orchestrator` and `round` lines in the workflow log — your directions among them, on your word — the conversion of a change's records on your word, the owner's notes on a round, the ledger line of a waived design review, or of a recommended waiver of one you declined, workflow commits on your word, its own observations of the tooling |
 
 Every step but the review opens an interactive Claude Code session. With
 `UNATTENDED=1` the same target runs the step headless instead, through
 `scripts/change-workflow start <step> <change> --unattended`: held to its step's permissions in
-`.claude/change-steps.toml`, on its step's models, ending with an outcome appended
+`.claude/change-steps.toml`, on its step's models, which the repository's workflow
+configuration names ("Maintaining the step table", below), ending with an outcome appended
 to the change's workflow log. `make plan` unattended resumes the design step's
 session; `FRESH=1` starts a fresh one. The review always runs unattended.
 
@@ -84,13 +85,36 @@ archive cleanup — pushes each commit right after through `scripts/change-workf
 push` (`make push-branch`), the guarded push of exactly `HEAD`, the only push a step may make. A pushed branch
 starts nothing: validation dispatches the end-to-end pipeline itself.
 
-Validation dispatches CI workflows too, for evidence only a run of one produces.
-`make run-ci WORKFLOW=<file>` dispatches a workflow on the current branch and
-prints the newest run of it there before the dispatch as `CI_AFTER_RUN`; it
-refuses any workflow `scripts/ci_evidence.py` does not list, naming the list, which
-holds `tests.yml` and nothing that publishes, and only you extend it. `make
-validate-ci WORKFLOW=<file> CI_AFTER_RUN=<id>` is validation's `ci` part: it waits
-for the dispatch's run of `HEAD` newer than that one, keeps its job logs under
+**The repository's hooks.** What a step runs of the repository's own — its checks,
+suites, relock, validation parts, and their cleanup — is declared in
+`.agents/workflow.toml`, and a skill runs it through `scripts/change-workflow run`,
+which, in an unattended run, holds each hook to the steps the engine allows it —
+an interactive session, `make check-change` included, is unrestricted — and ends
+each with one
+closing line naming the hook, the commit, the result, and each failed command with
+its exit status. Before each commit a step runs `run pre-commit <change>`: when the
+worktree changes a path outside the configuration's inert paths (here `openspec/`
+and `docs/`), it runs `after-functional-change` (here `make lock`), then
+`pre-commit-functional` (`make check-packaging`, `make test`), then `pre-commit`;
+otherwise `pre-commit` alone. The step stages what the hooks rebuilt. Closeout runs
+`run pre-archive <change>` (`make check-packaging`, `make check-architecture-change`)
+before the archive; validation learns its parts from `scripts/change-workflow config
+parts <change>` and runs its preflight (`make check-uv-version`) and then each part
+through `run validation`; archive cleanup runs `run
+cleanup <change>`. The skills read the documents `scripts/change-workflow config
+load <step>` prints, and run OpenSpec as `scripts/change-workflow openspec
+<arguments>`, through the configuration's `openspec.command`. No step may edit the
+configuration: it changes as a tracked edit of yours, or the orchestrating
+session's on your word.
+
+Validation dispatches CI workflows too, for evidence only a run of one produces,
+through its owed `ci` part: `run validation <change> ci start --owed <file>`
+dispatches a workflow on the current branch, `make run-ci WORKFLOW=<file>` here,
+which ends with the newest run of it there before the dispatch, the marker the
+engine keeps; it refuses any workflow `scripts/ci_evidence.py` does not list, naming
+the list, which holds `tests.yml` and nothing that publishes, and only you extend
+it. Its collect, `make validate-ci WORKFLOW=<file> CI_AFTER_RUN=<marker>` here,
+waits for the dispatch's run of `HEAD` newer than that one, keeps its job logs under
 `.snapshot/validation/<short commit>/ci/`, and classes each failure — a failing test's
 ID and exception type from pytest's short summary, or a failing step with its
 error lines — against the
@@ -148,12 +172,20 @@ the merge, closeout, and archive cleanup ask the next-step computation as they
 start, and go on only when it names them — archive cleanup also when it names a validation
 before it, which it then checks for your waiver.
 
-`make check-change CHANGE=<change> [CHANGE_BASE=<branch>]` runs a step's closing
-checks, printing only failures and one pass line: comment hygiene, the agent
-skills, the change's citations and task list, the change index, each indexed
+`make check-change CHANGE=<change> [CHANGE_BASE=<branch>]` is your complete closing
+check: it runs `scripts/change-workflow run pre-commit <change>` as a step does,
+the functional hooks first when the worktree changes a path outside the inert paths.
+`pre-commit` runs the
+workflow's default checks — the change index, the task list, the agent skills, and
+the strict OpenSpec validation of the change, or of every specification for an
+archived change — each skipped only where the configuration's `defaults.disable`
+names it with a reason; then this repository's `make check-repository
+CHANGE=<change> CHANGE_BASE=<branch>` (`scripts/check_change.py`), printing only
+failures and one pass line: comment hygiene, the change's citations, each indexed
 capability's `spec.md` against its `index.md` with the change's deltas counted
-(`make check-spec-index`), and the pinned strict OpenSpec validation; then five
-written rules the change's own work keeps:
+(`make check-spec-index`), and five written rules the change's own work keeps.
+`scripts/change-workflow check change <change>` runs the default checks alone. The
+five rules:
 
 - each `### D<n>` decision under `design.md`'s `## Decisions` has a bullet starting
   `D<n>` in `proposal.md`'s "Knowledge to promote", `D<n>: no permanent destination
@@ -170,9 +202,11 @@ written rules the change's own work keeps:
 
 None has an exception marker: a false positive is reworded, or the rule amended
 (`AGENTS.md`, "Amend a rule or comply"). The three that read the diff compare with
-its merge-base with the branch the change lands on, `dev` unless `CHANGE_BASE` names
-another; a change branched from another change's branch passes that branch, or the
-other change's commits read as its own. `make check-tasks CHANGE=<change>` fails
+its merge-base with the branch the change lands on: the one its clone recorded,
+which `scripts/change-workflow find --json` prints as `base`, unless `CHANGE_BASE`
+names another, and refused, naming how to give it, for a change with neither, such as
+one worked in your workspace with no clone. A change branched from another change's
+branch lands on that branch, or the other change's commits read as its own. `make check-tasks CHANGE=<change>` fails
 when a numbered task sits under another section's heading; the steps that act on a
 task list run it first.
 
@@ -199,28 +233,59 @@ the repository imports the package. Its subcommands:
 
 ```text
 scripts/change-workflow start <step> <change> [--unattended] [--allow …] [--sections …] [--session …] [--arguments …] [--fresh]
-scripts/change-workflow next | record | note | review | find | clone | clone-remove | clone where
-scripts/change-workflow resume | stop | log | watch | denials | round-view | round-done | cost | history | push
-scripts/change-workflow check index | check tasks | check push | check skills | check round-view | check graph
+scripts/change-workflow next | record | note | review | find | clone | clone-remove [--base …] | clone where
+scripts/change-workflow resume | stop | log | watch | denials | round-view | round-done | cost | history | push [--remote …]
+scripts/change-workflow run <hook> <change> [--base …] | run validation <change> preflight | run validation <change> <part> run|start|collect [--owed …] | run cleanup <change>
+scripts/change-workflow config [--json] | config load <step>|common | config parts <change> [--json] | openspec <arguments>
+scripts/change-workflow check config | check change | check index | check tasks | check push | check skills | check round-view | check graph
 scripts/change-workflow hook post-compaction | convert
 ```
 
 `start` opens a step: interactively by default, headless with `--unattended`. It
-refuses an archived change for design, planning, implementation, and the merge, and
-refuses while a round view is open; it opens the change's workflow log with a line
-carrying the log's format before any step runs. `start orchestrate <change>` opens
-the orchestrating session on the step table's `[orchestrator]` row. Every subcommand
-exits 0 on success, 1 on a refusal or a failed check with its reason on standard
-error, and 2 on a usage error. `find --json <change>` prints the change's `name`,
-`directory`, `archived`, `records`, and the record set's `format`; `clone where
+checks the repository's configuration whole, and refuses a step whose required
+field is absent, naming it — the functional checks for implementation, triage, and
+the merge, a validation part for validation, the protected branches, and the
+models of an unattended run — before launching anything. It refuses an archived
+change for design, planning, implementation, and the merge, and refuses while a
+round view is open; it opens the change's workflow log with a line carrying the
+log's format before any step runs. `start orchestrate <change>` opens the
+orchestrating session on the model and effort the configuration's
+`models.orchestrator` names. Every subcommand exits 0 on success, 1 on a refusal or
+a failed check with its reason on standard error, and 2 on a usage error.
+
+`find --json <change>` prints the change's `name`, `directory`, `archived`,
+`records`, the record set's `format`, and `base`, the branch the change lands on as
+its clone recorded it — the clone's `--from`, or the branch the workspace had
+checked out — or `null` where none is recorded, as for a change with no clone. The
+merge, the base of every review but the design's, and the closing checks read it,
+an argument overriding it for one run, and refuse with neither. `clone where
 <change>` prints the change's clone, or nothing when it is worked in place, and
-refuses an unknown change or an unusable clone.
+refuses an unknown change or an unusable clone. `clone-remove --base <branch>`
+names the branch the change landed on, overriding the clone's record; a clone whose
+record names none needs it. `push` sends `HEAD` to its branch's upstream remote, or to `--remote <remote>`,
+and refuses a branch with neither; it refuses the configuration's protected
+branches and runs its `pre-push` first.
+
+`run` runs a hook of the repository's configuration for a change, as "The
+repository's hooks" above describes, held in an unattended run to the engine's
+table of which step may run each — `pre-push` and `post-clone` belong to `push` and
+`clone` alone — and
+filling each command's placeholders: `{change}`, `{base}` from `--base` or the
+recorded landing branch, `{remote}` in `pre-push`, `{owed}` from `--owed` in an owed
+part, and `{after}`, the marker the part's `start` printed last, in its `collect`.
+Its invocations are recorded on the run's log line as `invoked`. `config` lists how
+every field resolved — declared, default, disabled, or absent — with its command,
+`--json` the same structured; `config load <step>` prints the documents a step
+reads, `config load common` those every session reads; `config parts <change>` is
+validation's plan for the change; `check config` checks the file alone, and `check
+change` runs `pre-commit`'s default checks alone; `openspec` runs the configured
+OpenSpec command with the arguments given.
 
 The workflow's make targets — `make design`, `make review`, `make change-next`, and
 the rest — are a fragment of the package, `scripts/change_workflow/workflow.mk`,
-which the root `Makefile` includes after setting this repository's values
-(`CHANGE_WORKFLOW_MERGE_FROM` and `CHANGE_WORKFLOW_REVIEW_BASE`, both `dev`). Each
-target is a thin call of the command.
+which the root `Makefile` includes; it sets no value of the repository's, since the
+branch a change lands on is the clone's record. Each target is a thin call of the
+command.
 
 Which of these another party may rely on is tiered in the `change-workflow`
 specification (CW-5qne) and its
@@ -380,10 +445,11 @@ finishes it and records its outcome, and the command is run again. It refuses a
 change already converted, or one with a triage still in progress.
 
 **Maintaining the step table.** `.claude/change-steps.toml` gives each step its
-skill, its allow and deny rules, and its models in priority order with their
-effort. No step may edit it: a rule or model changes as a tracked edit, which you
-commit, or which the orchestrating session commits on your word in the change's
-clone.
+skill and its allow and deny rules; the repository's workflow configuration,
+`.agents/workflow.toml`, gives each step's models in priority order with their
+effort, and the orchestrating session's. No step may edit either: a rule or model
+changes as a tracked edit, which you commit, or which the orchestrating session
+commits on your word in the change's clone.
 The orchestrating session reads each run's denials from its log line
 (`scripts/change-workflow denials <change> <seq>`) and proposes the
 narrowest rule for a gap, either granted for one run or as a table edit. After a
@@ -393,8 +459,10 @@ rules: sed's in-place forms, find's deleting, running, and writing actions, and
 the diff family's output-to-file forms. A shell write such a rule refuses, made
 with the Edit or Write tool the step's rules allow, is read as a gap and needs no
 ruling from you; every other deny rule forbids the work itself. A
-row never names a Fable or Astra model, nor two models of one vendor. `REVIEW_MODEL`
-and `REVIEW_EFFORT` (below) are yours for a review run by hand, not the table's.
+step's models never name two of one vendor, and a Codex model only for the review;
+the engine refuses the configuration otherwise, naming the step. `REVIEW_MODEL`
+and `REVIEW_EFFORT` (below) are yours for a review run by hand, not the
+configuration's.
 
 **Granting a rule for one run.** A rule you grant reaches one run, fresh or
 resumed, and is never added to the table: the run's log line records it as
@@ -421,14 +489,15 @@ session to commit to a separate work-in-progress branch; one stopped by a refusi
 guard or a moved `HEAD` commits nothing. Work left uncommitted after a step finished is that
 step's defect: the orchestrating session brings it to you and commits it only on
 your word. The branch is the guard against unfinished work: a change's branch
-is not protected; only `main` and `dev` are.
+is not protected; only the configuration's protected branches, `main` and `dev`,
+are.
 
 **The merge before closeout.** Once the pre-closeout triage advances the change,
 the merge step (`change-merge`) brings the branch the change lands on into the
 change's branch, so the validation before closeout tests the change as it will
-land. That is the branch it was branched from: `make merge` merges `dev` unless
-`FROM=<branch>` names another, which you give the orchestrating session for a
-change branched from elsewhere. It resolves every conflict, and reconciles the
+land. That is the branch its clone recorded: `make merge` merges it unless
+`FROM=<branch>` names another, and refuses a change with neither, such as one worked
+in your workspace with no clone, naming `FROM`. It resolves every conflict, and reconciles the
 change's own code — its end-to-end scenarios above all, which no local suite runs —
 with what that branch renamed or removed, which merges
 without a conflict and fails only when it runs. Then it judges what the merge
@@ -499,22 +568,26 @@ environments, `.snapshot/`, and its step sessions.
 
 **Creating it.** `make orchestrate CHANGE=<change>`, started in the workspace,
 creates the clone when the change's branch is checked out neither there nor in a
-clone, by running `make change-clone CHANGE=<change> [BRANCH=feat/<change>]
-[FROM=dev]` in the workspace, with another `BRANCH` or `FROM` when you name one —
-a branch started from another change's branch; you can run it by hand too. It
-clones the workspace locally, sets the clone's `origin` to the workspace's and
-adds a `workspace` remote naming the workspace, and checks out the branch — the
-existing one, or a new one from `FROM` — at its furthest point between the
-workspace's copy and `origin`'s, refusing one where the two have diverged; the
-branch tracks `origin`'s, never the workspace's. It links the clone's
-`.claude/settings.local.json` to the workspace's and starts `make init` in the
-background. It is safe to run again: it finishes a clone left incomplete, restarts
+clone, by running `make change-clone CHANGE=<change> [BRANCH=feat/<change>]` in the
+workspace, with another `BRANCH`, or a `FROM` when you name one — a change landing
+on another branch than the one your workspace has checked out; you can run it by
+hand too. It records the branch the change lands on — `FROM`, or else the
+workspace's checked-out branch, refusing a detached workspace given none — and
+keeps that record on every rerun. It clones the workspace locally, sets the
+clone's `origin` to the workspace's and adds a `workspace` remote naming the
+workspace, and checks out the branch — the existing one, or a new one from the
+landing branch — at its furthest point between the workspace's copy and `origin`'s,
+refusing one where the two have diverged; the branch tracks its own name on
+`origin`, or on the landing branch's upstream remote, never the workspace. It links
+the clone's `.claude/settings.local.json` to the workspace's and starts the
+configuration's `post-clone`, `make init` here, in the background. It is safe to run again: it finishes a clone left incomplete, restarts
 a failed bootstrap, and refuses, deleting nothing, a directory that is not a clone
 of the workspace, has another branch checked out, or has uncommitted changes.
 
-**The bootstrap.** `make init` in the clone is running, succeeded, or failed —
+**The bootstrap.** The clone's `post-clone` is running, succeeded, or failed —
 failed when it exited non-zero or its process died without recording a status —
-and its log is in the clone's Git directory. Design and planning go on while it
+and its log, and the command it resolved to, are in the clone's Git directory; a
+repository declaring none has a clone usable at once. Design and planning go on while it
 runs; implementation, validation, and every later step wait for it. A failed
 bootstrap comes to you naming its log, almost always for a reason in the
 environment, and is never retried by itself: `make change-clone CHANGE=<change>`
@@ -567,12 +640,15 @@ leaves what is the same, extends a file the clone has since grown — the workfl
 and transcripts only grow — and refuses, naming it and overwriting nothing, any file
 that differs otherwise. Once the change has merged, remove its clone with `make
 change-clone-remove CHANGE=<change>` in your workspace. It refuses at once while a
-run is in progress in the clone or its bootstrap is still running. Otherwise it
-copies the history again first, then deletes the clone only when every file of that
-history is in your workspace with the clone's contents, the branch is merged into
-`origin`'s `dev` — a squash or rebase merge counts when merging the branch again
-would apply cleanly and change nothing — and the clone holds no commit `origin`
-lacks, no uncommitted change, and no stash; otherwise it names each problem and deletes nothing. Archive
+run is in progress in the clone or its bootstrap is still running, and for a clone
+whose record names no landing branch when no `BASE=<branch>` names one. Otherwise
+it copies the history again first, then deletes the clone only when every file of
+that history is in your workspace with the clone's contents, the branch is merged
+into the branch the change lands on, `BASE` or else the clone's record, on the
+branch's upstream remote — a squash or rebase merge counts when merging the branch
+again would apply cleanly and change nothing — and the clone holds no commit that
+remote lacks, no uncommitted change, and no stash; otherwise it names each problem
+and deletes nothing. Archive
 cleanup never removes the clone, since the pull request may need another round.
 
 **A change worked in the workspace.** A change can still be worked in your
@@ -598,7 +674,7 @@ a clone by hand:
 
 ## Reviews
 
-`make review` runs the reviewer read-only on the review row's models: Codex in its
+`make review` runs the reviewer read-only on the configuration's `models.review`: Codex in its
 read-only sandbox first, and `change-review` on Claude, held to reading, when Codex
 is not installed, not signed in, or at its usage limit; the record and its log line
 name the reviewer's harness and model. It captures the reviewer's final message,
@@ -608,9 +684,10 @@ alternatives — and
 only then publishes it under the next number. A review continues the previous
 reviewer's session of the same kind on the same harness, so a second design review
 knows what the first asked; `FRESH=1` starts a new one. `REVIEW_BASE` is the branch
-the diff is taken against (`dev` by default), and `REVIEW_MODEL` and
-`REVIEW_EFFORT` are the owner's choice of reviewer for one run, outside the step
-table's policy: `REVIEW_MODEL` replaces the review's models with the one named, a
+the diff is taken against, by default the one the change's clone recorded as its
+landing branch; a review other than the design's refuses with neither. `REVIEW_MODEL` and
+`REVIEW_EFFORT` are the owner's choice of reviewer for one run, outside the models'
+policy: `REVIEW_MODEL` replaces the review's models with the one named, a
 `claude-` model running on Claude and any other on Codex, with no fallback, and the
 record and its log line mark the run as an override. The orchestrating session
 never sets them. A pre-closeout review refuses until the latest validation passed
@@ -833,7 +910,7 @@ A waiver a step recommended is a line whose `agent_position` names the
 recommendation and its criterion ("Waivers", above); a recommended waiver the owner
 declines is a correction like any other, its `owner_disposition` giving their
 reason. When the owner waives archive cleanup's validation of a correction outside
-`openspec/` and `docs/` — by their direction to archive cleanup — archive cleanup
+the inert paths — by their direction to archive cleanup — archive cleanup
 records it as a line under the closeout review's record with `"finding":
 "validated"` and the owner's reason. Read together,
 a change's ledgers show where the guidance or the skills fell short.

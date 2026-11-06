@@ -1080,7 +1080,7 @@ Brings `docs/agents/change-workflow.md` to the commands the skills now run. Touc
 `docs/agents/change-workflow.md` and `scripts/completions/make-change.bash` where it
 names removed targets or variables.
 
-- [ ] 9.1 In `docs/agents/change-workflow.md`, "Skills": the closing checks as `make
+- [x] 9.1 In `docs/agents/change-workflow.md`, "Skills": the closing checks as `make
   check-change` over `run pre-commit`, the defaults and `make check-repository`
   listed, the hooks a step runs, validation's parts from `config parts`, archive
   cleanup's `run cleanup`, `code-snapshot` gone; "The engine's command": `run`,
@@ -1090,9 +1090,45 @@ names removed targets or variables.
   no longer exists. Verify: `make check-doc-citations
   CHANGE=add-workflow-capability-contract` reports only files closeout writes;
   `scripts/tests/test_make_change_completion.py` passes.
-- [ ] 9.2 Verification: `make check-doc-citations
+  - Done: "Skills" gains "The repository's hooks" — `.agents/workflow.toml`, `run`
+    and its closing line, `run pre-commit`'s tiers, `run pre-archive`, `config
+    parts` and `run validation`, `run cleanup`, `config load`, `openspec`, the
+    configuration protected from steps — and the validation, merge, and archive
+    cleanup rows and the CI paragraph say what runs through them; the closing
+    checks are `make check-change` over `run pre-commit`, the four defaults and
+    `defaults.disable`, `make check-repository`'s eight checks, `check change`, and
+    the diff checks' base from the clone's record. "The engine's command" lists
+    `run`, `config`, `config load` (with `common`), `config parts`, `check
+    config`, `check change`, `openspec`, `push --remote`, and `clone-remove
+    --base`, says what `start` requires, `find --json`'s `base`, `start
+    orchestrate` on `models.orchestrator`, and that the fragment sets no value of
+    the repository's. The guide never named `code-snapshot`. Outside the task's
+    list, the passages sections 4 and 5 left stale say what is now true: the step
+    table without models and the model policy, the protected branches, the merge's
+    and the review's base from the clone's record, the clone recording its
+    landing branch and its upstream, the `post-clone` bootstrap, clone removal
+    against the recorded branch with `BASE`, and the ledger's inert paths. The
+    shell completion names no removed target or variable, so nothing is dropped.
+    `make check-doc-citations` passes, but it reads only the change's own
+    documents, not the guide — run without `CHANGE` it named this change all the
+    same — so the guide's cited paths (`.agents/workflow.toml`,
+    `scripts/check_change.py`, `scripts/ci_evidence.py`, the fragment, the step
+    table) were checked by hand, by the fresh-context check; the plan's verify
+    has the same gap. The completion suite passes (library integration, a real
+    `bash`). The fresh-context check's corrections are in: the hook table binds
+    unattended runs only, the review's models are the configuration's, the
+    validation preflight is named, and clone removal's `BASE` is described as the
+    code checks it.
+- [x] 9.2 Verification: `make check-doc-citations
   CHANGE=add-workflow-capability-contract` and `make test` pass but for files
   closeout writes. End-to-end: none; no scenario exercises the guide.
+  - Done: `make check-doc-citations` passes. Section 9 changes no code: `make
+    test` passed in full in section 8 (8.2), and `make test-release-tooling`
+    (2597) after section 8's last fixes, which changed tests, docstrings, and
+    target descriptions only. `scripts/change-workflow run pre-commit ... --base
+    dev` over this documents-only worktree ran `pre-commit` alone, its tier, and
+    failed only on the specification index (10.9) and this machine's missing
+    `bunx` (8.5's handoff). End-to-end: confirmed none.
 
 ## 10. Closeout
 
