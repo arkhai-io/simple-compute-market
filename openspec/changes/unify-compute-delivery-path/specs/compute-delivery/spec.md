@@ -1,233 +1,174 @@
 ## ADDED Requirements
 
-### Requirement: Compute storefronts share one protected delivery path
+### Requirement: Compute storefronts deliver through one family path behind domain ports
 
-VM and bare-metal storefront fulfillment hooks MUST delegate protected compute delivery to one compute-family library through injected ports. Core hook-result identity validation MUST remain in force. Domain preparation and result codecs MUST remain injected. The path MUST consume selected-stage evidence without mechanism-ID branching; API-credit issuance MUST remain outside it.
+The VM and bare-metal storefronts MUST deliver through the compute-family library at `domains/compute/delivery`, which owns the delivery order and keeps no table of its own. Each storefront MUST supply a `DeliveryProgress` port over its existing progress row and a `ComputeDeliveryDomain` port for its claim, exact fulfillment request, ready evidence and continuation. The library MUST NOT import a storefront and MUST NOT branch on a domain or mechanism identity. API-credit issuance MUST remain outside it.
 
-#### Scenario: Both entry points deliver
+#### Scenario: Both domains run the same order
 
-- **WHEN** payment settle or the selected Alkahest continuation invokes either domain's fulfillment hook
-- **THEN** the hook delegates to the same protected-transition implementation
-- **AND** core still validates its returned negotiation and fulfillment identities
+- **WHEN** a VM deal and a bare-metal deal each settle with verified evidence
+- **THEN** each storefront's fulfillment hook calls the same library operation with its own two port implementations
+- **AND** each deal's reservation and fulfillment identities and activation instant are recorded in that domain's own progress row
 
 #### Scenario: API credits delivers
 
 - **WHEN** an API-credit deal reaches issuance
-- **THEN** its existing path has no compute activation requirement
+- **THEN** its existing path runs, with no compute activation or delivery-path call
+
+### Requirement: Delivery is driven one deal at a time and reports where it stands
+
+The library MUST expose `drive(negotiation_id)`, returning one of `waiting(wake_at)`, `pending`, `repair_required(reason)`, `available`, `converged` or `ended`. Each call MUST reconcile the deal's recorded state before acting and MUST be safe to repeat. A fulfillment hook MUST map `available` and `converged` to fulfilled, `waiting`, `pending` and `repair_required` to deferred, and `ended` to failed only once the end hand-off is durable.
+
+#### Scenario: A domain worker resumes a deal
+
+- **WHEN** a storefront's recovery worker calls `drive` for a deal interrupted after dispatch
+- **THEN** the path polls the recorded fulfillment and continues from that step without scheduling or beginning another
+
+#### Scenario: Repair-required stays visible
+
+- **WHEN** a deal's accepted timing is missing or its site activation answer is unexplained
+- **THEN** `drive` returns `repair_required` with the reason and the deal keeps its recorded resource
 
 ### Requirement: Delivery commits the Agreement window
 
-Delivery MUST commit and recover the accepted Agreement's exact start and duration under the same reservation identity. It MUST NOT substitute now or a default duration. Missing or conflicting timing MUST be repair-required without replacing an existing resource. An elapsed window before availability MUST enter the classified end handoff.
+Every commit and recovery MUST use the Agreement's `start_utc` and `start_utc + duration_seconds` under the same reservation identity. Delivery MUST NOT substitute the current time for a start or a default for a duration; missing or conflicting timing MUST be repair-required without replacing an existing resource. Late settlement MUST shorten service and MUST NOT move the end.
 
 #### Scenario: Settlement completes late
 
 - **GIVEN** an Agreement from 12:00 through 14:00
 - **WHEN** settlement completes at 12:30
-- **THEN** both domains commit 12:00 through 14:00 on first attempt and retry
+- **THEN** both domains commit 12:00 through 14:00, on the first attempt and on every retry
 
 #### Scenario: Recovery lacks timing
 
-- **WHEN** an unfinished delivery lacks valid accepted timing
-- **THEN** it remains repair-required with its recorded resource, not a replacement or a guessed hour
+- **WHEN** an unfinished delivery has no valid accepted start or duration
+- **THEN** it is repair-required with its recorded resource, not a replacement or a guessed hour
 
-### Requirement: Future-start delivery waits inside its admitted window
+### Requirement: A deal that starts later waits for its start
 
-Capacity MAY be committed at settlement before the Agreement start. Dispatch, activation, billing start and availability MUST NOT precede that start. The path MUST retain a durable wake time and an identified retry owner, and recheck admission on wake. Credential reads MUST NOT disclose before the start.
+Capacity MAY be committed at settlement before the Agreement start. Dispatch, activation, billing start and disclosure MUST NOT happen before `start_utc`. Before then `drive` MUST return `waiting` with the start as its wake time, release the deal's convergence claim, and leave the deal to the domain's existing recovery worker, which MUST recheck admission when the deal is driven again.
 
 #### Scenario: A forward reservation waits
 
-- **WHEN** a 12:00 Agreement commits at 10:00
-- **THEN** it remains waiting-for-delivery until 12:00 without dispatch or early access
-- **AND** recovery repeats the same commit and wake time
-- **AND** the commitment instant and accepted delivery deadline it supplies with the site commit are the deal's, so a deadline the site later writes is anchored by them
+- **WHEN** an Agreement starting at 12:00 settles at 10:00
+- **THEN** the reservation is committed for 12:00 through 14:00 at 10:00 and nothing is dispatched
+- **AND** at 12:00 the domain's worker drives the deal, admission passes and dispatch begins
 
-### Requirement: Delivery authorization is a decision separate from billing effects
+#### Scenario: An end is recorded while a deal waits
 
-The path MUST call the injected neutral authorization protocol before commit, dispatch, billing start and initial disclose. It MUST retain the servicing owner's durable decision reference before use, not duplicate its journal. Pending and unknown outcomes MUST remain pending. An explicitly composed no-financial-action decision for prepaid/current Alkahest MUST require selected-stage evidence and issue no financial mutation; a missing required adapter MUST NOT imply allow.
+- **WHEN** the buyer's end is recorded at 11:00 for a deal waiting for a 12:00 start
+- **THEN** at 12:00 admission refuses and nothing is dispatched
 
-#### Scenario: A prepaid deal passes authorization
+### Requirement: Protected steps are authorized and admitted
 
-- **WHEN** selected-stage evidence and local admission permit delivery
-- **THEN** the prepaid financial decision allows without a payment start
-
-#### Scenario: Alkahest has no lifecycle payment adapter
-
-- **WHEN** the selected Alkahest stage validates its typed commitment evidence and composition explicitly provides no-financial-action
-- **THEN** delivery can pass local admission and reach activation without a hosted payment start
-- **AND** a missing required adapter registration still blocks composition rather than implicitly allowing
-
-#### Scenario: An outcome is unknown
-
-- **WHEN** the authorization adapter cannot establish its outcome
-- **THEN** delivery stays pending and resolves the same attempt
-
-### Requirement: Protected transitions consume lifecycle admission
-
-Each protected transition, activation, recovery and credential-response authorization MUST consume the lifecycle owner's revision-bearing admission port. The path MUST use its transaction boundary for checkpoint/disclosure CAS without remote I/O in the transaction. A financial allow MUST NOT override a due local end.
+Before commit, dispatch, billing start and disclosure the path MUST call end service's `authorize_delivery` for that phase, and before activation it MUST pass end service's admission for `activate`. A pending or unknown outcome MUST leave the deal pending and resolve the same attempt; a financial allow MUST NOT override a due local end; a mechanism with no adapter MUST NOT be allowed.
 
 #### Scenario: An end wins before dispatch
 
-- **WHEN** lifecycle admission records a due end before dispatch
-- **THEN** delivery does not dispatch despite an earlier financial allow
-- **AND** hands recovery to the lifecycle owner
+- **WHEN** an end is recorded after the dispatch authorization was read but before dispatch
+- **THEN** the stale admission fails, nothing is dispatched, and the deal goes to the end hand-off
 
-### Requirement: Billing start follows activation under one effect identity
+#### Scenario: An authorization outcome is unknown
 
-After activation and start authorization, delivery MUST call end service's begin_billing with a stable key and retain only its intent reference. ActivatedDeliveryRef MUST supply negotiation/commitment/reservation/fulfillment IDs, verified site activation reference/instant and ready envelope/digest, without credentials. Recovery MUST reuse that key. Delivery MUST NOT implement the adapter's start_billing or a second intent journal.
+- **WHEN** the payment adapter cannot establish its authorization outcome
+- **THEN** the deal stays pending and the next drive resolves the same authorization
 
-#### Scenario: Rate start acknowledgement is lost
+### Requirement: Activation precedes billing start and availability
 
-- **WHEN** the authority accepted start but its acknowledgement was not persisted
-- **THEN** delivery resolves through the same begin_billing operation and retains only its intent reference
-- **AND** adopts its acknowledged outcome without another key or resource
+After ready evidence and admission for `activate`, and no earlier than the Agreement start, the path MUST call `CapacityEffects.activate_lease` for the binding's site. On success it MUST record the site's `activated_at_utc` once through the progress port and adopt the lease's current end; it MUST NOT extend or restore an end. On a 409 it MUST read the lease through the compute contract's `LeaseView`, entering the end hand-off for a `releasing` or `released` lease and repair-required otherwise; on a 404, or when the site cannot be asked or answers unsigned, the deal MUST be repair-required and MUST NOT be treated as activated.
 
-#### Scenario: Activation fails
+#### Scenario: A truncation precedes activation
 
-- **WHEN** expiry claims the lease before activation succeeds
-- **THEN** no billing-start effect has been issued
-- **AND** delivery enters the classified end handoff
+- **WHEN** end service truncates a lease to 13:00 before activation
+- **THEN** activation records the site's instant and the deal's lease ends at 13:00
 
-### Requirement: Delivery checkpoints recover stable effects
+#### Scenario: Expiry claims the lease first
 
-Each negotiation MUST keep ordered checkpoints authorized, dispatched, activated, started, available and converged. Delivery intents MUST precede reserve, commit, dispatch and activation I/O; billing MUST reference end service's sole intent/key under delivery's stable key. Checkpoints MUST advance only on acknowledgement. Recovery MUST reconcile the same effect/resource, including reservation creation, and recheck admission.
+- **WHEN** activation is refused with 409 and `LeaseView` shows the lease `releasing`
+- **THEN** no billing start is issued and the deal goes to the end hand-off
 
-#### Scenario: Reserve acknowledgement is lost
+#### Scenario: The site cannot activate
 
-- **WHEN** reserve succeeds before its returned identity is persisted
-- **THEN** negotiation-keyed exact-request replay recovers the same reservation
-- **AND** a conflicting request is refused rather than creating a second hold
+- **WHEN** the activation call reaches no site, or is answered without a valid signature
+- **THEN** the deal is repair-required, its activation instant stays null, and the call is retried later
 
-#### Scenario: An unresolved reserve intent outlives its hold
+### Requirement: Billing start uses end service's one intent
 
-- **WHEN** exact-request reconciliation returns the original expired or released reservation
-- **THEN** delivery preserves that identity and enters repair-required or classified end handoff, never silently reserves fresh
+After activation and a `start` authorization the path MUST call `begin_billing` with a stable operation key and a `DeliveryEvidence` naming the negotiation, commitment, reservation and fulfillment, an `ActivatedDeliveryRef` whose reference is the capacity reservation identity and whose instant is the site's, and the domain's ready evidence. Delivery MUST NOT keep a billing intent of its own; recovery MUST repeat the call under the same key.
 
-#### Scenario: A protected write fails
+#### Scenario: A billing-start acknowledgement is lost
 
-- **WHEN** an admission or intent write cannot be persisted
-- **THEN** the next protected effect is deferred
-- **AND** any existing physical resource remains adopted while persistence is retried
+- **WHEN** the payment authority accepted the start but the storefront restarted before recording the result
+- **THEN** the next drive calls `begin_billing` under the same key and adopts the recorded outcome without a second start
 
-#### Scenario: Adjacent checkpoints are interrupted
+#### Scenario: A once-only deal starts billing
 
-- **WHEN** either storefront restarts between adjacent checkpoints or an intent and acknowledgement
-- **THEN** it reconciles authoritative state before advancing
-- **AND** reaches availability only after ready evidence, activation and billing-start acknowledgement
+- **WHEN** a prepaid or Alkahest deal reaches billing start
+- **THEN** its once-only adapter returns a no-op and no payment start is created
 
 ### Requirement: Availability and convergence have explicit meanings
 
-Available MUST mean readiness and disclose authorization are durable without a buyer read. Converged MUST additionally mean the selected stage's required evidence, readiness and claim-binding continuation is acknowledged or explicitly absent. Terminal failure MUST map to failed only after the end handoff is durable.
+Available MUST mean readiness, activation, billing start and disclose authorization are durable, without any buyer read. Converged MUST additionally mean the domain's continuation — an Alkahest claim or evidence publication — is acknowledged, or that the domain has none.
 
 #### Scenario: A buyer never reads
 
-- **WHEN** ready evidence, activation, billing-start acknowledgement and disclose authorization complete
-- **THEN** delivery records available without waiting for a credential read
+- **WHEN** a deal's ready evidence, activation, billing start and disclose authorization complete
+- **THEN** `available` is recorded although the buyer has made no request
 
-#### Scenario: Evidence publication remains pending
+#### Scenario: Evidence publication is pending
 
-- **WHEN** availability is durable but the selected continuation is unfinished
-- **THEN** delivery is not converged and retries that continuation without another physical delivery
+- **WHEN** a deal is available but publishing its Alkahest evidence failed
+- **THEN** `drive` returns `available`, not `converged`, and retries the publication without another fulfillment
 
-### Requirement: Pending delivery preserves its retry owner
+### Requirement: Every step recovers the same resource
 
-Before dispatch, pending/persistence/repair outcomes MUST preserve the mechanism's journaled awaiting-delivery operation and retry owner, not deferred fulfillment. After workload creation, deferred MUST identify the deployed domain convergence owner. Repair-required MUST remain visible without guessing terms.
+A lost acknowledgement at any step MUST be recovered without a second resource: reserve through the site's placement key, dispatch through the recorded dispatch step and fulfillment identity, activation by repeating it for the same reservation, and billing start under the same key. The progress port MUST record the dispatch before `begin_fulfillment` is called.
 
-#### Scenario: Future-start Alkahest resumes without buyer polling
+#### Scenario: A reserve acknowledgement is lost
 
-- **WHEN** a committed forward deal restarts before dispatch with no buyer polls
-- **THEN** its selected continuation leaves the operation journaled awaiting delivery and the servicing worker rechecks each cycle without error backoff
-- **AND** delivery resumes at the accepted start under the same reservation and reaches availability
+- **WHEN** the storefront restarts after the site reserved capacity and before the identity was recorded
+- **THEN** the next drive's reserve under the same placement key returns the same reservation
 
-### Requirement: Activation consumes the reservation's current end
+#### Scenario: A recovered reservation has been released
 
-Before billing start and availability, every compute delivery MUST invoke reservation-only activation and journal retries. It MUST validate the returned end as the immutable commit end or a verified earlier end recorded by end service, and adopt the site's active instant. Unexplained mismatches MUST remain repair-required. A claimed expiry MUST NOT be resurrected.
+- **WHEN** the replayed reservation comes back released
+- **THEN** the deal is repair-required or goes to the end hand-off, and no fresh reservation is placed
 
-#### Scenario: Truncation precedes activation
+### Requirement: An undelivered deal is handed to the end operation with classified evidence
 
-- **WHEN** end service has recorded and applied an earlier future end before activation
-- **THEN** activation supplies no target deadline and preserves that shorter end
-
-#### Scenario: Activation acknowledgement is lost before truncation
-
-- **WHEN** activation succeeds, its acknowledgement is lost and end service then truncates
-- **THEN** retry adopts the current shorter end without extension or a replacement lease
-
-#### Scenario: An activated lease runs to its end
-
-- **WHEN** a reserved lease activates
-- **THEN** it remains active to its recorded end without renewal, whatever deadline preceded activation
-
-### Requirement: Every caller activates through the typed contract
-
-Every delivery and recovery caller MUST activate through the site's typed activation contract, so that the activation safeguard `renewable-compute-lease-deadlines` later enables needs no caller edit. A verified null-phase legacy leased view MUST use unchanged legacy behavior. Missing activation support MUST be tolerated only for that verified legacy case; non-null or unknown phase without working activation MUST be repair-required.
-
-#### Scenario: Storefronts upgrade before the site
-
-- **WHEN** the path observes a verified legacy null-phase leased view and no activation route
-- **THEN** it preserves legacy delivery behavior without claiming a new site activation
-
-#### Scenario: A protected site has no working activation route
-
-- **WHEN** a lease is awaiting activation but activation is unavailable
-- **THEN** delivery stays pending and reports repair-required, not assumed success
-
-### Requirement: Delivery supplies classified evidence to the single end operation
-
-Before availability, refusal, provisioning failure, elapsed window or activation lapse MUST enter record_end. Delivery MUST supply actor/cause/source, accepted start, fixed observation, resource IDs and evidence, including verified refusal reasons, payer/mandate state and unserved setup. It MUST NOT classify by event name, compute corrections or duplicate lifecycle cause/timing policy. Unsupported exceptional-end adapters MUST be reported honestly.
+Before availability, a refusal, provisioning failure, elapsed window or lapsed activation MUST enter end service's `record_end`. Delivery MUST supply the actor, cause and source, the Agreement start, the fixed failure-observation time, the resource identities and verified evidence, and MUST NOT classify by event kind, compute amounts or send a payment stop or reverse. Any site refusal of the commit after a reservation was made MUST be recorded as seller failure before dispatch, with its filing at the Agreement start and the reservation released through end service's no-dispatch path under one key.
 
 #### Scenario: A lawful end wins before availability
 
-- **WHEN** a buyer request, verified payer stop or ruling is observed before availability
-- **THEN** delivery supplies its exact evidence/instant alongside the non-delivery basis to record_end
-- **AND** uses the returned classification rather than treating every start refusal as seller failure
+- **WHEN** the buyer's end request is recorded before the deal is available
+- **THEN** delivery supplies it beside the never-delivered basis and acts on the classification end service returns, filing no self-penalty for a lawful end
 
-#### Scenario: Seller failure occurs before a future start
+#### Scenario: A commit is refused after reservation
 
-- **WHEN** a never-delivered deal fails before its accepted start
-- **THEN** delivery supplies both accepted start and the fixed failure-observation time
-- **AND** delivery retains the returned operation reference and supplies those fixed inputs once, without locally choosing a future at or recomputing on retry
-- **AND** consumes deal-lifecycle's exceptional-end filing/timing policy through the dispute adapter, without issuing a seller payment stop or reverse
+- **WHEN** the site refuses the commit of a reservation the deal already holds
+- **THEN** a seller-failure end with its filing is recorded, nothing is dispatched, and the reservation is released through the no-dispatch path
+- **AND** a restart before the release is acknowledged retries the same release and places no second reservation
 
-#### Scenario: Settlement arrives after the window without established buyer fault
+#### Scenario: Settlement arrives after the window
 
-- **WHEN** the window has elapsed and no resource became available
-- **THEN** delivery does not dispatch and supplies never-delivered evidence
-- **AND** does not infer a buyer-fault exemption from settlement lateness alone
+- **WHEN** settlement completes after the Agreement's end
+- **THEN** nothing is dispatched and never-delivered evidence is supplied, with no buyer fault inferred from the lateness
 
-#### Scenario: Buyer delivery-end receipt is evidence, not billing authority
+### Requirement: Credentials are disclosed only through a live, admitted read
 
-- **WHEN** a buyer end_delivery request arrives without at
-- **THEN** delivery consumes the storefront's signed receipt evidence and lifecycle admission result
-- **AND** does not issue a billing stop for the buyer or duplicate buyer-side stop retry or delivery_end triage policy
+A buyer's credential read MUST require `available` or `converged`, the Agreement start reached and end service's admission; it MUST fetch from provisioning's fulfillment result outside any transaction and recheck the revision and due end before the response is signed, discarding the fetched material if an end won. It MUST NOT read a payment snapshot. A credential-capable route's exact retry MUST run this read again.
 
-#### Scenario: An end overlaps dispatch
+#### Scenario: An end wins during the fetch
 
-- **WHEN** a final request wins after dispatch was sent
-- **THEN** delivery adopts that fulfillment and supplies its identity to end service
-- **AND** keeps signed site evidence without treating end intent as proven release
+- **WHEN** an end is admitted after the fetch begins but before the response is authorized
+- **THEN** the fetched material is discarded and disclosure is refused
 
-### Requirement: Credential disclosure uses live local admission even on exact retry
+#### Scenario: A credential read is retried after an end
 
-Buyer-authenticated credential responses MUST require available or converged, a reached start and lifecycle admission. They MUST fetch live outside the transaction and recheck revision/time before response authorization. Credential-capable response bodies MUST NOT be retained in replay storage; exact retries MUST re-enter the guard while changed requests remain rejected. No payment snapshot is required per read.
-
-#### Scenario: An end wins during fetch
-
-- **WHEN** a due end is admitted after fetching starts but before response authorization
-- **THEN** the fetched access material is discarded and disclosure refused
-
-#### Scenario: A successful credential response is retried after end
-
-- **WHEN** an exact authenticated retry arrives after a due end
-- **THEN** it re-runs eligibility rather than replaying the earlier credential body
-- **AND** replay storage retains no access material
-
-#### Scenario: The buyer polls VM settlement status
-
-- **WHEN** the VM buyer reads credentials through settle status
-- **THEN** the existing typed response is populated by the live guarded read, not a stored fallback
+- **WHEN** a buyer repeats an exact authenticated credential request after a locally admitted end
+- **THEN** the read runs again and is refused, and no earlier response body is returned
 
 #### Scenario: A response is already in flight
 
-- **WHEN** response authorization precedes end admission
-- **THEN** no claim is made to retract in-flight bytes
-- **AND** physical termination remains revocation for disclosed material
+- **WHEN** a response was authorized before an end was admitted
+- **THEN** no claim is made to retract it, and physical teardown revokes the disclosed access
