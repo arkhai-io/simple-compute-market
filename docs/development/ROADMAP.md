@@ -387,17 +387,6 @@ Work this goal found and leaves unowned:
 
 ---
 
-## Configuration delivery
-
-A service's secrets reach it from a secret profile or overlay file its configuration system layers, never from an environment variable its configuration names, and every stack the repository runs takes its configuration from committed profile, overlay, values and secret-overlay files, while a deployed stack's secret files arrive in operator-supplied Secrets ([`DEPLOYMENT_AND_CONFIG.md`](DEPLOYMENT_AND_CONFIG.md#profile-based-configuration)). Two services do not yet follow that shape fully, and no change owns either:
-
-| Open gap | Owned by |
-|---|---|
-| The registry reads profile-shaped env files (`config-<profile>.env` under `CONFIG_DIRECTORY` and `ACTIVE_PROFILES`) and parses its profiles itself, rather than through the Dynaconf loader the provisioning service uses; its chart renders such a profile and takes secrets as a `secretProfile` | Unowned — needs a new change, which changes only the profiles' format |
-| The signing credential `ARKHAI_IDENTITY_CREDENTIAL` is the one secret not delivered as a secret profile: every role reads it from that environment variable, set from a Secret on a cluster, which the identity specification keeps from the configuration loader | Unowned — revisit when a change decides identity credential delivery for the roles |
-
----
-
 ## Completed goals
 
 A goal moves here when its last open gap closes. Its current state is kept as it stood at completion, so a reader can see what the goal delivered and what it deliberately left unowned; the system as it is now is described by `ARCHITECTURE.md` and the capability specifications, which are kept current.

@@ -671,6 +671,8 @@ No change owns these yet.
 | Item | Origin |
 |---|---|
 | A storefront database is opened by about 125 raw `sqlite3.connect` calls across `core/storefront`, `kit/pool-overrides` and other kits, and each storefront domain, each with Python's default 5-second busy timeout. One connection helper in a kit every one of them can import, taking the database as a value that carries its connection settings, would put those settings in one place. It would also let the two bare-metal storefront tests of a locked database meet the lock without a busy timeout, instead of each waiting 5 seconds (`TESTING.md`, "Tests wait on events, never on durations") | Found while removing timed waits from `make test` |
+| The registry departs from the profile-based configuration `docs/development/DEPLOYMENT_AND_CONFIG.md` describes: it reads profile-shaped env files (`config-<profile>.env` under `CONFIG_DIRECTORY` and `ACTIVE_PROFILES`) and parses its profiles itself, rather than through the Dynaconf loader the provisioning service uses, and its chart renders such a profile and takes secrets as a `secretProfile`. A change bringing it onto the loader changes only the profiles' format | Found by `add-mvp-payments-lane-double` |
+| The signing credential `ARKHAI_IDENTITY_CREDENTIAL` is the one secret not delivered as a secret profile: every role reads it from that environment variable, set from a Secret on a cluster, which the identity specification keeps from the configuration loader. Revisit when a change decides identity credential delivery for the roles | Found by `add-mvp-payments-lane-double` |
 
 ## Archived and superseded
 
