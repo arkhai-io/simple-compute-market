@@ -290,6 +290,7 @@ dependencies = [
     { name = "arkhai-kit-capability-admissibility" },
     { name = "arkhai-kit-capability-pricing" },
     { name = "arkhai-kit-capability-shape" },
+    { name = "arkhai-kit-resource-pools-contracts" },
     { name = "pydantic" },
 ]
 wheels = [

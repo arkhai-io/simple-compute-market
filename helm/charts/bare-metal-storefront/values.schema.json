@@ -1109,6 +1109,16 @@
                   "type": "null"
                 }
               ]
+            },
+            "^[dD][eE][fF][aA][uU][lL][tT]_[aA][vV][aA][iI][lL][aA][bB][lL][eE]_[uU][nN][tT][iI][lL]_[uU][tT][cC]$": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           }
         },

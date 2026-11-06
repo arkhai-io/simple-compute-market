@@ -521,6 +521,65 @@ Post-review destinations remain D2's negotiation specification and repository
 architecture; UI disclosure remains in 4.1. Replay and focused validation are in
 `docs/attachments/negotiate-open-ended-compute-terms/reader-guard-checkpoint.md`.
 
+## Capacity-bound implementation (2026-11-07)
+
+D5's mode-level pool hint uses
+`policy_tags.capacity_bounds.<offering_mode>`, with independent optional
+`max_duration_seconds` and `available_until_utc` fields. This is the
+conservative placement choice for the previously unspecified hint nesting: it
+does not put capacity facts in rate entries, settlement clauses or physical
+resource shapes. Unknown mode names stay opaque. UTC values accept an aware
+UTC ISO datetime (or a UTC datetime from TOML), serialize canonically with Z,
+and refuse naive values, epoch numbers and nonzero offsets rather than
+guessing a timezone. Relative hints/overrides/defaults accept strict integers;
+a nonpositive statement masks lower tiers before becoming an absent relative
+limit. Null/omission defers to the next tier.
+
+Both storefronts resolve override > mode hint > configuration independently per
+bound. VM retains its existing per-model pricing hint and configured-model
+defaults as compatibility tiers: the mode hint precedes the legacy model hint,
+then the model default and flat default. A malformed stated bound raises and
+holds derivation instead of falling through, including a malformed legacy VM
+relative hint. Bare metal retains its positive relative bound rule for reserved
+publication; an absolute bound alone does not relax that admission rule.
+
+The pool contracts own pure bound reading/validation and tier selection; the
+pool service applies it to document validation as well as the HTTP write models.
+Domain listing/override models consume it. Shared storefront storage carries an
+optional absolute-bound column with an additive, null-by-default migration.
+Updates distinguish omission from explicit null for both capacity bounds, so
+withdrawing a bound clears it. Domain publication sends the absolute bound as a
+listing-level opaque extra through the existing registry carrier, not in the
+option or listing resource. Bare-metal storage/publication also stops copying
+the relative maximum into the resource; the listing codec reads the envelope and
+existing negotiation readers retain the same relative-bound guard. Existing rows
+with a resource copy remain readable, while public responses omit the copy.
+Changing/withdrawing a bound refreshes the existing capacity/shape identity.
+Accepted Agreements are not touched here.
+
+Bare-metal minimum/maximum compatibility must be judged against the same live
+projection the override write fetches, not a held projection or configuration
+alone: a pool hint can replace the configured maximum, and a corrected live hint
+must not remain refused because the storefront still holds malformed old tags.
+The pool-override contribution therefore supplies `projection_problems` beside
+its vocabulary and shape judgements. The service calls it after live-pool
+existence and before persistence, using the existing fetch (no additional
+network call). VM supplies no projection-dependent term refusal. Publication
+rechecks minimum/maximum compatibility on its held generation and retains the
+existing `pool_override_terms_conflict` diagnostic; unreadable bounds use
+`capacity_bounds_unreadable`.
+
+Validation and first-use recipes are in
+`docs/attachments/negotiate-open-ended-compute-terms/capacity-bounds-checkpoint.md`.
+The temporary probe drives typed administrator publication/override/read surfaces
+with real SQLite and existing injected site/chain/registry boundaries. It does
+not prove deployed registry persistence, buyer horizon enforcement or rate
+servicing. No permanent tests were added: kept expectations follow D5's deliberate
+strict/nonpositive semantics and the new listing term. D5 promotion remains
+post-review to resource-pool management, storefront publication and negotiation
+specifications/architecture; the shared projection-aware override check belongs
+in storefront publication's override contract.
+
 ## Design promotion record
 
 Destinations are planned, not claims of implemented behavior.

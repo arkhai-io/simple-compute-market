@@ -422,9 +422,8 @@ def build_bare_metal_negotiation_runtime(
         )
 
     def listing_of(record: Mapping[str, Any]) -> Any:
-        raw = record.get("listing_resource")
         try:
-            return domain.codecs.listing(json.loads(raw) if isinstance(raw, str) else raw)
+            return domain.codecs.listing(record)
         except Exception as exc:  # noqa: BLE001 - an unreadable listing cannot be offered
             raise BareMetalNegotiationRefusal(
                 "trusted bare-metal listing is unavailable"

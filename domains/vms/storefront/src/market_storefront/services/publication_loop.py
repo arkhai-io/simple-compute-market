@@ -455,6 +455,7 @@ class VmPublicationCycle:
             max_duration_seconds=normalize_max_duration_seconds(
                 pricing.get("max_duration_seconds")
             ),
+            available_until_utc=pricing.get("available_until_utc"),
         )
         return request, composed.rate_structure, ruled_out
 
@@ -593,6 +594,7 @@ class VmPublicationCycle:
             publication_clauses=derived.publication_clauses(),
             demands=fresh.get("demands"),
             max_duration_seconds=fresh.get("max_duration_seconds"),
+            available_until_utc=fresh.get("available_until_utc"),
             rate_structure=derived.rate_structure,
         )
         refreshed = await self._db.load_listing(listing_id=listing_id)

@@ -621,7 +621,13 @@ def _add_negotiation_message_terms(connection: sqlite3.Connection) -> None:
     connection.execute("ALTER TABLE negotiation_messages ADD COLUMN provision_terms TEXT")
 
 
+def _add_listing_availability(connection: sqlite3.Connection) -> None:
+    """Add the optional absolute capacity bound without changing existing listings."""
+    connection.execute("ALTER TABLE listings ADD COLUMN available_until_utc TEXT")
+
+
 MIGRATIONS: tuple[Migration[sqlite3.Connection], ...] = (
     Migration("20261106_001_negotiation_message_terms", _add_negotiation_message_terms),
+    Migration("20261107_001_listing_availability", _add_listing_availability),
 )
 """Core's migrations after the baseline, composed by every storefront chain."""

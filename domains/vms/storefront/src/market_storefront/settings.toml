@@ -212,7 +212,9 @@ settlements = []
 # advertises no rate -- in the payment asset's base units per hour, as decimal
 # text. It constructs no settlement option.
 default_min_price            = ""
-default_max_duration_seconds = 0   # 0 means unlimited
+default_max_duration_seconds = 0   # nonpositive/unset means unlimited
+# Absolute UTC lease-end ceiling, independently resolved from capacity_bounds.vm.
+# default_available_until_utc = "2035-01-01T00:00:00Z"
 publish_priceless            = false
 # Whether a resource pool's own projected `sla` hint
 # is consulted at all when resolving a listing's advertised SLA (the

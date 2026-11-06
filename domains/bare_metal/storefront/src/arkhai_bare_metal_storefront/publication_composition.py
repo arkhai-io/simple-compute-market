@@ -94,7 +94,7 @@ def publication_payload_builder(
             candidate=candidate,
             clauses=admissible,
             max_duration_seconds=candidate.get(
-                "override_max_duration_seconds", default_max_duration
+                "max_duration_seconds", candidate.get("override_max_duration_seconds", default_max_duration)
             ),
         )
 
@@ -123,6 +123,7 @@ def build_publication_cycle(
         seller_principal=runtime.seller_principal,
         build_payload=publication_payload_builder(runtime),
         default_max_duration_seconds=runtime.default_max_duration_seconds,
+        default_available_until_utc=runtime.default_available_until_utc,
         enter_stage=runtime.loops.enter_stage,
         derivation=runtime.publication_derivation,
     )

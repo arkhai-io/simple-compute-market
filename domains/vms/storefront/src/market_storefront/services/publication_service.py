@@ -123,6 +123,8 @@ async def _candidate(sqlite_client: Any, value: Listing | dict) -> PublicationCa
     # the compute publication schema types every present attribute.
     payload["listing_resource"] = listing.listing_resource.model_dump(mode="json", exclude_none=True)
     payload["publication_terms"] = published_rate_terms(listing.rate_structure)
+    if listing.available_until_utc is not None:
+        payload["publication_terms"]["available_until_utc"] = listing.available_until_utc
     return PublicationCandidate(listing.listing_id, binding, payload)
 
 

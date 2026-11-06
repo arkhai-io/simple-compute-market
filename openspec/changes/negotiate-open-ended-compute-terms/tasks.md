@@ -4,8 +4,9 @@ Implementation started on the stacked resize and registry branches. The partial
 2.1 checkpoints add the quote carrier/accessor, VM pricing-proof retention,
 installed billing projections and period-aware VM multiplier derivation.
 Signed-acceptance evidence enforcement, accepted consumer migration and the
-fail-closed direct-read guard are implemented through 2.1c. Listing bounds and
-later terms behavior remain unimplemented. Verification levels follow
+fail-closed direct-read guard are implemented through 2.1c. Task 2.2 adds validated
+listing bounds and both storefronts' resolution/persistence/publication carriers.
+Recurring publication and later terms behavior remain unimplemented. Verification levels follow
 `docs/development/TESTING.md`. New acceptance test implementation requires the
 maintainer's approval; the scenarios below are the intended contract, not tests
 added by this reconciliation.
@@ -220,6 +221,29 @@ added by this reconciliation.
   implemented. PR #351 stays draft; independent review, final rebase, promotion
   and archival remain pending. No deployed E2E or live approval is claimed.
 
+### Capacity-bound checkpoint (2026-11-07)
+
+- Completed 2.2: strict per-mode pool hints, UTC/listing/override validation,
+  independent bound precedence, null-by-default storage migration and republication
+  on the same identity. VM retains its legacy per-model hint/default tiers below
+  the new mode hint; malformed bounds hold instead of falling through. Bare metal's
+  positive relative reserved-bound admission and conflict diagnostic remain intact.
+- Shared pool-override contributions judge projection-dependent term conflicts
+  against the write's already-fetched live generation before persistence, not a
+  stale held generation. Both bounds can be withdrawn from persisted VM listings.
+- Focused regression, first-use and typing evidence, exact setup, resolved probe
+  mistakes and limits: `docs/attachments/negotiate-open-ended-compute-terms/capacity-bounds-checkpoint.md`.
+  No permanent tests added; kept expectations follow deliberate D5 semantics.
+- **Restart at 2.3**, then continue in order. No recurring helper, servicing
+  declaration/gates, horizon acceptance, complete buyer disclosure or deployed E2E
+  is implemented/claimed by this slice. Bare-metal listing decoding now merges
+  listing-level bounds; 3.2 still owes horizon enforcement against both of them.
+  PR #351 remains draft; final rebase, independent review, post-review promotion and
+  archival remain pending. No external resources or resident servers are retained.
+- Fresh setup: `make dist-ci`, then the per-package `make reinit` and
+  probe/suite commands in the evidence packet. Committed locks and generated
+  bare-metal configuration schema are refreshed; ignored environments are not setup.
+
 ## 2. Quote and capacity terms
 
 - [x] 2.1 In `core/src/market_core/schemas.py` implement the unit-bearing accessor;
@@ -240,11 +264,14 @@ added by this reconciliation.
   - [x] 2.1c Migrate remaining both-domain policy/reference/cap/amount readers and
     mandate checks, and integrate the fail-closed direct-read guard. Keep 2.1 unchecked
     until all three slices and its focused validation pass.
-- [ ] 2.2 Add validated relative/UTC absolute hints in `kit/resource-pools-contracts`,
+- [x] 2.2 Add validated relative/UTC absolute hints in `kit/resource-pools-contracts`,
   models in `domains/vms/domain/src/arkhai_vms` and
   `domains/bare_metal/src/arkhai_bare_metal`, and both storefronts' override/default
-  resolution. Keep bounds on the listing, not on each option. Verify pure validation
-  and tier precedence in the package unit suites; no network or lease changes here.
+  resolution. Keep bounds on the listing, not on each option. Carry/clear the absolute
+  term through shared storefront persistence and existing opaque registry publication;
+  use the pool-override kit's existing live fetch to validate cross-tier conflicts before
+  writes. Verify pure validation and tier precedence in the package unit suites;
+  no new network calls or lease changes here.
 - [ ] 2.3 In both storefront publication adapters, emit separately priced options on
   existing listing identities using the foundation codec and injected preset helper; include
   premature_stop_penalty, recommended on-demand default 24 periods' price with seller override,

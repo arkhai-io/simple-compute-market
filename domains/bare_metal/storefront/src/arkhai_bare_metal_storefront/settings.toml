@@ -111,9 +111,11 @@ publication_interval_seconds = 30
 # storefront override replaces the list for that pool.
 settlements = []
 # The maximum lease duration a listing publishes, in seconds, unless a pool's
-# override states its own. A pool for which neither states a positive bound is
-# held at publication rather than published without one.
+# override or capacity_bounds.bare_metal hint states its own. A pool resolving
+# no positive relative bound is held for reserved publication.
 # default_max_duration_seconds = 86400
+# Independent absolute UTC lease-end ceiling; an override or hint replaces it.
+# default_available_until_utc = "2035-01-01T00:00:00Z"
 
 [negotiation]
 # The seller policies run after the required guards; unset runs the default
