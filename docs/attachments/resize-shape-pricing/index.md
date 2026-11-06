@@ -3,9 +3,9 @@
 ## Setup and reproduction
 
 Nonvisual, fixture-backed library encounter; not independent acceptance or a deployed
-system/e2e run. Start revision: `9490b81d4` (`origin/resize-multiplier`). The evidence
-applies to this packet's containing implementation commit and its exit-pricing
-prerequisite `cbe5510dc`.
+system/e2e run. Slice B starts at `6f387f0b3` (`origin/resize-multiplier`). The current
+encounter uses multiplier semantics; the prior slice-A reference observations
+and its exit-pricing prerequisite `cbe5510dc` remain in Git history.
 
 The required surface for this bounded slice is VM negotiation policy and seller
 pricing, not a chain deployment. The prepared target is a fresh temporary SQLite
@@ -39,14 +39,14 @@ also present; it does not contaminate the selected-asset reference.
 
 | Action | Observed result |
 |---|---|
-| Open with two vCPUs, retaining the opening's omitted listing dimensions | Seller counters; effective shape is one H200 + two vCPUs, reference 80, not the advertised 100 |
-| Counter with grouped whole shape one H200 + six vCPUs | Reference 120 |
-| Reconstruct runtime, counter without a revision | Effective six-vCPU shape resumes from SQLite; reference remains 120 |
+| Open with two vCPUs, retaining the opening's omitted listing dimensions | Seller counters; effective shape is one H200 + two vCPUs, multiplier reference 10,000; derived quote 80, not the advertised 100 |
+| Counter with grouped whole shape one H200 + six vCPUs | Multiplier reference 10,000; derived quote 120 |
+| Reconstruct runtime, counter without a revision | Effective six-vCPU shape resumes from SQLite; multiplier reference remains 10,000 and derived quote remains 120 |
 | Request nine vCPUs and the wrong GPU model | `shape_inadmissible` names CPU maximum 8; seller-hook calls added: 0 |
 | Request the wrong GPU model within the envelope | `shape_commercially_infeasible` names GPU model; seller-hook calls added: 0 |
 | Request a different region | `shape_commercially_infeasible` names region; seller-hook calls added: 0 |
 | Revise to a whole storage-only shape with no priced family | `shape_price_unavailable`, not a quote from another asset or the advertised shape |
-| Configure CPU maximum 5 while the pool hint states maximum 8, request seven | Policy reaches pricing with reference 130: the hint's stated bound overrides the configured default |
+| Configure CPU maximum 5 while the pool hint states maximum 8, request seven | Policy reaches pricing with multiplier reference 10,000 and derived quote 130: the hint's stated bound overrides the configured default |
 | Store override CPU maximum 6 over hint maximum 8, request seven | `shape_inadmissible` names maximum 6 |
 | Replace override by one stating only the offer, request six | `shape_inadmissible` names configured-default maximum 5; hint maximum 8 does not leak through the override |
 | Revise a continuation outside the envelope | Refused before the runtime's fallback reference can price it |
@@ -55,12 +55,13 @@ also present; it does not contaminate the selected-asset reference.
 | Authoritative requested-shape feasibility | **not checked**; owned by the separate feasibility-probe change |
 
 The script is reproducible setup and an observational exercise, not a new permanent
-acceptance-test suite. No new tests were added. The two old regressions asserting
+acceptance-test suite. Slice B adds the specifically requested multiplier arithmetic,
+floor/convergence and persistence regressions; slice A added no new tests. The two old regressions asserting
 unconditional shape-mismatch refusal were removed deliberately; that intent is
 replaced by evaluating and pricing admissible shape proposals, while flat-priced
 listings remain fixed.
 
-## Validation
+## Slice A validation (prior checkpoint)
 
 - 94 existing VM cases passed: revision decoder, seller hook, reference amount,
   escrow normalization, hold cap, negotiate controller, and loopback buyer-selection
@@ -86,12 +87,39 @@ structure repaired those failures. Early exercise runs needed fixture API/setup
 corrections and a buyer bid inside the existing bisection policy's reasonable range;
 the final encounter above completes. No failing check is carried forward.
 
+## Slice B validation
+
+- 121 focused VM cases pass (including 20 existing negotiation-thread cases): exact multiplier arithmetic and overflow (unit),
+  shape-change/floor/convergence and large-payment SQLite round trip (library
+  integration), the existing decoder/seller/reference/escrow/hold/controller cases,
+  and the real buyer against the served storefront in both flat and shape-priced
+  modes (application integration). The latter publishes from pool family rates;
+  an unsourced database-only rate edit is not substituted for publication policy.
+- 71 core buyer cases and 69 VM buyer cases pass, covering monetary Agreement and
+  obligation comparison, client/orchestration, and resume. 49 existing policy and
+  generic rate-helper cases pass unchanged, including truncation compatibility.
+- The packet's one-command encounter passes after `make check-packaging` and the
+  storefront's declared `reinit`, using refreshed wheels without ad hoc source
+  overrides for internal packages.
+- `make check-packaging` passes. `make check-change
+  CHANGE=negotiation-driven-capacity-resize CHANGE_BASE=6f387f0b3` passes all twelve
+  checks, including comment hygiene and pinned strict OpenSpec validation.
+
+The focused VM reproduction command above additionally includes
+`tests/unit/test_vm_multiplier.py` and `tests/integration/test_vm_multiplier.py`.
+The large exact monetary quote is derived identically by seller artifacts, the
+persisted Agreement and the buyer codec; transcript scalars remain 10,000 bps.
+No existing truncation assertion was changed. Shape-priced quotes round once in
+`quote_from_multiplier`; `compute_rate_total` still serves legacy amount semantics.
+
 ## Boundaries
 
-This is slice A, not deployment-ready shape negotiation. The scalar remains an
-absolute base-unit amount with existing truncation. Tasks 2.7–2.11 still own basis
-points, upward rounding, floor/convergence and the payment-consumer audit. Accepted
-artifact/claim propagation remains 2c. No typing suite, deployed pipeline, browser
+This is slice B, not deployment-ready shape negotiation. Shape-priced scalar
+threads carry basis points; flat listings retain their absolute/truncating contract.
+The repeated no-revision sub-floor counter in the encounter reaches the existing
+bisection stale exit, so later refusal observations use a fresh thread. Accepting
+the floor instead converges, as the focused persistence regression demonstrates.
+Accepted artifact/claim propagation remains 2c. No typing suite, deployed pipeline, browser
 journey, registry seller-proof verification, promotion, archival, or PR is claimed.
 The top-level `rate_structure` carrier is the documented PR #349 contract on
 `registry-as-published`; registry storage/proof is not reimplemented here.

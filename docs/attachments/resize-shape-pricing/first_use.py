@@ -11,6 +11,8 @@ from market_pool_overrides import PoolOverrideRecord, SQLitePoolOverrideStore
 from market_storefront import container
 from market_storefront.negotiation_runtime import build_vm_negotiation_runtime
 from market_negotiation_runtime import OfferUnfulfillableError
+from arkhai_vms_negotiation.amounts import quote_from_multiplier
+from market_policy.scalar_policies import pinned_proposal
 from tests.fake_site import FakeProjectionSite, loaded_site_projection_state
 from tests.unit import test_sync_negotiation_seller_round_hook as fixture
 
@@ -47,6 +49,10 @@ async def main():
             references.append({
                 "shape": kwargs["requested_shape"],
                 "reference": result.our_amount,
+                "quote": quote_from_multiplier(
+                    kwargs["listing"], pinned_proposal(kwargs["history"]), result.our_amount,
+                    kwargs["requested_duration_seconds"], kwargs["requested_shape"],
+                ),
             })
             return result
 
@@ -62,7 +68,7 @@ async def main():
             return await runtime().start(
                 repository=db, listing_id="L-hook",
                 buyer_principal=fixture._BUYER, seller_principal=fixture._SELLER,
-                actor_principal=fixture._BUYER, proposal=fixture._selected_proposal(60),
+                actor_principal=fixture._BUYER, proposal=fixture._selected_proposal(9000),
                 terms=ProvisionTerms(kind="compute.v1", version=1, payload={
                     "duration_seconds": 3600, "ssh_public_key": "ssh-ed25519 public-development-fixture",
                     "compute_resource": compute,
@@ -71,7 +77,7 @@ async def main():
             )
 
         async def continuation(opened, revision=None, action="counter"):
-            proposal = fixture._selected_proposal(90)
+            proposal = fixture._selected_proposal(9500)
             if revision is not None:
                 proposal["provision_terms"] = {
                     "kind": "compute.v1", "version": 1, "payload": revision,
@@ -89,6 +95,9 @@ async def main():
         print("revised", json.dumps(references[-1]))
         await continuation(first)
         print("resumed_without_revision", json.dumps(references[-1]))
+        # Repeated floor counters reach the policy's stale exit. Use a new
+        # live thread for the remaining refusal and withdrawal encounters.
+        first = await opening({"vcpu_count": 2})
 
         for label, compute in [
             ("outside_hint_and_wrong_model", {"vcpu_count": 9, "gpu_model": "A100"}),
