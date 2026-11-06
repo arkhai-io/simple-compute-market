@@ -1,7 +1,7 @@
 # Every uv command in this Makefile uses the repository's declared Python version.
 export UV_PYTHON := $(or $(shell cat ../.python-version 2>/dev/null),$(error ../.python-version not found))
 
-.PHONY: dist dist-compute dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer \
+.PHONY: test dist dist-compute dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer \
 	dist-bare-metal-storefront dist-storefront dist-provisioning-operator-client dist-provisioning-adapters \
 	dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront \
 	dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer \
@@ -17,14 +17,15 @@ dist: dist-compute dist-vms dist-vms-listings dist-vms-negotiation dist-vms-sett
 	dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer \
 	dist-buyer ## Build every domains-scoped wheel
 
+test: test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-provisioning-adapter test-provisioning-iac
+
 # ---------------------------------------------------------------------------
 # Dist -- leaf wheel-build recipes for domains/-scoped packages, mirroring
 # kit/Makefile's existing delegation pattern. Cross-directory prerequisites
 # (e.g. kit/ wheels, provisioning/compute's wheel) are NOT expressed here --
 # this Makefile has no business knowing about siblings outside domains/;
-# they stay declared on the root Makefile's own delegating targets, which
-# call `$(MAKE) -C domains <target> DIST_DIR=$(DIST_DIR)` only once those
-# prerequisites are already satisfied. Only prerequisites between two
+# they are declared on the root Makefile's `dist-domains` aggregate, which
+# builds them before invoking this directory's `dist` target. Only prerequisites between two
 # targets both defined in this file are expressed here.
 # ---------------------------------------------------------------------------
 

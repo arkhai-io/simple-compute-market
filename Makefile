@@ -12,14 +12,13 @@ FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 
-.PHONY: helm-values-schema review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-bare-metal-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-uv-version check-python-version check-project-layout lock
+.PHONY: helm-values-schema review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-bare-metal-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-uv-version check-python-version check-project-layout lock
 .PHONY: check-architecture check-architecture-layers check-architecture-scope check-architecture-dependencies check-architecture-kinds check-architecture-change architecture-report
-.PHONY: test-release-tooling test-deployment-packaging test-registry-client test-provisioning-adapter test-e2e-unit
+.PHONY: test-release-tooling test-deployment-packaging test-registry-client test-e2e-unit
 .PHONY: test-frp-grant-admission test-frp-grant-admission-frp test-frp-grant-admission-floor build-frp-grant-admission
 .PHONY: test-payments-lane-double build-payments-lane-double
 .PHONY: dist-arkhai-core-registry
-.PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits test-provisioning-iac-native test-bare-metal-iac test-bare-metal-iac-native
-.PHONY: dist-bare-metal-buyer
+.PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits test-provisioning-iac-native test-bare-metal-iac-native
 .PHONY: run-e2e run-ci fetch-e2e-logs
 .PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
 .PHONY: design-review validate-local validate-ci validate-helm validate-parallel check-change check-repository install-gitleaks check-public-content check-secrets audit-secrets check-decision-destinations check-history-wording check-version-bumps check-local-imports check-capability-index record-capacity review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks pre-push
@@ -45,7 +44,7 @@ dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist
 
 dist-ci: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-ci-kits dist-alkahest dist-config dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-ansible dist-domains dist-compute-provisioning-service dist-registry-client ## Build repository-owned Python wheels without fetching separately released artifacts.
 
-dist-domains: dist-ci-kits dist-compute-provisioning dist-compute-provisioning-ansible ## Build every domains-scoped wheel through the domain aggregate
+dist-domains: dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-storefront-client dist-registry-client dist-ci-kits dist-compute-provisioning dist-compute-provisioning-ansible ## Build every domains-scoped wheel through the domain aggregate
 	cd domains && $(MAKE) dist DIST_DIR=$(DIST_DIR)
 
 dist-storefront-client: ## Build arkhai-core-storefront-client wheel into .dist/
@@ -128,43 +127,6 @@ dist-arkhai-core-storefront: ## Build arkhai-core-storefront wheel into .dist/
 	@ls $(DIST_DIR)/arkhai_core_storefront-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-core-storefront produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-bare-metal-buyer: dist-core dist-arkhai-core-buyer dist-registry-client dist-kits ## Build the bare-metal buyer contribution wheel.
-	cd domains && $(MAKE) dist-bare-metal-buyer DIST_DIR=$(DIST_DIR)
-
-dist-bare-metal-storefront: dist-core dist-arkhai-core-storefront dist-kits ## Build the bare-metal storefront contribution wheel.
-	cd domains && $(MAKE) dist-bare-metal-storefront DIST_DIR=$(DIST_DIR)
-
-# API-credits wheels, forwarded to `domains/Makefile` the same way the
-# bare-metal ones above are. `dist-domains` already builds all of these
-# through the domain aggregate; these exist so one wheel can be rebuilt on
-# its own while iterating, which is what
-# `domains/apicredits/sample-app/Makefile` and
-# `domains/apicredits/middleware/python`'s workflow both tell you to do
-# from the repository root.
-#
-# Prerequisites are each wheel's own internal dependencies, so a target
-# invoked directly on a clean tree resolves instead of failing in
-# `uv build` on a missing `.dist` entry.
-dist-apicredits-domain: dist-core dist-identity dist-alkahest dist-policy ## Build arkhai-apicredits-domain wheel into .dist/
-	cd domains && $(MAKE) dist-apicredits-domain DIST_DIR=$(DIST_DIR)
-
-dist-apicredits-service: dist-identity dist-ci-kits dist-apicredits-domain dist-apicredits-middleware ## Build arkhai-apicredits-service wheel into .dist/
-	cd domains && $(MAKE) dist-apicredits-service DIST_DIR=$(DIST_DIR)
-
-dist-apicredits-storefront: dist-apicredits-domain dist-arkhai-core-storefront dist-registry-client dist-ci-kits dist-config ## Build arkhai-apicredits-storefront wheel into .dist/
-	cd domains && $(MAKE) dist-apicredits-storefront DIST_DIR=$(DIST_DIR)
-
-dist-apicredits-middleware: dist-identity ## Build arkhai-apicredits-middleware wheel into .dist/
-	cd domains && $(MAKE) dist-apicredits-middleware DIST_DIR=$(DIST_DIR)
-
-# Depends on the middleware wheel because the sample app requires it with
-# the `signed` extra, which resolves arkhai-kit-identity out of .dist/.
-dist-apicredits-sample-app: dist-apicredits-middleware ## Build arkhai-apicredits-sample-app wheel into .dist/
-	cd domains && $(MAKE) dist-apicredits-sample-app DIST_DIR=$(DIST_DIR)
-
-dist-apicredits-buyer: dist-apicredits-domain dist-arkhai-core-buyer dist-ci-kits dist-config ## Build arkhai-apicredits-buyer wheel into .dist/
-	cd domains && $(MAKE) dist-apicredits-buyer DIST_DIR=$(DIST_DIR)
-
 dist-kits: ## Build kit-owned wheels into .dist/
 	$(MAKE) -C kit dist DIST_DIR=$(DIST_DIR)
 
@@ -197,7 +159,10 @@ test-deployment-packaging: test-release-tooling ## Run release tooling plus Helm
 dist-clean: ## Remove .dist/ directory
 	rm -rf $(DIST_DIR)
 
-test: test-core test-kits test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-registry-client test-storefront test-provisioning-adapter test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-e2e-unit test-deployment-packaging test-frp-grant-admission test-payments-lane-double ## Run every unit and integration suite; the docker-compose e2e scenarios and cluster `helm test` are separate
+test: test-domains test-core test-kits test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-registry-client test-e2e-unit test-deployment-packaging test-frp-grant-admission test-payments-lane-double ## Run every unit and integration suite; the docker-compose e2e scenarios and cluster `helm test` are separate
+
+test-domains:
+	$(MAKE) -C domains test
 
 test-core:
 	cd core && make test
@@ -219,16 +184,12 @@ test-provisioning:
 
 test-provisioning-iac:
 	$(MAKE) -C provisioning/compute/iac test
-	$(MAKE) -C domains test-provisioning-iac
 
 test-registry:
 	cd core/registry && make reinit && make test
 
 test-registry-client:
 	cd core/registry-client && $(MAKE) test
-
-test-provisioning-adapter:
-	$(MAKE) -C domains test-provisioning-adapter
 
 # The standalone frps admission plugin under tools/: its default suite needs no
 # network and skips the real-frp tests, which its gate runs with the floor run.
@@ -249,28 +210,6 @@ test-payments-lane-double:
 # The e2e project's unit tests; its scenarios need the docker-compose stack.
 test-e2e-unit:
 	cd e2e-tests && $(MAKE) test-unit
-
-test-storefront:
-	$(MAKE) -C domains test-storefront
-
-test-bare-metal:
-	$(MAKE) -C domains test-bare-metal
-
-test-compute:
-	$(MAKE) -C domains test-compute
-
-test-vms-domain:
-	$(MAKE) -C domains test-vms-domain
-
-test-vms-buyer:
-	$(MAKE) -C domains test-vms-buyer
-
-test-apicredits:
-	$(MAKE) -C domains test-apicredits
-
-# Compatibility alias for the cross-language middleware parity suite.
-test-apicredits-middleware:
-	$(MAKE) -C domains test-apicredits-middleware
 
 test-kits:
 	cd kit && make test
@@ -375,6 +314,17 @@ build-provisioning:
 # candidate image, with loopback networking only. A separate parse pass uses the
 # shared service configuration and image role path, as service jobs do.
 PROVISIONING_IMAGE ?= arkhai:compute-provisioning$(IMAGE_SUFFIX)
+test-bare-metal-iac-native: ## Native helper account/IPC/mount checks in a disposable private container
+	@docker image inspect $(PROVISIONING_IMAGE) >/dev/null 2>&1 || { \
+		echo "no $(PROVISIONING_IMAGE) image: build it first, with make build-provisioning" >&2; exit 1; }
+	docker run --rm --user 0 --network none --pid="" --ipc private \
+		--cap-add SYS_ADMIN --security-opt apparmor=unconfined \
+		--tmpfs /work:rw,nosuid,nodev,mode=0755 \
+		-v "$(CURDIR)/domains/bare_metal/provisioning/iac:/iac:ro" -w /iac \
+		-e BARE_METAL_DISPOSABLE_NATIVE=private-container-v1 \
+		-e PYTHON=/home/appuser/ansible-venv/bin/python \
+		$(PROVISIONING_IMAGE) bash scripts/native_cleanup_gate.sh
+
 test-provisioning-iac-native: ## Run family and VM IaC native Ansible tests in the built provisioning image
 	@docker image inspect $(PROVISIONING_IMAGE) >/dev/null 2>&1 || { \
 		echo "no $(PROVISIONING_IMAGE) image: build it first, with make build-provisioning" >&2; exit 1; }
@@ -530,20 +480,12 @@ stop-compose:
 # ---------------------------------------------------------------------------
 # Artifact Registry push configuration.
 #
-# AR_PROJECT is the only variable operators need to override when targeting
-# a different environment. All four registry URLs are derived from it.
-#
-# Usage:
-#   make push-runtime-artifacts                          # push to dev (default)
-#   make push-runtime-artifacts AR_PROJECT=compute-market-1-preprod
-#   make push-runtime-artifacts AR_PROJECT=compute-market-1-prod
-#
-# One-time machine setup before first push (covers Docker and Helm OCI):
-#   gcloud auth configure-docker us-central1-docker.pkg.dev
+# Supply AR_PROJECT and AR_LOCATION explicitly for the destination deployment.
+# Registry URLs are derived from these values and AR_PREFIX.
 # ---------------------------------------------------------------------------
 
-AR_PROJECT  ?= compute-market-1-dev
-AR_LOCATION ?= us-central1
+AR_PROJECT ?=
+AR_LOCATION ?=
 AR_PREFIX   ?= $(AR_PROJECT)
 
 DOCKER_REGISTRY := $(AR_LOCATION)-docker.pkg.dev/$(AR_PROJECT)/$(AR_PREFIX)-docker
@@ -565,68 +507,23 @@ PROVISIONING_OPERATOR_CLIENT_VERSION := $(shell sed -n 's/^version = "\(.*\)"/\1
 # Targets can be run individually or all at once via push-runtime-artifacts.
 # ---------------------------------------------------------------------------
 
+ARTIFACT_COMMAND = python3 scripts/publish_artifacts.py --project "$(AR_PROJECT)" --location "$(AR_LOCATION)" --prefix "$(AR_PREFIX)"
+
+.PHONY: _require-ar-project test-domains dist-domains push-dev-images push-charts push-wheels push-cli clobber-wheels
 _require-ar-project:
-ifndef AR_PROJECT
-	$(error AR_PROJECT is required. Usage: make <target> AR_PROJECT=<name>)
-endif
-
-define publish_python_wheel
-	@if gcloud artifacts versions describe "$(2)" \
-	  --project="$(AR_PROJECT)" \
-	  --location="$(AR_LOCATION)" \
-	  --repository="$(AR_PREFIX)-python" \
-	  --package="$(1)" >/dev/null 2>&1; then \
-		echo "Skipping $(1)==$(2): already exists in $(AR_PREFIX)-python"; \
-	else \
-		uv publish \
-		  --publish-url "$(PYTHON_REGISTRY)" \
-		  --username oauth2accesstoken \
-		  --password "$$(gcloud auth print-access-token)" \
-		  "$(3)"; \
-	fi
-endef
-
-define clobber_python_wheel
-	@if gcloud artifacts versions describe "$(2)" \
-	  --project="$(AR_PROJECT)" \
-	  --location="$(AR_LOCATION)" \
-	  --repository="$(AR_PREFIX)-python" \
-	  --package="$(1)" >/dev/null 2>&1; then \
-		echo "Deleting $(1)==$(2) from $(AR_PREFIX)-python"; \
-		gcloud artifacts versions delete "$(2)" \
-		  --project="$(AR_PROJECT)" \
-		  --location="$(AR_LOCATION)" \
-		  --repository="$(AR_PREFIX)-python" \
-		  --package="$(1)" \
-		  --quiet; \
-	else \
-		echo "No existing $(1)==$(2) in $(AR_PREFIX)-python"; \
-	fi; \
-	uv publish \
-	  --publish-url "$(PYTHON_REGISTRY)" \
-	  --username oauth2accesstoken \
-	  --password "$$(gcloud auth print-access-token)" \
-	  "$(3)"
-endef
-
-define push_image
-	docker tag arkhai:$(2)-$(GIT_SUFFIX) $(DOCKER_REGISTRY)/arkhai:$(1)-$(GIT_SUFFIX)
-	docker tag arkhai:$(2)-$(GIT_SUFFIX) $(DOCKER_REGISTRY)/arkhai:$(1)
-	docker push $(DOCKER_REGISTRY)/arkhai:$(1)-$(GIT_SUFFIX)
-	docker push $(DOCKER_REGISTRY)/arkhai:$(1)
-endef
+	@$(ARTIFACT_COMMAND) check
 
 push-runtime-artifacts: push-images push-charts push-wheels push-cli
 
 push-images: _require-ar-project
-	$(call push_image,registry,registry)
-	$(call push_image,storefront,storefront)
-	$(call push_image,provisioning,compute-provisioning)
-	$(call push_image,frp-grant-admission,frp-grant-admission)
+	$(ARTIFACT_COMMAND) image --registry "$(DOCKER_REGISTRY)" --suffix "$(GIT_SUFFIX)" --target registry --source registry
+	$(ARTIFACT_COMMAND) image --registry "$(DOCKER_REGISTRY)" --suffix "$(GIT_SUFFIX)" --target storefront --source storefront
+	$(ARTIFACT_COMMAND) image --registry "$(DOCKER_REGISTRY)" --suffix "$(GIT_SUFFIX)" --target provisioning --source compute-provisioning
+	$(ARTIFACT_COMMAND) image --registry "$(DOCKER_REGISTRY)" --suffix "$(GIT_SUFFIX)" --target frp-grant-admission --source frp-grant-admission
 
 push-dev-images: _require-ar-project
-	$(call push_image,dev-env,dev-env)
-	$(call push_image,e2e-tests,e2e-tests)
+	$(ARTIFACT_COMMAND) image --registry "$(DOCKER_REGISTRY)" --suffix "$(GIT_SUFFIX)" --target dev-env --source dev-env
+	$(ARTIFACT_COMMAND) image --registry "$(DOCKER_REGISTRY)" --suffix "$(GIT_SUFFIX)" --target e2e-tests --source e2e-tests
 
 push-charts: _require-ar-project dist-helm
 	helm push $(DIST_DIR)/arkhai-node-operator-*.tgz $(HELM_REGISTRY)
@@ -646,9 +543,9 @@ push-cli: _require-ar-project
 	  --source=domains/vms/buyer/dist/market
 
 clobber-wheels: _require-ar-project
-	$(call clobber_python_wheel,arkhai-core-storefront-client,$(STOREFRONT_CLIENT_VERSION),$(DIST_DIR)/arkhai_core_storefront_client-$(STOREFRONT_CLIENT_VERSION)-py3-none-any.whl)
-	$(call clobber_python_wheel,arkhai-core-registry-client,$(REGISTRY_CLIENT_VERSION),$(DIST_DIR)/arkhai_core_registry_client-$(REGISTRY_CLIENT_VERSION)-py3-none-any.whl)
-	$(call clobber_python_wheel,arkhai-vms-provisioning-operator-client,$(PROVISIONING_OPERATOR_CLIENT_VERSION),$(DIST_DIR)/arkhai_vms_provisioning_operator_client-$(PROVISIONING_OPERATOR_CLIENT_VERSION)-py3-none-any.whl)
+	$(ARTIFACT_COMMAND) wheel --registry "$(PYTHON_REGISTRY)" --package arkhai-core-storefront-client --version "$(STOREFRONT_CLIENT_VERSION)" --wheel "$(DIST_DIR)/arkhai_core_storefront_client-$(STOREFRONT_CLIENT_VERSION)-py3-none-any.whl" --clobber
+	$(ARTIFACT_COMMAND) wheel --registry "$(PYTHON_REGISTRY)" --package arkhai-core-registry-client --version "$(REGISTRY_CLIENT_VERSION)" --wheel "$(DIST_DIR)/arkhai_core_registry_client-$(REGISTRY_CLIENT_VERSION)-py3-none-any.whl" --clobber
+	$(ARTIFACT_COMMAND) wheel --registry "$(PYTHON_REGISTRY)" --package arkhai-vms-provisioning-operator-client --version "$(PROVISIONING_OPERATOR_CLIENT_VERSION)" --wheel "$(DIST_DIR)/arkhai_vms_provisioning_operator_client-$(PROVISIONING_OPERATOR_CLIENT_VERSION)-py3-none-any.whl" --clobber
 
 # Reviw and agent targets
 
@@ -800,36 +697,9 @@ last-diff: round-view-closed ## Write a binary-safe diff for the most recent com
 	git diff --binary HEAD^ HEAD > "$$OUTFILE"; \
 	echo "Done: $$OUTFILE"
 
-review-wheelhouse-prepare: ## Rebuild the wheelhouse from scratch, then refresh review locks.
-	@# Nothing needs preserving across the rebuild any more. This copied the
-	@# staged release inputs to a temporary directory and handed them back to
-	@# `dist`, because `dist-clean` would otherwise delete artifacts that were
-	@# received rather than built. `dist` builds every wheel it produces, so a
-	@# clean rebuild loses nothing.
-	$(MAKE) dist-clean
-	$(MAKE) dist
-	@$(MAKE) review-locks
-
 review-locks: ## Refresh selected project lockfiles against current repository wheels.
 	@if [ -z "$${REVIEW_PROJECTS}" ]; then echo "REVIEW_PROJECTS names no projects" >&2; exit 1; fi
 	python3 scripts/uv_project.py lock $${REVIEW_PROJECTS}
-
-review-wheelhouse: ## Resolve scope, rebuild wheels, refresh locks, and bundle dependencies.
-	@projects="$${REVIEW_PROJECTS:-}"; \
-	if [ -z "$${projects// }" ]; then \
-		args="--root $(CURDIR) --base-ref $${BASE_REF:-HEAD^} --format lines"; \
-		if [ -n "$${REVIEW_SCOPE_FILE:-}" ]; then args="$$args --scope-file $$REVIEW_SCOPE_FILE"; fi; \
-		projects="$$($(CURDIR)/scripts/resolve-review-scope.py $$args | tr '\n' ' ')"; \
-	fi; \
-	$(MAKE) review-wheelhouse-prepare REVIEW_PROJECTS="$$projects"; \
-	REVIEW_PROJECTS="$$projects" bash ./scripts/package-review-wheelhouse.sh \
-		"$(CURDIR)/.snapshot/$(GIT_NAME)-$(GIT_SUFFIX)-wheelhouse.tar.gz"
-
-review-wheelhouse-scope: ## Print the review projects resolved from REVIEW_PROJECTS, REVIEW_SCOPE_FILE, or BASE_REF.
-	@args="--root $(CURDIR) --base-ref $${BASE_REF:-HEAD^}"; \
-	if [ -n "$${REVIEW_PROJECTS:-}" ]; then args="$$args --projects $$REVIEW_PROJECTS"; \
-	elif [ -n "$${REVIEW_SCOPE_FILE:-}" ]; then args="$$args --scope-file $$REVIEW_SCOPE_FILE"; fi; \
-	$(CURDIR)/scripts/resolve-review-scope.py $$args
 
 # The change workflow's targets — each step, the review, the round view, the
 # workflow's checks, and the guarded push — are the engine's make fragment, which
@@ -911,22 +781,6 @@ fetch-e2e-logs: ## Wait for an E2E run, fetch its logs, and zip the resulting di
 		$(if $(strip $(E2E_COMMIT)),--commit "$(E2E_COMMIT)") \
 		$(if $(strip $(E2E_AFTER_RUN)),--after-run "$(E2E_AFTER_RUN)")
 
-prune-tombstones: ## Delete every file whose contents are a tombstone comment
-	@python3 scripts/prune_tombstones.py
-
-test-bare-metal-iac:
-	$(MAKE) -C domains test-bare-metal-iac
-
-test-bare-metal-iac-native: ## Native helper account/IPC/mount checks in a disposable private container
-	@docker image inspect $(PROVISIONING_IMAGE) >/dev/null 2>&1 || { \
-		echo "no $(PROVISIONING_IMAGE) image: build it first, with make build-provisioning" >&2; exit 1; }
-	docker run --rm --user 0 --network none --pid="" --ipc private \
-		--cap-add SYS_ADMIN --security-opt apparmor=unconfined \
-		--tmpfs /work:rw,nosuid,nodev,mode=0755 \
-		-v "$(CURDIR)/domains/bare_metal/provisioning/iac:/iac:ro" -w /iac \
-		-e BARE_METAL_DISPOSABLE_NATIVE=private-container-v1 \
-		-e PYTHON=/home/appuser/ansible-venv/bin/python \
-		$(PROVISIONING_IMAGE) bash scripts/native_cleanup_gate.sh
 
 install-gitleaks: ## Install the gitleaks release scripts/gitleaks-pins.toml pins, verified against its sha256; needs no root and does nothing when it is already on PATH ([GITLEAKS_INSTALL_DIR=~/.local/bin])
 	@python3 scripts/install_gitleaks.py$(if $(strip $(GITLEAKS_INSTALL_DIR)), --dir "$(GITLEAKS_INSTALL_DIR)")
