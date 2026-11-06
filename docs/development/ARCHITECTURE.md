@@ -1115,6 +1115,21 @@ immediately; future ends truncate the immutable lease horizon. Storefront teardo
 
 ## Deployment topology
 
+A service takes application secrets from its configuration system's secret profile
+or overlay, rather than naming environment variables that contain them. Signing
+identity delivery is the explicit exception, kept outside the settings loader.
+Buyer credential providers retain their named-variable interface. Trust is
+configuration: a payments CA bundle belongs to that client, not a process-wide
+trust-store override.
+
+Stack configuration lives in committed profiles, Compose overlays and values
+files. Make targets select files and run parameters; they do not generate or
+carry configuration values. Base files hold topology-fixed values, while
+operator/development bindings live in their overlays. A missing binding has no
+committed fallback in the base topology. Committed development secret files are
+labelled public fixtures; real deployment secrets are provisioned out of band
+and never committed to this public repository.
+
 ### Local development
 
 Compose is organized by market domain and includes the shared development chain. There is no required long-running buyer service. The bare-metal seller uses its dedicated image, role-owned writable storefront database, durable reservation-to-site route map, a separately injected seller signer, and its configuration in mounted files: the operator's `storefront.toml`, which binds each site to its URL and service peer, and the Secret overlay `storefront.secrets.toml`, as every storefront reads them. VM and bare-metal storefront services are independently selectable and may share a provisioning authority without sharing writable storefront databases. The root compose file combines domain stacks for full end-to-end work. On a local Kubernetes cluster, `make -C helm deploy-local` installs the umbrella as one release, and `make helm-topology-up` installs the two-release topology described below.
@@ -1204,6 +1219,13 @@ Production code adds no refusal, warning, probe, or hardening for a case nobody 
 Use an existing open-source library wherever one meets the requirements, and build our own only when none does. The relay's grant-admission plugin ([`frp-grant-admission`](../../openspec/specs/frp-grant-admission/spec.md)) is the repository's own because no library met its requirements; the secret scan uses gitleaks rather than a scanner of our own.
 
 ## Testing strategy
+
+A test double mirrors its producer's public API unless there is a compelling,
+explicitly recorded reason to deviate. It preserves transport, authentication,
+authorization, error and idempotency semantics where exercised; its evidence is
+limited to the surface its suite qualifies. Sharing the producer-facing kit's
+fixture engine avoids an independent ledger model, without turning fixture
+results into hosted-service, funding or physical-delivery proof.
 
 Tests belong at the lowest level that can prove the behavior: unit, integration, smoke, and end-to-end, each defending the narrowest observable contract appropriate to its level — no level should rely on end-to-end tests alone for behavior it could prove itself. See [`docs/development/TESTING.md`](TESTING.md) for the level definitions, coverage jurisdiction between them, the client-contract "no raw calls" rule, contract fixtures, boundary-change validation, cross-language conformance, and offline review validation, and [the testing and compatibility specification](../../openspec/specs/test-compatibility/spec.md) for the normative requirements.
 

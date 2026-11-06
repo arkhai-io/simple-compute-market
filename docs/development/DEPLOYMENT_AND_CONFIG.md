@@ -15,12 +15,20 @@ in place when practice changes, not layered with historical commentary.
 
 ## Profile-based configuration
 
-Every service in this repository uses the same configuration shape,
-built on [Dynaconf](https://www.dynaconf.com/): a committed
-`settings.toml` supplies base defaults, one or more profile-specific
-`config-<profile>.yml` files layer overrides on top, and environment
-variables under a service-specific prefix are the highest-priority
-override.
+Services use mounted configuration files with role-owned loaders. Most
+profile-based roles use [Dynaconf](https://www.dynaconf.com/): committed defaults,
+ordered `config-<profile>.yml` layers and a service-prefixed environment override.
+VM and bare-metal storefronts merge their TOML/JSON documents and secret overlay;
+the Pydantic-settings registry reads profile-shaped env files, as described below.
+The following resolution order describes the Dynaconf roles.
+
+A service's application secrets are settings in its secret profile or overlay,
+never values fetched from variables its configuration names. The buyer's
+credential provider may use a named variable. `ARKHAI_IDENTITY_CREDENTIAL` is the
+explicit service exception: the identity specification keeps the signing
+credential outside the loader. Normal service configuration still travels through
+files; the loader's documented environment override remains an operator escape
+hatch, not a runtime refusal or the normal delivery mechanism.
 
 **Resolution order, highest priority first:**
 
@@ -198,6 +206,24 @@ the deal test, so one Secret holds one copy. A Secret's profile file quotes ever
 hex value, because a YAML loader reads an unquoted `0x`-prefixed value as an
 integer.
 
+### Payments trust and secrets
+
+Both compute storefront charts accept `caBundle.configMapName` or, alternatively,
+`caBundle.secretName`, with `caBundle.key`: per agent on the VM chart and at the
+bare-metal chart root. The charts mount that key as
+`/etc/arkhai/ca/ca-bundle.pem` and derive
+`config.Settlement.arkhai_payments.ca_bundle_path`. Naming both sources or stating
+a different path is refused. With no source there is no mount or derived setting;
+the charts select no CA by default and never set `SSL_CERT_FILE`.
+
+The payments `api_key`, dispute `api_key` entries and wallet `private_key` belong
+in the storefront runtime Secret's `storefront.secrets.toml`, not values `config`.
+The values schemas refuse secret fields, including dispute credentials in any
+supported key spelling. Trust and service policy remain ordinary configuration.
+`tests.paymentsAccount` enables an actual `check-payments` Helm test using the
+same image, configuration, Secret, signer and CA projections as the Deployment,
+with no storefront PVC, health probes or network-overlay privileges.
+
 ### Storefront agents: pass-through configuration
 
 The VM and bare-metal storefronts do not use profiles; each reads up to three files
@@ -245,12 +271,14 @@ in `config`, in the storefront's own key names, and the chart renders it
 into `storefront.json` with its null-valued keys removed. A setting or settlement
 mechanism the storefront gains deploys through values alone. Keys may be spelled
 in any case, as the storefront's loader reads them; a key stated in two spellings is refused
-at render. The chart adds only what the release knows, and except for the port
-only where `config` does not state it:
+at render. The chart adds only what the release knows. Port and a mounted
+CA path must agree with their derived values; other defaults are added only
+where `config` does not state them:
 
 | Setting | Derived from |
 |---|---|
 | `port` | the agent's `port`; always set, and a different stated value is refused |
+| `Settlement.arkhai_payments.ca_bundle_path` | the configured `caBundle` mount; a different stated path is refused |
 | `base_url` | the agent's Service |
 | `registry.urls`, `registry.authorities.<url>` | the internal registry's Service, with the agent's `internalRegistryTrust` written under its URL |
 | `provisioning.service_url` | the provisioning Service |
@@ -288,7 +316,8 @@ contact exchange with a development contact on a reserved domain. Every address 
 it is a well-known development value never for a public network. For the local
 release to build Bob's Alkahest client, the out-of-band `arkhai-bob-runtime`
 Secret's `storefront.secrets.toml` must carry `[Wallet] private_key`, Anvil account
-2's published development key; it needs `[registry.auth]` only for a registry that
+2's published development key, and `[Settlement.arkhai_payments] api_key`, the
+local double's seller token; it needs `[registry.auth]` only for a registry that
 requires write keys, which the local registry does not. The storefront validates its typed sections at startup; untyped
 sections are not checked key by key (see below). Because the Deployment uses
 the `Recreate` strategy, a configuration the storefront refuses leaves no
@@ -552,8 +581,20 @@ resolved signing value.
 
 ## Registry descriptor configuration
 
-The registry is a Pydantic-settings service rather than a Dynaconf role. Its
-Helm and Compose surfaces set the public descriptor fields through
+The registry is a Pydantic-settings service rather than a Dynaconf role. After
+its default dotenv files it reads `config-<profile>.env` from `CONFIG_DIRECTORY`
+for each comma-separated `ACTIVE_PROFILES` entry in order. Later profiles win;
+process environment wins over every file. `REGISTRY_FILTER_SPEC_PATH` selects the
+filter specification; unset, the packaged specification is used.
+
+The chart renders its values as `config-production.env` in a ConfigMap under the
+configuration directory. An optional `secretProfile.secretName` and
+`secretProfile.profile` mount an existing Secret's `config-<profile>.env` beside
+it, with that profile appended after `production`. The Deployment sets only the
+two resolver variables. `auth.bootstrapKeySecret` and `auth.adminKeySecret` are
+refused: their settings belong in `secretProfile` (see the operator handbook).
+Compose likewise mounts committed registry profiles. Public descriptor fields
+are settings named
 `REGISTRY_DESCRIPTOR_BASE_URL`, `REGISTRY_DESCRIPTOR_DISPLAY_NAME`, and
 `REGISTRY_DESCRIPTOR_OPERATOR_IDENTITY`. When
 `REGISTRY_REQUIRE_READ_API_KEY=true`, the deployment must also set
@@ -584,7 +625,7 @@ schema-opaque registry chart a second time. The compute instance selects
 `/app/filter-spec.yaml` (`compute.market`); the API-credits instance selects
 `/app/filter-spec-apicredits.yaml` (`api_credits`). Both specifications are
 packaged in the registry image, but each process loads exactly one. Identity,
-credential Secret, descriptor, API-key Secret references, Service, and PVC
+credential Secret, descriptor, secret profile, Service, and PVC
 values are instance-local. `global.registryIdentity` continues to configure
 the compute storefront's trust pin and does not constrain the alias signer.
 
@@ -619,21 +660,30 @@ well-known development key never for a public network. The bare-metal stack also
 `compose.apicredits-lane.yml`, a compute-schema registry of its own that the
 credits scenario routes discovery away from; the full local stack never layers
 it, because VM's registry already fills that role there. Each stack takes its
-values from a generated environment file printed by the root `Makefile`
-(`e2e-vms-dev-env`, `e2e-bare-metal-dev-env`, `e2e-apicredits-dev-env`, and
-`e2e-dev-identities-env` for the full stack), so every required binding
-resolves to a committed development identity.
+configuration from committed overlays, profiles and secret overlays. No Make
+target generates environment files or carries application values. Base/domain
+files hold topology-fixed settings and no fallback credential or definition;
+root overlays bind each deployment's files. `dev-env/registry/` supplies registry
+profiles and `dev-env/provisioning/` site profiles mounted in the same shape as
+the charts. Wallet and payments keys are in secret overlays, not wallet env files.
+The complete per-stack file/profile/identity table is
+[development bindings](../../dev-env/identities/README.md#what-each-stack-binds).
+
+The VM and API-credit lanes layer `compose.payments-double.yml` and their own
+lane overlays; bare metal layers the double with its development bindings.
+The full stack uses `docker compose -f docker-compose.yml -f compose.vms-local.yml
+-f compose.apicredits-local.yml up -d`; it does not add lane-only profiles or run
+the payments double.
 
 Whether a compute stack provisions through its provisioning service's `mock`
 profile is chosen per run, not per stack file and never by a storefront.
-`PROVISIONING_MODE` (`mock` or `real`, default `mock`) is mapped by the root
-`Makefile`'s compute environment targets, which refuse any other value, to
-`VMS_PROVISIONING_ACTIVE_PROFILES` and `BARE_METAL_PROVISIONING_ACTIVE_PROFILES`:
-`mock` under mock, `docker` under real. The provisioning services read
-`ACTIVE_PROFILES` from those variables, and the base compose files default them
-to `docker`, real provisioning, as the provisioning Helm chart's `mockMode`
-defaults to false. The API-credit stack has no provisioning service and ignores
-the setting.
+`PROVISIONING_MODE` (`mock` or `real`, default `mock`) is the one configuration
+value a run supplies. Lane targets validate and export it; compute overlays set
+`ACTIVE_PROFILES=docker,<site>,${PROVISIONING_MODE:-mock}`. `mock` selects the mock
+profile; `real` names no profile file, the loader skips that missing include and
+uses real provisioning. Base files retain `ACTIVE_PROFILES=docker`; no storefront
+reads this switch. The API-credit stack has no provisioning service. Runner
+profile selection, image suffixes, network and marker lists remain run parameters.
 
 The VM development stack runs Bob and Alice as separate storefronts with
 separate provisioning authorities. Each authority has its own service signer,
@@ -724,7 +774,12 @@ trusts the bare-metal storefront's `Identity.principal` in place of a VM agent's
 
 Locally the topology is two releases in one namespace. Release 1 is the umbrella as
 `make -C helm deploy-local` installs it: the registry, Bob's VM storefront, its
-provisioning service, and the `dev-env` chain. Release 2, `arkhai-bare-metal-seller`,
+provisioning service, the `dev-env` chain and one payments double. The local
+release configures payments through the same service policy, runtime Secret
+and CA option a deployment supplies, never `development_auth`. The out-of-band
+Secrets step creates the lane CA ConfigMap and writes the public development
+seller token into the runtime overlay. The double is disabled in release defaults;
+its optional `tls.existingSecret` mounts a deployment's leaf certificate and key. Release 2, `arkhai-bare-metal-seller`,
 is the same chart with `helm/local-values.yaml` and then
 `helm/bare-metal-release-values.yaml` layered, values only: the
 bare-metal storefront and its own provisioning service, with the registry, the VM
@@ -752,6 +807,11 @@ value (Anvil accounts 8 and 9) never for a public network. Release 2 reuses rele
   never restarts `dev-env`: its Anvil reloads its state file, so the contracts
   survive, but a restart loses every transaction since start-up that the other
   services' volumes still refer to.
+The double holds transactions only in memory and is not restarted as part of
+that rollout: losing its ledger while storefront databases retain transactions
+would invalidate the local run. The local release serves the payments access
+check, not payment deal scenarios.
+
 - `make helm-topology-check` runs both releases' `helm test`, and
   `make helm-topology-down` removes release 2, then release 1. The topology targets
   refuse an overridden release name, whose Services the overlay would not name.
@@ -1433,7 +1493,13 @@ error's type.
 Marketplace roles resolve one strict `[Settlement]` root. `schema_version`
 selects the configuration contract, `priority` orders mechanism IDs, and peer
 `[Settlement.alkahest]`, `[Settlement.arkhai_payments]`, and `[Settlement.contact]` tables contain only
-mechanism-owned consumer settings. Arkhai payments resolves trusted service origin, Ed25519 receipt identity, fee policy, and an `api_key_env` reference through the shared kit's `settlement_config.py`. The owner-scoped WorkOS credential reaches only its consuming process; HTTPS is required outside loopback. Buyer `payer_account` is separate domain input (`[vms].payer_account` or `[apicredits].payer_account`), carried in selection params and the accepted Agreement, not inferred from marketplace identity. API-credit sellers supply `payee_account` and `asset` in each payment publication clause; the accepted option determines the seller client's owner. Local development uses `development_auth = true` with a loopback service origin instead of `api_key_env`; the two modes are mutually exclusive. Buyer marketplace identity comes only from
+mechanism-owned consumer settings. Arkhai payments resolves trusted service origin, Ed25519 receipt identity, fee policy, optional `ca_bundle_path`, and a credential through the shared kit's
+`settlement_config.py`. A service states secret `api_key` in its secret overlay;
+a buyer provider may instead use `api_key_env`. Exactly one form is allowed, each
+mutually exclusive with `development_auth`. One resolver serves client creation,
+readiness and the `check-payments --account <id>` CLI. The check emits credential-free
+JSON for configuration, credential, transport or service-refusal failures; a loaded
+CA affects only that payments client. The owner-scoped WorkOS credential reaches only its consuming process; HTTPS is required outside loopback. Buyer `payer_account` is separate domain input (`[vms].payer_account` or `[apicredits].payer_account`), carried in selection params and the accepted Agreement, not inferred from marketplace identity. API-credit sellers supply `payee_account` and `asset` in each payment publication clause; the accepted option determines the seller client's owner. Local development uses `development_auth = true` with a loopback service origin instead of `api_key_env`; the two modes are mutually exclusive. Buyer marketplace identity comes only from
 the selected durable profile referenced by `[BuyerProfile]`; storefront and
 service-role principals retain their role-owned public identity configuration.
 EVM credentials and networks remain in `[Wallet]` and `[Chains]`.
@@ -1699,7 +1765,8 @@ value is null in a JSON overlay. Remove it and configure preferences instead;
 the bare-metal buyer's `[bare_metal.arkhai_payments]` uses the same validation.
 No template supplies an authority's account, origin or record key.
 
-Credentials are separate, identity-bound references:
+Credentials are separate, identity-bound settings. A service puts the token in
+its secret overlay; a buyer may instead name a provider variable:
 
 ```toml
 [[DisputeCredential]]
@@ -1710,9 +1777,13 @@ record_key = "example-public-record-key"
 api_key_env = "EXAMPLE_DISPUTE_API_KEY"
 ```
 
-The binding must match all four identity fields. Credential resolution reads the
-named environment variable only when the authority is used; absence or an empty
-value fails with the variable's name, never its value. Duplicate bindings for an
+The binding must match all four identity fields. Each entry states exactly one
+of secret `api_key` or `api_key_env`. A service's secret overlay uses `api_key`;
+the example above illustrates the named-variable form. The entry resolves its
+token only when the authority is used, then constructs
+`MediationCredential(identity, token=SecretStr(...))`. The mediation client reads
+no environment. An absent/unusable token fails with a setting or variable name,
+never its value. Duplicate bindings for an
 identity are refused at lookup. The Agreement pins origin/record key for the
 deal's potentially unbounded case life: preference edits affect only new deals,
 and credentials must still serve accepted identities. Dispute adapters follow no

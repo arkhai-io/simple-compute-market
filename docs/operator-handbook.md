@@ -385,3 +385,54 @@ storefront publishes from a declaration is in the
   it, holds its listing, and reports it by name. The machine's pool must state
   a `region`. Do not put authoritative hardware in `bare_metal_publication`:
   publication-only data is never a source of the listing's shape.
+
+## Payments access
+
+Supply the storefront payments service policy and receipt identity in public
+configuration. Put `[Settlement.arkhai_payments].api_key` and any
+`[[DisputeCredential]].api_key` in its existing runtime Secret's
+`storefront.secrets.toml`; do not place tokens in chart values, public `config`
+or named pod variables. Buyer credential providers may use `api_key_env`.
+
+For a service using a deployment-specific CA, set the storefront's `caBundle`
+option (`configMapName` or `secretName`, plus `key`). The chart mounts the PEM
+and derives `Settlement.arkhai_payments.ca_bundle_path`; a conflicting stated
+path fails rendering. With no option, the chart adds no mount or setting.
+Trust stays local to the payments client; do not set process `SSL_CERT_FILE`.
+
+Run the role CLI inside its configured container:
+`market-storefront check-payments --account <seller-account>` or
+`bare-metal-storefront check-payments --account <seller-account>`; the API-credit
+role offers the same subcommand. Success is one JSON `ok` outcome and exit 0.
+Failures name configuration, credential, transport or the service refusal without
+printing credentials. A malformed or unreadable CA is a configuration failure.
+
+Set `tests.paymentsAccount` on the agent (VM) or chart (bare metal) to render the
+payments-check hook. Run `helm test <release> --filter name=<hook-name> --logs`
+and verify that pod's own exit 0 and `ok` JSON: a filter matching nothing proves
+nothing. The hook uses the Deployment's image, configuration, Secret, signer
+and CA, with no storefront PVC or network-overlay privileges. It proves access,
+not funding, a paid rental or financial reconciliation.
+
+Local Helm values enable one payments double per namespace, provision its public
+seller token and CA out of band, and exercise these same deployment-facing
+interfaces without development authentication. Those fixtures must never be
+used as production credentials or deployed as evidence of hosted payments.
+
+## Registry secret profile
+
+The registry renders ordinary values into `config-production.env`. Supply secret
+settings in an existing Secret's `config-<profile>.env` key and name both
+`secretProfile.secretName` and `secretProfile.profile`; the chart mounts it beside
+the rendered profile and appends its profile name after `production`. Only
+`CONFIG_DIRECTORY` and `ACTIVE_PROFILES` are application settings in the pod's
+environment. The signing credential retains its separate identity projection.
+
+Values `auth.bootstrapKeySecret` and `auth.adminKeySecret` are refused. For an
+upgrade, preserve their intended key values in the Secret profile as
+`REGISTRY_BOOTSTRAP_API_KEY` and `REGISTRY_ADMIN_API_KEY`, respectively,
+remove those retired values and configure `secretProfile`. Do not copy resolved
+secrets into values or the rendered ConfigMap. Validate the chart and the mounted
+profile before activating the registry; retain identity, database and client
+trust pins. A registry profile is a dotenv settings file, not a Dynaconf YAML
+profile, and process environment overrides it.

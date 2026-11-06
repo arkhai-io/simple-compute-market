@@ -423,7 +423,7 @@ Each loads the storefront's configuration exactly as `serve` does and calls one 
 in `kit/arkhai-payments`, which builds the client through `payments_client_for_owner`,
 calls `get_balance`, and returns the outcome or the failing step: `configuration`
 (including a `ca_bundle_path` that cannot be loaded), `credential`, `transport`, or
-`refused <code>`. The command prints one JSON line with no credential and exits nonzero on
+`refused` with a separate `code` field. The command prints one JSON line with no credential and exits nonzero on
 failure.
 
 ```console
@@ -843,6 +843,30 @@ published-fixture acceptance and private-key refusal.
 - **A later registry change** moves the registry onto the Dynaconf loader the
   provisioning service uses, from the profile env files and `secretProfile` here.
 
+## Implementation invariant clarifications
+
+- The balance engine projects an account; the HTTP peer separately owns caller
+  authorization, including another account's403 refusal. The once-only surface
+  does not justify a consumer mandate-read API that no consumer uses.
+- The payments diagnostic rejects a disabled section as configuration, while
+  accepted-deal servicing may still use its configured client when new-deal
+  publication is disabled. A refused diagnostic is not a rule to abandon an
+  accepted obligation.
+- A bundle the explicit `ca_bundle_path` names that cannot be loaded is a
+  configuration failure before a request. Certificate/connection failures are
+  transport failures; a service refusal has step `refused` and a separate code.
+  Diagnostics never return the credential. SSL-level tests establish trusted
+  and untrusted leaf behavior; the deployed positive check proves composed
+  key/trust access, not a separately qualified negative HTTP handshake journey.
+- Public chart schemas derive dispute-entry shape from the shared secret-marked
+  `DisputeCredential`, refusing a token in public config without banning its
+  public identity metadata. A configured test run resolves its buyer token before
+  readiness or mutation; development authentication remains exempt.
+- Intermediate Make environment generators, variable-based seller keys and
+  process-wide trust delivery in the first implementation round are superseded
+  by the committed profiles, secret overlays and per-client CA decisions. Their
+  task records are history, not alternative current configuration.
+
 ## Principles stated for promotion
 
 1. A double mirrors its producer's API unless there is a compelling reason to deviate:
@@ -872,3 +896,39 @@ Serving payment scenarios on the local Helm release is recorded as a roadmap gap
 trigger (D11), a production guard on fixture identities is
 `add-arkhai-payments-lane-double`'s decision (D4), and the registry's move onto Dynaconf is
 a later change (Effects on other changes).
+
+## Design promotion record
+
+The accepted design is retained. Current behavior belongs in the named owning
+specifications; current rationale and operating interfaces belong in their
+companions and development/operator documentation. The four spec deltas are
+merged by archival, not duplicated by hand. Package and development-binding
+READMEs already describing these interfaces were checked and retained.
+Execution cadence and test provenance stay in change history.
+
+| Accepted decision | Disposition | Permanent location |
+|---|---|---|
+| D1 The double's project and its place among tools | Retained; current behavior and rationale promoted | `tools/README.md#lane-collaborators`; `tools/payments-lane-double/README.md#what-it-is` |
+| D2 Lanes running the double; the VM scenario's mediation prerequisite and dispute credential | Retained; current behavior and rationale promoted | `openspec/specs/test-compatibility/spec.md#requirement-the-vm-payment-scenarios-case-stages-need-a-mediation-target` (delta); `openspec/specs/test-compatibility/architecture.md#payment-evidence-ownership`, "Payment evidence ownership"; `e2e-tests/README.md#shared-payment-scenario-configuration` |
+| D3 Committed lane CA and leaf; the CA option deriving `ca_bundle_path` | Retained; current behavior and rationale promoted | `tools/payments-lane-double/README.md#tls`; `openspec/specs/deployment-state/spec.md#requirement-a-storefront-chart-trusts-a-deployment-supplied-ca-bundle` (delta); `docs/development/DEPLOYMENT_AND_CONFIG.md#payments-trust-and-secrets`, "Kubernetes: ConfigMap and Secret mounting" |
+| D4 No production guard; the unusable pinned authority | Retained; current behavior and rationale promoted | `openspec/specs/test-compatibility/spec.md#requirement-lanes-run-payment-scenarios-against-an-in-lane-payments-double` (delta); `docs/development/TESTING.md#private-service-dependencies`, "Private Service Dependencies"; `docs/development/ROADMAP.md` |
+| D5 The balance read | Retained; current behavior and rationale promoted | `openspec/specs/market-composition/spec.md#requirement-the-payments-kit-reads-an-accounts-own-balance` (delta); `kit/arkhai-payments/README.md#settlement-configuration-integration` |
+| D6 Lane-owned targets fail | Retained; current behavior and rationale promoted | `openspec/specs/test-compatibility/spec.md#requirement-external-payment-qualification-names-its-target` (delta); `docs/development/TESTING.md#private-service-dependencies`, "Private Service Dependencies" |
+| D7 The pinned authority through the registry | Retained; current behavior and rationale promoted | `docs/development/TESTING.md#private-service-dependencies`, "Private Service Dependencies"; `e2e-tests/README.md#shared-payment-scenario-configuration` |
+| D8 The double mirrors the service | Retained; current behavior and rationale promoted | `openspec/specs/test-compatibility/spec.md#requirement-lanes-run-payment-scenarios-against-an-in-lane-payments-double` (delta); `docs/development/TESTING.md#private-service-dependencies`; `docs/development/ARCHITECTURE.md#testing-strategy`, "Testing strategy" |
+| D9 Lane configuration in committed files, never generated by Make (principle 4) | Retained; current behavior and rationale promoted | `openspec/specs/deployment-state/spec.md#requirement-a-stacks-configuration-lives-in-committed-files` (delta); `docs/development/DEPLOYMENT_AND_CONFIG.md#per-domain-stack-composition`, "Per-domain stack composition"; `docs/development/ARCHITECTURE.md#deployment-topology`, "Deployment topology" |
+| D10 Round 1's implementation cadence | Execution cadence retained as history; no permanent behavior | change history only |
+| D11 The local release's payments rehearsal | Retained; current behavior and rationale promoted | `openspec/specs/deployment-state/spec.md#requirement-the-local-release-rehearses-a-deployments-payments-interface` (delta); `docs/development/DEPLOYMENT_AND_CONFIG.md#release-topology`, "Release topology"; `docs/operator-handbook.md#payments-access`, "Payments access"; `docs/development/ROADMAP.md` (the Helm-serving gap) |
+| D12 `check-payments` | Retained; current behavior and rationale promoted | `openspec/specs/deployment-state/spec.md#requirement-a-storefront-checks-its-payments-access-from-its-own-container` (delta); `docs/development/DEPLOYMENT_AND_CONFIG.md#settlement-consumer-configuration-and-cutover`, "Settlement consumer configuration and cutover"; `docs/operator-handbook.md#payments-access`, "Payments access" |
+| D13 The cleanup in this change | Scope history retained; current loader limitation recorded | change history only; `docs/development/ROADMAP.md` (the registry's Dynaconf gap) |
+| D14 The runner's shared and per-lane payments profiles | Retained; current behavior and rationale promoted | `openspec/specs/test-compatibility/spec.md#requirement-a-lanes-runner-reads-committed-lane-profiles` (delta); `docs/development/TESTING.md#private-service-dependencies`, "Private Service Dependencies"; `e2e-tests/README.md#shared-payment-scenario-configuration`, "Shared payment-scenario configuration" |
+| D15 Development binds in the overlays; base files keep topology | Retained; current behavior and rationale promoted | `openspec/specs/deployment-state/spec.md#requirement-a-stacks-configuration-lives-in-committed-files` (delta); `docs/development/DEPLOYMENT_AND_CONFIG.md#per-domain-stack-composition`, "Per-domain stack composition"; `dev-env/identities/README.md#what-each-stack-binds` |
+| D16 The registry's profile env files and chart | Retained; current behavior and rationale promoted | `openspec/specs/deployment-state/spec.md#requirement-the-registry-reads-profile-shaped-env-files` (delta); `docs/development/DEPLOYMENT_AND_CONFIG.md#registry-descriptor-configuration`, "Registry descriptor configuration"; `docs/operator-handbook.md#registry-secret-profile`, "Registry secret profile"; `core/registry/README.md#configuration-files` |
+| D17 Provisioning site profiles | Retained; current behavior and rationale promoted | `docs/development/DEPLOYMENT_AND_CONFIG.md#per-domain-stack-composition`, "Per-domain stack composition"; `dev-env/identities/README.md#what-each-stack-binds` |
+| D18 The environment targets retired | Retained; current behavior and rationale promoted | `docs/development/DEPLOYMENT_AND_CONFIG.md#per-domain-stack-composition`, "Per-domain stack composition"; `docs/development/VALIDATION_RUNBOOK.md#8-bring-up-local-stack`, "Bring Up Local Stack"; `docker-compose.yml`'s header; `e2e-tests/README.md#shared-payment-scenario-configuration` |
+| D19 Secrets through secret overlays; trust through configuration (principle 3) | Retained; current behavior and rationale promoted | `openspec/specs/settlement-configuration/spec.md#requirement-payments-configuration-separates-accounts-and-credentials` (delta); `openspec/specs/deployment-state/spec.md#requirement-a-storefronts-secrets-reach-it-through-its-secret-overlay` (delta); `docs/development/DEPLOYMENT_AND_CONFIG.md#profile-based-configuration`, "Profile-based configuration" and "Kubernetes: ConfigMap and Secret mounting"; `docs/development/ARCHITECTURE.md#deployment-topology`, "Deployment topology"; `kit/arkhai-payments/README.md#settlement-configuration-integration`; `kit/arkhai-mediation/README.md#composition`; `docs/development/ROADMAP.md` (the signing-credential gap) |
+| D20 The provisioning mode | Retained; current behavior and rationale promoted | `docs/development/DEPLOYMENT_AND_CONFIG.md#per-domain-stack-composition`, "Per-domain stack composition"; `docs/development/TESTING.md#private-service-dependencies`'s lane paragraph |
+| D21 Tests holding restated values | Retained and enforced by fixture/bind-source tests | change history only; the tests are their own record |
+| D22 Implementation cadence | Execution cadence retained as history; no permanent behavior | change history only |
+| D23 Storefront wallet keys in the secret overlays | Retained; current behavior and rationale promoted | `docs/development/DEPLOYMENT_AND_CONFIG.md#per-domain-stack-composition`, "Per-domain stack composition"; `dev-env/identities/README.md#what-each-stack-binds` |
+| D4 integration clarification: exact public TLS fixture publication | Retained; current behavior and rationale promoted | `openspec/specs/market-change-workflow/README.md#secret-scanning`, "Secret scanning" |

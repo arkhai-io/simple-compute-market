@@ -26,7 +26,7 @@ Stable publisher rows and listings are owned through canonical
 ```bash
 # From repo root — brings up anvil (contracts pre-baked), registry, both
 # storefronts and provisioning.
-docker compose up -d
+docker compose -f docker-compose.yml -f compose.vms-local.yml -f compose.apicredits-local.yml up -d
 
 # Direct registry probe (no API key required by default):
 curl http://localhost:8080/health

@@ -57,16 +57,49 @@ Core tests own contribution discovery, frozen registry invariants, exact-object 
 
 ## Payment evidence ownership
 
-SCM's credential-free suites exercise generated payment models, shared JCS vectors, mandate policy, signed receipts, accepted-state persistence, and domain composition through deterministic collaborators. A controlled VM smoke can prove pending → provisioning → ready with one delivery, but cannot prove a live ledger or hardware effect.
+SCM's credential-free suites exercise generated payment models, shared JCS vectors,
+mandate policy, signed receipts, accepted-state persistence and domain composition.
+A controlled VM smoke can prove pending → provisioning → ready with one delivery,
+but cannot prove a hosted ledger or a hardware effect.
 
-The payments service owns ledger accounting, fees, hold release/extensions and
-cash providers; the dispute authority owns cases/rulings and applies their effects. Consumer tests do not inherit Stripe claims or a signed hosted-release profile matrix. Complete-deal qualification that needs the payments service's internals (local ledger, development-mode auth, operator test funds, ledger reads) is owned by the payments service's own end-to-end tests, which import this repository's published packages; this repository does not import the private service to test it. This repository's live payment scenario targets a public payments test deployment through its public API, runs only when such a target is configured, and otherwise reports the unmet prerequisite. A live payment run records the actual service target, consumer revision, authentication method, seed state, and observed readiness. An absent or unready payments target, or a missing physical target, is reported as an unmet prerequisite before scenario mutations, not converted into local acceptance. Once a payments target is configured, the settings a scenario supplies itself — its parties' accounts and credentials and the service policy it pins — are configuration the run owes, so a missing one fails the scenario, naming it, rather than blocking it: a pipeline with no target stays a blocked skip, while a misconfigured payments run fails deterministically.
+The VM, bare-metal and API-credit Compose lanes run
+[`tools/payments-lane-double`](../../../tools/payments-lane-double/README.md), an
+HTTP wrapper around the payments kit's clock-injected `PaymentsAuthority` engine.
+`FakePaymentsClient` uses the same engine: there is one deterministic ledger model.
+The double mirrors the producer's routes, bearer authentication, admission,
+authorization, idempotency and errors. Its suite claims the once-only surface;
+its labelled public accounts, tokens, seeded payer, receipt signer and lane CA
+are development fixtures, never production credentials. Receipts always state
+`livemode: false`. These results establish SCM's use of the public payments
+boundary, not provider funding, hosted-ledger correctness or service availability.
+
+Bare-metal and API-credit payment stages run without skips. VM commit, delivery,
+replay and servicing stages run; operator-end and refund stages require an
+accepting mediation target (`MEDIATION.SERVICE_URL`) and otherwise report a named
+blocked skip. The registry's recommended fixture authority has an `.invalid`
+origin, no usable private half for its record key and no bearer token at the
+double. The VM storefront has a public development dispute credential in its
+secret overlay, so unavailable mediation leaves servicing `running` rather than
+making an otherwise usable credential absent. No production fixture-identity
+refusal is implemented by this double.
+
+The independently operated payments service owns accounting, fees, hold release
+and extensions, and cash providers. The Agreement-named dispute authority owns
+cases, rulings and their effects. Consumer tests inherit neither Stripe claims
+nor a hosted-release qualification matrix. Tests requiring a service's internals
+belong to that service; SCM imports public contracts and tests its clients.
+External qualification records the actual target, consumer revision,
+authentication, funding provenance and readiness before mutations. An absent or
+unready external target or missing physical host is an unmet prerequisite.
+Configured missing settings and an unready lane-owned target fail by name before
+scenarios, without a settlement fallback. Real access, revocation and capacity
+return require their own physical observations.
 
 ## Lifecycle contract evidence
 
 The payments kit owns installed JSON Schema/generated models, JCS/signature and
 snapshot vectors, and one clock-injected per-part `PaymentsAuthority` fixture
-engine. Its HTTP fake and consumer fixtures use that engine. Mediation owns its
+engine. Its in-process `FakePaymentsClient`, the lane HTTP double and consumer fixtures use that engine. Mediation owns its
 independently installed schema/models, both ed25519/eip191 claim vectors and
 ruling traces. These fixtures prove deterministic public-contract compatibility,
 not the internal implementation or deployed monetary execution of either service.

@@ -1,7 +1,7 @@
 # Tasks
 
 Planned against the design settled in `design.md` and advanced by
-`reviews/12-design.triage.md`. Every implementation task answers to a decision D1–D12, a
+`reviews/12-design.triage.md`. Every implementation task answers to an accepted decision D1–D23, a
 delta requirement under `specs/`, or a repository obligation cited at the task:
 `openspec/README.md#plan-closeout-requirements`, the task rules in
 `openspec/config.yaml`, `docs/development/TESTING.md`'s level definitions,
@@ -191,58 +191,8 @@ test_access_check.py (new)}`, and the fake's existing tests; `kit/arkhai-payment
   Owed by validation: `tests.yml`, job `test · test-kits` — the kit suite passes from
   the relocked environment.
 
-  Evidence, all local:
-  - `make -C kit test-arkhai-payments`: mypy clean; the vector replay passes (published
-    mandates, receipt, attachments, approvals, 4 snapshots and 9 scenario steps;
-    historical raw framing); generated models current; 191 unit tests pass.
-  - `make test`: exit 0, no failing suite. It ran before the last test-only edits
-    (fixture labels, the zero-gross case), which the kit gate above then covered.
-  - `make check-packaging`: passes after the bare-metal pin move.
-  - `make check-change`: comment hygiene, agent skills, task list, change index, spec
-    index and OpenSpec validation pass. Documentation citations fail on three citations
-    of files section 2 creates (`tools/payments-lane-double/README.md`, twice, and
-    `tools/payments-lane-double/fixtures/dispute-authority.toml`). They resolve once
-    section 2 lands.
-
-  End-to-end confirmed: no `e2e-tests` marker exercises section 1, and none was added.
-  The three payment-deal markers reach this code only through sections 3 and 4.
-  Owed by validation, confirmed: `tests.yml`, job `test · test-kits`, which must show
-  the payments kit suite passing from the relocked environment. Its new cases are
-  `test_balance_view.py`, `test_access_check.py` and the balance cases in
-  `test_client.py`.
-
-  Handoff to sections 2 and 3:
-  - The double's `GET /balances/{account}` route is `PaymentsAuthority.balance(account)`.
-    Its 403 for another account is the double's to enforce (D5, D8). The engine answers
-    for any account it is asked about.
-  - The storefront CLIs (3.1) call
-    `check_payments_access(settlement.mechanisms.get("arkhai_payments"), account)` and
-    print `outcome.json_line()`, exiting 0 on `outcome.ok`. They need no handling of a
-    missing or invalid section, which are `configuration` outcomes. They must turn the
-    `ValueError` a malformed `--account` raises into a usage error.
-  - A disabled section fails with `configuration`, as planned, although
-    `payments_client_for_owner` still serves accepted deals while payments is disabled
-    for new ones. A storefront still servicing old payment deals with payments disabled
-    reports the check failed.
-  - Follow-up left deliberately: no test runs a real TLS handshake with an untrusted
-    certificate. Section 2's committed lane CA and leaf make one cheap. For example, the
-    real client against the double over HTTPS with a context that does not trust the
-    lane CA would show the `transport` step end to end. Section 2 or 3 should add it, or
-    record why not.
-  - D12's text in `design.md` says `refused <code>`. The build has `step: "refused"`
-    plus a `code` field (1.4's note). Closeout's narrative compression should bring the
-    design in line.
-
-  Implementation round 1's triage (reviews 29–31), fixes to this section:
-  - 29 F1. A trust bundle the client could not load escaped the check's JSON outcome.
-    `PaymentsClient` loads the bundle `SSL_CERT_FILE` names when it is built, off
-    loopback, so a missing, unreadable or malformed file raised `FileNotFoundError` or
-    `ssl.SSLError` before any request, and the CLIs printed a traceback. `access_check.py`
-    now builds the client in its own `try` and reports an `OSError` there as the
-    `transport` step, detail "the trust bundle SSL_CERT_FILE names could not be loaded",
-    composed from fixed text. Building is now separate from the read, so only a failure
-    to build gets that detail. `test_access_check_tls.py` adds the missing and malformed
-    cases against a non-loopback origin at `.invalid`.
+  Final verification and handoff: The kit owns the balance projection and credential-free access outcome. HTTP caller authorization belongs to the peer. Final configuration and key resolution follow section6; source CI test-kits and the lane setup/deployed access checks pass.
+  Complete combined evidence is recorded before section 13 and confirmed by 13.8.
 
 ## 2. The payments double
 
@@ -441,64 +391,8 @@ in `test`, `build-payments-lane-double`, and its place in `build-dev` and the th
   Owed by validation: `tests.yml`, job `test · test-payments-lane-double` — the job
   exists in the matrix and passes, `check-tls` included.
 
-  Evidence, all local:
-  - `make test-payments-lane-double`: `check-tls` passes, and 44 tests pass (25 unit,
-    19 library integration).
-  - `make build-payments-lane-double`: the image builds. `docker run` against
-    `/health` is unrun (2.6).
-  - `make test`: exit 0. It ran before the review fixes (a token check, a
-    case-insensitive scheme, dependency declarations, comments and test labels).
-    Those touch only the double's project, which the gate above re-ran after them,
-    with its relock.
-  - `make test-release-tooling`: 2177 passed. It includes the tests.yml-matrix check
-    against `make test` and the build-target tests.
-  - `make check-packaging`: all eight checks OK after the relock.
-  - `make check-change`: everything passes, comment hygiene included. Section 1's
-    three citations of this section's files now resolve.
-
-  End-to-end confirmed: none. No `e2e-tests` marker runs the double until section 4
-  wires the lanes. Owed by validation, confirmed: `tests.yml`, job
-  `test · test-payments-lane-double`, which must exist in the matrix and pass with
-  `check-tls`.
-
-  Fresh-context check: the reviewer found no layering, documentation-placement or
-  public-content defects. Fixed:
-  - `pydantic` and `starlette` are now declared, and `cryptography` moved to `dev`;
-  - the generator's and README's claim about who can issue under the lane CA is
-    corrected (its seed is public, so anyone can);
-  - test values are labelled, and an overstated test name is renamed;
-  - the raw mandate read's comment no longer describes a plan;
-  - whitespace tokens are refused at load, and the `Bearer` scheme is matched
-    case-insensitively.
-
-  Declined:
-  - Moving the suite's helpers out of `tests/conftest.py`. `from conftest import`
-    works under pytest's default import mode, as the kit's `payment_terms` import
-    does.
-
-  Recorded here rather than changed:
-  - the raw-call exceptions and the code read on rejection paths (2.5);
-  - the inferred statuses (2.4);
-  - the editable image install (2.6).
-
-  Handoff to sections 3–5:
-  - Lane values: the receipt identity is `receipt_identity` in
-    `fixtures/accounts.toml`. The seller's account and token are `accounts.seller`,
-    the buyer's `accounts.buyer`, and the lane CA is `tls/lane-ca.pem`. The service
-    is `https://payments-double:8443`. The registry recommendation is
-    `fixtures/dispute-authority.toml` as a `DisputeEntry` document, to render as
-    JSON into `REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES`.
-  - Section 1's follow-up stays open: no test yet shows the kit's `transport` step
-    from a real TLS handshake with an untrusted certificate. Section 2's handshake
-    cases are at `ssl` level only. Section 3's CLI tests are the cheaper place, or
-    section 4's lane setup shows it against the running double.
-  - The kit's `PaymentsClient` has no call for `GET /transactions/{id}/mandate`. A
-    `get_mandate` would remove the suite's one happy-path raw call. Left out
-    deliberately: no consumer reads the route, and the kit is not this section's.
-  - Running a generator or a Python one-liner needs owner permission in the
-    implement step. This run was granted the generator and
-    `uv run --project tools/payments-lane-double python -c *`. Sections 4 and 5
-    should read the fixtures with tools the step allows, or ask for the same.
+  Final verification and handoff: The separate HTTP peer mirrors the producer and shares PaymentsAuthority. Public deterministic fixtures, TLS regeneration and SSL trusted/untrusted handshakes pass. The default-command image and deployed access check pass; no hosted-ledger or funding claim follows.
+  Complete combined evidence is recorded before section 13 and confirmed by 13.8.
 
 ## 3. Storefront `check-payments` and the VM storefront's unreachable authority
 
@@ -632,70 +526,8 @@ three storefronts' `pyproject.toml`; every lock `make lock` rewrites.
   Owed by validation: `tests.yml`, jobs `test · test-storefront`, `test · test-bare-metal`
   and `test · test-apicredits` — each passes from the relocked environments.
 
-  Evidence, all local, after the fresh-context fixes:
-  - `make test-storefront`: unit 1213 passed, 1 skipped; integration 525 passed. These
-    include the 8 CLI cases and 3.2's case.
-  - `make test-bare-metal`: storefront 582 passed, with the 6 CLI cases. The domain,
-    IaC, buyer and adapter suites pass.
-  - `make test-apicredits`: storefront 254 passed, with the 6 CLI cases. The other
-    API-credit suites pass.
-  - `make -C kit test-arkhai-payments`: 195 passed, with the TLS case and the three
-    cases for the new call.
-  - `make test`: no failing suite. It ran before the second check's test-only fixes
-    (the real section-read cases, the subprocess's step assertion, docstrings), which
-    the three storefront gates above re-ran.
-  - `make check-packaging`: all eight checks OK after `make lock`.
-  - `make check-uv-version`: OK.
-  - `make check-change`: every check passes, comment hygiene included.
-
-  End-to-end confirmed: no `e2e-tests` marker exercises this section's behaviour yet.
-  Every VM lane already constructs `VmDealLifecycle`, now with `mediation_transport=None`,
-  so it shows only that the default is inert. Section 4's lane setup runs
-  `check-payments` in each payment storefront's container (4.7), and
-  `e2e_vm_payment_deal`'s stage 2 (`test_commit_replay_and_servicing_keep_the_same_hosted_deal`)
-  then exercises 3.2's behaviour against the lane's unanswerable authority.
-  Owed by validation, corrected to add the kit job, since this section changed the
-  kit's `access_check.py`, its tests and its lock:
-  - `tests.yml`, jobs `test · test-storefront`, `test · test-bare-metal` and
-    `test · test-apicredits`: each passes from the relocked environments.
-  - `tests.yml`, job `test · test-kits`: the payments kit suite passes, with
-    `test_access_check_tls.py` and the new `check_configured_payments_access` cases.
-
-  Fresh-context check. It found no layering, comment-hygiene or fixture-labelling
-  defect. Fixed:
-  - 3.2 could not show what it claimed about the respondent poll. It now asserts the
-    paths both reads reach and the one logged error. The poll does raise, as 3.2's
-    correction records.
-  - The command body was copied in three CLIs. It is now one kit call.
-  - The bare-metal suite was labelled "Unit" although it reads real files and starts a
-    subprocess; its docstring now says what it runs.
-  - 3.2's docstring cited the whole lane scenario; it now cites only the servicing part.
-  - VM's dev group was missing `arkhai-kit-deal-lifecycle-client`; it is declared now.
-  Declined:
-  - Moving the kit's TLS test into a `tests/integration/` directory. The kit's suite is
-    flat, and its tests import the shared `payment_terms` module by sibling path.
-  - Showing the bare-metal loader's refusal message in the outcome. Every `detail` is
-    fixed text by the kit's invariant, and the VM and API-credit loaders' messages
-    (TOML decode errors) may quote input. `serve` and `config` still report the reason.
-  A second check found these, all fixed: VM's and API credits' real section read was
-  untested (one case each now); the bare-metal subprocess case did not require the
-  `transport` step; two docstrings cited the untrusted-origin scenario without saying no
-  handshake runs; the TLS test's level label; and three overstatements in these notes.
-
-  Handoff to section 4:
-  - Run the check as `docker compose exec <storefront> <cli> check-payments --account
-    <seller account>`. It exits 0 on ok, 1 on a failed step, and 2 on a malformed
-    account. Its one line on stdout is the JSON outcome. The CLIs are
-    `market-storefront`, `bare-metal-storefront` and `apicredits-storefront`.
-  - The lane CA must reach the storefront through `SSL_CERT_FILE`. The client honours it
-    only for a non-loopback origin such as `https://payments-double:8443`.
-  - The VM lane's storefront logs "VM respondent discovery awaits recovery" at ERROR on
-    every servicing cycle while it holds the `.invalid` authority's credential. That is
-    expected, not a failure; `e2e-tests/README.md` (4.8) may say so.
-  - `e2e_vm_payment_deal`'s stage 2 reads `view.authority.state`, the payment view's
-    state. It reads `running` because the deal's dispute credential resolves (3.2). If
-    the VM lane's `[[DisputeCredential]]` variable is unset or empty, the view reads
-    `repair_required`.
+  Final verification and handoff: All storefront CLIs expose the access check. The VM seller has a usable identity-bound development credential; unavailable mediation leaves its ordinary servicing state running. Role suites pass; the credential is supplied by the section9 secret overlay.
+  Complete combined evidence is recorded before section 13 and confirmed by 13.8.
 
 ## 4. Compose lane wiring
 
@@ -967,127 +799,8 @@ profiles. The double, the scenarios, `LANE_OWNED`, the mediation prerequisite an
   marker in the three lanes' module lists must stay green.
   Owed by validation: `tests.yml`, job `test · test-e2e-unit` — passes.
 
-  Evidence, local, after both fresh-context checks' fixes unless noted:
-  - `make test-e2e-unit`: 537 passed, with `test_payments_helper.py`,
-    `test_mediation_helper.py` and the new `test_domain_stack_configuration.py` cases.
-  - `make -C tools/payments-lane-double test`: `check-tls` passes; 49 passed, with the
-    five `test_lane_env.py` cases.
-  - `make test-release-tooling`: 2181 passed, with the Compose render cases (4.1).
-  - `make -C helm test-render`: passes, `test_the_development_configuration_passes_the_schema`
-    included over the edited `storefront.dev.toml`.
-  - `make test`: exit 0, after the render-suite fix. The first run failed six render
-    cases (4.1). It ran before the second check's fixes, which touched comments, a
-    `settings.toml` comment line, the README and these notes, and no code path.
-  - `make check-packaging`: all eight checks OK. `make check-change`: every check passes.
-  - System, bare-metal lane, `make -C e2e-tests test-e2e-bare-metal` (before the fresh
-    checks; the later edits touch no code it ran). The stack came up with the double
-    healthy, and `check-payments` printed `"outcome": "ok"` for the seller's account.
-    pytest: 61 passed, 2 failed, 2 skipped, 3 errors. The three errors were
-    `e2e_bare_metal_payment_deal` failing at setup on the hex buyer seed (4.4). After
-    the seed fix, `test-buyer-machine BUYER_MODULE=e2e_bare_metal_payment_deal
-    PAYMENTS_ENV_FILE=…` against the running stack passed all three stages with no
-    skip: discovery of the payment option, approval at the double, receipt-gated mock
-    delivery, re-drive from the run log, seller refund read back as reversed at the
-    double, and physical teardown. The run's env file was regenerated by hand with
-    the Edit tool for that rerun, because the root target that writes it is outside
-    this step's allowed commands; the committed Makefile constant is the same value.
-  - The two failures predate this change: `test_bare_metal_introduction.py::TestStage02_Reveal`
-    and `test_bare_metal_unbacked_introduction.py::...test_03_the_unbacked_listing_offers_only_an_introduction`
-    read the option-level `mechanism` key, which `dev`'s 38a5fec12 (#314) removed from
-    published options. The two skips follow the first failure. VM's
-    `e2e_vm_introduction` shares `introduction_stages.py` and will fail the same way.
-    Not fixed here: outside the section, and owned by whoever repairs #314's fallout.
-  - API-credit and VM lanes: not run. Every lane names its chain container `anvil` and
-    publishes port 8545, the bare-metal stack stayed up after its run, and this step may
-    run neither `docker` nor `make -C e2e-tests e2e-*-down`, so no second lane could
-    come up. The API-credit run got as far as its `down` (its compose files
-    interpolate) before it was stopped. Both are left to validation's pipeline. Unrun
-    there: `check-payments` in `bob-storefront` and `credits-storefront`;
-    `e2e_credits_payment_deal`, including its new refund signer and the seed's payment
-    option; `e2e_vm_payment_deal` stages 1–2 reading `running` and stages 3–4's
-    mediation skip; and every other VM and API-credit marker with the registries'
-    new recommendation.
-
-  End-to-end confirmed: `e2e_bare_metal_payment_deal` passes in the bare-metal lane.
-  `e2e_credits_payment_deal` and `e2e_vm_payment_deal` are the API-credit and VM lanes'
-  evidence, owed to validation's pipeline. Each lane target's `check-payments` step is
-  part of the lane run. The bare-metal and VM lanes' introduction markers fail for the
-  pre-existing reason above.
-  Owed by validation, confirmed: `tests.yml`, job `test · test-e2e-unit` passes. Corrected
-  to add the jobs this section's other suites run in, since it changed their tests and
-  the files they render: `tests.yml`, job `test · test-payments-lane-double`, with
-  `test_lane_env.py`; and `tests.yml`, job `test · test-deployment-packaging`, which runs
-  `make test-release-tooling`'s Compose render cases and `make -C helm test-render`.
-
-  Fresh-context checks, two:
-  - Fixed after the first: the six render-suite failures (the blocking finding); the
-    script moved from the package to `scripts/`, out of the wheel and image; its test
-    moved to `tests/integration/`; a rendered check that the recommendation arrives as
-    JSON; two helper comments; the double README's claim that nothing restates the
-    fixtures; the mediation setting described as the gate it is; the Python 3.11 floor
-    documented; overstated notes.
-  - Fixed after the second: a history comment copied into the credits lane copy; a
-    forward reference to the cluster service in `lane_env.py`; `seller_account`
-    documented; the README's note that the VM readiness gate reads its own
-    `PAYMENTS.MEDIATION_URL`; four overstated notes.
-  - Declined: patching the helpers' module-level `settings` in their tests, which
-    `test_payments_helper.py` already does and which has no other seam; the static
-    overlay checks in `test_domain_stack_configuration.py` beside the render cases,
-    because the render cases skip without Docker Compose and the static ones do not;
-    regenerating an old `.e2e-<lane>.env` in `e2e-*-down`/`-logs` (a local file
-    predating this change lacks `PAYMENTS_LANE_*`, so down refuses until the next lane
-    run rewrites it; CI starts clean).
-
-  Handoff to section 5 and closeout:
-  - Section 5 can reuse `tools/payments-lane-double/scripts/lane_env.py` for
-    `topology-secrets.sh` (the seller token) and the e2e-tests chart's `PAYMENTS` values
-    (`runner` mode prints them). Its `SERVICE_URL` is the double's Compose name, which
-    D3 makes the cluster Service name too.
-  - Lane-only storefront copies: `storefront.bob.lane.toml` and
-    `storefront.credits.lane.toml`; a change to `storefront.bob.toml` or
-    `storefront.credits.toml` must be made to the copy, or
-    `test_a_lane_storefront_configuration_is_its_stack_profile_plus_payments` fails.
-  - Closeout items, passages this section makes false: `docs/development/TESTING.md`'s
-    "Private Service Dependencies" ("a blank SERVICE_URL … is what the pipeline runs",
-    an unready target always blocking) and the bare-metal lane's "Unconfigured payments
-    remain a named blocked prerequisite"; `DEPLOYMENT_AND_CONFIG.md`'s "Per-domain stack
-    composition" (the overlay list, and "passes only the signer credential through the
-    environment" for the lane's bare-metal storefront) and its naming of
-    `storefront.bob.toml` as the VM lane's configuration; `ROADMAP.md`'s "none
-    configures a payments target"; `.github/workflows/e2e.yml`'s lane descriptions,
-    incomplete. Also for closeout to judge: `openspec/specs/deployment-state/spec.md`'s
-    requirement that public renderings contain no payment authority, beside lane
-    Compose renders that now run the double.
-  - The design's "Facts" call the API-credit seller credential an Ed25519 seed; it is
-    the lane storefront's eip191 key (4.4). Narrative compression should correct it.
-  - The session ran long; section 5 should start fresh.
-
-  Implementation round 1's triage (reviews 29–31), fixes to this section:
-  - 30 V2. Validation 30's VM lane had `e2e_vm_payment_deal`'s stage 1 refused with a 409
-    "publication source is already bound". The scenario listed `test_full_deal`'s
-    resource, `compute-e2e-deal-001`, which the canonical deal binds earlier on the same
-    stack, and a listing's binding outlives the listing. The VM deal driver
-    (`compute_deal_driver.py`) now takes its executor, pool and resource as fields,
-    defaulting to the canonical deal's. `test_vm_payment_deal.py` overrides `deal_driver`
-    with its own: `kvm-payment-deal`, `compute-e2e-payment-deal-pool` and
-    `compute-e2e-payment-deal-001`, the first two in `host_registry.py`. It offers the
-    canonical shape under that resource. Stage 2's failure followed from stage 1's. No
-    lane has yet run the stages after the listing.
-  - 29 F1, the e2e half. `helpers/payments.py`'s `target_ready` built its SSL context
-    outside its `try`, so a missing or malformed `SSL_CERT_FILE` bundle raised, instead
-    of reporting the target not ready, which fails a lane-owned target by name. It now
-    builds the context inside the `try` and catches `OSError`, of which `ssl.SSLError` is
-    one. `test_payments_helper.py` adds the missing and malformed cases.
-  - Returned to design, 31 O1. The owner's notes on this round found the lane settings
-    carried by the Makefile against `DEPLOYMENT_AND_CONFIG.md`'s "Profile-based
-    configuration": the `e2e-<lane>-payments-env` targets print `ARKHAI_PAYMENTS__`
-    variables, with a hard-coded buyer seed and a seller key read with `sed`, and
-    `lane_env.py compose` prints the Compose values. The owner chose alternative B: move
-    this section's settings into per-lane runner profiles and literal overlays, and move
-    the pre-existing `e2e-*-dev-env` targets, with their services' `REGISTRY_*` and
-    `PROVISIONING_*` values, into profile files too. That reverses D9 and widens the
-    scope, so the change returns to design (`design.md` D9 and Open Questions). This
-    section's lane wiring is reworked by whatever the design and plan make of it.
+  Final verification and handoff: All three Compose lanes exercise once-only payments; VM case stages alone need accepting mediation. The configured helper validates required settings before readiness. Sections9–10 supply the final committed profiles and retire the intermediate environment generators.
+  Complete combined evidence is recorded before section 13 and confirmed by 13.8.
 
 ## 5. Helm: the subchart, the storefront chart options, and the local rehearsal
 
@@ -1315,172 +1028,8 @@ payments-only render case, the `helm test` check and validation's run of it stan
   Owed by validation: `tests.yml`, job `test · test-deployment-packaging` —
   `make -C helm test-render` passes with the new render cases.
 
-  Evidence, all local:
-  - `make -C helm test-render`: every umbrella assertion and every chart's and
-    `helm/tests/`' render test passes, the new cases of 5.1–5.6 among them. No skip
-    line was printed: both storefront environments exist here, so the startup refusal
-    over the local release with payments, the payments-only checks (5.4) and release
-    2's loader check all ran.
-  - Templates broken once while writing the tests: with `SSL_CERT_FILE` dropped from
-    the storefront chart's environment helper, the CA bundle, payments-only and
-    payments-check cases failed. With a `data` mount added to the bare-metal payments
-    check pod, its equality case failed. Both breaks were reverted.
-  - `make test-deployment-packaging`: release tooling 2181 passed, with the updated
-    `topology-secrets` case, and the render suite above.
-  - `make -C tools/payments-lane-double test`: `check-tls` passes; 50 passed, with the
-    `seller-token` case.
-  - `make test`: exit 0, no failing suite.
-  - `make check-packaging`: all eight checks OK. No dependency or lock changed.
-  - `make check-change`: every check passes.
-  - System: not run. The plan's `topology-secrets`, `deploy-local`, `make -C helm test`
-    and `topology-check` would deploy to a cluster, which this step's commands do not
-    reach. Left to validation's Helm part, with the gap below.
-
-  End-to-end: none, as planned; no `e2e-tests` marker exercises the charts.
-  Correction to the plan's claim that validation's Helm part runs the release's
-  `helm test`, the payments check among them: `scripts/validate_slice.py`'s
-  `_run_scenarios` runs only the scenario pod (`helm test --filter
-  name=<release>-e2e-tests-e2e-scenarios`). Validation's deploy does start the release,
-  the double, and Bob configured for payments, and waits for every rollout; so a
-  storefront that refuses its payments configuration, or a pod naming a missing
-  ConfigMap or Secret, fails it. Nothing automated runs the payments check pods. They
-  run under `make -C helm test` (Bob) and `topology-check` (both storefronts).
-  Closeout's 6.8 asks for "the Helm part's payments check", so the round's triage
-  should decide one of two things:
-  - validation also runs the payments check pods, a change to
-    `scripts/validate_slice.py` outside this section's files;
-  - or 6.8 records it as an owner-run `make -C helm test` against the validated
-    namespace.
-  Owed by validation, confirmed, with one job added:
-  - `tests.yml`, job `test · test-deployment-packaging`: `make -C helm test-render`
-    passes with the new render cases, and release tooling with the updated
-    `topology-secrets` case.
-  - `tests.yml`, job `test · test-payments-lane-double`: the suite passes with the
-    `seller-token` case.
-
-  Fresh-context check. It found no rendering, indentation, schema, layering,
-  comment-hygiene, test-level, packaging or public-content defect. Fixed:
-  - The environment helpers' comments justified only the credential and the key; they
-    now say why `SSL_CERT_FILE`, process trust and not a setting, travels outside the
-    configuration system.
-  - The `api_key_env` collision and `STOREFRONT_` refusals (5.3).
-  - Fixture labels lacking "never for a public network": two in
-    `bare-metal-release-values.yaml`, one in `local-values.yaml`.
-  - `scripts/validate_slice.py`'s `HELM_SCENARIOS` comment, which this section made
-    incomplete.
-  - The storefront chart's `tests` comment, which left out the account condition.
-  - Four overstated notes: 5.1's TLS Secret, 5.4's "RPC off", 5.5's "renders keep
-    their content", and 5.6's profile comparison.
-  After the fixes, `make -C helm test-render` and `make test-deployment-packaging`
-  (release tooling 2181 passed, render suite passed) were re-run and pass. `make test`
-  and `make check-packaging` ran before them; the fixes touched only these chart
-  templates and tests, values comments, a script comment and these notes.
-  Declined:
-  - Testing the bare-metal chart's `required` on a `null` `caBundle.key` or
-    `paymentsKey.key`. The schema refuses an empty key, and the default supplies one;
-    only an explicit `null` reaches the template.
-  - Raising the render suite's Python floor. `test_release_topology.py` now imports
-    `tomllib`, as the bare-metal chart's render test already did, so `test-render.sh`'s
-    `python3` was already 3.11 or newer.
-  Recorded for the round's triage and closeout, not changed here:
-  - `openspec/specs/deployment-state/spec.md`, "A storefront's configuration reaches it
-    through its configuration system". Its scenario says the bare-metal chart's pod
-    environment carries "only the configuration directory and the signing credential".
-    That holds for every render without `caBundle` or `paymentsKey`, and the existing
-    test still asserts it over the example. With either set, the environment also
-    carries `SSL_CERT_FILE` or the payments key. The change's delta only adds
-    requirements, so the archived spec would state both. It needs a MODIFIED delta
-    naming the two options, which is a spec edit for the triage to accept.
-  - Two design statements this section's build narrows, which `design.md` should be
-    brought in line with at narrative compression: D9, "the local release's e2e-tests
-    chart values carry the same keys", holds for the public keys only (5.6); and D3's
-    "the local deploy target creates that ConfigMap" is done by `topology-secrets`,
-    which D3's later sentence names, with `deploy-local` checking for it.
-
-  Handoff to closeout:
-  - Promotion, beyond 6.9's list, of behaviour the section made true, or the passage
-    goes stale:
-    - DEPLOYMENT_AND_CONFIG.md's "Release topology". `topology-up` restarts neither
-      dev-env nor the payments double. `check-local-secrets` now also checks
-      `LOCAL_CONFIGMAPS`, and `deploy-local` runs it.
-    - Its "Kubernetes: ConfigMap and Secret mounting" pod rule.
-    - Its storefront pass-through table of the pod environment.
-    - TESTING.md's "Chart Render Tests" list of what each chart's suite asserts.
-  - The validation gap above (5.7, End-to-end) decides how 6.8 shows the Helm payments
-    check.
-  - The section is a session of its own. The next step is the round's validation and
-    implementation review.
-
-  Implementation round 1's triage (reviews 29–31), fixes to this section and outside
-  any section:
-  - 29 F2. Validation now runs the payments check pods, as decided in `design.md` under
-    D12. `scripts/validate_slice.py` reads the release's hooks (`helm get hooks`) and
-    runs each `-payments-check` pod as its own step after the scenario pod. A pass counts
-    only with the pod's exit status 0, and a pod with no status is stopped. The validator
-    keeps each pod's log under `evidence["payments_checks"]` and in the rendered summary.
-    A release rendering no check pod is warned, never passed. In
-    `scripts/tests/test_validate_slice.py`, the full-sequence case now includes Bob's
-    check. Eight cases are new: two pods, a nonzero exit, no exit status, a commit during
-    the check, no pod rendered, unreadable hooks, the hook parser, and the suffix both
-    charts render. 6.8 reads the check from the validation record.
-  - 29 documentation. The permanent requirement "A storefront's configuration reaches it
-    through its configuration system" allowed only two kinds of value outside the
-    configuration system, and its scenario said the pod environment holds only the
-    configuration directory and the signing credential. Both are false with 5.2's
-    `caBundle` and 5.3's `paymentsKey`. The `deployment-state` delta now MODIFIES it
-    with a third kind: a value something other than the loader reads from the process
-    environment, such as `SSL_CERT_FILE`. The credential kind now includes the variable
-    `api_key_env` names. One scenario covers each case. The owner's disposition: code
-    follows the guidance, and where a spec disagrees, one of them changes. The
-    fresh-context check found that the guidance does not yet say this either.
-    `DEPLOYMENT_AND_CONFIG.md`'s "Profile-based configuration" lets a pod spec set only
-    the profile resolver variables and a variable an external subprocess reads. Its
-    example, `ANSIBLE_CONFIG`, is written into `os.environ` from resolved settings, not
-    set on the pod, and it names no credential variable. Whether that guidance gains the
-    in-process reader and the named-credential kinds, or `SSL_CERT_FILE` travels another
-    way, is recorded in `design.md`'s Open Questions for the design session this change
-    returns to.
-  - Also from the fresh-context check. Two fixes: the payments check pod is stopped
-    when the commit moves during its step, with a case for it in
-    `test_validate_slice.py`, and the `deployment-state` delta gains the scenario "The
-    storefront's CA bundle cannot be loaded" for 29 F1. Promotion destinations for 29 F2,
-    beyond 6.9's list: `docs/development/TESTING.md`'s account of what the Helm part
-    runs and keeps, and `.agents/skills/change-validate/SKILL.md`'s, both of which name
-    only the scenario pod. For 6.8, a `payments check` warning, meaning no check pod was
-    rendered, is not evidence.
-  - Evidence for these fixes, all local, against base `5e2f0fd86`:
-    - Unit and integration (`TESTING.md`'s levels):
-      - `make -C core/storefront test`: 226 passed, the new real-SQLite case included.
-      - `make -C kit/arkhai-payments test`: 197 passed, with mypy, vectors and
-        generated models checked.
-      - `make test-e2e-unit`: 539 passed. `test_vm_payment_deal.py` collects its 4
-        tests, by `make -C e2e-tests test-unit PYTEST_ARGS=--collect-only …`.
-      - `make test-release-tooling`: 2189 passed, re-run after the fresh-context
-        fixes.
-    - `make test`: exit 0, run before the fresh-context fixes. Those touched only
-      `validate_slice.py` and its tests, which were re-run above, a test comment, and
-      change documents.
-    - `make check-packaging`: all eight checks OK. No dependency or lock changed.
-    - `make check-comment-hygiene` and `make check-change`: pass.
-    - Not run: any end-to-end lane or Helm deployment. The VM payment deal past its
-      listing, and Bob's payments check pod in a cluster, are owed to the validation of
-      the round the design and plan make of this return.
-    - Fresh-context check, against `5e2f0fd86`: no code bug. Fixed, as above: the stop on
-      a commit change, the spec scenario, the test comment, and the overstated note on
-      the guidance. Left as recorded:
-      - an `OSError` from `SSL_CERT_DIR` or certifi shares the trust-bundle detail, a
-        negligible edge;
-      - the index row stays `in implementation` until the return is confirmed and the
-        design step takes it.
-  - Owner's addition to 30 V2. `core_storefront`'s
-    `SQLiteClient.listing_id_for_derivation_key` called an undefined `self._connect()`,
-    so every source-conflict 409 logged an `AttributeError` and could not name the
-    listing holding the source, as validation 30's VM log showed. It now opens
-    `sqlite3.connect(self.db_path)` like its neighbours. A real-SQLite case in
-    `core/storefront/tests/integration/test_listing_closure.py` covers it: the method
-    names the bound listing, still names it once closed, and returns `None` for an
-    unknown key. The fix removes the unowned-work row for this in
-    `openspec/changes/README.md`.
+  Final verification and handoff: The local Helm release uses the deployment-facing CA and key interfaces, with a double enabled only locally. Sections11–12 own the final registry/profile and storefront projection. Actual deployment and authenticated payments-check proof pass; payment deal scenarios are not served by this Helm release.
+  Complete combined evidence is recorded before section 13 and confirmed by 13.8.
 
 ## 6. The payments kit's secret key and configured CA
 
@@ -1600,35 +1149,8 @@ test_client.py, test_access_check.py, test_access_check_tls.py}`;
   from the relocked environment with the new cases; jobs `test · test-storefront`,
   `test · test-bare-metal` and `test · test-apicredits` — each passes from the relocked
   environments.
-  Results: `make -C kit test-arkhai-payments` (unit and library integration, with mypy,
-  the vector check and the generated-model check) 219 passed. `make test-storefront`
-  1213 passed, 1 skipped (unit, the stale-schema test included) and 525 passed
-  (application integration); `make test-bare-metal` 126, 224, 582, 31 and 137 passed;
-  `make test-apicredits` every suite passed. `make test`: every suite passed but
-  `scripts/tests/test_change_workflow_assumptions.py::test_every_target_and_path_the_workflow_names_is_provided_here`,
-  which fails on `HEAD` before this section: `.claude/change-steps.toml` names `make
-  build-*` (commit 4a9c8e2f6) and the workflow's provisions list does not, outside this
-  change's code. That failure stops `make test` inside `test-deployment-packaging`, so the
-  targets after it were run alone and passed: `make -C helm test-render`, `make
-  test-frp-grant-admission` (203 passed, 15 skipped), `make test-payments-lane-double`
-  (50 passed). `make check-packaging` passed. `make check-change` passed but for its
-  citations check, which reports `e2e-tests/config/config-payments-lane.yml` and
-  `config-bare-metal-lane.yml`, cited by `design.md` and `tasks.md` and created by
-  section 10. End-to-end scenarios confirmed as planned: none exercises this section yet;
-  the three payment markers do from section 9.
-
-  Handoff: the fresh-context check found the version bump (reverted, see 6.4), the empty
-  `ca_bundle_path` falling back to the default store (refused at config and in the
-  client), and tests short of the plan's TLS claims (a client unit case and the
-  "another CA's bundle" transport case added). Declined: moving the TLS test to an
-  `integration/` directory (the kit's tests are flat and the task names the path), and
-  removing the check's second key resolution (it resolves once to classify the failure
-  and `payments_client_for_owner` resolves again, both through the one function).
-  Clearing a stale wheel: `make lock` resolves lower-bound consumers to the highest wheel in
-  `.dist`, so reverting a bump needs `make dist-clean` before `make lock`. Section 9's lane
-  configurations state `api_key` in the secret overlays and `ca_bundle_path`; the
-  bare-metal storefront needs no code change for either, since it parses the section
-  through `ArkhaiPaymentsConfig`.
+  Final verification and handoff: api_key and api_key_env resolve through one kit function, mutually exclusive with development_auth. ca_bundle_path scopes trust to one client. Kit suites, configuration error/redaction cases, packaging and all three payment lanes pass.
+  Complete combined evidence is recorded before section 13 and confirmed by 13.8.
 
 ## 7. Dispute credentials carry secrets; the mediation credential carries the token
 
@@ -1756,38 +1278,8 @@ test_lifecycle_ends.py, test_servicing_unreachable_authority.py}`;
   Owed by validation: `tests.yml`, jobs `test · test-kits`, `test · test-storefront`,
   `test · test-bare-metal` and `test · test-vms-buyer` — each passes from the relocked
   environments with the migrated constructors.
-  Results: `make -C kit test-deal-lifecycle` 76 passed; `make -C kit test-arkhai-mediation`
-  55 passed with mypy clean; `make -C kit test-deal-servicing` 63 passed (its examples are
-  not collected; see 7.3); `make -C kit test-arkhai-payments` 220 passed. `make
-  test-storefront` 1213 passed, 1 skipped and 526 passed; `make test-bare-metal` 126, 224,
-  583, 32 and 137 passed; `make test-vms-buyer` 215 passed. `make test`: everything passed
-  but the same pre-existing `test_change_workflow_assumptions` failure section 6 records,
-  and the targets after it (`make -C helm test-render`, `make test-payments-lane-double`)
-  passed run alone. `make helm-values-schema` changed nothing. `make check-packaging`
-  passed. `make check-change` failed only on section 10's two runner profiles, as in
-  section 6. End-to-end confirmed as planned: none yet; `e2e_vm_payment_deal`'s stage 2
-  exercises the VM storefront's credential once section 9 states it in Bob's secret
-  overlay.
-
-  Handoff: the fresh-context check also found, and this section fixed, comments claiming a
-  values schema refuses `DisputeCredential.api_key`, the mediation README's change-history
-  wording and a snippet calling `credential_for` on the `dispute_config` function, unsorted
-  imports, and test names that claimed a secret overlay the harness never reads.
-  `ArkhaiPaymentsConfig` now also sets `hide_input_in_errors`: a three-character key was
-  shown whole in its validation error (`test_a_validation_error_never_shows_a_stated_key`
-  failed before the setting and passes after). Left for later sections:
-  - **A plan gap.** The deployment-state delta requires the storefront charts' values
-    schemas to refuse a secret dispute credential setting in `config`, and no task
-    delivers it: the VM schema has no `[[DisputeCredential]]` definition and the
-    bare-metal settings type it `list[dict[str, Any]]`, so `api_key` there passes the
-    schema. It belongs with section 12's chart and schema work, which should add a typed
-    `DisputeCredential` to both storefronts' generated definitions (the field is already
-    marked secret); the triage or a plan amendment should place it.
-  - The closeout's `DEPLOYMENT_AND_CONFIG.md` list now names "Dispute authority
-    preferences", whose credential passage describes variable references only.
-  - Declined: moving the `MediationCredential` refusal cases to a unit directory (see
-    7.2). Not rerun: a second fresh-context check after these fixes, which were local to
-    the files it named.
+  Final verification and handoff: Identity-bound dispute entries resolve one secret token before MediationCredential construction; the client reads no environment. Consumers and examples use the same resolver. The previously recorded public-chart schema gap is delivered by task 12.7, and operator guidance describes both credential forms.
+  Complete combined evidence is recorded before section 13 and confirmed by 13.8.
 
 ## 8. The registry reads profile-shaped env files
 
@@ -1881,27 +1373,8 @@ filter-specification loader's callers; `core/registry/tests/unit/test_filter_spe
   then. None is owed here.
   Owed by validation: `tests.yml`, job `test · test-registry` — passes with the new and
   reworked cases.
-  Results: `make test-registry` 139 passed (unit) and 128 passed (application
-  integration). `make test`: every suite passed but the pre-existing
-  `test_change_workflow_assumptions` failure section 6 records; the targets after it
-  (`make -C helm test-render`, `make test-frp-grant-admission`, `make
-  test-payments-lane-double`) passed run alone, and `make test-release-tooling` was rerun
-  after the sample-file edits with the same single failure. `make check-packaging` passed.
-  `make check-change` failed only on section 10's two runner profiles. End-to-end
-  confirmed as planned: none yet.
-
-  Handoff: the fresh-context check found the default-then-profile order untested, tests
-  reading the working directory's dotenv files, an unset-spec case broken by a shell's
-  `REGISTRY_FILTER_SPEC_PATH`, unused parameters, the unread variables surviving in sample
-  files, and a pre-existing task-number reference in
-  `test_settled_envelope_across_specs.py`'s docstring; all fixed. Kept: the
-  `reset_cache(settings)` seam, recorded under 8.2. For section 9: a lane registry's
-  `config-<registry>.env` takes the same `REGISTRY_*` names its `environment:` carries
-  today, `REGISTRY_FILTER_SPEC_PATH` included, and a JSON value goes on one single-quoted
-  line; `/app/shared-env/.env` is still read first if present. For closeout: the
-  registry restates `parse_active_profiles`, which `deployment-state`'s architecture
-  companion ("Configuration bootstrap boundary") places in `arkhai-kit-config`; its
-  promotion should say the registry parses profiles itself until the Dynaconf move.
+  Final verification and handoff: The registry loads ordered profile env files after defaults, with process precedence, and selects its filter spec through a setting. Registry tests and the real profile-backed Helm startup pass. Dynaconf migration remains outside this change.
+  Complete combined evidence is recorded before section 13 and confirmed by 13.8.
 
 ## 9. Compose stacks on committed overlays, profiles and secret overlays
 
@@ -2123,87 +1596,8 @@ test_bare_metal_compose.py, test_multi_storefront_compose.py}`.
   Owed by validation: `tests.yml`, job `test · test-deployment-packaging` — `make
   test-release-tooling`'s compose render cases pass.
 
-  Evidence, local:
-  - Unit: `make test-release-tooling` 2222 passed, none skipped (after the fresh-context
-    fixes); `make test-e2e-unit` 538 passed; `make -C helm test-render` passes (it
-    validates the edited `storefront.dev.toml` against the bare-metal chart's schema).
-  - `make test`: exit 0, every suite, including `test_change_workflow_assumptions`, which
-    sections 6–8 recorded failing and `fbe70e3eb` fixed. It ran before the fresh-context
-    fixes, which touched `storefront.credits.toml`, `test_committed_stack_values.py`, the
-    quickstart, two issue-discovery phase files and these notes; release tooling was
-    rerun after them.
-  - `make check-change`: everything passes but the documentation citations, which report
-    only `e2e-tests/config/config-payments-lane.yml` and `config-bare-metal-lane.yml`,
-    which section 10 creates.
-  - System, through the lane targets, before the fresh-context fixes (none touches a lane
-    run's files but `storefront.credits.toml`, which the API-credit lane replaces with
-    its lane copy). The lane targets still write and pass their environment files, which
-    the Compose files no longer read: the files interpolate only `PROVISIONING_MODE`,
-    which those files do not set, so each stack came up from its Compose files alone,
-    under mock. The plan's direct `docker compose … up -d --wait` and the full local
-    stack's bring-up are unrun, since the step may not run `docker` directly.
-    - `make -C e2e-tests test-e2e-apicredits`: stack up, `credits-storefront`'s
-      `check-payments` printed `"outcome": "ok"` for the seller's account; 4 passed —
-      `e2e_credits_deal` and all three `e2e_credits_payment_deal` stages, the first run of
-      that scenario in a lane, so the refund signer path 4.4 left unrun now passes.
-    - `make -C e2e-tests test-e2e-bare-metal`: `check-payments` ok; 64 passed, 2 failed,
-      2 skipped. `e2e_bare_metal_payment_deal`'s three stages pass. The failures are
-      the two introduction cases 4.9 recorded as `dev`'s #314 fallout (`KeyError:
-      'mechanism'`), and the skips follow the first.
-    - `make -C e2e-tests test-e2e-vm`: `bob-storefront`'s `check-payments` ok; 152
-      passed, 1 failed, 2 skipped. `e2e_vm_payment_deal`'s stages 1–2 pass, past the
-      listing for the first time (30 V2's fix), stage 2 reading `running`; stages 3–4
-      skip (the run printed no skip reasons; their one skip path is the
-      `mediation_target` fixture, 4.6). The failure is `e2e_vm_introduction`'s
-      `test_03_the_unbacked_listing_offers_only_an_introduction`, the same #314
-      `KeyError: 'mechanism'` 4.9 predicted. Every other VM marker passed.
-
-  End-to-end confirmed: `e2e_credits_payment_deal`, `e2e_bare_metal_payment_deal` and
-  `e2e_vm_payment_deal` (stages 1–2) exercise this section's secret overlays,
-  `ca_bundle_path` and Bob's dispute credential, and pass; every lane marker runs on these
-  stacks. The introduction failures predate the change.
-  Owed by validation, confirmed and extended: `tests.yml`, job
-  `test · test-deployment-packaging` — `make test-release-tooling`'s compose render cases
-  and `test_committed_stack_values.py` pass; `tests.yml`, job `test · test-e2e-unit` — the
-  reworked static stack cases pass.
-
-  Fresh-context check. Fixed:
-  - The full stack's credits storefront would have refused its configuration
-    (`api_key_env` beside the overlay's `api_key`, 9.5), with a test that catches it.
-  - `docs/bare-metal-seller-quickstart.md` told operators to export variables the wrapper
-    no longer reads; it now gives an operator overlay, registry profile and site profile.
-    No task named the quickstart; closeout's documentation compliance should confirm it.
-  - `tools/issue-discovery`'s two `compose_up` phases set the retired
-    `VMS_PROVISIONING_ACTIVE_PROFILES`; they set `PROVISIONING_MODE` now. Their default
-    compose arguments still name `docker-compose.yml` alone, which never started bare and
-    still does not; left as it was.
-  - Tests for registry-b's bootstrap key, the wallet keys and the registry selection, and
-    notes that overstated (9.1, 9.6) or did not say how the system runs were made.
-  Declined:
-  - Keeping the bare-metal SSH key's guard (9.1 says why).
-  - Returning `REGISTRY_FILTER_SPEC_PATH` and registry-b's read and write gates to the
-    domain files: 9.3 moves every `REGISTRY_*` value into the profiles, and the base file
-    still binds the API-credit specification at the path the profile names.
-  - Replacing the VM base file's `${HOME}/.ssh/id_ed25519` bind, which predates the change
-    and is an operator's real key, not a committed value.
-  - Pinning `pyyaml` in `test-release-tooling`, whose other `--with` packages but
-    `eth-account` are unpinned too.
-
-  Handoff to section 10 and closeout:
-  - Comments section 10 makes true or must fix: the overlays' headers say the lane
-    targets "do exactly this" with no `--env-file`, true once 10.3 lands; the root
-    `Makefile`'s mode comment says the compose files default to real, while the overlays
-    default to `mock`; `docker-compose.yml`'s header (10.6).
-  - `tools/payments-lane-double/README.md` and `e2e-tests/README.md` still describe
-    `SSL_CERT_FILE`, `PAYMENTS_LANE_*` and the env-file wiring; 10.6 rewrites them.
-    `dev-env/identities/README.md` is already rewritten for the stack; its runner
-    paragraph (lane_env.py `runner`, the env targets, the Makefile seed) is 10.6's.
-  - `lane_env.py compose` has no reader once 10.4 retires the targets.
-  - For closeout: `DEPLOYMENT_AND_CONFIG.md` "Bare-metal role configuration" ("The
-    Compose wrapper mounts the operator's storefront.toml…") and "Per-domain stack
-    composition"'s `VMS_`/`BARE_METAL_PROVISIONING_ACTIVE_PROFILES` paragraph are now
-    false; the first is not in the promotion list.
-  - The full local stack was not brought up here.
+  Final verification and handoff: Base/domain Compose files carry topology only; overlays bind committed identities, site/registry profiles and secret overlays. Wallet/payment/dispute values stay in their secret overlays. PROVISIONING_MODE is the run-supplied profile selector. Restated fixture and bind-source checks pass.
+  Complete combined evidence is recorded before section 13 and confirmed by 13.8.
 
 ## 10. The runner's lane profiles and the Make targets
 
@@ -2369,74 +1763,8 @@ test_domain_stack_configuration.py}`; `e2e-tests/Makefile`; the root `Makefile`;
   Owed by validation: `tests.yml`, jobs `test · test-e2e-unit`,
   `test · test-payments-lane-double` and `test · test-deployment-packaging` — each passes.
 
-  Evidence, local:
-  - Unit: `make test-e2e-unit` 551 passed; `make test-release-tooling` 2226 passed, none
-    skipped; `make test-payments-lane-double`, `check-tls` and 49 passed, after `make
-    lock` (only the double's lock changed); `make -C helm test-render` passes, with the
-    reworked runner-profile comparison.
-  - `make test`: exit 0, every suite. It ran before the fresh-context fixes, which
-    touched tests (`test_lane_compose.py`, `test_payments_helper.py`,
-    `test_domain_stack_configuration.py`), comments, `.gitignore`, the runbook and the
-    README, and these notes; the three unit suites above were rerun after them.
-  - `make check-packaging`: all checks OK. `make check-change`: every check passes,
-    documentation citations included, now that the runner profiles exist.
-  - System, through the lane targets as rewritten, before the fresh-context fixes (none
-    touches a file a lane run reads but the e2e Makefile's comment order):
-    - `make -C e2e-tests test-e2e-apicredits`: `check-payments` ok; the runner ran under
-      `ACTIVE_PROFILES=docker,payments-lane,apicredits-lane`; 4 passed, all three
-      `e2e_credits_payment_deal` stages among them, no skips.
-    - `make -C e2e-tests test-e2e-bare-metal`: `check-payments` ok; 64 passed, 2 failed,
-      2 skipped; the three `e2e_bare_metal_payment_deal` stages pass. The failures and
-      skips are the two introduction cases' `KeyError: 'mechanism'` (`dev`'s #314, 4.9).
-    - `make -C e2e-tests test-e2e-vm`: `check-payments` ok; 152 passed, 1 failed, 2
-      skipped; `e2e_vm_payment_deal`'s stages 1–2 pass, approving at the double with the
-      key the harness handed its in-process client, and stages 3–4 skip. The failure is
-      `e2e_vm_introduction`'s same #314 case.
-    No environment file was written or read in these runs.
-
-  End-to-end confirmed: `e2e_bare_metal_payment_deal` and `e2e_credits_payment_deal` pass
-  without skips, `e2e_vm_payment_deal`'s stages 1–2 pass and 3–4 skip (their only skip
-  path is the `mediation_target` fixture; the run printed no reasons), each lane's
-  `check-payments` passed at setup, and every other lane marker passed but the three
-  introduction cases that fail on `dev` already.
-  Owed by validation, confirmed: `tests.yml`, jobs `test · test-e2e-unit`,
-  `test · test-payments-lane-double` (with the relocked environment) and
-  `test · test-deployment-packaging` (release tooling's dry-run and render cases, and
-  `make -C helm test-render`'s topology comparison) — each passes.
-
-  Fresh-context check. Fixed:
-  - `.gitignore` would have exposed this checkout's leftover `.e2e-*.env` files, which
-    hold local paths, to a blanket `git add`; it keeps `.e2e-*.env` (10.4).
-  - The Makefile dry-run tests walked the whole build chain, since `make -n` runs
-    `$(MAKE)` lines; they pass `MAKE=:` now, and assert the runner's `ACTIVE_PROFILES`,
-    the CA mount against the shared profile, and `-down`/`-logs` (10.3).
-  - The missing-bundle case could not fail (a closed port is unready anyway); it now
-    runs the default probe answering healthy, with the lane CA as control (10.2).
-  - A test through the runner's own loader that the profiles merge into a complete
-    section (10.1).
-  - The runbook's §0 bullet; a profile comment calling every value quoted; the
-    Makefile's mode lines under the wrong paragraph; a README sentence; overstated notes.
-  Declined:
-  - Moving the runner-profile cases out of the double's `tests/integration/`: the plan
-    and D21 put them in `test_lane_env.py`, beside the script's cases.
-  - Replacing `test_payments_helper.py`'s patch of the module's `target_ready` with the
-    `ready` seam: the case exists to show what the default probe receives.
-  - Hardening the mode check against a multi-word value; `filter` reads `mock real` as
-    allowed, and a run passing that has asked for both.
-
-  Handoff to sections 11–12 and closeout:
-  - The local Helm release's e2e-tests chart profile has no `ca_bundle_path` and no
-    buyer key; it serves no payment scenario (D11). `helm/tests/test_release_topology.py`
-    now holds its public keys to `config-payments-lane.yml` as well as the fixtures.
-  - The double's README Helm passage still describes the `seller-payments-key` Secret;
-    12.2 retires it.
-  - Closeout destinations this section made false: `DEPLOYMENT_AND_CONFIG.md`'s
-    "Per-domain stack composition" (the environment targets and
-    `*_PROVISIONING_ACTIVE_PROFILES`) and "Bare-metal role configuration" (section 9's
-    handoff), `TESTING.md`'s lane paragraph on `PROVISIONING_MODE` and its "Private
-    Service Dependencies" account of the runner's payments settings.
-  - The session is large: two sections, six lane runs and two fresh-context checks.
-    Sections 11 and 12 should start in a fresh session.
+  Final verification and handoff: Runner settings layer shared payments and per-lane profiles; buyer tokens are handed to buyers, not installed in the runner environment. Environment generators are retired. Lane-owned setup fails by name. All lane setup checks and required payment stages pass; only the expected VM mediation stages skip.
+  Complete combined evidence is recorded before section 13 and confirmed by 13.8.
 
 ## 11. The registry chart's env-file profile
 
@@ -2573,47 +1901,8 @@ Files: `helm/charts/registry/templates/{deployment.yaml, _helpers.tpl}`, a new
   payments check to pass.
   Owed by validation: `tests.yml`, job `test · test-deployment-packaging` — `make -C helm
   test-render` passes with the registry cases.
-  Results:
-  - `make -C helm test-render` passes: every umbrella assertion and chart suite, with the
-    registry loader case run, not skipped.
-  - `make test-release-tooling`: 2226 passed.
-  - `make test`: ran every target to its end with no failure.
-  - `make check-change` passes.
-  - After the fresh-context fixes, which touched the chart's helper and comments, the
-    topology tests, the registry's Dockerfile and one `config.py` comment:
-    `make -C helm test-render` passes again; `make test-registry` passes, 139 unit and
-    128 application integration; `make check-packaging` is all OK. `make test` was not
-    rerun after them.
-  - No dependency or lock changed.
-  End-to-end confirmed as planned: none. Validation's Helm deploy is the first run of a
-  registry pod on the rendered profile, and of the registry image without `ENV PORT`; the
-  Compose lanes run that image too. Owed by validation, confirmed as written.
-
-  Fresh-context check. Fixed:
-  - The trailing-backslash and `${` refusals.
-  - The Dockerfile's `ENV PORT` and the `root_path` comment (11.1).
-  - The loader case: non-default values, so a dropped line would show; a newline; a key
-    in both profiles to show precedence.
-  - The values schema's `secretProfile` refusals, now tested.
-  - The test helper's docstring, which claimed the reader's decoding outright.
-  - A manifest-wide `CHAIN_ID` search inside the per-chart loop, removed.
-  - Two test names and a docstring framed as "still … as before".
-  Declined: none.
-
-  Handoff to section 12 and closeout:
-  - Closeout destinations this section made false, beyond 13.9's "Registry descriptor
-    configuration" (which already covers `DEPLOYMENT_AND_CONFIG.md`'s "Helm and Compose
-    surfaces set … through `REGISTRY_DESCRIPTOR_*`" and its "API-key Secret references …
-    are instance-local"):
-    - `TESTING.md`'s "Chart Render Tests" lists each loader check by its interpreter
-      variable and should gain `REGISTRY_PYTHON`.
-    - `DEPLOYMENT_AND_CONFIG.md`'s "Kubernetes: ConfigMap and Secret mounting" says a
-      new non-secret key needs only a `values.yaml` change. That holds for the
-      provisioning chart, not the registry's, which maps each value to its variable by
-      name (D16 keeps the values' shape). Promotion should state the registry as that
-      exception, and that its profile is a dotenv file rather than YAML.
-  - The registry image's `CMD` hard-codes port 8080 whatever `service.port` says;
-    pre-existing, left.
+  Final verification and handoff: The registry chart renders a public env profile and mounts an optional secretProfile, with only resolver variables in its application environment. Retired auth key-Secret values are refused. Schema/render/loader and deployed profile startup checks pass.
+  Complete combined evidence is recorded before section 13 and confirmed by 13.8.
 
 ## 12. Storefront charts: a derived `ca_bundle_path` and the secret overlay
 
@@ -2739,80 +2028,8 @@ tests/test_render.py}` and the same under `helm/charts/bare-metal-storefront/`;
   Owed by validation: `tests.yml`, jobs `test · test-deployment-packaging` — `make -C helm
   test-render` and release tooling pass with the new cases — and
   `test · test-payments-lane-double` — passes.
-  Results:
-  - `make -C helm test-render` passes, with no skip line: the storefront startup-refusal
-    and loader checks over the payments renders ran, both storefront environments
-    existing here.
-  - `make test-release-tooling`: 2227 passed.
-  - `make test-payments-lane-double`: 49 passed.
-  - `make test`: ran to its end with no make error.
-  - `make check-change` passes; `make check-packaging` is all OK.
-  - No dependency or lock changed, and the generated values-schema definitions are
-    untouched.
-  End-to-end confirmed as planned: none. Validation's Helm deploy is the first run of a
-  storefront reading its key from the runtime overlay and its trust from the derived
-  path, in Bob's `-payments-check` pod; the bare-metal one runs under `topology-check`.
-  Owed by validation, confirmed as written; the release-tooling case is in the
-  `test · test-deployment-packaging` job.
-
-  Fresh-context check. It found no template, script, schema, layering or comment-hygiene
-  defect, and nothing outside `openspec/` and `docs/attachments/` still depending on
-  `paymentsKey`, `seller-payments-key`, a storefront chart's `api_key_env` or a chart-set
-  `SSL_CERT_FILE`. Fixed:
-  - The storefront chart's own `"paymentsKey": false` is now tested alone, through
-    `_render_chart`: the umbrella render validates both schemas, so removing either one
-    would have failed nothing.
-  - The VM chart's schema refusals now name the refused value's path (`_names_path`), as
-    the bare-metal suite's `_refused_at` does, rather than any mention of the key.
-  - The empty-section refusal is tested in both charts (`arkhai_payments: {}`).
-  - `test_the_local_payments_values_are_the_payments_doubles_committed_fixtures` asserts,
-    for Bob's and release 2's documents, the derived `ca_bundle_path` and no `api_key`,
-    `api_key_env` or `development_auth`. Before, nothing caught `api_key_env` returning
-    to `bare-metal-release-values.yaml`.
-  - A comment naming the wrong helper for the derivation.
-  - `local-values.yaml` said `check-local-secrets` requires the token. It checks that
-    the runtime Secret exists, not what its overlay holds; the comment now says so, and
-    that a Secret without the token fails the payments check, which reports neither
-    `api_key` nor `api_key_env` configured (read from `access_check.py`).
-  After them, `make -C helm test-render` and `make check-change` pass again. `make
-  test`, `make test-release-tooling` and `make check-packaging` ran before them; the
-  fixes touched only the two charts' render tests, the topology test, one template
-  comment and one values comment.
-  Left for the round's triage, not changed here:
-  - **The refusal of a CA bundle with no payments section** (12.1) is this session's
-    choice. D3 and the delta say the chart derives the path "from the option's
-    presence", without naming the case. The triage should confirm it, and record it in
-    D3 and as a delta scenario, or choose to create the section instead.
-  - **D3's "the local deploy target checks for them before installing"** now holds for
-    the CA ConfigMap and the runtime Secret, not for the token inside the Secret. The
-    alternatives are a content check in `check-local-secrets` (`kubectl get secret … -o
-    jsonpath` and a TOML read in the Makefile) or D3 reworded to match.
-  - **Still unplaced: section 7's handoff plan gap.** The delta requires both storefront
-    values schemas to refuse a secret dispute credential setting in `config`. Neither
-    does: the VM generator types no `[[DisputeCredential]]`, and bare metal's settings
-    type it as `list[dict]`. The fix is one `{"type": "array", "items":
-    model_fragment(DisputeCredential, role=role)}` override per generator
-    (`domains/{vms,bare_metal}/storefront/src/…/values_schema.py`), `make
-    helm-values-schema`, both drift tests, and a render refusal per chart. It is left
-    out of this section because no section 12 task names it, and it changes two domain
-    storefront packages beyond the section's files.
-
-  Handoff to closeout. Destinations this section made false, beyond 13.9's "Kubernetes:
-  ConfigMap and Secret mounting":
-  - `DEPLOYMENT_AND_CONFIG.md`, "Storefront agents: pass-through configuration":
-    - its derived-settings table should gain `Settlement.arkhai_payments.ca_bundle_path`,
-      derived from `caBundle` and refused when stated differently, as `port` is; the
-      sentence "except for the port only where `config` does not state it" needs the
-      same exception;
-    - its account of what `arkhai-bob-runtime`'s overlay carries should name the
-      payments `api_key`;
-    - section 5's handoff already named its pod-environment table.
-  - `TESTING.md`, "Chart Render Tests": the release-tooling case reading the overlays
-    `topology-secrets` writes.
-  - The double's README Helm passage is current (12.2).
-  - The session is large: two sections, two fresh-context checks, and a dozen render
-    suite runs. The next step is the round's validation and implementation review, in
-    fresh sessions.
+  Final verification and handoff: Both storefront charts derive the CA path, take the payment key from their runtime secret overlay and share Deployment/test-pod projections. Both refuse secret dispute keys. The real check pod uses no storefront PVC or overlay privilege; render/loader and deployed payments checks pass.
+  Complete combined evidence is recorded before section 13 and confirmed by 13.8.
 
 - [x] 12.6 **Integration publication gate (D4; MCW-s8gk).** The combined current
   publication rule rejects D3's deterministic PKCS8 fixture. Amend `.gitleaks.toml`
@@ -2874,10 +2091,10 @@ Integration handoff for 12.6–12.7:
   prove an external rental, hosted Stripe funding or deployed configuration.
 
 Combined integration verification at `31a1ba47c`: Tests workflow run42180770193
-passed all24jobs, including all21root test targets. E2E run42180876034 passed all
-three lanes: bare metal70passed, API credits4passed, VM153passed with only the two
+passed all24 jobs, including all21 root test targets. E2E run42180876034 passed all
+three lanes: bare metal 70 passed, API credits 4 passed, VM 153 passed with only the two
 expected missing-mediation case-stage skips. All three authenticated payments setup
-checks succeeded. Deployed Helm validation passed14served compatibility tests and
+checks succeeded. Deployed Helm validation passed14 served compatibility tests and
 the actual payments-check pod exited0. These results establish local double and
 configuration compatibility, not hosted funding or physical hardware delivery.
 Independent Standards/Spec review and its incremental rechecks have no unresolved
@@ -2892,23 +2109,23 @@ delta requirement). The eleven parts follow `openspec/README.md#plan-closeout-re
 in order. Closeout changes no code: a part needing a code, lock, chart, or test change
 returns the change to implementation.
 
-- [ ] 13.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene` and read every
+- [x] 13.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene` and read every
   comment and docstring sections 1–12 added: the kit's `access_check.py`, key resolution
   and balance view; the mediation credential and dispute credential; the registry's
   loader; the double's modules, fixtures and generator; the storefront CLIs' subcommands;
   the Compose files, profiles and secret overlays and the lane targets; the helper; the
   charts' values and templates. Each states current behaviour and every fixture value's
   label is present. A needed correction returns to implementation.
-- [ ] 13.2 **Import placement — confirm.** Every import sections 1–12 added is at module
+- [x] 13.2 **Import placement — confirm.** Every import sections 1–12 added is at module
   level unless a verified cycle or recorded lazy-load reason keeps it local. A needed move
   returns to implementation.
-- [ ] 13.3 **Documentation compliance.** Check D1–D23 against `openspec/README.md`'s
+- [x] 13.3 **Documentation compliance.** Check D1–D23 against `openspec/README.md`'s
   placement rules and the promotion record below, recording a disposition per decision,
   and check every promoted statement against the code.
-- [ ] 13.4 **Narrative compression.** Compress section notes to final behaviour,
+- [x] 13.4 **Narrative compression.** Compress section notes to final behaviour,
   validation evidence, deferred work, and destinations, moving durable rationale into
   `design.md` first.
-- [ ] 13.5 **Roadmap currency.** In `docs/development/ROADMAP.md`:
+- [x] 13.5 **Roadmap currency.** In `docs/development/ROADMAP.md`:
   - Goal 8's open-gap row "Payment scenarios skip without a target, and hostile payment
     and dispute-authority cases cannot be driven deterministically": narrow it to the
     dispute-authority double, controls and evidence classes `add-arkhai-payments-lane-double`
@@ -2927,7 +2144,7 @@ returns the change to implementation.
   - add an unowned gap: the signing credential `ARKHAI_IDENTITY_CREDENTIAL` is the one
     secret not delivered as a secret profile, revisited when a change decides identity
     credential delivery (D19, the design's Open Questions).
-- [ ] 13.6 **Campaign index currency.** In `openspec/changes/README.md`, keep this
+- [x] 13.6 **Campaign index currency.** In `openspec/changes/README.md`, keep this
   change's row `in closeout` and update the Reach hosts campaign's graph lines
   naming it. Prepare the archive link for the archival step; apply that link only
   when 13.11 moves the directory. Archive cleanup sets the final `archived` status. Note in `qualify-real-provisioning-by-scenario`'s row that its storefront
@@ -2937,10 +2154,10 @@ returns the change to implementation.
   `add-arkhai-payments-lane-double`'s row its D1/D7 revision, the fixture-identity guard it
   owns, and the `MediationCredential` carrying a resolved token it inherits. Run
   `make check-change-index`. Archive cleanup, not closeout, releases the dependents.
-- [ ] 13.7 **Packaging.** Run `make check-packaging` and resolve every failure, then
+- [x] 13.7 **Packaging.** Run `make check-packaging` and resolve every failure, then
   `make check-architecture-change CHANGE=add-mvp-payments-lane-double`. No `.agents/`,
   `.claude/` or `.codex/` edit is planned; if one was made, run `make check-agent-skills`.
-- [ ] 13.8 **End-to-end pipeline.** Confirm the pipeline passes on the closeout candidate
+- [x] 13.8 **End-to-end pipeline.** Confirm the pipeline passes on the closeout candidate
   and record the run, its result, and the scenarios exercising this change:
   `e2e_bare_metal_payment_deal` and `e2e_credits_payment_deal` passing without skips,
   `e2e_vm_payment_deal`'s stages 1–2 passing and 3–4 reporting the mediation blocked
@@ -2948,7 +2165,7 @@ returns the change to implementation.
   stacks configured from committed files; and the Helm part's payments check with the
   registry started from its rendered profile. A pipeline that cannot run for an unrelated
   reason is recorded as a blocker naming its cause and owner, and what it gates is unrun.
-- [ ] 13.9 **Promotion.** Write and record in the promotion record:
+- [x] 13.9 **Promotion.** Write and record in the promotion record:
   - `openspec/specs/test-compatibility/architecture.md`, "Payment evidence ownership":
     the in-lane double, what it mirrors and serves, what its results establish and do
     not, and the VM scenario's mediation prerequisite; its "Lifecycle contract evidence"
@@ -2998,13 +2215,34 @@ returns the change to implementation.
     `openspec/specs/deployment-state/spec.md`, `openspec/specs/market-composition/spec.md`
     and `openspec/specs/settlement-configuration/spec.md`, written by the archive (13.11);
   - `openspec/specs/README.md`: no new capability or companion, so no entry; confirm.
-- [ ] 13.10 **Documentation citations.** Run
+  Promotion/verification evidence:23accepted decisions and the bounded TLS
+  clarification retain their meaning; design.md names verified heading anchors.
+  No new capability or companion needs a capability-index row. The package,
+  binding and full-stack runbook descriptions already current were retained;
+  the registry quickstart now selects the same committed overlays. The four
+  normative deltas remain for 13.11 to merge exactly once. Packaging and all
+  architecture checks pass; the change owns no exception or override row.
+  Source execution evidence is31a1ba47c: Tests42180770193 (24 jobs),
+  E2E42180876034 (all lanes, only intended VM mediation skips), and deployed
+  Helm14 served tests plus an authenticated payments-check pod exit 0. The
+  pre-closeout candidate differs only in documentation; no hosted funding,
+  physical hardware or accepting mediation proof is inherited from these runs.
+
+- [x] 13.10 **Documentation citations.** Run
   `make check-doc-citations CHANGE=add-mvp-payments-lane-double` after promotion and
   resolve every match, then `openspec validate add-mvp-payments-lane-double --strict`.
-- [ ] 13.11 **Archival.** `openspec archive add-mvp-payments-lane-double -y`, merging the
+- [x] 13.11 **Archival.** `openspec archive add-mvp-payments-lane-double -y`, merging the
   four deltas into `openspec/specs/`; then point the index row at the archive directory.
 
 ## Design promotion record
+
+Every decision retains its accepted meaning; the completed per-decision
+dispositions are also recorded in `design.md`'s "Design promotion record".
+Normative text below is merged by 13.11. D10/D22 are execution cadence, D13's
+remaining loader limitation is in the roadmap, and D21 is enforced by tests.
+`dev-env/identities/README.md`, the kit READMEs and the full-stack runbook command
+already describe the implemented surfaces and were verified without needless edits.
+The registry quickstart was aligned to those same committed full-stack overlays.
 
 | Accepted decision | Permanent location |
 |---|---|
@@ -3025,7 +2263,7 @@ returns the change to implementation.
 | D15 Development binds in the overlays; base files keep topology | `openspec/specs/deployment-state/spec.md` (delta); `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Per-domain stack composition"; `dev-env/identities/README.md` |
 | D16 The registry's profile env files and chart | `openspec/specs/deployment-state/spec.md` (delta); `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Registry descriptor configuration"; `docs/operator-handbook.md`, "Registry secret profile"; `core/registry/README.md` |
 | D17 Provisioning site profiles | `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Per-domain stack composition"; `dev-env/identities/README.md` |
-| D18 The environment targets retired | `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Per-domain stack composition"; `docs/development/VALIDATION_RUNBOOK.md`, "Bring Up Local Stack"; `docker-compose.yml`'s header; `e2e-tests/README.md` |
+| D18 The environment targets retired | `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Per-domain stack composition"; `docs/development/VALIDATION_RUNBOOK.md`, "8. Bring Up Local Stack"; `docker-compose.yml`'s header; `e2e-tests/README.md` |
 | D19 Secrets through secret overlays; trust through configuration (principle 3) | `openspec/specs/settlement-configuration/spec.md` (delta); `openspec/specs/deployment-state/spec.md` (delta); `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Profile-based configuration" and "Kubernetes: ConfigMap and Secret mounting"; `docs/development/ARCHITECTURE.md`, "Deployment topology"; `kit/arkhai-payments/README.md`; `kit/arkhai-mediation/README.md`; `docs/development/ROADMAP.md` (the signing-credential gap) |
 | D20 The provisioning mode | `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Per-domain stack composition"; `docs/development/TESTING.md`'s lane paragraph |
 | D21 Tests holding restated values | change history only; the tests are their own record |

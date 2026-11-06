@@ -500,9 +500,11 @@ project of its own:
   the dev chain.
 
 The compute lanes' provisioning services run their mock profile because the
-run selects it: `PROVISIONING_MODE` (`mock` or `real`, default `mock`) is read
-by each lane's environment target, which prints the stack's provisioning
-profiles, never by a storefront. Under the `mock` profile each compute adapter
+run selects it: lane targets validate and export `PROVISIONING_MODE` (`mock` or
+`real`, default `mock`), and committed overlays interpolate it as the provisioning
+service's last profile after `docker` and its site profile. No environment target
+prints those settings, and no storefront reads the switch. A missing `real`
+profile file is skipped, leaving real provisioning active. Under the `mock` profile each compute adapter
 runs its jobs through a mock executor of its own, resolved by the same
 `(offering_mode, action)` table as its real one, and the playbook output the
 mock returns is parsed by the adapter's real result path. The rule and gate
@@ -1142,6 +1144,12 @@ distinct from terminal failed-job recovery or force-release.
 
 ## Chart Render Tests
 
+Release-tooling checks also inspect the secret overlays written by
+`helm/scripts/topology-secrets.sh`; storefront loader checks run in each role's
+locked environment. These static/loader tests complement the deployed Helm
+payments-check pod: only its own exit status and authenticated response show
+that the installed configuration, secret and CA can reach the target.
+
 A chart render test runs `helm template` against a chart with chosen values and
 asserts on the manifests it produces, or on its refusal to produce them. It is a
 static configuration test, like `e2e-tests/tests/unit/`'s image-pin and stack
@@ -1279,25 +1287,50 @@ and `domains/apicredits/middleware/rust/tests/conformance.rs`.
 
 ## Private Service Dependencies
 
-This repository is public, and every test target it runs in public CI or a public build MUST pass without credentials for a private repository, image or package. A scenario that needs a private service's internals (its source, images, development-mode auth, operator test funds, or ledger reads) lives in that service's repository, which may depend on SCM's public artifacts. SCM's own e2e may run against a service's public test deployment, readiness-gated: it reports the unmet prerequisite when no target is configured or reachable. Otherwise SCM tests the client side against the service's published contract (schemas and test vectors) and a test double at the client kit's boundary.
+This public repository's CI and public builds pass without credentials for a
+private repository, image or package. Tests requiring a service's internals
+(source, images, development auth, operator funds or ledger reads) belong to
+that service. SCM consumes published schemas/vectors and tests the client side
+against the public contract. A double mirrors its producer's API unless there
+is a compelling reason to deviate; qualified surface and evidence limits remain
+explicit.
 
-The API-credit payment scenario reads its payments policy through
-`e2e-tests/tests/e2e/roles/helpers/payments.py`, which other payment scenarios
-may reuse. A blank PAYMENTS.SERVICE_URL means no payments target is configured,
-and the scenario reports a blocked skip, never an Alkahest fallback: that is
-what the pipeline runs. With SERVICE_URL set, SERVICE_IDENTITY,
-BUYER_ACCOUNT, BUYER_MARKETPLACE_CREDENTIAL and
-SELLER_MARKETPLACE_CREDENTIAL are required, and a missing one fails the
-scenario by name before the target's `/health` is checked (timeout 5 seconds,
-environment proxies disabled); an unready target is again a blocked skip.
-FEE_BPS defaults to 250; LIVEMODE and DEVELOPMENT_AUTH default to false, are
-read as strict booleans, and LIVEMODE is emitted explicitly in buyer TOML.
-DEVELOPMENT_AUTH and API_KEY_ENV are mutually exclusive. The helper serializes
-only the named payments table, not domain configuration or payer selection.
-See [shared payment-scenario configuration](../../e2e-tests/README.md#shared-payment-scenario-configuration)
-for environment and runner setup.
+All three Compose lanes run the payments lane double, sharing the payments kit's
+engine. Bare-metal and API-credit payment scenarios run rather than skip; VM
+payment stages 1–2 run, while case stages 3–4 require an accepting mediation target
+and report a blocked skip naming `MEDIATION.SERVICE_URL` when absent. Registries
+recommend a fixture authority that cannot answer: `.invalid` origin, no usable
+record-key private half and no bearer token at the double. This is construction,
+not a production fixture-identity guard. The VM storefront's secret overlay holds
+its labelled development dispute credential.
 
-**Current example:** complete deals settled through the Arkhai payments service are qualified by that service's own suite. Here, `kit/arkhai-payments` generates its models from the service's published schema and checks the published vectors, all vendored and identified by content hash in `kit/arkhai-payments/schema/SOURCE.md`: the current producer vectors through the strict models, signatures and transaction identities, and the historical vectors as raw transaction identities, receipt framing, signatures and attachment hashes only, which the current models refuse, as "Payment Receipts in Tests" describes. Neither proves live service responses, provider funding or physical delivery.
+Runners layer `docker,payments-lane,<lane>-lane`: committed
+`config-payments-lane.yml` supplies the target, accounts, key settings and CA,
+then each lane profile supplies only its differences. Tests hold restated values
+to their canonical fixture or identity files. Payments settings and credentials
+are not injected into the runner's environment. The harness hands the resolved
+buyer token to each buyer process under the configured `API_KEY_ENV` name.
+The runner reads `BUYER_API_KEY` from its settings; external runs supply that
+setting through a secret profile. `CA_BUNDLE_PATH` scopes trust to the payments
+client and readiness probe; the probe disables environment proxies.
+
+The shared helper is `e2e-tests/tests/e2e/roles/helpers/payments.py`. Without a
+configured target an external run is blocked. A configured run requires service
+identity, buyer account and both marketplace credentials; without development
+authentication it also requires a key-variable name and a usable buyer token.
+Configuration failures occur by name before readiness or scenario mutations and
+never echo the credential. An unready external target blocks; `LANE_OWNED=true`
+with no target or an unready target fails setup. Each lane also runs the seller's
+actual authenticated `check-payments` before scenarios. There is no Alkahest
+fallback. Fee defaults to250 bps; receipt mode is explicit and boolean settings
+are parsed as booleans.
+
+The double and vendored vectors prove deterministic public-contract composition,
+not the producer's ledger, Stripe funding, hosted availability, real access or
+physical cleanup. External qualification names its actual service and consumer
+revision and observes those outcomes separately. See
+[shared payment-scenario configuration](../../e2e-tests/README.md#shared-payment-scenario-configuration)
+and [payment evidence ownership](../../openspec/specs/test-compatibility/architecture.md#payment-evidence-ownership).
 
 ## Offline Review Validation
 

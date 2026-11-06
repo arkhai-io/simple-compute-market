@@ -230,6 +230,15 @@ the reason for each beside the list. The provider-specific rules stay, because
 they match fixed formats that almost never misfire. A later fixture that trips one
 is another entry in the gate's list, never a marker beside the fixture.
 
+The deterministic public TLS leaf at
+`tools/payments-lane-double/tls/double.key.pem` has one rule-local gate allowance:
+the canonical path AND the exact generated key match must both agree. Different
+material at that path, the same fixture elsewhere and an additional key in the
+file remain refused. The fixture cannot label itself exempt, and neither the key
+rule nor a directory is disabled. The audit configuration retains this fixture's
+finding. Real pinned-scanner regressions verify staged/committed acceptance,
+audit visibility and those negative cases.
+
 `scripts/tests/test_check_secrets.py` scans the whole tracked tree under the gate
 and asserts it finds nothing, under any rule. A gitleaks release whose new rule the
 tree trips therefore fails that test when the pin moves, rather than at someone's

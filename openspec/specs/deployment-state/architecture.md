@@ -117,10 +117,15 @@ release/extensions, fees and provider operations. The independent Agreement-name
 dispute authority owns cases, outcomes and their payment effects. SCM installs `arkhai-kit-arkhai-payments` from `.dist`; its wire models come from the published JSON Schema rather than service implementation imports.
 
 Buyer and seller roles configure trusted payment origin, Ed25519 receipt identity,
-fee policy and an API-key environment-variable name under
-`[Settlement.arkhai_payments]`. Ordered root `[[Dispute]]` preferences and separate
+fee policy and optional `ca_bundle_path` under `[Settlement.arkhai_payments]`.
+A service takes its `api_key` from its secret overlay; a buyer provider may name
+`api_key_env`. These forms and loopback `development_auth` are mutually exclusive.
+One resolver supplies client construction, readiness and the payments check.
+The configured CA affects only that payments client, not process-wide trust. Ordered root `[[Dispute]]` preferences and separate
 full-identity `[[DisputeCredential]]` bindings configure dispute participation.
-Signed registry descriptors may recommend authorities; buyers explicitly opt in,
+Credential consumers resolve each binding once and pass a validated secret token
+to `MediationCredential`; the mediation client reads no environment. Signed
+registry descriptors may recommend authorities; buyers explicitly opt in,
 local identity vetoes prevail and recommendations stay registry-specific. WorkOS user-scoped API keys reach only the owning process, separately from marketplace signer Secrets. HTTPS is required outside loopback. Generated public config and images contain no resolved API key, provider object, or payment-service persistence.
 
 Storefront-owned migrations persist exact Agreement bytes and opaque settlement data together in negotiation threads; domain receipt and physical/grant progress remain separately role-owned. VM and bare-metal trust the accepted selected-site provisioner independently of payment trust. API-credit deployments retain a separate credits authority and gated application. Payment-only Ed25519 buyers and sellers require no wallet or chain configuration.
