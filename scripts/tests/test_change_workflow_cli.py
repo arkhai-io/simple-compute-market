@@ -231,7 +231,8 @@ def test_a_failed_push_exits_1_whatever_git_returned(
     _git(root, "remote", "add", "origin", str(tmp_path / "no-such-remote"))
     _git(root, "checkout", "-q", "-b", "feat/x")
 
-    status, out, err = _printed(capsys, lambda: cli.main(["push"], root=root))
+    status, out, err = _printed(capsys, lambda: cli.main(["push", "--remote", "origin"],
+                                                         root=root))
     assert status == 1
     assert out.startswith("+ git push")
     assert "ERROR: git push exited with status" in err
@@ -353,6 +354,43 @@ def test_an_interactive_start_opens_the_steps_skill(tmp_path: Path, arguments: l
     assert cli.main(["start", arguments[0], CHANGE, *arguments[1:]], root=root,
                     launch=launched) == 0
     assert launched.commands == [["claude", prompt]]
+
+
+def test_a_change_worked_in_place_merges_with_no_base_given(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-s3ju: with no clone to have recorded the branch the change lands on, and
+    none given, the merge refuses, naming the argument that gives it, and starts
+    nothing."""
+    root = _repository(tmp_path / "workspace", CHANGE)
+    launched = Launched()
+
+    status, _, err = _printed(capsys, lambda: cli.main(["start", "merge", CHANGE], root=root,
+                                                       launch=launched))
+
+    assert status == 1
+    assert "FROM=<branch>" in err and "--arguments 'from <branch>'" in err
+    assert launched.commands == []
+
+
+def test_the_merge_brings_in_the_branch_the_clone_recorded(tmp_path: Path) -> None:
+    root = _repository(tmp_path / "workspace", CHANGE)
+    clone_root = find.clone_directory(root, CHANGE)
+    _git(tmp_path, "clone", "-q", "--origin", "workspace", str(root), str(clone_root))
+    (clone_root / ".git" / find.CLONE_MARKER).write_text(
+        json.dumps({"change": CHANGE, "branch": f"feat/{CHANGE}", "base": "release/2.1"}),
+        "utf-8")
+    launched = Launched()
+
+    assert cli.main(["start", "merge", CHANGE], root=clone_root, launch=launched) == 0
+    assert cli.main(["start", "merge", CHANGE, "--arguments", "from main"], root=clone_root,
+                    launch=launched) == 0
+    # Only a leading `from <branch>` names the branch; other words are the skill's.
+    assert cli.main(["start", "merge", CHANGE, "--arguments", "keep notes from me"],
+                    root=clone_root, launch=launched) == 0
+
+    assert [command[-1] for command in launched.commands] == [
+        f"/change-merge {CHANGE} from release/2.1", f"/change-merge {CHANGE} from main",
+        f"/change-merge {CHANGE} from release/2.1 keep notes from me"]
 
 
 def test_an_interactive_session_that_fails_exits_1_naming_its_status(
@@ -557,8 +595,10 @@ def test_start_orchestrate_refuses_a_configuration_without_its_model(
 
 
 @pytest.mark.parametrize("entry,problem", [
-    ('{ model = "claude-opus-5-5", allow = ["Bash(ls)"] }', "models.orchestrator.allow is no field"),
-    ('{ model = "claude-opus-5-5", harness = "claude" }', "models.orchestrator.harness is no field"),
+    ('{ model = "claude-opus-5-5", allow = ["Bash(ls)"] }',
+     "models.orchestrator.allow is no field"),
+    ('{ model = "claude-opus-5-5", harness = "claude" }',
+     "models.orchestrator.harness is no field"),
     ('{ effort = "medium" }', "models.orchestrator.model must be a non-empty string"),
     ('{ model = "claude-opus-5-5", effort = "" }', "models.orchestrator.effort must be"),
 ])
@@ -593,13 +633,31 @@ def test_find_json_prints_the_change_for_a_program(
     (root / "openspec/changes" / CHANGE / "reviews").mkdir()
 
     assert _printed(capsys, lambda: cli.main(["find", "--json", CHANGE], root=root))[0] == 0
+    # A change worked in place, with no clone, records no branch it lands on.
     assert _printed(capsys, lambda: cli.main(["find", "--json", CHANGE], root=root))[1] == (
         json.dumps({"name": CHANGE, "directory": f"openspec/changes/{CHANGE}",
                     "archived": False, "records": f"openspec/changes/{CHANGE}/reviews",
-                    "format": FORMAT}) + "\n")
+                    "format": FORMAT, "base": None}) + "\n")
     status, out, _ = _printed(capsys, lambda: cli.main(["find", "--json", "other"], root=root))
     assert status == 0
     assert json.loads(out)["records"] is None
+
+
+def test_find_json_prints_the_branch_a_clone_recorded(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-s3ju: `base` is the branch the change's clone recorded, read from the
+    workspace in the clone beside it, and in the clone itself."""
+    root = _repository(tmp_path / "workspace", CHANGE)
+    clone_root = find.clone_directory(root, CHANGE)
+    _git(tmp_path, "clone", "-q", "--origin", "workspace", str(root), str(clone_root))
+    marker = clone_root / ".git" / find.CLONE_MARKER
+    marker.write_text(json.dumps({"change": CHANGE, "branch": f"feat/{CHANGE}",
+                                  "base": "release/2.1"}), "utf-8")
+
+    for checkout in (root, clone_root):
+        status, out, _ = _printed(capsys, lambda: cli.main(["find", "--json", CHANGE],
+                                                           root=checkout))
+        assert status == 0 and json.loads(out)["base"] == "release/2.1"
 
 
 def test_find_json_says_an_archived_change_is_archived(
@@ -610,7 +668,8 @@ def test_find_json_says_an_archived_change_is_archived(
     status, out, _ = _printed(capsys, lambda: cli.main(["find", "--json", CHANGE], root=root))
     assert status == 0
     assert json.loads(out) == {"name": CHANGE, "directory": ARCHIVED, "archived": True,
-                               "records": f"{ARCHIVED}/reviews", "format": FORMAT}
+                               "records": f"{ARCHIVED}/reviews", "format": FORMAT,
+                               "base": None}
     assert cli.main(["find", "--active", "--json", CHANGE], root=root) == 1
 
 
@@ -703,10 +762,10 @@ def test_clone_where_run_in_a_clone_looks_beside_its_workspace(
 # The make fragment.
 
 def _fragment(tmp_path: Path, target: str, *variables: str) -> list[str]:
-    """What `make -n` prints for `target` of a Makefile that sets this repository's
-    merge branch and includes the fragment, with no step variable inherited."""
+    """What `make -n` prints for `target` of a Makefile that includes the fragment,
+    with no step variable inherited."""
     makefile = tmp_path / "Makefile"
-    makefile.write_text(f"CHANGE_WORKFLOW_MERGE_FROM := main\ninclude {FRAGMENT}\n", "utf-8")
+    makefile.write_text(f"include {FRAGMENT}\n", "utf-8")
     env = {key: value for key, value in os.environ.items()
            if key not in ("UNATTENDED", "SECTION", "SECTIONS", "FRESH", "ALLOW", "ARGUMENTS",
                           "SESSION_ID", "REVIEW_BASE", "REVIEW_MODEL", "REVIEW_EFFORT",
@@ -738,8 +797,9 @@ COMMAND = "scripts/change-workflow"
     ("implement", ["SECTION=3", "UNATTENDED=1", "ARGUMENTS=it's", "SESSION_ID=s-1"],
      [f"{COMMAND} start implement \"X\" --sections \"3\" --arguments 'it'\\''s' "
       "--session 's-1' --unattended"]),
+    # No base given: the engine reads the branch the change lands on.
     ("review", ["KIND=design"],
-     [f'{COMMAND} review "X" --kind "design" --base "dev"    ']),
+     [f'{COMMAND} review "X" --kind "design"     ']),
     ("review", ["KIND=closeout", "REVIEW_BASE=main", "REVIEW_MODEL=m", "REVIEW_EFFORT=high",
                 "FRESH=1", "UNVALIDATED=1"],
      [f'{COMMAND} review "X" --kind "closeout" --base "main" --model "m" --effort "high" '
@@ -747,7 +807,7 @@ COMMAND = "scripts/change-workflow"
     ("triage", ["UNATTENDED=1"], [f'{COMMAND} start triage "X" --unattended']),
     ("validate", ["ARGUMENTS=with HELM_ALL_SCENARIOS=1"],
      [f"{COMMAND} start validate \"X\" --arguments 'with HELM_ALL_SCENARIOS=1'"]),
-    ("merge", [], [f"{COMMAND} start merge \"X\" --arguments 'from main'"]),
+    ("merge", [], [f'{COMMAND} start merge "X"']),
     ("merge", ["FROM=release", "UNATTENDED=1"],
      [f"{COMMAND} start merge \"X\" --arguments 'from release' --unattended"]),
     ("closeout", [], [f'{COMMAND} start closeout "X"']),
@@ -757,6 +817,7 @@ COMMAND = "scripts/change-workflow"
     ("change-clone", ["BRANCH=b", "FROM=main"],
      [f'{COMMAND} clone "X" --branch "b" --from "main"']),
     ("change-clone-remove", [], [f'{COMMAND} clone-remove "X"']),
+    ("change-clone-remove", ["BASE=main"], [f'{COMMAND} clone-remove "X" --base "main"']),
     ("round-view", ["BASE=abc"], [f'{COMMAND} round-view "X" --base "abc"']),
     ("round-done", [], [f"{COMMAND} round-done"]),
     ("round-view-closed", [], [f"{COMMAND} check round-view"]),
@@ -777,7 +838,7 @@ def test_a_fragment_target_runs_the_command(tmp_path: Path, target: str,
 
 def test_a_value_set_before_the_include_stands(tmp_path: Path) -> None:
     makefile = tmp_path / "Makefile"
-    makefile.write_text("CHANGE_WORKFLOW := bin/cw\nCHANGE_WORKFLOW_REVIEW_BASE := trunk\n"
+    makefile.write_text("CHANGE_WORKFLOW := bin/cw\nREVIEW_BASE := trunk\n"
                         f"include {FRAGMENT}\n", "utf-8")
     output = subprocess.run(["make", "-n", "--no-print-directory", "-f", str(makefile), "review",
                              "CHANGE=X", "KIND=design"], cwd=tmp_path, capture_output=True,

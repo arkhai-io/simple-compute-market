@@ -11,8 +11,9 @@ round view (`ROUND_VIEW_CLOSED`); then it opens the change's workflow log with a
 carrying the record set's format, refusing records of another format
 (`log.open_log`). `start orchestrate` opens the orchestrating session on the model
 and effort the workflow configuration's `models.orchestrator` names. `resume`
-resumes a waiting run with the owner's answer; `review` runs a review; `stop` sends SIGTERM to the change's run in progress — in its
-clone when it has one, else in this checkout — on the owner's word, which the run
+resumes a waiting run with the owner's answer; `review` runs a review; `stop`
+sends SIGTERM to the change's run in progress — in its clone when it has one, else
+in this checkout — on the owner's word, which the run
 logs as `stopped`; `log` and `note` read and write the workflow log, `note --resumes`
 recording the owner's direction to revisit a finished triage; `watch` follows the
 steps as they run, and `denials` reports a run's denials. `record` is a
@@ -52,6 +53,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -68,7 +70,7 @@ from .graph import KINDS, STEPS
 from .log import (branch_decisions, direction, history_log_path, last_entries, log_path,
                   note_orchestrator, note_round, open_log, read_log, record_interactive)
 from .records import git_head
-from .review import DEFAULT_BASE, review_and_log
+from .review import review_and_log
 from .running import drop_invocations, invocations_directory, kept_invocations, stop
 from .watch import denial_report, watch
 from .wrapper import Wrapper
@@ -216,7 +218,9 @@ def _parser() -> argparse.ArgumentParser:
                        "models")
     review.add_argument("change")
     review.add_argument("--kind", required=True, choices=KINDS)
-    review.add_argument("--base", default=DEFAULT_BASE)
+    review.add_argument("--base", default=None,
+                        help="the branch the change is read against, for this run; the "
+                             "branch it lands on, as its clone recorded it, by default")
     review.add_argument("--model", default=None,
                         help="the owner's choice of reviewer for this run, outside the review "
                              "models' policy: a claude- model runs on Claude, any other on Codex, "
@@ -330,7 +334,8 @@ def _parser() -> argparse.ArgumentParser:
     found.add_argument("--records", action="store_true",
                        help="its records: this checkout's, else the owner's workspace's")
     find_.add_argument("--json", action="store_true",
-                       help="print name, directory, archived, and records as JSON")
+                       help="print name, directory, archived, records, format, and base, the "
+                            "branch the change lands on, as JSON")
     find_.add_argument("change")
     clone = commands.add_parser(
         "clone", help="create or finish a change's clone; `clone where <change>` prints a "
@@ -341,11 +346,15 @@ def _parser() -> argparse.ArgumentParser:
     clone.add_argument("--branch", default=None,
                        help="the change's branch; feat/<change> by default")
     clone.add_argument("--from", dest="from_ref", default=None,
-                       help="where a new branch starts; dev by default")
+                       help="the branch the change lands on, where a new branch starts; the "
+                            "workspace's checked-out branch by default")
     removing = commands.add_parser(
         "clone-remove", help="delete a merged change's clone once its history is in the "
                              "workspace")
     removing.add_argument("change")
+    removing.add_argument("--base", default=None,
+                          help="the branch the change landed on, for a clone that recorded "
+                               "none")
     viewing = commands.add_parser(
         "round-view", help="show an implementation round as uncommitted changes")
     viewing.add_argument("change")
@@ -356,7 +365,9 @@ def _parser() -> argparse.ArgumentParser:
     history_.add_argument("change")
     cost = commands.add_parser("cost", help="report what a change's runs cost")
     cost.add_argument("change")
-    commands.add_parser("push", help="push exactly HEAD to its own branch, once it may be")
+    push_ = commands.add_parser("push", help="push exactly HEAD to its own branch, once it may be")
+    push_.add_argument("--remote", default=None,
+                       help="the remote to push to, in place of the branch's upstream's")
     config_ = commands.add_parser(
         "config", help="list how every field of the repository's workflow configuration "
                        "resolved; `config load <step>` a step's documents; `config parts "
@@ -376,7 +387,8 @@ def _parser() -> argparse.ArgumentParser:
     run_.add_argument("--owed", default=None,
                       help="an owed part only: the workflow its run is for")
     run_.add_argument("--base", default=None,
-                      help="the branch the change lands on, for a command naming {base}")
+                      help="the branch the change lands on, for a command naming {base}; "
+                           "the one its clone recorded by default")
     commands.add_parser(
         "openspec", help="run the configured OpenSpec command with the arguments given",
         add_help=False)
@@ -425,6 +437,25 @@ def _takes(root: Path, step: str, change: str) -> None:
                         "archives it")
 
 
+# The merge's invocation names the branch it brings in first, after the change:
+# `<change> from <branch>`.
+_FROM = re.compile(r"from\s+\S")
+
+
+def merge_arguments(root: Path, change: str, arguments: str) -> str:
+    """The merge's arguments, naming the branch it brings in: the one given, `from
+    <branch>`, or else the branch the change lands on, as its clone recorded it;
+    refused, naming the argument, with neither."""
+    if _FROM.match(arguments):
+        return arguments
+    base = find.landing_branch(root, change)
+    if base is None:
+        raise StepError(f"the merge brings in the branch {change} lands on, and none is "
+                        "recorded, since the change has no clone that recorded one: give it "
+                        "with FROM=<branch>, or --arguments 'from <branch>'")
+    return " ".join(part for part in (f"from {base}", arguments) if part)
+
+
 def start(args: argparse.Namespace, root: Path, wrapper: Wrapper, launch: Launch) -> int:
     if not args.unattended and (args.allow or args.session or args.fresh):
         raise _Usage("--allow, --session, and --fresh qualify an unattended run; an "
@@ -445,6 +476,8 @@ def start(args: argparse.Namespace, root: Path, wrapper: Wrapper, launch: Launch
     configuration = config.load(root)
     config.require_for_step(configuration, args.step, unattended=args.unattended)
     arguments = " ".join(part for part in (words, args.arguments) if part)
+    if args.step == "merge":
+        arguments = merge_arguments(root, args.change, arguments)
     if args.step == ORCHESTRATE:
         model = configuration.orchestrator_model()
         command = ["claude", "--model", model.model,
@@ -564,14 +597,17 @@ def delegated(args: argparse.Namespace) -> Delegated | None:
                              *(["--branch", args.branch] if args.branch else []),
                              *(["--from", args.from_ref] if args.from_ref else [])]
     simple: dict[str, Delegated] = {
-        "clone-remove": (clones.main, ["remove", getattr(args, "change", "")]),
+        "clone-remove": (clones.main, ["remove", getattr(args, "change", ""),
+                                       *(["--base", args.base]
+                                         if getattr(args, "base", None) else [])]),
         "round-view": (round_view.main, ["start", getattr(args, "change", ""),
                                          *(["--base", args.base]
                                            if getattr(args, "base", None) else [])]),
         "round-done": (round_view.main, ["done"]),
         "history": (history.main, ["sync", getattr(args, "change", "")]),
         "cost": (cost_report.main, [getattr(args, "change", "")]),
-        "push": (push.main, ["push"]),
+        "push": (push.main, ["push", *(["--remote", args.remote]
+                                       if getattr(args, "remote", None) else [])]),
         "hook": (hook.main, None),
     }
     if args.command in simple:
@@ -632,8 +668,11 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
                 raise _Usage("run validation takes `preflight`, or a part and its phase")
         elif (args.part, args.phase, args.owed) != (None, None, None):
             raise _Usage(f"run {args.hook} takes the change alone")
+        # The branch the change lands on, for a command naming `{base}`: the one
+        # given, or the one its clone recorded.
+        base = args.base or find.landing_branch(root, args.change)
         return hooks.main(args.hook, args.change, root=root, configuration=config.load(root),
-                          environ=environ, base=args.base, part=args.part, phase=args.phase,
+                          environ=environ, base=base, part=args.part, phase=args.phase,
                           owed=args.owed)
     if args.command == "check" and args.check == "change":
         configuration = config.load(root)

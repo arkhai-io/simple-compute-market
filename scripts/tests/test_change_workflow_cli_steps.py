@@ -680,8 +680,7 @@ def _make_n(*arguments: str) -> list[str]:
            if key not in ("UNATTENDED", "SECTION", "SECTIONS", "FRESH", "HELM_ALL_SCENARIOS",
                           "ALLOW", "ARGUMENTS", "SESSION_ID", "FROM", "BASE", "BRANCH",
                           "REVIEW_BASE", "REVIEW_MODEL", "REVIEW_EFFORT", "UNVALIDATED",
-                          "CHANGE_WORKFLOW", "CHANGE_WORKFLOW_MERGE_FROM",
-                          "CHANGE_WORKFLOW_REVIEW_BASE",
+                          "CHANGE_WORKFLOW",
                           "MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKELEVEL")}
     output = subprocess.run(["make", "-n", "--no-print-directory", *arguments],
                             cwd=Path(__file__).resolve().parents[2], capture_output=True,
@@ -690,12 +689,17 @@ def _make_n(*arguments: str) -> list[str]:
 
 
 @pytest.mark.parametrize("target,variables,commands", [
-    # A change lands on dev, so the merge brings dev in unless FROM names another.
-    ("merge", [], [f"{COMMAND} start merge \"X\" --arguments 'from dev'"]),
+    # CW-h8vm, "A repository includes the fragment": the merge brings in the branch
+    # the change lands on, which the engine reads, unless FROM names another; the
+    # repository sets no branch of its own.
+    ("merge", [], [f'{COMMAND} start merge "X"']),
     ("merge", ["FROM=release/2.1", "UNATTENDED=1"],
      [f"{COMMAND} start merge \"X\" --arguments 'from release/2.1' --unattended"]),
-    # A review reads the change against dev.
-    ("review", ["KIND=design"], [f'{COMMAND} review "X" --kind "design" --base "dev"    ']),
+    # A review reads the change against the branch it lands on, unless REVIEW_BASE
+    # names another.
+    ("review", ["KIND=design"], [f'{COMMAND} review "X" --kind "design"     ']),
+    ("review", ["KIND=design", "REVIEW_BASE=main"],
+     [f'{COMMAND} review "X" --kind "design" --base "main"    ']),
     ("design", ["UNATTENDED=1", "ALLOW=Bash(make lock)"],
      [f"{COMMAND} start design \"X\" --unattended --allow 'Bash(make lock)'"]),
     ("orchestrate", [], [f'{COMMAND} start orchestrate "X"']),

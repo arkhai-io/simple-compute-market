@@ -17,15 +17,15 @@
 # make's own, written `$$`).
 
 CHANGE_WORKFLOW ?= scripts/change-workflow
-# The branch a change lands on, which the merge before closeout brings in unless
-# FROM names another, and the branch a review reads the change against.
-CHANGE_WORKFLOW_MERGE_FROM ?= dev
-CHANGE_WORKFLOW_REVIEW_BASE ?= dev
 
 ALLOW ?=
-REVIEW_BASE ?= $(CHANGE_WORKFLOW_REVIEW_BASE)
-# The review's models are the review row's in the step table. Unset by default;
-# given, they are the owner's choice for one run, outside the row's policy:
+# The branch a review reads the change against (REVIEW_BASE), and the branch the
+# merge before closeout brings in (FROM), for one run: unset, each is the branch the
+# change lands on, as its clone recorded it, and with none recorded the merge, and
+# every review but the design's, are refused, naming them.
+REVIEW_BASE ?=
+# The review's models are the workflow configuration's. Unset by default; given,
+# they are the owner's choice for one run, outside the models' policy:
 # REVIEW_MODEL replaces the whole list, a claude- model running on Claude and any
 # other on Codex, and the record says so. The orchestrating session never sets them.
 REVIEW_MODEL ?=
@@ -41,7 +41,6 @@ CHANGE_WORKFLOW_GRANTS = $(if $(strip $(ALLOW)), --allow '$(subst ;,' --allow ',
 # run, or nothing for an interactive session, which no table restricts.
 CHANGE_WORKFLOW_RUN = $(if $(CHANGE_WORKFLOW_HEADLESS), --unattended$(CHANGE_WORKFLOW_GRANTS))
 CHANGE_WORKFLOW_ARGUMENTS = $(if $(strip $(ARGUMENTS)), --arguments '$(subst ','\'',$(ARGUMENTS))')
-MERGE_FROM = $(or $(strip $(FROM)),$(CHANGE_WORKFLOW_MERGE_FROM))
 
 .PHONY: design plan implement review triage validate merge closeout archive-cleanup orchestrate
 .PHONY: change-next change-clone change-clone-remove round-view round-done round-view-closed
@@ -58,7 +57,7 @@ implement: ## Open a fresh Claude Code session implementing an OpenSpec change; 
 	@$(CHANGE_WORKFLOW) start implement "$(CHANGE)"$(if $(strip $(SECTIONS)$(SECTION)), --sections "$(or $(strip $(SECTIONS)),$(strip $(SECTION)))")$(if $(CHANGE_WORKFLOW_HEADLESS),$(CHANGE_WORKFLOW_ARGUMENTS)$(if $(strip $(SESSION_ID)), --session '$(subst ','\'',$(strip $(SESSION_ID)))'))$(CHANGE_WORKFLOW_RUN)
 
 review: ## Review an OpenSpec change read-only, in Codex or, when Codex is unavailable, on Claude (CHANGE=<change> KIND=design|implementation|pre-closeout|closeout [REVIEW_BASE=<branch>] [REVIEW_MODEL=<any model id, claude-… on Claude; the owner's choice>] [REVIEW_EFFORT=<effort>] [FRESH=1] [UNVALIDATED=1])
-	@$(CHANGE_WORKFLOW) review "$(CHANGE)" --kind "$(KIND)" --base "$(REVIEW_BASE)" $(if $(strip $(REVIEW_MODEL)),--model "$(REVIEW_MODEL)") $(if $(strip $(REVIEW_EFFORT)),--effort "$(REVIEW_EFFORT)") $(if $(strip $(FRESH)),--fresh) $(if $(filter 1,$(UNVALIDATED)),--unvalidated)
+	@$(CHANGE_WORKFLOW) review "$(CHANGE)" --kind "$(KIND)" $(if $(strip $(REVIEW_BASE)),--base "$(REVIEW_BASE)") $(if $(strip $(REVIEW_MODEL)),--model "$(REVIEW_MODEL)") $(if $(strip $(REVIEW_EFFORT)),--effort "$(REVIEW_EFFORT)") $(if $(strip $(FRESH)),--fresh) $(if $(filter 1,$(UNVALIDATED)),--unvalidated)
 
 triage: ## Open a fresh Claude Code session triaging an OpenSpec change's untriaged reviews, validation, and the owner's notes (CHANGE=<change> [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
 	@$(CHANGE_WORKFLOW) start triage "$(CHANGE)"$(CHANGE_WORKFLOW_RUN)
@@ -66,8 +65,8 @@ triage: ## Open a fresh Claude Code session triaging an OpenSpec change's untria
 validate: ## Open a Claude Code session validating the commit at HEAD for an OpenSpec change; ARGUMENTS follows the change in the skill's invocation (CHANGE=<change> [ARGUMENTS=<text>] [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
 	@$(CHANGE_WORKFLOW) start validate "$(CHANGE)"$(CHANGE_WORKFLOW_ARGUMENTS)$(CHANGE_WORKFLOW_RUN)
 
-merge: ## Open a fresh Claude Code session merging the branch an OpenSpec change lands on into its branch once its pre-closeout review is triaged, resolving the conflicts and repairing what that branch's changes broke (CHANGE=<change> [FROM=<branch>, default CHANGE_WORKFLOW_MERGE_FROM] [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
-	@$(CHANGE_WORKFLOW) start merge "$(CHANGE)" --arguments 'from $(subst ','\'',$(MERGE_FROM))'$(CHANGE_WORKFLOW_RUN)
+merge: ## Open a fresh Claude Code session merging the branch an OpenSpec change lands on into its branch once its pre-closeout review is triaged, resolving the conflicts and repairing what that branch's changes broke (CHANGE=<change> [FROM=<branch>, default the branch the change lands on] [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
+	@$(CHANGE_WORKFLOW) start merge "$(CHANGE)"$(if $(strip $(FROM)), --arguments 'from $(subst ','\'',$(strip $(FROM)))')$(CHANGE_WORKFLOW_RUN)
 
 closeout: ## Open a fresh Claude Code session closing out an OpenSpec change, archiving it last; resumes one archived but not committed (CHANGE=<change> [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
 	@$(CHANGE_WORKFLOW) start closeout "$(CHANGE)"$(CHANGE_WORKFLOW_RUN)
@@ -82,11 +81,11 @@ change-next: ## Print the next step of an OpenSpec change as the orchestrator co
 	@$(CHANGE_WORKFLOW) find "$(CHANGE)" >/dev/null
 	@$(CHANGE_WORKFLOW) next "$(CHANGE)" --plain
 
-change-clone: ## Create a change's own clone beside the owner's workspace, or finish one left incomplete, and start its bootstrap in the background; run in the workspace (CHANGE=<change> [BRANCH=feat/<change>] [FROM=<branch>])
+change-clone: ## Create a change's own clone beside the owner's workspace, or finish one left incomplete, and start its bootstrap in the background; run in the workspace (CHANGE=<change> [BRANCH=feat/<change>] [FROM=<the branch it lands on; the workspace's checked-out branch>])
 	@$(CHANGE_WORKFLOW) clone "$(CHANGE)" $(if $(strip $(BRANCH)),--branch "$(BRANCH)") $(if $(strip $(FROM)),--from "$(FROM)")
 
-change-clone-remove: ## Delete a merged change's clone, copying its history into the workspace first; refuses, deleting nothing, while the clone holds anything else; run in the workspace (CHANGE=<change>)
-	@$(CHANGE_WORKFLOW) clone-remove "$(CHANGE)"
+change-clone-remove: ## Delete a merged change's clone, copying its history into the workspace first; refuses, deleting nothing, while the clone holds anything else; run in the workspace (CHANGE=<change> [BASE=<the branch it landed on, for a clone that recorded none>])
+	@$(CHANGE_WORKFLOW) clone-remove "$(CHANGE)"$(if $(strip $(BASE)), --base "$(BASE)")
 
 round-view: ## Show an implementation round as uncommitted changes for the owner's reading: in the owner's workspace, on the branch fetched from the change's clone, or in place for a change with no clone; run again to follow the clone's new commits (CHANGE=<change> [BASE=<commit>])
 	@$(CHANGE_WORKFLOW) round-view "$(CHANGE)" $(if $(BASE),--base "$(BASE)")

@@ -555,7 +555,7 @@ CW-59c7 (the remote and a new branch's upstream), CW-xx5f, and CW-h8vm. Touches
 `hooks.py`, and `workflow.mk`, and the root `Makefile`'s
 `CHANGE_WORKFLOW_MERGE_FROM` and `CHANGE_WORKFLOW_REVIEW_BASE`.
 
-- [ ] 5.1 `clone` records the landing branch — the workspace's checked-out branch, or
+- [x] 5.1 `clone` records the landing branch — the workspace's checked-out branch, or
   `--from` — in the clone's marker, and gives a new change branch an upstream of its
   own name on the landing branch's upstream remote, as `branch.<name>.remote` and
   `branch.<name>.merge`; `clone.DEFAULT_FROM` is removed (D4, CW-s3ju, CW-59c7). Verify:
@@ -563,7 +563,26 @@ CW-59c7 (the remote and a new branch's upstream), CW-xx5f, and CW-h8vm. Touches
   from `dev` and from `main` recording each, the new branch's upstream configured
   before its first push, and "Orchestration is run again from another branch"
   (CW-s3ju).
-- [ ] 5.2 `find --json` prints `base`, the recorded landing branch or `null` (D4,
+  - Done: the marker gains `base`, kept on every rerun (a recorded base stands
+    whatever the workspace has checked out); a workspace with no branch checked out
+    and no `--from` is refused before anything is cloned. The upstream is
+    `origin`'s branch of the name when it exists, else the name on the landing
+    branch's upstream remote (`git config`, since `--set-upstream-to` needs the
+    remote-tracking ref), else none; a landing upstream remote other than `origin`
+    is added to the clone with the workspace's URL. The bootstrap's `{base}` is the
+    landing branch. The marker's reading moved to `find` (`clone_marker`,
+    `landing_branch`, and `clone_directory`, which `clone` imports), since `find`
+    cannot import `clone`. Evidence (library integration, real workspaces and
+    clones): clones from `dev` and from `main` recording each, `--from` naming
+    another, the upstream configured before any push, "Orchestration is run again
+    from another branch" through `find --json`, a detached workspace refused, a
+    `--from` contradicting the recorded branch refused, a landing branch tracking
+    another remote giving the clone that remote and the branch its upstream there,
+    one tracking nothing giving no upstream, and the bootstrap's `{base}` the
+    landing branch. The suites' workspaces now push `dev` with `-u`, as a real
+    workspace's `dev` tracks `origin`. A rerun that adds the landing branch's remote
+    settles the upstream again after adding it.
+- [x] 5.2 `find --json` prints `base`, the recorded landing branch or `null` (D4,
   CW-s3ju); the merge, the review's base, and the hooks' `{base}` read it, an argument
   overriding it for one run (the merge's `FROM`, the review's `--base`), and a step
   needing it with none recorded or given refuses, naming the argument (CW-hdxi).
@@ -574,23 +593,81 @@ CW-59c7 (the remote and a new branch's upstream), CW-xx5f, and CW-h8vm. Touches
   `base` printed and `null`, "A change worked in place merges with no base given"
   (CW-s3ju), the review reading `base`, and "A repository includes the fragment"
   (CW-h8vm) through `make merge FROM=<branch>`.
-- [ ] 5.3 The guarded push sends to the branch's upstream remote, or a remote given
+  - Done: `start merge` with no `from <branch>` in its arguments adds the recorded
+    branch, or refuses naming `FROM=<branch>` and `--arguments 'from <branch>'`
+    (`cli.merge_arguments`); a review other than the design's takes `--base` or the
+    recorded branch, or refuses naming `--base` (the design review names no base, so
+    needs none); `run` fills `{base}` from `--base` or the recorded branch. The
+    fragment passes `--base` and `from` only when `REVIEW_BASE` or `FROM` is set;
+    `make change-clone-remove` takes `BASE`. The next-step computation's clone
+    suggestion names no `FROM`, and its messages on an unlanded prerequisite say to
+    merge the branch the change lands on, not `dev`. Only a leading `from <branch>`
+    in the merge's arguments names its branch. Evidence, all library integration
+    (`landing_branch` runs `git`, inside or outside a repository): `base` null for
+    a change with no clone and recorded, read in the clone and from the workspace
+    (`test_find_change.py`; `find --json` both ways in
+    `test_change_workflow_cli.py`); "A change worked in place merges with no base
+    given" and the merge bringing in the recorded branch, a leading `from`
+    overriding and other words left to the skill, in `test_change_workflow_cli.py`
+    beside the other `start` tests (real `git init` and clone, the launch faked),
+    not `test_change_workflow_cli_steps.py`; the review reading the recorded branch
+    and refusing with none (review suite); `{base}`
+    recorded and overridden through `run` with a real `sh` (hooks suite); CW-h8vm
+    through the root Makefile's `make -n merge` with and without `FROM`, and the
+    review with and without `REVIEW_BASE` (`test_change_workflow_cli_steps.py`,
+    library integration: a real `make -n`). The review suite's runs of other kinds
+    give `base="dev"`, the change being worked in place.
+- [x] 5.3 The guarded push sends to the branch's upstream remote, or a remote given
   as `push --remote <remote>`, and refuses a branch with neither; `push.DEFAULT_REMOTE`
   is removed (D4, CW-59c7). Verify: tests in `scripts/tests/test_check_push_ready.py`
   (library integration) for "A new change branch is pushed first" and "A branch with
   no upstream" (CW-59c7).
-- [ ] 5.4 `clone-remove` judges the merge against the recorded landing branch on the
+  - Done: a remote given overrides the upstream's for that push, leaving the
+    upstream as it was; with no upstream it is pushed with `--set-upstream`; the
+    `workspace` remote and `.` are refused, so no push goes into the owner's
+    workspace (tested both ways). Both
+    scenarios pass, "A new change branch is pushed first" through a real clone
+    made by `clones.create`, plus the remote given for a branch with no upstream
+    and the override (library integration, real Git). The push suites'
+    repositories (`test_check_push_ready.py`, `test_check_public_content.py`,
+    `test_check_secrets.py`) give their change branch its own-name upstream, as a
+    clone does.
+- [x] 5.4 `clone-remove` judges the merge against the recorded landing branch on the
   branch's upstream remote, where it judged `origin/dev` and `origin`, and takes
   `--base <branch>` for a clone with none recorded, refusing without it (D4, CW-xx5f).
   Verify: tests in `scripts/tests/test_change_clone.py` (library integration) for
   "The owner removes a clone too early", "A change landed on another branch", and "A
   clone recorded no landing branch" (CW-xx5f).
-- [ ] 5.5 Verification: `pytest -q scripts/tests/test_change_clone.py
+  - Done: `--base` overrides the recorded branch for the removal, as CW-s3ju has
+    an argument override it for one run, so a change the merge brought onto
+    another branch is removable once landed there (found by the fresh-context
+    check: the first version kept the recorded branch over the argument). A clone
+    whose marker records none and given none is refused before its history is
+    copied; a branch tracking no remote is a problem named in the refusal. The
+    three scenarios pass ("too early" is the existing unmerged and records-missing
+    refusals), plus a branch merged only into another branch than its recorded
+    one, the override, a branch tracking no remote, and `clone-remove --base`
+    through the command (library integration, real clones and a bare `origin`).
+- [x] 5.5 Verification: `pytest -q scripts/tests/test_change_clone.py
   scripts/tests/test_find_change.py scripts/tests/test_change_workflow_review.py
   scripts/tests/test_change_workflow_cli_steps.py scripts/tests/test_check_push_ready.py
   scripts/tests/test_make_change_completion.py scripts/tests/test_validate_parallel.py`
   (unit, and library integration where a real Git repository is used) passes; `make
   test` passes. End-to-end: none; no scenario exercises the workflow tooling.
+  - Done: the seven suites with the CLI, hooks, next-step, history, public-content,
+    secrets, and workflow-command suites pass; `make test-release-tooling` (2574)
+    and `make test` pass. End-to-end: confirmed none. `make check-change` fails
+    only on the specification index (10.9).
+  - Handoff: the permanent documents still name `CHANGE_WORKFLOW_MERGE_FROM`,
+    `CHANGE_WORKFLOW_REVIEW_BASE`, and `dev` as the default
+    (`docs/agents/change-workflow.md`, section 9; both capabilities' `README.md`
+    and `market-change-workflow`'s `spec.md`, closeout's 10.9 and the archive).
+    The validation skill's guarded push needs no `--remote`: this branch tracks
+    `origin`.
+  - Fresh-context check, declined: a run interrupted after the clone's checkout and
+    before its marker records the workspace's branch at the rerun, which may not be
+    the one the branch started from; the window is one Git call wide, and a rerun
+    with `--from` records the intended one.
 
 ## 6. This repository's configuration and targets (D20, MCW-r4tx, MCW-k3vy)
 

@@ -22,7 +22,9 @@ pre-closeout review refuses to start unless the latest validation record names
 earlier pre-closeout review's triage, only those and the repository's inert paths —
 with the result `passed`; the owner overrides that by `--unvalidated`, or by their
 direction to the review in the workflow log, until a review of that kind has run on
-it. The review's outcome is `finished`,
+it. Every review but the design's reads the change against the branch it lands on,
+`--base` or the one its clone recorded, and refuses with neither. The review's
+outcome is `finished`,
 naming the record this run published and, as its exit, the triage of its kind, or
 `stopped` with the runner's reason; an earlier record never counts.
 """
@@ -41,7 +43,7 @@ from typing import Any, Callable, Sequence
 from . import config
 from .common import Clock, Entry, StepError, repository_root, utc_now
 from .cost import review_cost
-from .find import ChangeNotFound, change_directory, is_archived
+from .find import ChangeNotFound, change_directory, is_archived, landing_branch
 from .graph import KINDS
 from .harness import (NETWORK_RETRIES, CodexRunner, Reached, Runner, claude_command,
                       codex_command, missing_program, resume_command, run_claude, run_codex,
@@ -54,7 +56,6 @@ from .running import (drop_invocations, invocations_directory, kept_invocations,
 from .steps import HARNESSES, STEP_TABLE, Model, StepRules, load_steps
 from .stream import Stream, transcript_denials
 
-DEFAULT_BASE = "dev"
 SECTIONS = ("Summary", "Assessment", "Questions", "Findings", "Readiness")
 # Each finding's fields, and the values each admits; None admits any non-empty
 # value. A finding with one evident fix states `Alternatives: none — <why>`, so an
@@ -188,14 +189,14 @@ def review_problems(text: str, kind: str, change: str) -> list[str]:
     return problems
 
 
-def review_prompt(kind: str, change: str, base: str) -> str:
+def review_prompt(kind: str, change: str, base: str | None) -> str:
     prompt = f"Use the change-review skill. Review kind: {kind}. Change: {change}."
     if kind != "design":
         prompt += f" Base: {base}."
     return prompt
 
 
-def continuation_prompt(kind: str, change: str, base: str, previous: str) -> str:
+def continuation_prompt(kind: str, change: str, base: str | None, previous: str) -> str:
     prompt = (f"The change {change} has been revised since your review, {previous}. Re-read the "
               "change-review skill, which may have changed, and every file in the change, including "
               f"the triage records in reviews/. Then write a complete new {kind} review in the skill's "
@@ -344,7 +345,7 @@ def _marker_text(text: str) -> str:
     return " ".join(text.split()).replace("-->", "->")
 
 
-def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str | None = None,
+def run_review(change: str, kind: str, *, base: str | None = None, model: str | None = None,
                effort: str | None = None, fresh: bool = False, root: Path | None = None,
                runner: CodexRunner = run_codex, claude: Runner = run_claude,
                unvalidated: bool = False, head: Callable[[Path], str] = _reviewed_head,
@@ -383,6 +384,13 @@ def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str |
         models = configuration.step_models("review")
     except config.ConfigError as exc:
         raise ReviewError(str(exc)) from exc
+    # Every review but the design's reads the change against the branch it lands
+    # on: the one given for this run, or the one its clone recorded.
+    base = base or landing_branch(root, change)
+    if kind != "design" and base is None:
+        raise ReviewError(f"a {kind} review reads {change} against the branch it lands on, "
+                          "and none is recorded, since the change has no clone that recorded "
+                          "one: give it with --base <branch> (REVIEW_BASE=<branch>)")
     reviewed = head(root)
     # The owner's direction to this review, not yet used by a run of it, overrides
     # the validation check as `--unvalidated` does: the check is the review's

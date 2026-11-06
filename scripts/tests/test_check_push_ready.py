@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from change_workflow import cli
+from change_workflow import clone as clones
 from change_workflow import push as guard
 from change_workflow.common import SESSION_ID, UNATTENDED_RUN
 from change_workflow.running import invocations_directory, kept_invocations
@@ -61,7 +62,20 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     _git(work, "checkout", "-q", "-b", "feat/change")
     _commit(work, "slice")
     _configure(work)
+    _track_own_name(work)
     return work
+
+
+def _track_own_name(repo: Path, remote: str = "origin") -> None:
+    """The change branch's upstream, a branch of its own name on `remote` that does
+    not exist yet, as a change's clone configures it."""
+    _git(repo, "config", "branch.feat/change.remote", remote)
+    _git(repo, "config", "branch.feat/change.merge", "refs/heads/feat/change")
+
+
+def _untrack(repo: Path) -> None:
+    _git(repo, "config", "--unset", "branch.feat/change.remote")
+    _git(repo, "config", "--unset", "branch.feat/change.merge")
 
 
 def _configure(repo: Path, text: str = PROTECTED, checks: tuple[str, ...] = ()) -> None:
@@ -81,13 +95,78 @@ def _remote_head(repo: Path, branch: str) -> str:
     return _git(repo, "ls-remote", "origin", f"refs/heads/{branch}").split("\t")[0]
 
 
-def test_a_new_branch_is_pushed_to_its_own_name_and_tracks_it(repo: Path) -> None:
+def test_a_branch_tracking_its_own_name_not_yet_pushed_is_pushed_there(repo: Path) -> None:
     head = _git(repo, "rev-parse", "HEAD")
 
     assert guard.main(["push"], root=repo) == 0
 
     assert _remote_head(repo, "feat/change") == head
     assert _git(repo, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/feat/change"
+
+
+def test_a_branch_with_no_upstream(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-59c7: with no upstream and no remote given, the push refuses, naming the
+    argument that gives the remote, and pushes nothing."""
+    _untrack(repo)
+
+    assert guard.main(["push"], root=repo) == 1
+
+    assert "give it with --remote <remote>" in capsys.readouterr().err
+    assert _remote_head(repo, "feat/change") == ""
+
+
+def test_a_branch_with_no_upstream_is_pushed_to_the_remote_given_and_tracks_it(
+        repo: Path) -> None:
+    _untrack(repo)
+    head = _git(repo, "rev-parse", "HEAD")
+
+    assert cli.main(["push", "--remote", "origin"], root=repo, environ={}) == 0
+
+    assert _remote_head(repo, "feat/change") == head
+    assert _git(repo, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/feat/change"
+
+
+def test_a_remote_given_overrides_the_upstreams_for_one_push(repo: Path,
+                                                            tmp_path: Path) -> None:
+    other = tmp_path / "other.git"
+    _git(tmp_path, "init", "-q", "--bare", str(other))
+    _git(repo, "remote", "add", "mirror", str(other))
+    head = _git(repo, "rev-parse", "HEAD")
+
+    assert guard.main(["push", "--remote", "mirror"], root=repo) == 0
+
+    assert _git(repo, "ls-remote", "mirror", "refs/heads/feat/change").split("\t")[0] == head
+    assert _remote_head(repo, "feat/change") == ""
+    assert _git(repo, "config", "branch.feat/change.remote") == "origin"
+
+
+@pytest.mark.parametrize("remote", ["workspace", "."])
+def test_no_push_goes_to_the_workspace_whatever_remote_is_given(
+        repo: Path, capsys: pytest.CaptureFixture[str], remote: str) -> None:
+    assert guard.main(["push", "--remote", remote], root=repo) == 1
+
+    assert "is no remote a change's branch is pushed to" in capsys.readouterr().err
+    assert _remote_head(repo, "feat/change") == ""
+
+
+def test_a_new_change_branch_is_pushed_first(repo: Path) -> None:
+    """CW-59c7: a change's clone made for a new branch from a landing branch
+    tracking `origin` gave the branch an upstream of its own name on `origin`, so
+    its first push goes there with no remote given. Library integration: a real
+    clone of a real workspace."""
+    _git(repo, "checkout", "-q", "dev")
+    clone = clones.create(repo, CHANGE, bootstrap=lambda _: None).clone
+    _configure(clone)
+    # The settings link the clone makes, which this repository's .gitignore holds.
+    with (clone / ".git/info/exclude").open("a", encoding="utf-8") as exclude:
+        exclude.write("/.claude/\n")
+    (clone / "slice.txt").write_text("slice", "utf-8")
+    _git(clone, "add", "slice.txt")
+    _git(clone, "commit", "-qm", "slice")
+
+    assert _git(clone, "config", f"branch.feat/{CHANGE}.remote") == "origin"
+    assert guard.main(["push"], root=clone) == 0
+    assert _remote_head(repo, f"feat/{CHANGE}") == _git(clone, "rev-parse", "HEAD")
 
 
 def test_a_tracked_branch_pushes_exactly_head(repo: Path) -> None:

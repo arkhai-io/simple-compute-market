@@ -4,8 +4,10 @@ An unattended push needs a mechanical definition of "the change's own branch".
 HEAD must be attached to a branch none of the workflow configuration's
 `repository.protected-branches`, the worktree must be clean, untracked files
 included, and the branch's upstream, if it has one, must be the branch of the same
-name. A branch with no upstream yet is pushed to the same name on `origin` and the
-upstream set, because every new change branch starts that way.
+name. The push goes to the upstream's remote, or the remote `--remote` names; a
+branch with no upstream is pushed to the same name on the remote given and the
+upstream set, and refused with none given. A change's clone gives its new branch
+its upstream as it is made, so its first push needs no argument.
 
 The check reports and never repairs: each refused state means something
 unexpected happened, and fixing it automatically would hide that. The push sends
@@ -38,10 +40,10 @@ from typing import Mapping, Sequence
 
 from . import config
 from .common import SESSION_ID, StepError, repository_root
+from .find import WORKSPACE_REMOTE
 from .hooks import Hooks, Invoked
 from .running import invocations_directory, keep_invocations
 
-DEFAULT_REMOTE = "origin"
 PRE_PUSH = "pre-push"
 _NO_OBJECT = "0" * 40
 
@@ -61,10 +63,16 @@ def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True)
 
 
-def check(root: Path, protected: Sequence[str]) -> tuple[PushTarget | None, list[str]]:
+def check(root: Path, protected: Sequence[str],
+          remote: str | None = None) -> tuple[PushTarget | None, list[str]]:
     """The push HEAD may receive, or every reason it may not be pushed; `protected`
-    the branches no step pushes."""
+    the branches no step pushes, and `remote` the remote given for this push, in
+    place of the upstream's."""
     problems: list[str] = []
+    if remote in (WORKSPACE_REMOTE, "."):
+        # A change's clone names the owner's workspace by this remote, and a step
+        # pushes nothing into the owner's workspace.
+        problems.append(f"{remote} is no remote a change's branch is pushed to")
     attached = _git(root, "symbolic-ref", "--quiet", "--short", "HEAD")
     branch = attached.stdout.strip() if attached.returncode == 0 else ""
     if not branch:
@@ -81,16 +89,20 @@ def check(root: Path, protected: Sequence[str]) -> tuple[PushTarget | None, list
 
     target = None
     if branch:
-        remote = _git(root, "config", f"branch.{branch}.remote").stdout.strip()
+        tracked = _git(root, "config", f"branch.{branch}.remote").stdout.strip()
         merge = _git(root, "config", f"branch.{branch}.merge").stdout.strip()
-        if not remote and not merge:
-            target = PushTarget(branch, DEFAULT_REMOTE, set_upstream=True)
-        elif merge != f"refs/heads/{branch}" or not remote or remote == ".":
-            upstream = (f"{remote}/{merge.removeprefix('refs/heads/')}" if remote and merge
-                        else remote or merge)
+        if not tracked and not merge:
+            if remote:
+                target = PushTarget(branch, remote, set_upstream=True)
+            else:
+                problems.append(f"{branch} has no upstream, so the remote to push to is "
+                                "unknown; give it with --remote <remote>")
+        elif merge != f"refs/heads/{branch}" or not tracked or tracked == ".":
+            upstream = (f"{tracked}/{merge.removeprefix('refs/heads/')}" if tracked and merge
+                        else tracked or merge)
             problems.append(f"{branch} tracks {upstream}, not a branch of its own name")
         else:
-            target = PushTarget(branch, remote, set_upstream=False)
+            target = PushTarget(branch, remote or tracked, set_upstream=False)
     return (None if problems else target), problems
 
 
@@ -127,6 +139,8 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None,
          environ: Mapping[str, str] = os.environ) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("action", choices=("check", "push"))
+    parser.add_argument("--remote", default=None,
+                        help="the remote to push to, in place of the branch's upstream's")
     args = parser.parse_args(argv)
     try:
         root = repository_root() if root is None else root
@@ -135,7 +149,7 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None,
     except StepError as exc:
         print(f"REFUSED: {exc}", file=sys.stderr)
         return 1
-    target, problems = check(root, configuration.protected_branches or ())
+    target, problems = check(root, configuration.protected_branches or (), args.remote)
     if problems:
         for problem in problems:
             print(f"REFUSED: {problem}", file=sys.stderr)

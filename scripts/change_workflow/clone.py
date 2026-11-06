@@ -13,18 +13,26 @@ left and never reclones:
 
 1. clone the workspace, without a checkout, its remote named `workspace` — how
    every script in the clone finds the workspace;
-2. set `origin` to the workspace's `origin` URL, so the push guard's upstream of
+2. set `origin` to the workspace's `origin` URL, and the landing branch's upstream
+   remote, when it is another, to that remote's URL, so the push guard's upstream of
    the same name holds;
 3. check out the branch: the existing one at its furthest point between the
-   workspace and `origin`, or a new one from `--from`, refusing a branch whose two
-   copies have diverged; it tracks `origin`'s branch when there is one and never
-   the workspace's, so no push goes to the workspace;
+   workspace and `origin`, or a new one from the branch the change lands on,
+   refusing a branch whose two copies have diverged; it tracks `origin`'s branch
+   when there is one, and otherwise a branch of its own name on the landing
+   branch's upstream remote, so its first push goes there, and never the
+   workspace's, so no push goes to the workspace;
 4. link `.claude/settings.local.json` to the workspace's, so the owner's local
    permissions have one source;
 5. start the bootstrap, the workflow configuration's `post-clone` as the clone's
    checkout declares it, in the background, recording in the clone's Git directory
    the commands it resolved to, its process and log while it runs, then its exit
    status; with no `post-clone` declared it succeeds at once, running nothing.
+
+The branch the change lands on is the workspace's checked-out branch when the clone
+is made, or `--from`; it is recorded in the clone's marker (`find.landing_branch`)
+and kept on every rerun, so running orchestration again from another branch does not
+move it.
 
 A directory that is not a clone of the workspace, a clone with another branch
 checked out, and one with uncommitted changes are refused, naming the directory,
@@ -37,9 +45,11 @@ environment, and a silent retry would hide it.
 the clone. It copies the change's history into the workspace first
 (`history`), then refuses, deleting nothing and naming each problem,
 unless every file of that history is in the workspace with the clone's contents,
-the branch is merged into `origin`'s `dev`, and the clone holds no commit `origin`
-lacks, no uncommitted change, no stash, and no run in progress: anything else would
-be lost with it.
+the branch is merged into the branch the change lands on on its upstream's remote,
+and the clone holds no commit that remote lacks, no uncommitted change, no stash,
+and no run in progress: anything else would be lost with it. A branch given
+(`--base`) overrides the recorded one for the removal; a clone whose marker records
+none is removed only with one given, refused before anything is copied without it.
 
 `clone_of` and `bootstrap_state` are what the next-step computation and the round
 view read; `where` is what `clone where` answers, a usable clone told apart from
@@ -65,16 +75,16 @@ from typing import Callable, Sequence
 
 from . import config
 from .common import StepError, repository_root
-from .find import WORKSPACE_REMOTE, workspace_of
+from .find import CLONE_MARKER, WORKSPACE_REMOTE, clone_directory, clone_marker, workspace_of
 from .history import HistoryError, Synced, differences, report, sync
 from .running import runs_in_progress
 
-DEFAULT_FROM = "dev"
 POST_CLONE = "post-clone"
 SETTINGS = Path(".claude/settings.local.json")
-# In the clone's Git directory: which change and branch the clone was made for,
-# the bootstrap's process and log, and its exit status once it has one.
-MARKER = "change-clone.json"
+# In the clone's Git directory: which change and branch the clone was made for and
+# the branch it lands on (`find`), the bootstrap's process and log, and its exit
+# status once it has one.
+MARKER = CLONE_MARKER
 BOOTSTRAP = "change-bootstrap.json"
 BOOTSTRAP_LOG = "change-bootstrap.log"
 BOOTSTRAP_STATUS = "change-bootstrap.status"
@@ -138,14 +148,6 @@ def default_branch(change: str) -> str:
     return f"feat/{change}"
 
 
-def clone_directory(workspace: Path, change: str) -> Path:
-    """`<workspace>.changes/<change>/`, beside the workspace rather than inside it:
-    the scripts' tree walkers ignore `.gitignore`, so a clone nested in the
-    workspace would be relocked and scanned as part of it."""
-    workspace = workspace.resolve()
-    return workspace.parent / f"{workspace.name}.changes" / change
-
-
 def _check_name(change: str) -> None:
     if not change or change == "archive" or "/" in change or change.startswith("."):
         raise CloneError(f"{change!r} is not a change name")
@@ -168,14 +170,7 @@ def _is_clone_of(directory: Path, workspace: Path) -> bool:
 
 
 def _marker(clone: Path) -> dict[str, str]:
-    path = _git_path(clone, MARKER)
-    if not path.is_file():
-        return {}
-    try:
-        recorded = json.loads(path.read_text("utf-8"))
-    except json.JSONDecodeError:
-        return {}
-    return recorded if isinstance(recorded, dict) else {}
+    return clone_marker(clone)
 
 
 def _checked_out(clone: Path) -> bool:
@@ -412,22 +407,30 @@ def _check_out(clone: Path, branch: str, from_ref: str) -> None:
         start_from = _furthest(clone, from_ref, on_origin)
         start = start_from[1] if start_from else _ref(clone, from_ref)
         if start is None:
-            raise CloneError(f"{branch} does not exist, and --from {from_ref} names no "
-                             "branch of the workspace or origin, nor a commit")
+            raise CloneError(f"{branch} does not exist, and {from_ref}, the branch it lands "
+                             "on, names no branch of the workspace or origin, nor a commit")
     # No index yet: nothing was ever checked out here, so the worktree holds no
     # tracked work for the forced checkout to overwrite.
     _git(clone, "checkout", "--quiet", "--force", "--no-track", "-B", branch, start)
 
 
-def _settle_upstreams(clone: Path, branch: str) -> None:
-    """No branch of the clone tracks the workspace, so the push guard, which pushes
-    a branch to its upstream's remote, never pushes into the owner's workspace.
+def _settle_upstreams(clone: Path, branch: str, remote: str | None) -> None:
+    """The change's branch tracks `origin`'s branch of its name when there is one,
+    and otherwise a branch of its name on `remote`, the landing branch's upstream
+    remote, so the guarded push, which pushes a branch to its upstream's remote,
+    needs no fallback for the first push; with neither it tracks nothing. No branch
+    of the clone tracks the workspace, so no push goes into the owner's workspace.
 
     Run on every pass, not only after the checkout, so a run interrupted between
     the checkout and this is finished by the next.
     """
     if _remote_url(clone, "origin") and _ref(clone, f"refs/remotes/origin/{branch}"):
         _git(clone, "branch", "--quiet", f"--set-upstream-to=origin/{branch}", branch)
+    elif remote and _remote_url(clone, remote):
+        # The branch does not exist there yet, so Git's own --set-upstream-to, which
+        # needs the remote-tracking ref, cannot name it.
+        _git(clone, "config", f"branch.{branch}.remote", remote)
+        _git(clone, "config", f"branch.{branch}.merge", f"refs/heads/{branch}")
     elif _git(clone, "config", f"branch.{branch}.remote", check=False).stdout.strip():
         _git(clone, "branch", "--quiet", "--unset-upstream", branch)
     tracking = _git(clone, "for-each-ref", "--format=%(refname:short) %(upstream:remotename)",
@@ -441,10 +444,18 @@ def _settle_upstreams(clone: Path, branch: str) -> None:
                 _git(clone, "branch", "--quiet", "--unset-upstream", name)
 
 
+def _upstream_remote(workspace: Path, landing: str) -> str | None:
+    """The remote the workspace's `landing` branch tracks, when it is a branch that
+    tracks one other than the workspace itself."""
+    remote = _git(workspace, "config", f"branch.{landing}.remote", check=False).stdout.strip()
+    return remote if remote not in ("", ".", WORKSPACE_REMOTE) else None
+
+
 def create(workspace: Path, change: str, *, branch: str | None = None,
-           from_ref: str = DEFAULT_FROM, bootstrap: PostClone = _configured_post_clone,
+           from_ref: str | None = None, bootstrap: PostClone = _configured_post_clone,
            spawn: Spawn = _spawn) -> Created:
-    """Create the change's clone, or finish one an interrupted run left. The
+    """Create the change's clone, or finish one an interrupted run left. The branch
+    the change lands on is `from_ref`, or the workspace's checked-out branch. The
     bootstrap runs the `post-clone` the clone's checkout declares (`bootstrap`)."""
     _check_name(change)
     workspace = workspace.resolve()
@@ -457,6 +468,11 @@ def create(workspace: Path, change: str, *, branch: str | None = None,
                          "pushes go to")
     target = clone_directory(workspace, change)
     done: list[str] = []
+    given = from_ref or _current_branch(workspace)
+    unknown = (f"the workspace {workspace} has no branch checked out, so the branch the "
+               "change lands on is unknown; give it with --from <branch>")
+    if not given and not target.exists():
+        raise CloneError(unknown)
 
     if target.exists() and (not target.is_dir() or any(target.iterdir())):
         if not target.is_dir() or not _is_clone_of(target, workspace):
@@ -476,6 +492,14 @@ def create(workspace: Path, change: str, *, branch: str | None = None,
         raise CloneError(f"{target} holds {recorded['branch']}, not {branch}; nothing was "
                          "deleted")
     branch = branch or recorded.get("branch") or default_branch(change)
+    if from_ref and recorded.get("base") not in (None, from_ref):
+        raise CloneError(f"{target} lands on {recorded['base']}, not {from_ref}; nothing was "
+                         "changed")
+    # The recorded landing branch stands, whichever branch the workspace has now.
+    landing = recorded.get("base") or given
+    if not landing:
+        raise CloneError(unknown)
+    remote = _upstream_remote(workspace, landing)
 
     # What is already in the clone is refused before anything is written to it.
     current_origin = _remote_url(target, "origin")
@@ -491,23 +515,34 @@ def create(workspace: Path, change: str, *, branch: str | None = None,
         # Settled even in a clone refused below: it touches only upstreams and the
         # branch `git clone` made, never work, and a branch left tracking the
         # workspace would push into it.
-        _settle_upstreams(target, branch)
+        _settle_upstreams(target, branch, remote)
         if dirty := _uncommitted(target):
             raise CloneError(f"{target} has uncommitted changes; nothing was deleted:\n"
                              + "\n".join(dirty))
 
+    added = False
     if current_origin is None:
         _git(target, "remote", "add", "origin", origin)
+        added = True
+    if remote not in (None, "origin") and _remote_url(target, remote) is None:
+        url = _remote_url(workspace, remote)
+        if url:
+            _git(target, "remote", "add", remote, url)
+            added = True
+    if added:
         done.append("remotes")
+        if checked_out:
+            # Settled above before the remote it tracks was there.
+            _settle_upstreams(target, branch, remote)
     if not checked_out:
-        _check_out(target, branch, from_ref)
-        _settle_upstreams(target, branch)
+        _check_out(target, branch, landing)
+        _settle_upstreams(target, branch, remote)
         done.append("branch")
     if not recorded:
         # Recorded once the branch is checked out, so a run refused before that
         # leaves another `--branch` free to be asked for.
-        _git_path(target, MARKER).write_text(json.dumps({"change": change, "branch": branch}),
-                                             "utf-8")
+        _git_path(target, MARKER).write_text(
+            json.dumps({"change": change, "branch": branch, "base": landing}), "utf-8")
 
     link = target / SETTINGS
     wanted = workspace / SETTINGS
@@ -525,7 +560,7 @@ def create(workspace: Path, change: str, *, branch: str | None = None,
     if state.state in (ABSENT, FAILED):
         try:
             commands = bootstrap(target)
-            resolved = [config.fill(command, {"change": change, "base": from_ref})
+            resolved = [config.fill(command, {"change": change, "base": landing})
                         for command in commands or ()]
         except StepError as exc:
             raise CloneError(f"the clone's bootstrap cannot be started: {exc}; the clone is "
@@ -535,21 +570,30 @@ def create(workspace: Path, change: str, *, branch: str | None = None,
     return Created(target, branch, tuple(done), state)
 
 
-def _left_behind(clone: Path, branch: str) -> list[str]:
-    """What deleting the clone would lose beyond its history: a branch not merged,
-    commits `origin` lacks, a stash, uncommitted changes."""
-    _git(clone, "fetch", "--quiet", "--prune", "origin")
-    merged_into = f"refs/remotes/origin/{DEFAULT_FROM}"
+def _left_behind(clone: Path, branch: str, base: str) -> list[str]:
+    """What deleting the clone would lose beyond its history: a branch not merged
+    into `base`, the branch it lands on, on the branch's upstream remote, commits
+    that remote lacks, a stash, uncommitted changes."""
     problems = []
     head = _ref(clone, f"refs/heads/{branch}")
+    remote = _git(clone, "config", f"branch.{branch}.remote", check=False).stdout.strip()
     if head is None:
         problems.append(f"{branch} is not a branch of the clone, so its merge cannot be shown")
-    elif _ref(clone, merged_into) is None or not _merged(clone, head, merged_into):
-        problems.append(f"{branch} is not merged into origin/{DEFAULT_FROM}")
-    unpushed = _git(clone, "rev-list", "--branches", "--not", "--remotes=origin").stdout.split()
-    if unpushed:
-        problems.append(f"{len(unpushed)} commit(s) origin lacks, the latest "
-                        f"{unpushed[0][:12]}")
+    if remote in ("", ".", WORKSPACE_REMOTE):
+        if head is not None:
+            problems.append(f"{branch} tracks no remote, so where it was merged and pushed "
+                            "cannot be shown")
+    else:
+        _git(clone, "fetch", "--quiet", "--prune", remote)
+        merged_into = f"refs/remotes/{remote}/{base}"
+        if head is not None and (_ref(clone, merged_into) is None
+                                 or not _merged(clone, head, merged_into)):
+            problems.append(f"{branch} is not merged into {remote}/{base}")
+        unpushed = _git(clone, "rev-list", "--branches", "--not",
+                        f"--remotes={remote}").stdout.split()
+        if unpushed:
+            problems.append(f"{len(unpushed)} commit(s) {remote} lacks, the latest "
+                            f"{unpushed[0][:12]}")
     if _ref(clone, "refs/stash"):
         problems.append("a stash")
     if dirty := _uncommitted(clone):
@@ -557,9 +601,10 @@ def _left_behind(clone: Path, branch: str) -> list[str]:
     return problems
 
 
-def remove(workspace: Path, change: str) -> Removed:
+def remove(workspace: Path, change: str, base: str | None = None) -> Removed:
     """Delete the change's clone, copying its history into the workspace first, once
-    nothing in the clone would be lost with it."""
+    nothing in the clone would be lost with it: its branch merged into the branch it
+    lands on, `base` when given, else as the clone recorded it."""
     _check_name(change)
     workspace = workspace.resolve()
     if workspace_of(workspace) is not None:
@@ -572,6 +617,12 @@ def remove(workspace: Path, change: str) -> Removed:
     if recorded.get("change") not in (None, change):
         raise CloneError(f"{target} is the clone of {recorded['change']}, not {change}; "
                          "nothing was deleted")
+    # A base given overrides the recorded one for this removal, as the merge's own
+    # argument overrides it: a change merged onto another branch is judged there.
+    landing = base or recorded.get("base")
+    if not landing:
+        raise CloneError(f"{target} recorded no branch the change lands on, so its merge "
+                         "cannot be judged; give it with --base <branch>; nothing was deleted")
     if runs := runs_in_progress(target):
         raise CloneError(f"{target} has a run in progress, so nothing was deleted: "
                          + "; ".join(run.describe() for run in runs))
@@ -584,7 +635,8 @@ def remove(workspace: Path, change: str) -> Removed:
         raise CloneError(f"{exc}; nothing was deleted") from exc
     problems = [f"history: {line}" for line in missing]
     try:
-        problems += _left_behind(target, recorded.get("branch") or default_branch(change))
+        problems += _left_behind(target, recorded.get("branch") or default_branch(change),
+                                 landing)
     except CloneError as exc:
         problems.append(str(exc))
     if problems:
@@ -607,11 +659,15 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
     creating.add_argument("change")
     creating.add_argument("--branch", default=None,
                           help="the change's branch; feat/<change> by default")
-    creating.add_argument("--from", dest="from_ref", default=DEFAULT_FROM,
-                          help="where a new branch starts; dev by default")
+    creating.add_argument("--from", dest="from_ref", default=None,
+                          help="the branch the change lands on, where a new branch starts; "
+                               "the workspace's checked-out branch by default")
     removing = actions.add_parser("remove", help="delete a merged change's clone once its "
                                   "history is in the workspace")
     removing.add_argument("change")
+    removing.add_argument("--base", default=None,
+                          help="the branch the change landed on, for a clone that recorded "
+                               "none")
     args = parser.parse_args(argv)
     try:
         root = repository_root() if root is None else root
@@ -620,7 +676,7 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
         return 1
     if args.action == "remove":
         try:
-            removed = remove(root, args.change)
+            removed = remove(root, args.change, args.base)
         except RemovalRefused as error:
             print(report(error.synced, root.resolve()))
             print(f"ERROR: {error}", file=sys.stderr)
@@ -633,7 +689,7 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
         return 0
     try:
         created = create(root, args.change, branch=args.branch or None,
-                         from_ref=args.from_ref or DEFAULT_FROM)
+                         from_ref=args.from_ref or None)
     except CloneError as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1

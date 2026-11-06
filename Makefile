@@ -974,11 +974,9 @@ review-wheelhouse-scope: ## Print the review projects resolved from REVIEW_PROJE
 	$(CURDIR)/scripts/resolve-review-scope.py $$args
 
 # The change workflow's targets — each step, the review, the round view, the
-# workflow's checks, and the guarded push — are the engine's make fragment, set to
-# this repository's branches: a change lands on dev, and a review reads it against
-# dev. HELM_ALL_SCENARIOS reaches the validation step as the skill's argument.
-CHANGE_WORKFLOW_MERGE_FROM := dev
-CHANGE_WORKFLOW_REVIEW_BASE := dev
+# workflow's checks, and the guarded push — are the engine's make fragment, which
+# reads the branch a change lands on from the change's clone.
+# HELM_ALL_SCENARIOS reaches the validation step as the skill's argument.
 include scripts/change_workflow/workflow.mk
 validate: ARGUMENTS += $(if $(filter 1,$(HELM_ALL_SCENARIOS)),with HELM_ALL_SCENARIOS=1)
 

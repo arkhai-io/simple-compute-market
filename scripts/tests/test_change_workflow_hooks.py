@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from change_workflow import config, hooks, records
+from change_workflow import config, find, hooks, records
 from change_workflow.cli import main
 from change_workflow.common import SESSION_ID, StepError
 from change_workflow.graph import HOOK_STEPS, STEPS
@@ -175,6 +175,23 @@ def test_an_interactive_run_is_unrestricted(tmp_path: Path) -> None:
     assert (tmp_path / "relocked").exists()
 
 
+def test_base_is_the_branch_the_clone_recorded_unless_given(tmp_path: Path) -> None:
+    """CW-s3ju: a hook's `{base}` is the branch the change lands on, as its clone
+    recorded it, and `--base` overrides it for one run. Library integration: a real
+    Git directory holds the marker, and a real `sh` runs the hook."""
+    configured(_change(tmp_path), "[hooks]\npre-archive = \"printf '%s' {base} > seen.txt\"\n")
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / ".git" / find.CLONE_MARKER).write_text(
+        json.dumps({"change": CHANGE, "branch": f"feat/{CHANGE}", "base": "release/2.1"}),
+        "utf-8")
+
+    assert main(["run", "pre-archive", CHANGE], root=tmp_path, environ={}) == 0
+    assert (tmp_path / "seen.txt").read_text("utf-8") == "release/2.1"
+    assert main(["run", "pre-archive", CHANGE, "--base", "main"], root=tmp_path,
+                environ={}) == 0
+    assert (tmp_path / "seen.txt").read_text("utf-8") == "main"
+
+
 def test_a_marker_naming_no_step_runs_no_hook(tmp_path: Path) -> None:
     runner = _hooks(tmp_path, "[hooks]\npre-archive = 'make a'\n", environ={UNATTENDED: "1"})
 
@@ -209,7 +226,8 @@ def test_a_review_on_claude_is_marked_as_the_review(tmp_path: Path) -> None:
     root = repository_with_records(tmp_path)
     claude = claude_review(review_text("implementation"))
 
-    run_review(CHANGE, "implementation", root=root, runner=codex_missing, claude=claude,
+    run_review(CHANGE, "implementation", base="dev", root=root, runner=codex_missing,
+               claude=claude,
                head=lambda _: "0" * 40, changed_since=lambda *_: None, echo=None,
                unvalidated=True)
 
@@ -882,7 +900,8 @@ def test_a_review_on_claude_records_what_it_invoked(tmp_path: Path) -> None:
                                                                 "hook": "pre-commit"}]),
                       (claude_review(review_text("implementation")).runs[0]))
 
-    line = review_and_log(CHANGE, "implementation", root=root, runner=codex_missing,
+    line = review_and_log(CHANGE, "implementation", base="dev", root=root,
+                          runner=codex_missing,
                           claude=reviewer, head=lambda _: "0" * 40,
                           changed_since=lambda *_: None, echo=None, unvalidated=True,
                           runs=lambda _: None, invocations=lambda _: kept)

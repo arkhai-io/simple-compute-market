@@ -46,7 +46,7 @@ COMMAND = ROOT / 'scripts/change-workflow'
 
 @pytest.fixture
 def branch(repo: Path, tmp_path: Path) -> Path:
-    """`repo` on a change branch tracked nowhere yet, beside a bare `origin` holding
+    """`repo` on a change branch not yet pushed, beside a bare `origin` holding
     `dev`, with this check in its tree and a workflow configuration whose `pre-push`
     runs it as the guarded push runs a pre-push hook; both ignored so the worktree
     stays clean."""
@@ -55,6 +55,9 @@ def branch(repo: Path, tmp_path: Path) -> Path:
     git(repo, 'remote', 'add', 'origin', str(remote))
     git(repo, 'push', '-q', '-u', 'origin', 'dev')
     git(repo, 'checkout', '-q', '-b', 'feat/change')
+    # Its upstream, a branch of its own name on `origin`, as a change's clone sets it.
+    git(repo, 'config', 'branch.feat/change.remote', 'origin')
+    git(repo, 'config', 'branch.feat/change.merge', 'refs/heads/feat/change')
     script = repo / 'scripts' / Path(checker.__file__).name
     script.parent.mkdir()
     script.write_text(Path(checker.__file__).read_text('utf-8'), 'utf-8')

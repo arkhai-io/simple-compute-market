@@ -17,12 +17,16 @@ archive cleanup copies them into the owner's workspace, at the same path, where 
 session working another change finds them. `--records` therefore looks in this
 checkout first, then, from a clone, in the workspace its `workspace` remote names.
 
+The branch a change lands on is recorded in its clone's marker as the clone is made
+(`landing_branch`): read in the clone, or, from the workspace, in the change's clone
+beside it. A change worked in place, or whose clone's marker records none, has none.
+
 Run as a command, it prints the directory relative to the repository root — the
 records directory in the workspace as an absolute path — or names the problem and
 exits 1, or 2 for a malformed argument. With `--json` it prints the change as an
 object a program reads (`found`).
 
-Contract: openspec/specs/change-workflow/spec.md, CW-1iaz and CW-c3he.
+Contract: openspec/specs/change-workflow/spec.md, CW-1iaz, CW-c3he, and CW-s3ju.
 """
 
 from __future__ import annotations
@@ -40,6 +44,9 @@ ARCHIVE = CHANGES / "archive"
 REVIEWS = "reviews"
 # The remote a change's clone names the owner's workspace by.
 WORKSPACE_REMOTE = "workspace"
+# In a clone's Git directory: which change and branch the clone was made for, and
+# the branch the change lands on.
+CLONE_MARKER = "change-clone.json"
 # `openspec archive` prefixes the change's name with the date it was archived.
 _ARCHIVED = re.compile(r"^\d{4}-\d{2}-\d{2}-(?P<name>.+)$")
 
@@ -116,6 +123,47 @@ def workspace_of(checkout: Path) -> Path | None:
     return Path(url).resolve()
 
 
+def clone_directory(workspace: Path, change: str) -> Path:
+    """`<workspace>.changes/<change>/`, beside the workspace rather than inside it:
+    the scripts' tree walkers ignore `.gitignore`, so a clone nested in the
+    workspace would be relocked and scanned as part of it."""
+    workspace = workspace.resolve()
+    return workspace.parent / f"{workspace.name}.changes" / change
+
+
+def clone_marker(checkout: Path) -> dict[str, str]:
+    """What the checkout's clone marker records, or nothing for a checkout that is
+    no change's clone, or whose marker cannot be read."""
+    found = subprocess.run(["git", "rev-parse", "--git-path", CLONE_MARKER], cwd=checkout,
+                           capture_output=True, text=True)
+    if found.returncode != 0:
+        return {}
+    path = Path(found.stdout.strip())
+    path = path if path.is_absolute() else checkout / path
+    try:
+        recorded = json.loads(path.read_text("utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return recorded if isinstance(recorded, dict) else {}
+
+
+def landing_branch(root: Path, name: str) -> str | None:
+    """The branch the change called `name` lands on, as its clone recorded it: read
+    in this checkout when it is the change's clone, else in the change's clone of
+    this workspace; None when none is recorded, as for a name no change can have."""
+    try:
+        _check_name(name)
+    except ChangeNotFound:
+        return None
+    for checkout in (root, clone_directory(workspace_of(root) or root, name)):
+        if not checkout.is_dir():
+            continue
+        recorded = clone_marker(checkout)
+        if recorded.get("change") == name and isinstance(recorded.get("base"), str):
+            return recorded["base"]
+    return None
+
+
 def find_records(root: Path, name: str,
                  workspace: Callable[[Path], Path | None] = workspace_of) -> Path:
     """The records of the change called `name`: this checkout's, else, in a change's
@@ -134,13 +182,14 @@ def find_records(root: Path, name: str,
 def found(root: Path, name: str, directory: Path) -> dict[str, object]:
     """The change as `--json` prints it, for a program to read: its name, its
     directory relative to the repository, whether it is archived, its records
-    directory in this checkout, or None when this checkout holds none, and the
-    record-set format this engine reads and writes them in."""
+    directory in this checkout, or None when this checkout holds none, the
+    record-set format this engine reads and writes them in, and the branch it
+    lands on, or None when none is recorded."""
     records = records_directory(root, name)
     return {"name": name, "directory": directory.relative_to(root).as_posix(),
             "archived": is_archived(root, directory),
             "records": records.relative_to(root).as_posix() if records is not None else None,
-            "format": FORMAT}
+            "format": FORMAT, "base": landing_branch(root, name)}
 
 
 def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:

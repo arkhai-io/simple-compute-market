@@ -479,6 +479,9 @@ def branch(repo: Path, tmp_path: Path) -> Path:
     git(repo, "remote", "add", "origin", str(remote))
     git(repo, "push", "-q", "-u", "origin", "dev")
     git(repo, "checkout", "-q", "-b", "feat/change")
+    # Its upstream, a branch of its own name on `origin`, as a change's clone sets it.
+    git(repo, "config", "branch.feat/change.remote", "origin")
+    git(repo, "config", "branch.feat/change.merge", "refs/heads/feat/change")
     return repo
 
 

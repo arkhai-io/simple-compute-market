@@ -81,7 +81,7 @@ def workspace(tmp_path: Path) -> Path:
     _git(work, "add", "--all")
     _git(work, "commit", "-q", "-m", "start")
     _git(work, "remote", "add", "origin", str(origin))
-    _git(work, "push", "-q", "origin", "dev")
+    _git(work, "push", "-q", "-u", "origin", "dev")
     return work
 
 

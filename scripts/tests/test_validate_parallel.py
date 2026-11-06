@@ -658,7 +658,7 @@ def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     _git(work, "add", "--all")
     _git(work, "commit", "-q", "-m", "dev")
     _git(work, "remote", "add", "origin", str(tmp_path / "origin.git"))
-    _git(work, "push", "-q", "origin", "dev")
+    _git(work, "push", "-q", "-u", "origin", "dev")
     return work
 
 

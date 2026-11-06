@@ -6,13 +6,14 @@ from __future__ import annotations
 import json
 import os
 import signal
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Sequence
 
 import pytest
 
-from change_workflow import config
+from change_workflow import config, find
 from change_workflow.log import log_path, note_orchestrator, read_log
 from change_workflow.review import (ReviewError, claim_record, prior_session, review_and_log,
                                     review_models, run_review)
@@ -23,6 +24,10 @@ from change_workflow_fixtures import (ALTERNATIVES, CHANGE, CONFIGURED, FINDING,
                                       codex_missing, codex_saying, configured, not_installed,
                                       option, option_rules, repository, review_text, reviews_of,
                                       validation_text, writing)
+
+# The branch the change lands on, given for each review run here: the change is
+# worked in place, with no clone to have recorded one.
+BASE = "dev"
 
 
 def test_a_review_is_published_and_its_transcript_kept_apart(tmp_path: Path) -> None:
@@ -44,7 +49,7 @@ def test_numbering_follows_records_and_transcripts(tmp_path: Path) -> None:
     root = repository(tmp_path, "01-design.log", "02-validation.log",
                       "transcripts/03-implementation.log")
 
-    path = run_review(CHANGE, "implementation", root=root,
+    path = run_review(CHANGE, "implementation", base=BASE, root=root,
                       runner=writing(review_text("implementation")), head=lambda _: HEAD)
 
     assert path.name == "04-implementation.md"
@@ -73,7 +78,37 @@ def test_design_review_names_no_base(tmp_path: Path) -> None:
     run_review(CHANGE, "design", root=root, runner=writing(review_text(), calls=calls),
                head=lambda _: HEAD)
 
+    # Nor needs one: the change, worked in place, records no branch it lands on.
     assert "Base:" not in calls[0][-1]
+
+
+def test_a_review_reads_the_branch_the_clone_recorded(tmp_path: Path) -> None:
+    """CW-s3ju: with no base given, a review reads the change against the branch its
+    clone recorded. Library integration: the clone's marker read through a real
+    Git directory."""
+    root = repository(tmp_path)
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    (root / ".git" / find.CLONE_MARKER).write_text(
+        json.dumps({"change": CHANGE, "branch": f"feat/{CHANGE}", "base": "release/2.1"}),
+        "utf-8")
+    calls: list[list[str]] = []
+
+    run_review(CHANGE, "implementation", root=root,
+               runner=writing(review_text("implementation"), calls=calls), head=lambda _: HEAD)
+
+    assert calls[0][-1].endswith(f"Change: {CHANGE}. Base: release/2.1.")
+
+
+def test_a_review_with_no_base_recorded_or_given_is_refused_naming_the_argument(
+        tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    calls: list[list[str]] = []
+
+    with pytest.raises(ReviewError, match=r"give it with --base <branch> \(REVIEW_BASE"):
+        run_review(CHANGE, "implementation", root=root, runner=writing(review_text(),
+                                                                       calls=calls),
+                   head=lambda _: HEAD)
+    assert calls == []
 
 
 def test_a_review_runs_on_its_configured_codex_entry(tmp_path: Path) -> None:
@@ -115,7 +150,7 @@ def test_a_review_on_the_owners_model_is_recorded_as_an_override(tmp_path: Path)
     root = repository(tmp_path)
     claude = claude_review(review_text("implementation"))
 
-    line = review_and_log(CHANGE, "implementation", root=root, clock=clock,
+    line = review_and_log(CHANGE, "implementation", base=BASE, root=root, clock=clock,
                           model="claude-fable-5-1", runner=codex_missing, claude=claude,
                           head=lambda _: HEAD, echo=None)
 
@@ -286,7 +321,7 @@ def test_a_closeout_review_of_an_archived_change_is_recorded_in_the_archive(tmp_
     archived.mkdir(parents=True)
     configured(tmp_path)
 
-    path = run_review(CHANGE, "closeout", root=tmp_path,
+    path = run_review(CHANGE, "closeout", base=BASE, root=tmp_path,
                       runner=writing(review_text("closeout")), head=lambda _: HEAD)
 
     assert path == archived / "reviews" / "01-closeout.md"
@@ -297,7 +332,7 @@ def test_a_closeout_review_of_an_active_change_is_refused(tmp_path: Path) -> Non
     calls: list[list[str]] = []
 
     with pytest.raises(ReviewError, match="not archived"):
-        run_review(CHANGE, "closeout", root=root, head=lambda _: HEAD,
+        run_review(CHANGE, "closeout", base=BASE, root=root, head=lambda _: HEAD,
                    runner=writing(review_text("closeout"), calls=calls))
 
     assert calls == []
@@ -330,7 +365,7 @@ def test_the_latest_review_is_continued_past_two_digit_numbers(tmp_path: Path) -
             "utf-8")
     calls: list[list[str]] = []
 
-    run_review(CHANGE, "implementation", root=root,
+    run_review(CHANGE, "implementation", base=BASE, root=root,
                runner=writing(review_text("implementation"), calls=calls), head=lambda _: HEAD)
 
     assert calls[0][:4] == ["codex", "exec", "resume", "latest"]
@@ -368,7 +403,7 @@ def test_a_review_of_another_kind_does_not_continue(tmp_path: Path) -> None:
                head=lambda _: HEAD)
     calls: list[list[str]] = []
 
-    run_review(CHANGE, "implementation", root=root,
+    run_review(CHANGE, "implementation", base=BASE, root=root,
                runner=writing(review_text("implementation"), calls=calls), head=lambda _: HEAD)
 
     assert "resume" not in calls[0]
@@ -409,7 +444,8 @@ def test_a_record_written_during_the_run_takes_the_earlier_number(tmp_path: Path
         (reviews_of(root) / "02-validation.md").write_text("x", "utf-8")
         return inner(command, log)
 
-    path = run_review(CHANGE, "implementation", root=root, runner=runner, head=lambda _: HEAD)
+    path = run_review(CHANGE, "implementation", base=BASE, root=root, runner=runner,
+                      head=lambda _: HEAD)
 
     assert path.name == "03-implementation.md"
     assert (reviews_of(root) / "transcripts" / "03-implementation.log").is_file()
@@ -432,7 +468,7 @@ def test_a_pre_closeout_review_needs_a_passing_validation_of_head(
     calls: list[list[str]] = []
 
     with pytest.raises(ReviewError, match=reason):
-        run_review(CHANGE, "pre-closeout", root=root, head=lambda _: HEAD,
+        run_review(CHANGE, "pre-closeout", base=BASE, root=root, head=lambda _: HEAD,
                    runner=writing(review_text("pre-closeout"), calls=calls))
 
     assert calls == []
@@ -442,7 +478,7 @@ def test_a_passing_validation_of_head_admits_a_pre_closeout_review(tmp_path: Pat
     root = repository(tmp_path)
     (reviews_of(root) / "03-validation.md").write_text(validation_text(HEAD, "passed"), "utf-8")
 
-    path = run_review(CHANGE, "pre-closeout", root=root, head=lambda _: HEAD,
+    path = run_review(CHANGE, "pre-closeout", base=BASE, root=root, head=lambda _: HEAD,
                       runner=writing(review_text("pre-closeout")))
 
     assert path.name == "04-pre-closeout.md"
@@ -454,7 +490,7 @@ def test_a_ledger_commit_after_validation_admits_a_pre_closeout_review(tmp_path:
                                                        "utf-8")
 
     path = run_review(
-        CHANGE, "pre-closeout", root=root, head=lambda _: HEAD,
+        CHANGE, "pre-closeout", base=BASE, root=root, head=lambda _: HEAD,
         changed_since=lambda *_: [f"{RECORDS}/interventions.jsonl"],
         runner=writing(review_text("pre-closeout")))
 
@@ -484,7 +520,7 @@ def test_a_document_commit_after_a_pre_closeout_triage_admits_the_next_review(
         tmp_path: Path) -> None:
     root = _triaged_pre_closeout(tmp_path, INERT)
 
-    path = run_review(CHANGE, "pre-closeout", root=root, head=lambda _: HEAD,
+    path = run_review(CHANGE, "pre-closeout", base=BASE, root=root, head=lambda _: HEAD,
                       changed_since=lambda *_: DOCUMENTS,
                       runner=writing(review_text("pre-closeout")))
 
@@ -497,7 +533,7 @@ def test_with_no_inert_path_declared_a_document_commit_needs_validating(
     root = _triaged_pre_closeout(tmp_path, CONFIGURED)
 
     with pytest.raises(ReviewError, match="openspec/changes/README.md"):
-        run_review(CHANGE, "pre-closeout", root=root, head=lambda _: HEAD,
+        run_review(CHANGE, "pre-closeout", base=BASE, root=root, head=lambda _: HEAD,
                    changed_since=lambda *_: DOCUMENTS,
                    runner=writing(review_text("pre-closeout")))
 
@@ -509,7 +545,7 @@ def test_a_document_commit_before_any_pre_closeout_review_needs_validating(
                                                        "utf-8")
 
     with pytest.raises(ReviewError, match="specs/x/spec.md"):
-        run_review(CHANGE, "pre-closeout", root=root, head=lambda _: HEAD,
+        run_review(CHANGE, "pre-closeout", base=BASE, root=root, head=lambda _: HEAD,
                    changed_since=lambda *_: DOCUMENTS,
                    runner=writing(review_text("pre-closeout")))
 
@@ -517,7 +553,7 @@ def test_a_document_commit_before_any_pre_closeout_review_needs_validating(
 def test_the_owner_may_run_a_pre_closeout_review_unvalidated(tmp_path: Path) -> None:
     root = repository(tmp_path)
 
-    path = run_review(CHANGE, "pre-closeout", root=root, unvalidated=True,
+    path = run_review(CHANGE, "pre-closeout", base=BASE, root=root, unvalidated=True,
                       head=lambda _: HEAD, runner=writing(review_text("pre-closeout")))
 
     assert path.name == "01-pre-closeout.md"
@@ -531,13 +567,13 @@ def test_the_owners_direction_overrides_a_failed_validation_until_the_review_run
     note_orchestrator(log, "review over the failure", "the failure is the pipeline's",
                       by="owner", next_step="review", kind="pre-closeout")
 
-    line = review_and_log(CHANGE, "pre-closeout", root=root, clock=clock, head=lambda _: HEAD,
-                          runner=writing(review_text("pre-closeout")))
+    line = review_and_log(CHANGE, "pre-closeout", base=BASE, root=root, clock=clock,
+                          head=lambda _: HEAD, runner=writing(review_text("pre-closeout")))
 
     assert (line["outcome"], line["record"]) == ("finished", "04-pre-closeout.md")
     # Used by the review it directed: the next one is held to the validation again.
     with pytest.raises(ReviewError, match="result is failed"):
-        run_review(CHANGE, "pre-closeout", root=root, head=lambda _: HEAD,
+        run_review(CHANGE, "pre-closeout", base=BASE, root=root, head=lambda _: HEAD,
                    runner=writing(review_text("pre-closeout")))
 
 
@@ -548,14 +584,14 @@ def test_a_direction_to_another_node_overrides_nothing(tmp_path: Path) -> None:
                       next_step="closeout")
 
     with pytest.raises(ReviewError, match="result is failed"):
-        run_review(CHANGE, "pre-closeout", root=root, head=lambda _: HEAD,
+        run_review(CHANGE, "pre-closeout", base=BASE, root=root, head=lambda _: HEAD,
                    runner=writing(review_text("pre-closeout")))
 
 
 def test_an_implementation_review_never_waits_for_validation(tmp_path: Path) -> None:
     root = repository(tmp_path)
 
-    path = run_review(CHANGE, "implementation", root=root, head=lambda _: HEAD,
+    path = run_review(CHANGE, "implementation", base=BASE, root=root, head=lambda _: HEAD,
                       runner=writing(review_text("implementation")))
 
     assert path.name == "01-implementation.md"
@@ -640,8 +676,8 @@ def test_a_review_falls_back_to_claude_when_codex_is_unavailable(
     root = repository(tmp_path)
     claude = claude_review(review_text("implementation"))
 
-    line = review_and_log(CHANGE, "implementation", root=root, clock=clock, runner=codex,
-                          claude=claude, head=lambda _: HEAD, echo=None)
+    line = review_and_log(CHANGE, "implementation", base=BASE, root=root, clock=clock,
+                          runner=codex, claude=claude, head=lambda _: HEAD, echo=None)
 
     command = claude.commands[0]
     assert command[:3] == ["claude", "-p", ("Use the change-review skill. Review kind: "
@@ -801,7 +837,7 @@ def test_a_failed_review_beside_an_earlier_record_is_logged_stopped(tmp_path: Pa
 def test_a_review_refused_before_it_runs_is_logged_stopped(tmp_path: Path) -> None:
     root = repository(tmp_path)
 
-    line = review_and_log(CHANGE, "pre-closeout", root=root, clock=clock,
+    line = review_and_log(CHANGE, "pre-closeout", base=BASE, root=root, clock=clock,
                           runner=writing(review_text("pre-closeout")), head=lambda _: HEAD)
 
     assert line["outcome"] == "stopped"
@@ -812,7 +848,7 @@ def test_a_review_refused_before_it_runs_is_logged_stopped(tmp_path: Path) -> No
 def test_a_refused_review_on_the_owners_model_is_marked_an_override(tmp_path: Path) -> None:
     root = repository(tmp_path)
 
-    line = review_and_log(CHANGE, "pre-closeout", root=root, clock=clock,
+    line = review_and_log(CHANGE, "pre-closeout", base=BASE, root=root, clock=clock,
                           model="gpt-6-astra", runner=writing(review_text("pre-closeout")),
                           head=lambda _: HEAD)
 

@@ -95,7 +95,6 @@ from typing import Any, Callable, Mapping, Sequence
 
 from . import config, graph
 from .clone import ABSENT as BOOTSTRAP_ABSENT
-from .clone import DEFAULT_FROM
 from .clone import FAILED as BOOTSTRAP_FAILED
 from .clone import RUNNING as BOOTSTRAP_RUNNING
 from .clone import Bootstrap, bootstrap_state, clone_of, default_branch, workspace_of
@@ -805,8 +804,7 @@ class Computation:
                 routes=["work it in the workspace", "move it into a clone by hand"])
         return self.clone_step(
             f"{state.change}'s branch is checked out neither here nor in a clone of its own",
-            {"CHANGE": state.change, "BRANCH": default_branch(state.change),
-             "FROM": DEFAULT_FROM})
+            {"CHANGE": state.change, "BRANCH": default_branch(state.change)})
 
     def in_clone(self, clone: Path, why: str) -> Result:
         return {"step": "in-clone", "clone": str(clone),
@@ -903,7 +901,8 @@ class Computation:
                 directory = change_directory(self.root, name)
             except ChangeNotFound:
                 return _owner(f"{name}, which {gates} depends on, has no directory on this "
-                              "branch: merge dev once its proposal has landed there",
+                              "branch: merge the branch it lands on once its proposal has "
+                              "landed there",
                               prerequisite=name)
             if is_archived(self.root, directory):
                 return _owner(f"{name} is archived on this branch: release the dependency "
@@ -1489,7 +1488,7 @@ class Computation:
 
     def blocked_on_prerequisite(self) -> Result | None:
         """A design that ended blocked, until its prerequisite's row reaches this
-        branch by merging dev and the dependency is recorded."""
+        branch by merging the branch it lands on, and the dependency is recorded."""
         last = self.last(("design",))
         if not last or last.get("outcome") != "blocked":
             return None
@@ -1499,7 +1498,8 @@ class Computation:
             prerequisite = change_directory(self.root, name)
         except ChangeNotFound:
             return _owner(f"the design is blocked on {name}, whose proposal is not on this "
-                          "branch: merge dev once it has landed there", prerequisite=name)
+                          "branch: merge the branch it lands on once it has landed there",
+                          prerequisite=name)
         if is_archived(self.root, prerequisite):
             # Landed and merged in: once its dependency is released, design resumes.
             return None
