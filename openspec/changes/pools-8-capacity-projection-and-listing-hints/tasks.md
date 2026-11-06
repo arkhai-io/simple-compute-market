@@ -198,8 +198,52 @@ after that round and a validation of its `HEAD`; parts 7–11 (7.8–7.11 here) 
     only as a tag) are recorded as resolved elsewhere, each with its evidence, under their
     own headings in `design.md`.
 
-- [x] 7.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve every match; separately, direct-read every touched file for `AGENTS.md`'s fuzzier provenance-narration rule the tool can't catch mechanically. **Done:** ran the real tool (not the manual greps every earlier section relied on) -- found and fixed two genuine violations in very recent test docstrings; re-ran clean across the entire repository. A second pass, prompted by external review, found and fixed one further fuzzy violation the mechanical tool structurally can't catch (a test docstring narrating how a bug was originally found, not just its literal change-ID text) -- confirming the mechanical/fuzzy distinction this task's own text already warned about. **Correction (closeout, 2026-11-06):** three comments in `arkhai_vms_listings` still need rewriting; see "Closeout run (2026-11-06)" above.
-- [x] 7.2 **Import placement.** Migrate local imports to module level wherever safe; verify each candidate move against the real test suite. **Done:** audited every local import touched by this section's own work (test files only -- this section made no production-code changes). One local import in the new buyer regression test (`import domains.vms.listings`, after a `sys.modules` clear) has a genuine, documented reason to stay local: it is the test's own subject, and cannot be imported at file scope without defeating the `sys.modules`-clearing setup the test depends on. Recorded with an inline comment rather than left unexplained. **Correction (closeout, 2026-11-06):** that audit covered only Section 7's own test files. Four production local imports this change added in Sections 5–6 now have a reason that no longer holds, and should move; see "Closeout run (2026-11-06)" above.
+### Fix round (2026-11-06)
+
+Implementation made the code and comment edits listed above, and no others. Outside the code,
+it set this change's row in `openspec/changes/README.md` back to `in implementation`.
+
+- **Comments.** `resolve_vm_listing_cardinality_mode`'s docstring now states the invariant. A
+  pool that declares no value, or one the domain does not recognize, takes a default that
+  follows its member count, because a single-member pool's listing is keyed on its resource's
+  identity. The three module docstrings name
+  `market_resource_pools_contracts.hints`, in `kit/resource-pools-contracts`. The citation
+  takes the `#requirement-` anchor.
+- **Imports.** The four `market_resource_pools_contracts.hints` imports are now at module level
+  in `listing_cardinality_mode.py`, `pool_descriptors.py`, and `pricing_resolution.py`, and
+  their comments are gone. No circular import appeared. No test patches these names where they
+  were looked up.
+- **Evidence.** Each suite ran after `make dist-domains` rebuilt `.dist`, and each environment's
+  installed `arkhai_vms_listings` was confirmed to hold the edited code.
+  - `make test` is the trap here. A suite reinstalls internal wheels from `.dist`, and
+    `make test` does not rebuild them. So an edit to `arkhai_vms_listings` is tested only once
+    `.dist` is rebuilt; the first full run here used the old wheel.
+  - `make test-storefront` passed: 1215 unit tests passed and 1 was skipped; 527 integration
+    tests passed. The resolvers' own tests are among them: `test_listing_cardinality_mode.py`,
+    `test_pool_descriptors.py`, and `test_pricing_resolution.py` (unit), and
+    `test_reconciler_projection.py`, which calls the reconciler directly (library
+    integration).
+  - `make test-vms-buyer` passed 215 tests. They include `test_no_resource_pools_dependency.py`,
+    which guards the buyer boundary. Buyer code calls none of these resolvers, so this suite
+    proves the module-level imports load without a cycle, and nothing more.
+  - The full `make test` then passed, exit 0, and `make check-packaging` passed, exit 0.
+    Both ran before a final edit that only re-wrapped and completed docstrings. After that
+    edit, `make test-storefront` was rerun on a rebuilt wheel, with the same counts.
+  - `make check-change` passed every check after the final edit, including comment hygiene
+    and local imports.
+  - The edits change no behaviour, so no end-to-end scenario is newly evidence for them, and no
+    `Owed by validation:` line is added.
+- **Left alone.** `listing_shapes.py:217–222` has a local import of the same kind with the
+  same stale reason ("buyers install this package without the resource-pool kit"). It came in
+  from `dev` through other changes, not this one, and this round's instruction was to make
+  only the listed edits. It is recorded here for the owner and closeout to decide on.
+  `pricing_resolution.py:108` says "this domain, not `kit/resource-pools`, owns validating
+  the shape it accepts". The shared hint reads now live in `kit/resource-pools-contracts`, so
+  this may be the same naming slip as the module docstrings. It was not on closeout's list, so
+  it was left as it is for closeout to judge.
+
+- [x] 7.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve every match; separately, direct-read every touched file for `AGENTS.md`'s fuzzier provenance-narration rule the tool can't catch mechanically. **Done:** ran the real tool (not the manual greps every earlier section relied on) -- found and fixed two genuine violations in very recent test docstrings; re-ran clean across the entire repository. A second pass, prompted by external review, found and fixed one further fuzzy violation the mechanical tool structurally can't catch (a test docstring narrating how a bug was originally found, not just its literal change-ID text) -- confirming the mechanical/fuzzy distinction this task's own text already warned about. **Correction (closeout, 2026-11-06):** three comments in `arkhai_vms_listings` still need rewriting; see "Closeout run (2026-11-06)" above. Rewritten in the fix round; see "Fix round (2026-11-06)".
+- [x] 7.2 **Import placement.** Migrate local imports to module level wherever safe; verify each candidate move against the real test suite. **Done:** audited every local import touched by this section's own work (test files only -- this section made no production-code changes). One local import in the new buyer regression test (`import domains.vms.listings`, after a `sys.modules` clear) has a genuine, documented reason to stay local: it is the test's own subject, and cannot be imported at file scope without defeating the `sys.modules`-clearing setup the test depends on. Recorded with an inline comment rather than left unexplained. **Correction (closeout, 2026-11-06):** that audit covered only Section 7's own test files. Four production local imports this change added in Sections 5–6 now have a reason that no longer holds, and should move; see "Closeout run (2026-11-06)" above. Moved to module level in the fix round; see "Fix round (2026-11-06)".
 - [x] 7.3 **Documentation compliance.** Re-check every accepted decision against `openspec/README.md`'s placement rules directly. **Done:** see 7.5's own audit findings below -- four stale/nonexistent-anchor promotion-table rows found and corrected; one permanent-spec evidence line found depending on an active change document for its own rationale (`design.md`'s "External review round," referenced by name) and corrected to be self-contained, per this same rule.
 - [x] 7.4 **Narrative compression.** Shorten completed-task notes to final behavior, material evidence, deferred work, and permanent destinations; move debugging narratives into `design.md` first. **Done, in two passes:** the first took this document from 415 lines to roughly 160, confirming `design.md` already carried the full rationale for every section before trimming. A second pass, prompted by external review, found this section's own closeout notes hadn't been held to the same standard -- still carrying which review found which problem and in what order, rather than final behavior and evidence. Trimmed further; the debugging-sequence detail that prompted this (a mechanical edit briefly deleting a section heading, later manual sweeps proving insufficient) has no lasting design value once the fix is verified, so it was cut rather than relocated.
 - [x] 7.5 **Promotion.** Complete the design-promotion record. **Done:**
