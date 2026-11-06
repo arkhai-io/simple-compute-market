@@ -61,9 +61,10 @@ Verification point: `make -C provisioning/compute/service test-integration`;
 End-to-end: no scenario reads the column; every deployed scenario runs both services'
 migrations at startup, so `e2e_deal`, `e2e_bare_metal_deal`, `e2e_bare_metal_mock_deal`
 and `e2e_credits_deal` passing shows the migration applies to a started service. None
-is owed. Corrected at implementation: no scenario reads the column, and those four
-markers show only that each started service records the migration and starts
-cleanly on it. A deployed database is fresh, and once section 2 maps the column
+is owed. Corrected at implementation: no scenario reads the column, and of those
+four markers, `e2e_bare_metal_deal` needs a real host and no pipeline lane runs it;
+the other three show only that each started service records the migration and
+starts cleanly on it. A deployed database is fresh, and once section 2 maps the column
 `create_all` makes it, so no scenario runs the migration's `ADD COLUMN`; that path
 is proven only by the two migration test files above. No `Owed by validation:` line.
 
@@ -316,6 +317,25 @@ through `CapacityEffects`. The fresh-context check also found that
 `openspec/specs/market-composition/architecture.md` says nothing "reserves, commits,
 releases, or truncates through an aggregate directly"; 6.9 now names that sentence.
 
+Pre-closeout fix (review 23 F1): route order raised the last site's error, so a 409
+from the site holding a released reservation was hidden by a later site's 404,
+losing D5's distinction. `aggregation.py`'s `_more_informative` now ranks route-order
+failures: a site's refusal with a status other than 404, then a failure with no
+status (a site that could not be asked), then a 404, keeping the later of equal
+rank; the status is read by attribute, as `multi_registry_client.py` does, since
+core cannot import the site client's error type. Both `activate_lease` and
+`commit` use it; commit's is outside the plan, fixed on the owner's word because
+D5 makes activation answer as commit does. `test_aggregation.py` (unit, over fake
+sites whose refusals carry a status): 409 then 404 surfaces the 409 for activation
+and for commit; 409 then an unreachable site surfaces the 409; an unreachable site
+then 404 surfaces the transport error; 404 everywhere surfaces a 404. The
+fresh-context check of the fix found that, as first written (any non-404 over a
+404), a 409 followed by an unreachable site surfaced the transport error; the
+ranking was added for it. It found nothing else to fix; a commit test asserting the
+second site was asked was declined, as the 409's message already fails the old
+behaviour. Evidence: `make -C core/storefront test` 232 passed; `make dist-ci`, then
+`make test` passed; `make check-packaging` passed; `make check-change` passed.
+
 ## 5. `activated_at_utc` on the compute lease view
 
 Delivers the instant on `LeaseView`, read-only, with no activation operation on the
@@ -425,9 +445,10 @@ the change to implementation. The eleven parts of
   `make check-architecture-change CHANGE=activate-compute-leases-at-the-site` — the
   change owns no architecture exception or override row.
 - [ ] 6.8 **End-to-end pipeline.** Record the pipeline run on the change's final commit,
-  its result, and that `e2e_deal`, `e2e_bare_metal_deal`, `e2e_bare_metal_mock_deal`
-  and `e2e_credits_deal` passed with both services migrated and `LeaseView` carrying
-  the field; record that no scenario activates a lease, activating callers being
+  its result, and that `e2e_deal`, `e2e_bare_metal_mock_deal` and `e2e_credits_deal`
+  passed with both services migrated and `LeaseView` carrying the field; record that
+  `e2e_bare_metal_deal` needs a real host and was not run, no pipeline lane running
+  it (23 F2); record that no scenario activates a lease, activating callers being
   `unify-compute-delivery-path`'s. A pipeline that cannot run for an unrelated reason
   is recorded as a blocker naming its cause and owner, its validations unrun.
 - [ ] 6.9 **Promotion.** Write:
