@@ -1,4 +1,11 @@
 [
+  {
+    "path": "kit/settlement-runtime/src/market_settlement_runtime/rate_publication.py",
+    "scope": "derive_rate_preset",
+    "expression": "quote.amount",
+    "count": 1,
+    "reason": "Unit-bearing AgreedPrice reference quote supplied by the installed preset helper, used only for the publication penalty recommendation; never a raw Agreement or multiplier."
+  },
   {"path": "core/buyer/src/core_buyer/deal_helpers.py", "scope": "exact_agreed_amount", "expression": "quote.amount", "count": 1, "reason": "AgreedPrice returned by the accessor; escrow requires total."},
   {"path": "core/buyer/src/core_buyer/deal_helpers.py", "scope": "load_deal_context", "expression": "parsed_plan.obligations[0].amount", "count": 1, "reason": "SettlementObligation amount-presence validation, not an Agreement read."},
   {"path": "core/buyer/src/core_buyer/negotiation_client.py", "scope": "_validate_agreement_acceptance", "expression": "agreement.amount", "count": 1, "reason": "Raw negotiation hook compares the signed carrier to the codec-derived expected money; it does not interpret a billing unit or spend the scalar."},

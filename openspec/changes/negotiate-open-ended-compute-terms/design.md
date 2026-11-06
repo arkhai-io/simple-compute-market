@@ -580,6 +580,51 @@ post-review to resource-pool management, storefront publication and negotiation
 specifications/architecture; the shared projection-aware override check belongs
 in storefront publication's override contract.
 
+## Recurring publication implementation choices
+
+Task 2.3 will add a mechanism-neutral, structured `recurring` request on each
+settlement publication clause. An omitted request preserves once publication;
+separate clauses price payer-only and payer/payee combinations independently.
+Clauses already resolve whole through override > pool hint > configured default,
+so the preset's notices, penalty and setup resolve with their own quoted rate,
+not by merging rights across sellers' tiers. No stored class is introduced.
+
+The injected helper supplies a unit-bearing reference quote, parsed period,
+approval window, adjudication and the mechanism's lifecycle capabilities, then
+encodes a fully resolved preset. Publication computes the default penalty from
+that quote and validates shared lifecycle terms before calling the encoder.
+The encoder cannot replace those rights or insert a horizon into option identity.
+No hosted rate encoder is supplied here; absent helpers omit only recurring
+clauses. Setup support is an explicit helper capability tied to the vendored
+delivery-end revision, not inferred from the presence of setup fields.
+
+The pool's effective deadline must come from a composition-injected pool-facts
+reader, keyed by site/pool, not the clause's historical delivery-deadline input
+or an unenforced raw tag. The renewable dependency has not implemented that port
+on this base. Its absence resolves no enforced deadline; once publication remains
+possible with the default-buyer diagnostic, and injected qualification supplies
+the port. This change does not invent provider defaults or enable site enforcement.
+Diagnostics are kept in cycle reports even when reserved peers remain publishable.
+The shared refusal function is `default_buyer_refusals`; task 4.1 must consume it
+rather than maintaining another buyer recommendation policy.
+
+Bare-metal pool clauses use `policy_tags.pricing.bare_metal.settlements`; a
+stated override replaces that list, which replaces configured clauses whole.
+An empty list withholds every option. Malformed hint structure holds the pool,
+not a lower tier's price. Reserved-only pools retain their positive-relative-
+maximum hold; pools offering recurrence reach per-option derivation instead.
+An absolute-only horizon can therefore publish recurring options while reserved
+capacity options are omitted with their existing positive-bound requirement.
+With no finite bound, recurrence is omitted and reported, not held as an unknown
+mechanism; a listing left without any valid option closes through the existing
+no-settlement-option path. Capacity/shape identity never includes billing presets.
+
+Publication resolves its diagnostic reference start to a whole second; an
+absolute bound with fractional seconds cannot yield the integer Agreement horizon
+unchanged, so that recurring default is refused instead of rounded. Acceptance
+remains responsible for checking the later actual start and approval expiry.
+Permanent destinations remain D3/D5's publication and settlement homes, post-review.
+
 ## Design promotion record
 
 Destinations are planned, not claims of implemented behavior.

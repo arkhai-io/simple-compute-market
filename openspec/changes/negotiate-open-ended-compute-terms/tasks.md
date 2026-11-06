@@ -6,7 +6,8 @@ installed billing projections and period-aware VM multiplier derivation.
 Signed-acceptance evidence enforcement, accepted consumer migration and the
 fail-closed direct-read guard are implemented through 2.1c. Task 2.2 adds validated
 listing bounds and both storefronts' resolution/persistence/publication carriers.
-Recurring publication and later terms behavior remain unimplemented. Verification levels follow
+Task 2.3 adds injected recurring publication; servicing gates and later terms
+behavior remain unimplemented. Verification levels follow
 `docs/development/TESTING.md`. New acceptance test implementation requires the
 maintainer's approval; the scenarios below are the intended contract, not tests
 added by this reconciliation.
@@ -244,6 +245,41 @@ added by this reconciliation.
   probe/suite commands in the evidence packet. Committed locks and generated
   bare-metal configuration schema are refreshed; ignored environments are not setup.
 
+### Recurring-publication checkpoint (2026-11-07)
+
+- Completed 2.3: structured per-clause recurring presets, neutral injected helper,
+  24-period on-demand penalty recommendation/override, shared-codec validation,
+  default-horizon/runway omissions and durable seller diagnostics in both domains.
+  Billing combinations do not change capacity/shape identity. Bare-metal clauses
+  resolve override > mode-specific pricing hint > configured clauses; absolute-only
+  recurrence does not admit reserved options without their positive relative maximum.
+- Both compositions consume an injected effective pool-facts deadline reader.
+  No such live port is supplied on this base: absence publishes no promise and
+  names the default-buyer refusal; raw clause values are not substituted. The
+  hosted recurring helper remains absent in deployed compositions. Returned
+  treatments and setup fail closed when the injected helper cannot enforce them.
+- Reproducible signed administrator publication/read setup, mixed options,
+  penalty override, missing helper, runway, unbounded/absolute-only horizons,
+  unsupported treatments/setup, evidence/results and resolved attempts:
+  `docs/attachments/negotiate-open-ended-compute-terms/recurring-publication-checkpoint.md`.
+  No permanent tests added. Existing app/fixture seams follow the new contract.
+- Two small encountered baseline repairs are separate commits: the VM architecture
+  test now permits core carriers as the permanent layering rule does (retaining
+  role/composition bans), and the bare-metal introduction fixture uses a rateless
+  current option instead of an obsolete priced carrier. Assertions over actual
+  introduction settle/fulfillment outcomes remain intact.
+- **Restart at 3.1**, defining the composition-owned servicing declaration and
+  publication/cached-acceptance gates; then 3.2 horizon acceptance, 3.3 declaration
+  qualification, section 4 buyer disclosure/first use/validation, and section 5.
+  `default_buyer_refusals` in the neutral publication module is the policy seam
+  section 4 must reuse, not duplicate. The helper's actual names are recorded in
+  `dependency-contracts.md`. 3.1 still must add its declaration input/gate.
+- PR #351 stays draft. No acceptance guarantee, hosted materialization, real
+  provisioning or deployed E2E is claimed. Final rebase/review, post-review
+  promotion and archive remain pending. No external resources or resident servers
+  are retained. Fresh setup remains `make dist-ci`, per-package `make reinit`,
+  then the two committed probe commands in the evidence packet.
+
 ## 2. Quote and capacity terms
 
 - [x] 2.1 In `core/src/market_core/schemas.py` implement the unit-bearing accessor;
@@ -272,7 +308,7 @@ added by this reconciliation.
   use the pool-override kit's existing live fetch to validate cross-tier conflicts before
   writes. Verify pure validation and tier precedence in the package unit suites;
   no new network calls or lease changes here.
-- [ ] 2.3 In both storefront publication adapters, emit separately priced options on
+- [x] 2.3 In both storefront publication adapters, emit separately priced options on
   existing listing identities using the foundation codec and injected preset helper; include
   premature_stop_penalty, recommended on-demand default 24 periods' price with seller override,
   and `delivery_deadline_seconds` from the pool's effective value, read like the bound hints, on

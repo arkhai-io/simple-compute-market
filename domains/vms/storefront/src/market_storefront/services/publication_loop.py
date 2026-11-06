@@ -361,7 +361,13 @@ class VmPublicationCycle:
                 source, candidate, listing_resource
             )
             try:
-                derived = self._await(self._listings.derive_listing(request))
+                derived = self._await(self._listings.derive_listing(
+                    request, publication_diagnostic=lambda entry: self.report.record(
+                        "report", site_id=candidate["site_id"], pool_id=candidate.get("pool_id"),
+                        source=_source_of(candidate), reason=entry["code"],
+                        **{key: value for key, value in entry.items() if key != "code"},
+                    ),
+                ))
                 derived = replace(
                     derived,
                     listing=derived.listing.model_copy(update={"rate_structure": rate_structure}),
