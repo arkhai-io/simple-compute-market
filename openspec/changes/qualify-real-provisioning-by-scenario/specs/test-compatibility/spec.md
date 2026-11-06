@@ -16,7 +16,11 @@ the buyer purchase settled through `arkhai.payments.v1` runs the same definition
 lease ends is not shared across endings: the lease-watchdog expiry and the teardown
 dispatch it starts are shared by every scenario whose lease ends by expiry, and a
 scenario whose lease ends another way, such as by the buyer's teardown, runs its own
-ending stage, which ends in the state teardown completion starts from.
+ending stage, which ends in the state teardown completion starts from. A shared stage
+from fulfillment onwards MUST read each input it checks from state an earlier stage
+wrote independently of the lease under check: the expected host from the Alkahest
+settlement preview or from the driver's declared host, and the teardown's fulfillment
+from whichever ending ran.
 
 A shared stage MUST NOT depend on the mock profile. Holding a provisioning job before
 its result, releasing it, and evaluating a mock rule are mock gates: they are stages of
@@ -65,6 +69,9 @@ at the gate, and its gate-free part stays shared.
   shared expiry stages when the lease ends by expiry, as the VM purchase's does, and a
   stage of its own when it ends by the buyer's teardown, as the bare-metal purchase's
   does
+- **AND** the lease record's host is checked against its driver's declared host, and
+  teardown completion advances the fulfillment its ending reported, so each shared
+  stage's body is the Alkahest set's
 
 #### Scenario: A deal outside the canonical deal
 
@@ -92,8 +99,8 @@ With a ready payments target configured, the bare-metal lane MUST qualify one fi
   canonical lifecycle commit for the same negotiation, and requires the original
   transaction, fulfillment identity, and durable result
 - **AND** the buyer requests physical teardown through `market bare-metal teardown`,
-  converging mock reclaim, and the pinned seller separately refunds the held payment,
-  before selected-site capacity release is confirmed
+  converging mock reclaim, then the pinned seller separately refunds the payment, still
+  held, before selected-site capacity release is confirmed
 
 #### Scenario: A stage fails after the payment is approved
 

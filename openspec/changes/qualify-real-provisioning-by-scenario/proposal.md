@@ -31,7 +31,9 @@ no VM scenario buys through `market buy` in `arkhai.payments.v1`.
   onwards are keyed on the deal's settlement reference, so the Alkahest and
   buyer-purchase sets share them. A lease's ending is shared only among scenarios that
   end the same way: the watchdog-expiry stages by the Alkahest set and the VM purchase,
-  while the bare-metal purchase runs its own buyer-teardown stage.
+  while the bare-metal purchase runs its own buyer-teardown stage. Each set supplies the
+  shared stages' inputs from its own earlier stages, such as the expected host from the
+  Alkahest preview or the buyer purchase's declared host, so their bodies stay one.
 - **External-topology qualification scenarios** extend those purchases against a
   configured real-provisioning target and payments target, adding only the real-host
   observations:

@@ -413,12 +413,36 @@ states it asserts differ:
   by the bare-metal lane purchase and the observation 4 and 5 module, which runs
   `market bare-metal teardown` and ends in the state `11b` starts from.
 
-Whether `11b`'s entry prerequisites fit unchanged after a buyer teardown is checked
-against the code in planning; the boundary is the one stated here.
+**The handoff into the shared stages** (review 31 F2). `09c` and `11b` stay one body
+each. What differs between the sets is which earlier stage writes the state they read,
+and each input stays independent of the lease it is checked against:
 
-**Rejected:** sharing `10a` to `11a` across endings by changing only the reference
-field. A buyer teardown is a different trigger, and the requirement forbids a shared
-stage whose body differs between lanes.
+| State | Read by | Alkahest set | Buyer purchases |
+|---|---|---|---|
+| `expected_host_id` | `09c`, compared with the lease's host | `08a`, from its evaluate-settle preview | the purchase stages, from the driver's declared host: the one host the scenario registered enabled for its resource, or the target's host on a real lane |
+| `teardown_fulfillment_id` | `11b`, advanced to `torn_down` | the ending: expiry's `10b`, from the lease | the expiry ending's `10b` (VM); the buyer-teardown stage, from the deal's fulfillment as delivery status reports it (bare metal) |
+| `_teardown_job_completed` | `11b` | the mock gate's `11a2`, or a real lane's job watch | the same: the buyer-teardown ending arms `09c2` and drains through `11a2` in a mock lane, and a real lane watches its job |
+| the re-reservation's name | `11b` | from the settlement reference | from the settlement reference |
+
+`_evaluate_settle_host_id` becomes `expected_host_id`, and every stage reading it — `08c`'s
+mock evaluation and the real lanes' check of the previewed host included — reads the
+renamed field. `11b`
+keeps its held watchdog and its own `check_leases` that must report the release: the
+existing bare-metal payment purchase already releases through convergence to `torn_down`
+and a `check_leases` call after the buyer's teardown. If implementation finds a buyer
+teardown releasing the lease outside `check_leases`, so that `11b` cannot run unchanged,
+the change returns to design rather than splitting the stage in planning or
+implementation.
+
+**Rejected:**
+
+- **Sharing `10a` to `11a` across endings by changing only the reference field.** A
+  buyer teardown is a different trigger, and the requirement forbids a shared stage
+  whose body differs between lanes.
+- **Splitting `09c` and `11b` at the differing inputs** (review 31 F2). Each assertion
+  would keep its meaning, but the stages would be defined twice when only their inputs'
+  producers differ.
+- **Dropping `09c`'s host check on the buyer path.** It hollows the assertion out.
 
 ### D16. The existing bare-metal payment purchase is the bare-metal base
 
@@ -446,11 +470,21 @@ refund and the teardown stay separate operations, and the module's compensating 
 is unchanged. The permanent requirement "A configured bare-metal payment purchase is
 qualified end to end" is modified accordingly.
 
-Planning confirms that the double accepts a seller reverse after release (the once
-part's hold stays held through its dispute window) and that the CLI teardown's
-delivery-end filing to the unanswerable authority leaves the run successful (D10). If
-the reverse after release is refused, the refund stays before the teardown, and the
-scenario states that the lane proves the CLI teardown only on a refunded deal.
+The refund after the teardown has held funds to reverse:
+
+- **No stop.** The bare-metal storefront submits no payments event but the refund's
+  reverse; the buyer's teardown ends delivery, not the payment.
+- **The hold outlasts the scenario.** The double holds a once part as one lot from
+  approval until its hold window passes, `P7D` in the lane, and its reverse takes any
+  held lot.
+- **No conflict with the earlier end.** The refund records its own end request under
+  its own source; the servicing journal accepts it beside the buyer's, and the end
+  service does not apply the physical end again.
+
+The CLI teardown's delivery-end filing to the unanswerable authority records `Unknown`
+and leaves the run successful (D10). The order is not conditional: if implementation
+finds the reverse after the teardown refused, the change returns to design rather than
+reordering the scenario or narrowing what it proves.
 
 **Rejected:**
 
@@ -461,6 +495,11 @@ scenario states that the lane proves the CLI teardown only on a refunded deal.
   are pytest functions, not subclassable stages, and its ending is not the one those
   observations use.
 - **No bare-metal base.** The buyer CLI's teardown would be verified only externally.
+- **Refunding before the teardown when a reverse after it is refused** (review 31 F1).
+  The lane would prove the CLI teardown only on a refunded deal while the acceptance
+  boundary still promised an unrefunded one, and the code produces no such refusal.
+- **Narrowing the scenario to a refunded-deal teardown.** It loses the local proof of the
+  ending observations 4 and 5 use.
 
 ### D17. The VM lane purchase is a new module with its own resource and host
 
