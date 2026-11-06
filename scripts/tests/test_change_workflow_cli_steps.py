@@ -680,7 +680,7 @@ def _make_n(*arguments: str) -> list[str]:
            if key not in ("UNATTENDED", "SECTION", "SECTIONS", "FRESH", "HELM_ALL_SCENARIOS",
                           "ALLOW", "ARGUMENTS", "SESSION_ID", "FROM", "BASE", "BRANCH",
                           "REVIEW_BASE", "REVIEW_MODEL", "REVIEW_EFFORT", "UNVALIDATED",
-                          "CHANGE_WORKFLOW",
+                          "CHANGE_WORKFLOW", "CHANGE_BASE",
                           "MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKELEVEL")}
     output = subprocess.run(["make", "-n", "--no-print-directory", *arguments],
                             cwd=Path(__file__).resolve().parents[2], capture_output=True,
@@ -709,9 +709,13 @@ def _make_n(*arguments: str) -> list[str]:
     ("check-push-ready", [], [f"{COMMAND} check round-view", f"{COMMAND} check push"]),
     ("push-branch", [], [f"{COMMAND} push"]),
     ("change-graph", [], [f"{COMMAND} check graph"]),
-    ("check-change", [], ['python3 scripts/check_change.py "X"']),
-    # The diff checks read from the branch the change lands on, dev unless named.
-    ("check-change", ["CHANGE_BASE=release"],
+    # The owner's complete closing check is the workflow's whole pre-commit, whose
+    # hook is this repository's check-repository; each reads the branch the change
+    # lands on, which the clone recorded, unless CHANGE_BASE names another.
+    ("check-change", [], [f'{COMMAND} run pre-commit "X"']),
+    ("check-change", ["CHANGE_BASE=release"], [f'{COMMAND} run pre-commit "X" --base "release"']),
+    ("check-repository", [], ['python3 scripts/check_change.py "X"']),
+    ("check-repository", ["CHANGE_BASE=release"],
      ['python3 scripts/check_change.py "X" --base "release"']),
 ])
 def test_the_root_makefile_runs_the_command_through_the_fragment(

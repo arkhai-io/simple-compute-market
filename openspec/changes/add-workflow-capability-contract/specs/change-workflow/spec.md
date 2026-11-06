@@ -632,7 +632,7 @@ The workflow MUST describe each field of the configuration, who uses it, and how
 and each role an adopting repository provides outside it, with the skills that use
 it. A repository MUST state how it provides what the configuration does not hold. A
 test MUST fail on a make target or repository path the skills or step table name that
-the statement omits.
+both the statement and the configuration's commands omit.
 
 #### Scenario: A skill names a new target
 

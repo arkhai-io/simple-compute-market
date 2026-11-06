@@ -130,8 +130,24 @@ def test_a_row_names_two_models_of_one_vendor() -> None:
 
 def test_the_step_table_holds_no_models() -> None:
     """The step table names each step's skill and rules; models are the
-    configuration's, and a row carrying them is accepted unread."""
+    configuration's."""
     assert not hasattr(load_steps()["design"], "models")
+
+
+@pytest.mark.parametrize("table,field", [
+    (f'[steps.design]\nskill = "change-design"\n{MODELS}', "models.design"),
+    ('[orchestrator]\nmodel = "claude-opus-5-5"\neffort = "medium"\n'
+     '[steps.design]\nskill = "change-design"\n', "models.orchestrator"),
+])
+def test_models_in_the_step_table_are_refused_naming_the_configurations_field(
+        tmp_path: Path, table: str, field: str) -> None:
+    """A model left in the step table is a value nothing reads, so the loader refuses
+    it, naming where the configuration holds it."""
+    path = tmp_path / "steps.toml"
+    path.write_text(table, "utf-8")
+
+    with pytest.raises(StepError, match=re.escape(field)):
+        load_steps(path)
 
 
 PUSHES = ["git push origin HEAD", "scripts/change-workflow push", "uv run git push",
@@ -384,13 +400,13 @@ def test_no_step_may_edit_its_own_permissions() -> None:
 
 
 @pytest.mark.parametrize("table,problem", [
-    (f'[steps.design]\nskill = "change-design"\n{MODELS}deny = "Bash(git push*)"\n',
+    ('[steps.design]\nskill = "change-design"\ndeny = "Bash(git push*)"\n',
      "list of rules"),
-    (f'[steps.design]\nskill = "change-design"\n{MODELS}allowed = []\n', "takes only"),
-    (f'[steps.deploy]\nskill = "change-deploy"\n{MODELS}', "unknown step"),
+    ('[steps.design]\nskill = "change-design"\nallowed = []\n', "takes only"),
+    ('[steps.deploy]\nskill = "change-deploy"\n', "unknown step"),
     ('[commons]\nallow = []\n', "unknown tables"),
     ('[common]\nskill = "x"\n', "common row takes only"),
-    (f'[steps.plan]\nskill = "change-plan"\n{MODELS}resume_from = "design"\n', "has no row"),
+    ('[steps.plan]\nskill = "change-plan"\nresume_from = "design"\n', "has no row"),
 ])
 def test_a_malformed_step_table_is_refused(tmp_path: Path, table: str, problem: str) -> None:
     path = tmp_path / "steps.toml"

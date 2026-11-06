@@ -74,7 +74,7 @@ closeout: ## Open a fresh Claude Code session closing out an OpenSpec change, ar
 archive-cleanup: ## Open a fresh Claude Code session cleaning up an archived OpenSpec change once its closeout review's triage has advanced it (CHANGE=<change> [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
 	@$(CHANGE_WORKFLOW) start archive-cleanup "$(CHANGE)"$(CHANGE_WORKFLOW_RUN)
 
-orchestrate: ## Open the orchestrating Claude Code session for one OpenSpec change, on the model and effort of the step table's [orchestrator] row (CHANGE=<change>)
+orchestrate: ## Open the orchestrating Claude Code session for one OpenSpec change, on the model and effort the workflow configuration's models.orchestrator names (CHANGE=<change>)
 	@$(CHANGE_WORKFLOW) start orchestrate "$(CHANGE)"
 
 change-next: ## Print the next step of an OpenSpec change as the orchestrator computes it, in plain form: the step, its reason, and for a waiting run its seq and what it asks (CHANGE=<change>)

@@ -4,8 +4,8 @@ is held to, and what a model a step runs on is.
 The table is `.claude/change-steps.toml`, the workflow's policy. Each step's rules
 are its own plus `common`'s. The models each step runs on, and the orchestrating
 session's, are the repository's preference, which its workflow configuration names
-(`config`). The loader accepts a row's `models` and an `[orchestrator]` table and
-reads neither.
+(`config`), so the loader refuses a row's `models` and an `[orchestrator]` table,
+naming the field that holds them, rather than leave a value nothing reads.
 
 Contract: openspec/specs/change-workflow/spec.md, CW-qu42.
 """
@@ -56,7 +56,10 @@ def _read_table(path: Path | None) -> tuple[Path, dict[str, Any]]:
         table = tomllib.loads(path.read_text("utf-8"))
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise StepError(f"cannot read the step table {path}: {exc}") from exc
-    if unknown := set(table) - {"common", "steps", ORCHESTRATOR}:
+    if ORCHESTRATOR in table:
+        raise StepError(f"{path} has an [{ORCHESTRATOR}] table; the orchestrating session's "
+                        f"model is the workflow configuration's models.{ORCHESTRATOR}")
+    if unknown := set(table) - {"common", "steps"}:
         raise StepError(f"{path} has unknown tables: {', '.join(sorted(unknown))}")
     return path, table
 
@@ -72,7 +75,10 @@ def load_steps(path: Path | None = None) -> dict[str, StepRules]:
     for name, row in table.get("steps", {}).items():
         if name not in STEPS:
             raise StepError(f"{path} names an unknown step {name!r}")
-        if "skill" not in row or set(row) - {"skill", "models", "allow", "deny", "resume_from"}:
+        if "models" in row:
+            raise StepError(f"{path}'s {name} row names models; a step's models are the "
+                            f"workflow configuration's models.{name}")
+        if "skill" not in row or set(row) - {"skill", "allow", "deny", "resume_from"}:
             raise StepError(f"{path}'s {name} row needs a skill, and takes only skill, allow, "
                             "deny, and resume_from")
         steps[name] = StepRules(

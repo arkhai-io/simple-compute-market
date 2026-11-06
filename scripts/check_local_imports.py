@@ -9,7 +9,7 @@ with no comment: one ending a line of the statement, or one on its own on the
 line above. A comment that is only a tool's directive (`noqa`, `type:`,
 `pragma`) gives no reason. Whether the reason is sound stays with review.
 
-Run by `make check-change`, against the merge-base with the branch the change
+Run by `make check-repository`, the change workflow's `pre-commit`, against the merge-base with the branch the change
 lands on. Usage: `check_local_imports.py [--base <branch>]`.
 
 Contract: openspec/specs/market-change-workflow/spec.md, MCW-c4ek.

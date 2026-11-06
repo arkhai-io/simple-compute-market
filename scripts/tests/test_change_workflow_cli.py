@@ -25,7 +25,6 @@ from change_workflow import (clone, cli, config, cost_report, diagram, find, his
                              next_step, push, round_view, skills, tasks)
 from change_workflow.common import FORMAT, StepError
 from change_workflow.log import log_path, read_log, record_outcome
-from change_workflow.steps import load_steps
 from change_workflow_fixtures import (CHANGE, CONFIGURED, VALID, FakeClaude, configured,
                                       event_lines, make_wrapper, option_rules)
 
@@ -613,16 +612,6 @@ def test_this_repositorys_orchestrator_is_opus_at_medium_effort() -> None:
     # large context for a change's relayed turns, not a high effort.
     model = config.load(REPO).orchestrator_model()
     assert (model.harness, model.model, model.effort) == ("claude", "claude-opus-5-5", "medium")
-
-
-def test_the_step_table_accepts_and_ignores_its_models_and_orchestrator_row(
-        tmp_path: Path) -> None:
-    table = tmp_path / "change-steps.toml"
-    table.write_text('[orchestrator]\nmodel = "claude-opus-5-5"\neffort = "medium"\n'
-                     '[steps.design]\nskill = "change-design"\n'
-                     'models = [{ harness = "claude", model = "claude-opus-5-5" }]\n', "utf-8")
-
-    assert set(load_steps(table)) == {"design"}
 
 
 # `find --json`.

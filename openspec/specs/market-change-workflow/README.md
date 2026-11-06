@@ -267,31 +267,31 @@ change's runs at once. No step runs the local compose lanes.
 
 Each role is the workflow's, as
 [`change-workflow`](../change-workflow/README.md#what-an-adopting-repository-provides)
-states it; the provision is what fills it here. A test
-(`scripts/tests/test_change_workflow_assumptions.py`) fails when a make target or
-repository path the workflow's skills, its step table, or its make fragment name, the
-fragment's own targets among them, is missing from these two tables, or when the two
-documents' roles differ.
+states it; the provision is what fills it here: a field of this repository's
+workflow configuration, `.agents/workflow.toml`, or what the configuration does not
+hold. A test (`scripts/tests/test_change_workflow_assumptions.py`) fails when a make
+target or repository path the workflow's skills, its step table, or its make fragment
+name, the fragment's own targets among them, is missing from these two tables and
+from the configuration's commands, or when the two documents' roles differ.
 
 | Role | Provided by |
 |---|---|
-| Local validation of a commit: the repository's own checks and suites against the commit, built from it | `make validate-local`, the family `make validate-*` the step table grants, among them `make validate-ci`; `make check-uv-version` and `make dist-clean` around them; `scripts/validate_slice.py`, which runs the parts against the commit and writes their evidence under `.snapshot/validation/` |
-| Validation in a deployed environment: the change's services built and run as the repository deploys them | `make validate-helm`, `make validate-parallel*`, and the chart's render checks `make -C helm test-render`, in the change's own namespace, within the capacity `helm/validation-capacity.toml` records |
-| The end-to-end pipeline: a run whose head is the commit, its logs fetched | `make run-e2e` (`make run-e2e*`), the scenarios under `e2e-tests/`, and `make fetch-e2e-logs` (`make fetch-e2e-logs*`), into `.snapshot/e2e-logs/` |
-| CI evidence only a push produces: the workflows validation may dispatch, from a fixed list | `make run-ci`, dispatching only the workflows `scripts/ci_evidence.py` lists |
-| Removing a change's validation resources, and recording what they used, at archive cleanup | `make -C helm teardown` (`make -C helm teardown*`), and `make record-capacity` (`make record-capacity*`) into `helm/validation-capacity.toml` |
-| The repository's tests and environments: the suites, locks, builds, and environment refreshes a change's work runs | `make test` and `make test*`, `make -C * test*` in a project; `make lock`, `make lock*`; `make dist*`, `make -C * dist*`; `make init*`, `make -C * init*`; `make reinit*` and `make typecheck*`, the targets of a project's own `Makefile`; `make helm-values-schema`; internal dependencies from wheels and locks through `scripts/uv_project.py` |
-| The packaging check before closeout | `make check-packaging`, which runs `make check-architecture` over `docs/development/ARCHITECTURE.toml`, and `make check-architecture-change` |
-| The closing checks a step ends with | `make check-change` (`scripts/check_change.py`), and the checks it runs and the step table grants as `make check-*` and `scripts/check_*`: `make check-comment-hygiene`, `make check-doc-citations` (`make check-doc-citations*`), `make check-spec-index` |
-| A snapshot of the code for the owner's reading | `make code-snapshot` |
+| Local validation of a commit: the repository's own checks and suites against the commit, built from it | the configuration's validation preflight, then its `local` part; `scripts/validate_slice.py`, which runs the local and Helm parts against the commit, clearing the wheelhouse first, and writes their evidence under `.snapshot/validation/`; the family `make validate-*` the step table grants the steps that fix code |
+| Validation in a deployed environment: the change's services built and run as the repository deploys them | the configuration's `helm` part, after `local`; `make validate-parallel*`, and the chart's render checks `make -C helm test-render`, in the change's own namespace, within the capacity `helm/validation-capacity.toml` records |
+| The end-to-end pipeline: a run whose head is the commit, its logs fetched | the configuration's `pipeline` part, dispatching the run and collecting its logs into `.snapshot/e2e-logs/`; the scenarios under `e2e-tests/`; the step table denies `make run-e2e*` to the steps that fix code |
+| CI evidence only a push produces: the workflows validation may dispatch, from a fixed list | the configuration's owed `ci` part, dispatching only the workflows `scripts/ci_evidence.py` lists |
+| Removing a change's validation resources, and recording what they used, at archive cleanup | the `helm` part's `cleanup`, recording the capacity measured into `helm/validation-capacity.toml`, then removing the change's namespace and images |
+| The repository's tests and environments: the suites, locks, builds, and environment refreshes a change's work runs | the configuration's `after-functional-change` and `pre-commit-functional`; the step table's grants for engineering work: `make test` and `make test*`, `make -C * test*` in a project; `make lock`, `make lock*`; `make dist*`, `make -C * dist*`; `make init*`, `make -C * init*`; `make reinit*` and `make typecheck*`, the targets of a project's own `Makefile`; `make helm-values-schema`; internal dependencies from wheels and locks through `scripts/uv_project.py` |
+| The packaging check before closeout | the configuration's `pre-commit-functional` and `pre-archive`: `make check-packaging`, which runs `make check-architecture` over `docs/development/ARCHITECTURE.toml`, and `make check-architecture-change` |
+| The closing checks a step ends with | the configuration's `pre-commit`, `make check-repository` (`scripts/check_change.py`), after the workflow's default checks; `make check-change`, the owner's complete closing check, which runs `scripts/change-workflow run pre-commit`; the checks they run and the step table grants as `make check-*` and `scripts/check_*`: `make check-comment-hygiene`, `make check-doc-citations` (`make check-doc-citations*`), `make check-spec-index` |
 | The change index at a known path | `openspec/changes/README.md`, checked in a prerequisite's proposal checkout beside this one by `make -C ../<prerequisite>-proposal check-change-index` (`make -C ../*-proposal check-change-index`) |
 | The guidance documents every step reads | `AGENTS.md`, `docs/development/ARCHITECTURE.md`, `docs/development/TESTING.md`, `docs/development/DEPLOYMENT_AND_CONFIG.md`, `openspec/README.md`, `docs/development/ROADMAP.md`, `openspec/config.yaml`, and the workflow's guide `docs/agents/change-workflow.md` |
 | Where specifications and documentation live | `openspec/` (`openspec/**`): the capabilities under `openspec/specs/`, indexed by `openspec/specs/README.md`, each `openspec/specs/<capability>/spec.md`; and `docs/` (`docs/**`), its development documents under `docs/development/` |
-| Protected branches the guarded push refuses | `main` and `dev` |
-| A pre-push check the guarded push runs over what it would send, where the repository provides one | `scripts/check_public_content.py --pre-push`, the public-content scan of the branch's name and every outgoing commit (MCW-q8vd), its local denylist named by Git's `scm.publicContentDenyFile`; then `scripts/check_secrets.py --pre-push`, the pinned gitleaks over the same commits; the same pair `scripts/hooks/pre-push` runs. A step runs the gate over its staged additions with `make check-secrets`, and the audit of every rule with `make audit-secrets` |
-| The `origin` remote the guarded push and the pipeline use | `origin`, this repository on GitHub |
-| The branch a change lands on, merged before closeout and reviewed against | `dev`, set before the fragment's include by `Makefile` as `CHANGE_WORKFLOW_MERGE_FROM` and `CHANGE_WORKFLOW_REVIEW_BASE` |
-| The clone's bootstrap: one command that readies a fresh clone | `make init` |
+| Protected branches the guarded push refuses | `main` and `dev`, the configuration's `repository.protected-branches` |
+| A pre-push check the guarded push runs over what it would send, where the repository provides one | the configuration's `pre-push`, `make pre-push`, which runs `scripts/check_public_content.py --pre-push`, the public-content scan of the branch's name and every outgoing commit (MCW-q8vd), its local denylist named by Git's `scm.publicContentDenyFile`; then `scripts/check_secrets.py --pre-push`, the pinned gitleaks over the same commits; the same target `scripts/hooks/pre-push` runs. A step runs the gate over its staged additions with `make check-secrets`, and the audit of every rule with `make audit-secrets` |
+| The `origin` remote the guarded push and the pipeline use | `origin`, this repository on GitHub, the upstream remote a change's clone gives its branch |
+| The branch a change lands on, merged before closeout and reviewed against | the clone's `--from`, or else the branch the workspace had checked out when the change's clone was made, `dev` for most changes, which the clone records |
+| The clone's bootstrap: one command that readies a fresh clone | the configuration's `post-clone`, `make init` |
 | The make fragment's targets, included by the repository's `Makefile` | `Makefile` includes `scripts/change_workflow/workflow.mk`, giving `make design`, `make plan`, `make implement`, `make review`, `make triage`, `make validate`, `make merge`, `make closeout`, `make archive-cleanup`, `make orchestrate`, `make change-next`, `make change-clone`, `make change-clone-remove`, `make round-view`, `make round-done` (`make round-done*`), `make round-view-closed`, `make change-watch`, `make change-cost`, `make change-history`, `make check-change-index`, `make check-tasks` (`make check-tasks*`), `make check-agent-skills`, `make check-push-ready`, `make push-branch`, and `make change-graph`; run in a change's clone as `make -C <clone> implement`, `make -C <clone> push-branch`, and `make -C <clone> change-history` |
 
 ### The engine's own assumptions
@@ -310,7 +310,8 @@ review.
 | The documentation a commit may change after a pre-closeout review without a validation | `openspec/` and `docs/` |
 | Where validation's and the pipeline's evidence is, which history copies | `.snapshot/validation/` and `.snapshot/e2e-logs/`, untracked |
 | Its command and package, beside each other under `scripts/` | `scripts/change-workflow` and `scripts/change_workflow/`, whose computation and graph the orchestrating skill cites, `scripts/change_workflow/next_step.py` and `scripts/change_workflow/graph.py` |
-| The step table, at a fixed path, in Claude Code's permission-rule syntax | `.claude/change-steps.toml`, its rules guarding `.claude/**` |
+| The repository's workflow configuration, at a fixed path, checked whenever it is read | `.agents/workflow.toml`, which the step table denies every step to edit |
+| The step table, at a fixed path, in Claude Code's permission-rule syntax | `.claude/change-steps.toml`, its rules guarding `.claude/**` and `.agents/workflow.toml`, and granting the engine's `scripts/change-workflow run` for the hooks, `scripts/change-workflow openspec` for the configured OpenSpec command, and `scripts/change-workflow config` |
 | The outcome schema, at a fixed path | `.agents/change-outcome.schema.json` |
 | The skills' one source, linked into each harness's directory | `.agents/skills`, under `.agents/`, linked from `.claude/` and `.codex/` |
 | The harness's local settings, which a clone links to the workspace's | `.claude/settings.local.json` |

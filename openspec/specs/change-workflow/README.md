@@ -1320,7 +1320,8 @@ own statement; this repository's is
 [`market-change-workflow`'s](../market-change-workflow/README.md#how-this-repository-provides-the-workflows-roles).
 A test fails when a make target or repository path the skills, the step table, or
 the make fragment name, the fragment's own targets among them, is missing from that
-statement, or when a role here has no provision there, or one there no role here.
+statement and from the commands the repository's workflow configuration declares,
+or when a role here has no provision there, or one there no role here.
 
 | Role | Used by | Expected to be replaced by |
 |---|---|---|
@@ -1332,7 +1333,6 @@ statement, or when a role here has no provision there, or one there no role here
 | The repository's tests and environments: the suites, locks, builds, and environment refreshes a change's work runs | `change-implement`, `change-triage`, `change-merge`, `change-validate`, `change-plan` | `add-workflow-capability-contract` |
 | The packaging check before closeout | `change-implement`, `change-triage`, `change-merge`, `change-closeout`, `change-validate` | `add-workflow-capability-contract` |
 | The closing checks a step ends with | every step that commits | `add-workflow-capability-contract` |
-| A snapshot of the code for the owner's reading | `change-triage` | `add-workflow-capability-contract` |
 | The change index at a known path | every step | `add-workflow-capability-contract` |
 | The guidance documents every step reads | every step | `add-workflow-capability-contract` |
 | Where specifications and documentation live | every step | `add-workflow-capability-contract` |
@@ -1361,6 +1361,7 @@ review: a module's constant or a tool it invokes is not collected.
 | The documentation a commit may change after a pre-closeout review without a validation | `records.DOCUMENTATION` |
 | Where validation's and the pipeline's evidence is, which history copies | `history.VALIDATION`, `history.E2E_LOGS` |
 | Its command and package, beside each other under `scripts/` | the command's own path, and the skills that name it |
+| The repository's workflow configuration, at a fixed path, checked whenever it is read | `config.CONFIGURATION` |
 | The step table, at a fixed path, in Claude Code's permission-rule syntax | `steps.STEP_TABLE`; provisional, replaced by `sandbox-unattended-workflow-steps` and `add-workflow-harness-adapters` |
 | The outcome schema, at a fixed path | `outcome.SCHEMA` |
 | The skills' one source, linked into each harness's directory | `skills` |

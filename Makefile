@@ -21,7 +21,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: dist-bare-metal-buyer
 .PHONY: run-e2e run-ci fetch-e2e-logs
 .PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
-.PHONY: design-review validate-local validate-ci validate-helm validate-parallel check-change install-gitleaks check-public-content check-secrets audit-secrets check-decision-destinations check-history-wording check-version-bumps check-local-imports check-capability-index record-capacity review-diff last-diff review-wheelhouse-prepare review-locks pre-push
+.PHONY: design-review validate-local validate-ci validate-helm validate-parallel check-change check-repository install-gitleaks check-public-content check-secrets audit-secrets check-decision-destinations check-history-wording check-version-bumps check-local-imports check-capability-index record-capacity review-diff last-diff review-wheelhouse-prepare review-locks pre-push
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -971,7 +971,14 @@ review-wheelhouse-scope: ## Print the review projects resolved from REVIEW_PROJE
 # session included, and the part's own make reads it there.
 include scripts/change_workflow/workflow.mk
 
-check-change: ## Run a change's closing checks — comment hygiene, agent skills, its citations and task list, the change index, the indexed capabilities' specifications, the pinned strict OpenSpec validation, decision destinations, history wording, version bumps, local imports, and the capability index — printing only failures and one pass line (CHANGE=<change> [CHANGE_BASE=<the branch it lands on; dev>])
+# The owner's complete closing check is the workflow's whole `pre-commit`: its
+# default checks, then this repository's `check-repository`, each once. Run as the
+# engine runs it before a commit, a worktree changing a path outside the inert
+# paths runs the functional hooks first.
+check-change: ## Run the change workflow's pre-commit for a change: its default checks — the change index, the task list, the agent skills, the strict OpenSpec validation — then check-repository; when the worktree changes a path outside the inert paths, relocking, the packaging check, and every suite first (CHANGE=<change> [CHANGE_BASE=<the branch it lands on; the one its clone recorded>])
+	@scripts/change-workflow run pre-commit "$(CHANGE)"$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")
+
+check-repository: ## Run this repository's own closing checks of a change — comment hygiene, its citations, the indexed capabilities' specifications, decision destinations, history wording, version bumps, local imports, and the capability index — printing only failures and one pass line; the workflow's pre-commit hook (CHANGE=<change> [CHANGE_BASE=<the branch it lands on; the one its clone recorded>])
 	@python3 scripts/check_change.py "$(CHANGE)"$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")
 
 check-decision-destinations: ## Fail if a `### D<n>` decision of a change's design has no bullet starting `D<n>` in its proposal's "Knowledge to promote" (CHANGE=<change>)

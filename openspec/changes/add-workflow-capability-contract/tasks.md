@@ -966,7 +966,7 @@ the root `Makefile`, `scripts/change_workflow/steps.py`,
 tables of `openspec/specs/change-workflow/README.md` and
 `openspec/specs/market-change-workflow/README.md`.
 
-- [ ] 8.1 `scripts/check_change.py` drops the agent skills, task list, change index,
+- [x] 8.1 `scripts/check_change.py` drops the agent skills, task list, change index,
   and OpenSpec validation checks, which the default `pre-commit` runs, reads its base
   from `scripts/change-workflow find --json`'s `base` unless `--base` names one, and
   becomes `make check-repository CHANGE=<change> [CHANGE_BASE=<branch>]`: comment
@@ -974,16 +974,49 @@ tables of `openspec/specs/change-workflow/README.md` and
   wording, version bumps, local imports, and the capability index (D11, D20,
   MCW-r4tx). Verify: `scripts/tests/test_check_change.py` (unit) lists exactly those
   eight checks, reads `base`, and refuses with neither `base` nor `--base`.
-- [ ] 8.2 `make check-change CHANGE=<change>` runs `scripts/change-workflow run
+  - Done: the script keeps its name and reads `base` from `find --json` through
+    `workflow_command.found_change`, as it already read `archived`; with neither
+    it refuses before any check, naming `--base` and `CHANGE_BASE`. Its pinned
+    validator (`OPENSPEC`, `openspec_command`) is gone with the validation. The
+    suite (17 pass) lists exactly the eight checks and their commands, a failing
+    one shown alone, `--base` overriding, an unknown change refused, and the
+    refusal naming `--base` and `CHANGE_BASE`. The cases through `run_checks` are
+    library integration, not the task's unit: each runs the real command's `find
+    --json` in a real `git init`, the base cases reading a clone marker written
+    under `.git/` as a clone records it; the list of checks and the argument
+    parsing are unit. `make -n check-repository` with and without `CHANGE_BASE` is
+    in `test_change_workflow_cli_steps.py` (library integration, a real `make -n`).
+    The sibling checks' docstrings name `make check-repository` as their caller.
+- [x] 8.2 `make check-change CHANGE=<change>` runs `scripts/change-workflow run
   pre-commit <change>`, so the four defaults and then `make check-repository` run,
   each once (D11). Verify: `make check-change CHANGE=add-workflow-capability-contract`
   prints the defaults and the repository's checks once each, and its failures are
   those `make check-change` reported before the change, no fewer.
-- [ ] 8.3 The step table's loader refuses a row carrying `models` and an
+  - Done: `CHANGE_BASE` becomes `--base`, which this clone needs (6.1's note).
+    `make check-change CHANGE=add-workflow-capability-contract CHANGE_BASE=dev`
+    ran each check once: with section 8's code in the worktree it ran the
+    functional tier first — `make lock` (no lock changed), `make check-packaging`,
+    and the whole `make test`, all passing — then the four defaults and `make
+    check-repository`. It fails on the specification index, as `make check-change`
+    did before (10.9), and on one more: the default OpenSpec check, since this
+    machine has no `bunx` (`sh: 1: bunx: not found`, exit 127) and the
+    configuration's `openspec.command` is `bunx @fission-ai/openspec@1.14.0`,
+    where the old script fell back to `npx --yes` without `bunx`. The validation
+    itself passed here through that fallback after section 7's last delta edit,
+    and section 8 changed no delta. The configuration is the owner's to edit
+    (CW-z5me); see the handoff below. `make -n check-change` with and without
+    `CHANGE_BASE` is in `test_change_workflow_cli_steps.py`, whose `make -n`
+    helper now drops an inherited `CHANGE_BASE`, which the outer `make
+    check-change CHANGE_BASE=dev` exported into the suite's environment.
+- [x] 8.3 The step table's loader refuses a row carrying `models` and an
   `[orchestrator]` row, naming it, now that task 7.1 removed them (D5). Verify: unit
   tests in `scripts/tests/test_change_workflow_steps.py`; the repository's table
   loads.
-- [ ] 8.4 Bring the inventory to what the test collects (D18, CW-m4ps, MCW-5tgp):
+  - Done: each refusal names the configuration's field that holds the value
+    (`models.<step>`, `models.orchestrator`). The steps suite (unit) refuses both
+    and loads the repository's table; its malformed-table cases no longer carry
+    `models`. The CLI suite's test that the loader accepted them is removed.
+- [x] 8.4 Bring the inventory to what the test collects (D18, CW-m4ps, MCW-5tgp):
   `test_change_workflow_assumptions.py` collects `.agents/workflow.toml`'s commands
   as provisions, and the two `README.md` tables list `.agents/workflow.toml` and the
   new subcommands' rules and no longer list the targets no skill or rule names
@@ -991,13 +1024,55 @@ tables of `openspec/specs/change-workflow/README.md` and
   description of the configuration is closeout's (task 10.9). Verify: the test passes
   and fails, naming the target and the skill, when a fixture skill names an
   unlisted target (CW-m4ps's scenarios).
-- [ ] 8.5 Verification: `pytest -q scripts/tests/test_check_change.py
+  - Done: `configured` reads the configuration's hooks', preflight's, and parts'
+    commands (not `load`'s documents) as provisions beside the tables. The roles
+    lose "A snapshot of the code"; the provisions name the configuration's parts
+    and hooks where they named validation's and archive cleanup's targets, and
+    `make check-repository` with `make check-change` over `run pre-commit`; the
+    engine's assumptions gain the configuration at its fixed path
+    (`config.CONFIGURATION`; `.agents/workflow.toml`), and this repository's step
+    table row its new deny and grants. Outside the task's list, the provisions'
+    landing branch (no longer `CHANGE_WORKFLOW_MERGE_FROM`), remote, protected
+    branches, and bootstrap rows say what the configuration and the clone now
+    provide; the fragment's `orchestrate` description names `models.orchestrator`.
+    CW-m4ps's delta now says the test fails on what both the statement and the
+    configuration's commands omit, as MCW-5tgp already did. Evidence (12 pass):
+    the test passes against the repository, reading its tracked tree through `git
+    ls-files` and its real documents and configuration (library integration);
+    CW-m4ps's scenarios on fixtures — a skill naming an unlisted target fails naming
+    both, against the statement and the configuration together, a target only the
+    configuration provides passing; a role with no provision fails naming it — and
+    the configuration's commands collected, its documents not (unit). The rest of
+    both `README.md` — the engine's assumptions still naming the removed
+    constants, this repository's "The closing checks" — and `change-workflow`'s
+    `spec.md` pairing the closing checks with `scripts/check_change.py` as
+    evidence, are 10.9's.
+- [x] 8.5 Verification: `pytest -q scripts/tests/test_check_change.py
   scripts/tests/test_change_workflow_steps.py
   scripts/tests/test_change_workflow_assumptions.py` (unit) passes; `make check-change
   CHANGE=add-workflow-capability-contract` fails only on the citations of files
   closeout writes and the spec index entries closeout's promotion writes; `make
   test` passes; `make check-packaging` passes. End-to-end: none; no scenario
   exercises the workflow tooling.
+  - Done: the three suites pass (154 with the CLI-steps suite); the check-change
+    and assumptions suites are partly library integration (8.1's and 8.4's
+    notes), the steps suite unit. `make test` and `make check-packaging` pass, run as
+    `pre-commit-functional` inside `make check-change` (8.2), every suite through
+    `test-frp-grant-admission` included. `make check-change` fails only on the
+    specification index and, on this machine, the default OpenSpec check for want
+    of `bunx` (8.2). End-to-end: confirmed none.
+  - Handoff: this repository's `openspec.command` names `bunx` alone, so on a
+    machine without it — this clone's — every `run pre-commit`, and so every
+    committing skill's check and `make check-change`, fails its OpenSpec default.
+    The old closing check ran `bunx` where installed, else `npx --yes`. Fixing it
+    is an edit of `.agents/workflow.toml`, the owner's or the orchestrating
+    session's on the owner's word: for example `command = "npx --yes
+    @fission-ai/openspec@1.14.0"`, which needs only Node, or a repository script
+    choosing between them; or the owner accepts that the configured command needs
+    `bunx` on every machine. It is put to the owner, not settled here.
+    `make check-change`'s target comment, this repository's "The
+    closing checks" in `market-change-workflow`'s `README.md`, and the guide
+    (section 9) are where the closing checks are described.
 
 ## 9. The workflow's guide (D11, D16, D17)
 
