@@ -195,12 +195,12 @@ def _at_site(
 class CapacityEffects:
     """The one guarded boundary every storefront capacity effect passes.
 
-    Reserve, commit, release, and lease truncation act only at a listing's
-    durable binding site, and only after the binding's backing delegate admits
-    the effect, before any site call. Composed over any aggregate capacity
-    client, so a storefront that builds its own aggregate -- one that records
-    where each reservation lives, say -- passes the same guard as one composed
-    through :class:`CapacityRuntime`. Every effect names its site to the
+    Reserve, commit, lease activation, release, and lease truncation act only
+    at a listing's durable binding site, and only after the binding's backing
+    delegate admits the effect, before any site call. Composed over any
+    aggregate capacity client, so a storefront that builds its own aggregate --
+    one that records where each reservation lives, say -- passes the same guard
+    as one composed through :class:`CapacityRuntime`. Every effect names its site to the
     aggregate, so only the sites it names are reachable and nothing is chosen
     from response data or fanned out.
     """
@@ -306,6 +306,26 @@ class CapacityEffects:
             site_id=binding.site_id,
         )
         return _at_site(truncated, binding)
+
+    async def activate_lease(
+        self,
+        binding: PublicationBinding,
+        *,
+        capacity_reservation_id: str,
+    ) -> dict[str, Any] | None:
+        """Activate only at the durable site binding, including after restart.
+
+        Returns the reservation as the site recorded it, with the instant its
+        first activation recorded; a site that refuses raises its error.
+        """
+        self.require_binding(binding, "lease activation")
+        activated = await self._client.activate_lease(
+            capacity_reservation_id=capacity_reservation_id,
+            site_id=binding.site_id,
+        )
+        if activated is not None and activated.get("site") != binding.site_id:
+            raise CapacityBindingError("capacity authority returned a mismatched site")
+        return _at_site(activated, binding)
 
 
 class CapacityRuntime:
@@ -419,6 +439,11 @@ class CapacityRuntime:
         self, binding: PublicationBinding, **kwargs: Any
     ) -> dict[str, Any] | None:
         return await self.effects().truncate_lease(binding, **kwargs)
+
+    async def activate_lease(
+        self, binding: PublicationBinding, **kwargs: Any
+    ) -> dict[str, Any] | None:
+        return await self.effects().activate_lease(binding, **kwargs)
 
     async def reconcile_now(self) -> None:
         await self._run_reconcile(None)

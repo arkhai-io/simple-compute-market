@@ -24,6 +24,7 @@ class FakeSite:
         self.reservations: dict[str, int] = {}
         self.committed: list[str] = []
         self.committed_deals: list[dict | None] = []
+        self.activations: list[str] = []
         self.reserve_call_count = 0
         self._seq = 0
 
@@ -108,6 +109,18 @@ class FakeSite:
         if capacity_reservation_id not in self.reservations:
             return None
         return {"capacity_reservation_id": capacity_reservation_id, "lease_end_utc": lease_end_utc}
+
+    async def activate_lease(self, *, capacity_reservation_id):
+        self._check()
+        self.activations.append(capacity_reservation_id)
+        if capacity_reservation_id not in self.reservations:
+            raise LookupError(
+                f"{self.resource_id} holds no reservation {capacity_reservation_id}"
+            )
+        return {
+            "capacity_reservation_id": capacity_reservation_id,
+            "activated_at_utc": "2099-01-01T00:07:00+00:00",
+        }
 
     def subscribe(self, subscriber):
         return lambda: None
@@ -229,6 +242,46 @@ async def test_writes_route_to_the_owning_site():
     released = await client.release(capacity_reservation_id=capacity_reservation_id)
     assert released["site"] == "dc-a"
     assert a.available == 4
+
+
+@pytest.mark.asyncio
+async def test_an_activation_naming_its_site_reaches_only_that_site():
+    client, a, b = _aggregate(placement=fill_first)
+    reserved = await client.reserve(
+        claim={"offering_mode": "vm", "gpu_count": 1}, deal_ref={},
+    )
+
+    activated = await client.activate_lease(
+        capacity_reservation_id=reserved["capacity_reservation_id"], site_id="dc-a",
+    )
+
+    assert activated["site"] == "dc-a"
+    assert activated["activated_at_utc"] == "2099-01-01T00:07:00+00:00"
+    assert (a.activations, b.activations) == ([reserved["capacity_reservation_id"]], [])
+
+
+@pytest.mark.asyncio
+async def test_an_activation_naming_no_site_goes_past_a_refusing_site():
+    """With a cold routing cache, as after a restart, route order tries each
+    site; one that does not hold the reservation refuses with an error, and
+    the site that holds it answers."""
+    client, a, b = _aggregate(placement=fill_first)
+    b.reservations["held-at-b"] = 1
+
+    activated = await client.activate_lease(capacity_reservation_id="held-at-b")
+
+    assert activated["site"] == "dc-b"
+    assert (a.activations, b.activations) == (["held-at-b"], ["held-at-b"])
+
+
+@pytest.mark.asyncio
+async def test_an_activation_no_site_records_raises_the_last_site_s_error():
+    client, a, b = _aggregate(placement=fill_first)
+
+    with pytest.raises(LookupError, match="^res-b holds no reservation missing$"):
+        await client.activate_lease(capacity_reservation_id="missing")
+
+    assert (a.activations, b.activations) == (["missing"], ["missing"])
 
 
 @pytest.mark.asyncio

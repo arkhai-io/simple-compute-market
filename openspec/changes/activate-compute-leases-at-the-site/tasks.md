@@ -230,7 +230,7 @@ and publication lifecycle", `storefront-publication` "A listing's origin site is
 its admission authority"). Touches `core/storefront`, `kit/capacity-publication`, and
 storefront test doubles.
 
-- [ ] 4.1 In `core/storefront/src/core_storefront/capacity.py`, add
+- [x] 4.1 In `core/storefront/src/core_storefront/capacity.py`, add
   `activate_lease(*, capacity_reservation_id)` to `SiteCapacityAuthority`, documented as
   returning the reservation as the site recorded it, and name activation in the module
   docstring's list of reservation-lifecycle verbs. In
@@ -238,12 +238,27 @@ storefront test doubles.
   `AggregateCapacityClient.activate_lease(*, capacity_reservation_id, site_id=None)`,
   routed as `truncate_lease` is: to the named site when given, tagged with it;
   otherwise in route order (D2).
-- [ ] 4.2 In `kit/capacity-publication/src/market_capacity_publication/capacity.py`, add
+  Differs in route order's error handling: truncation swallows each site's
+  exception and returns `None`, but a site refuses an activation with an error
+  (404 or 409), never `None`, so swallowing would turn every refusal into a silent
+  `None`. Route order therefore tries each site and raises the last site's error
+  when none activates the reservation, as `commit` does; the method's docstring
+  says so. `CapacityEffects` always names the site, so the storefront's path never
+  takes route order.
+- [x] 4.2 In `kit/capacity-publication/src/market_capacity_publication/capacity.py`, add
   `CapacityEffects.activate_lease(binding, *, capacity_reservation_id)`, which calls
   `require_binding(binding, "lease activation")` before any site call and sends the
   effect only to `binding.site_id`, returning `_at_site(...)` as `truncate_lease` does,
   and `CapacityRuntime.activate_lease` delegating to it (D2).
-- [ ] 4.3 Unit tests: `core/storefront/tests/unit/test_aggregation.py` — its fake site
+  Beyond `_at_site`, it refuses a result the aggregate tagged with another site
+  (`CapacityBindingError`, "mismatched site"), as `reserve` does, which 4.3's
+  "a result naming another site is refused" calls for; `CapacityEffects`'
+  docstring names lease activation among the effects it guards. The fresh-context
+  check called this a speculative guard, since `AggregateCapacityClient` always
+  tags a site-named result with that site; kept, because `CapacityEffects` is
+  composed over whatever aggregate a storefront builds (bare metal builds its own),
+  and `reserve` already checks the same seam.
+- [x] 4.3 Unit tests: `core/storefront/tests/unit/test_aggregation.py` — its fake site
   gains `activate_lease`; activation with `site_id` reaches only that site and is
   tagged; the aggregate still satisfies `CapacityClient`. 
   `kit/capacity-publication/tests/unit/test_capacity.py` — activation reaches only the
@@ -256,13 +271,50 @@ storefront test doubles.
   `domains/vms/storefront/tests/fake_site.py`'s — so
   `domains/vms/storefront/tests/unit/test_remote_capacity_client.py`'s protocol
   assertions keep holding for both the site client and the aggregate.
+  `test_aggregation.py`: a site-named activation reaches only that site and is
+  tagged with it; with a cold routing cache, route order passes the first site's
+  refusal and activates at the second, which holds the reservation; for a
+  reservation no site holds it tries both and raises the second site's own error
+  (each site's message names it); the existing protocol test still passes.
+  `test_capacity.py`: the binding's site alone is awaited, with the reservation
+  identity only; the unbacked binding's refusal (`CapacityNotAdmittedError` naming
+  "lease activation") joins the existing no-site-call test; an unconfigured site
+  raises `CapacityBindingError` with no site awaited; a result tagged with another
+  site, from a mocked aggregate, is refused after one call naming the binding's
+  site. All unit tests over doubles; the protocol checks are `runtime_checkable`
+  attribute checks, not signature checks.
+  Corrected from the plan: the VM storefront's two doubles are unchanged.
+  `test_remote_capacity_client.py`'s protocol assertions run against the real
+  `SiteCapacityClient` and `AggregateCapacityClient`, which section 3 and 4.1 gave
+  the method, so they hold without any double; `fake_site.py` is a transport fake
+  behind that real client, and no VM test sends the route to it;
+  `test_interrupt_deal_admin.py`'s `_FakeCapacity` stands in for `CapacityRuntime`,
+  not a site authority, and no interrupt path activates. An activation handler and
+  a stub were added and then removed after the fresh-context check, as code no test
+  exercises.
+  Evidence: `make dist-ci`; `make -C core/storefront test` 228 passed;
+  `make -C kit/capacity-publication test` 127 passed;
+  `make -C domains/vms/storefront test` 525 passed (unchanged files, run for the
+  protocol assertions); `make test` passed; `make check-packaging` passed;
+  `make check-change` (comment hygiene among its checks) passed. No typing check is
+  part of this section's verification point or of `make test`; none was run.
 
 Verification point: `make -C core/storefront test`; `make -C kit/capacity-publication test`;
 `make -C domains/vms/storefront test`; `make test`. The route these layers reach is
 proven at application level in section 3; a storefront composing the chain over a real
 site is `unify-compute-delivery-path`'s application-integration evidence when it wires
 the first caller.
-End-to-end: none activates a lease. None is owed here.
+End-to-end: none activates a lease. None is owed here. Confirmed at implementation:
+no storefront code calls `activate_lease` yet. No `Owed by validation:` line.
+
+Handoff: `AggregateCapacityClient.activate_lease` keeps a route-order path when no
+site is named, as 4.1 planned and the protocol's optional `site_id` allows; the
+market-composition delta forbids fanning out once a binding is recorded, and only
+`CapacityEffects`, which always names the site, keeps storefront callers off it, as
+it does for commit and truncation. `unify-compute-delivery-path` wires its callers
+through `CapacityEffects`. The fresh-context check also found that
+`openspec/specs/market-composition/architecture.md` says nothing "reserves, commits,
+releases, or truncates through an aggregate directly"; 6.9 now names that sentence.
 
 ## 5. `activated_at_utc` on the compute lease view
 
@@ -353,7 +405,9 @@ the change to implementation. The eleven parts of
   - `openspec/specs/market-composition/architecture.md`, "Storefront composition kit",
     and `docs/development/ARCHITECTURE.md`, "Capacity publication and multi-domain
     storefront composition": activation in the list of capacity effects passing
-    `CapacityEffects` (D2);
+    `CapacityEffects` (D2), and, in the companion, activation in the sentence that
+    nothing reserves, commits, releases, or truncates through an aggregate directly
+    (amended at section 4's implementation);
   - `docs/development/ARCHITECTURE.md`, "Capacity reservation": activation between
     fulfillment and expiry in the flow, recorded by the site and not delivery
     evidence (D1);

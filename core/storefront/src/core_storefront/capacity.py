@@ -9,8 +9,8 @@ the storefront reaches it only through this client interface —
 - an advisory availability ``snapshot`` at negotiation-round start,
 - an authoritative check-and-``reserve`` at fulfillment time (with an
   optional TTL for two-phase reserve),
-- ``commit``/``release``/``truncate_lease`` for the reservation
-  lifecycle, and
+- ``commit``/``activate_lease``/``release``/``truncate_lease`` for the
+  reservation lifecycle, and
 - anonymous, versioned capacity-change events that drive each
   storefront's derived-listing reconciliation (a *different*
   storefront's sale must also invalidate your listings, so closure
@@ -190,6 +190,19 @@ class SiteCapacityAuthority(Protocol):
         lease_end_utc: str,
     ) -> dict[str, Any] | None:
         """End a lease early (settlement lifecycle decided the deal is over)."""
+        ...
+
+    async def activate_lease(
+        self,
+        *,
+        capacity_reservation_id: str,
+    ) -> dict[str, Any] | None:
+        """Record that a lease began running; the reservation as the site recorded it.
+
+        Named by the reservation alone: the instant is the authority's, and a
+        retry returns the instant first recorded. A reservation the authority
+        does not hold, or one it refuses to activate, is an error.
+        """
         ...
 
 

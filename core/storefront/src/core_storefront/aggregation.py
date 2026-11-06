@@ -509,6 +509,41 @@ class AggregateCapacityClient:
                 return _tagged(name, truncated)
         return None
 
+    async def activate_lease(
+        self,
+        *,
+        capacity_reservation_id: str,
+        site_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Activate at the named site, tagged with it; otherwise in route order.
+
+        A site refuses an activation it cannot record with an error, not a
+        null answer, so route order raises the last site's error when none
+        activated it, as commit does.
+        """
+        if site_id is not None:
+            activated = await self._sites[site_id].activate_lease(
+                capacity_reservation_id=capacity_reservation_id,
+            )
+            return None if activated is None else _tagged(site_id, activated)
+        last_error: Exception | None = None
+        for name in self._route_order(capacity_reservation_id):
+            try:
+                activated = await self._sites[name].activate_lease(
+                    capacity_reservation_id=capacity_reservation_id,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[AGGREGATOR] lease activation at site %r failed: %s", name, exc,
+                )
+                last_error = exc
+                continue
+            if activated is not None:
+                return _tagged(name, activated)
+        if last_error is not None:
+            raise last_error
+        return None
+
     # -- events ----------------------------------------------------------
 
     def subscribe(self, subscriber: CapacitySubscriber) -> Callable[[], None]:
