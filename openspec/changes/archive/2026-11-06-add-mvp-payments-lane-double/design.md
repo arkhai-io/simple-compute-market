@@ -443,8 +443,10 @@ Each loads the storefront's configuration exactly as `serve` does and calls one 
 in `kit/arkhai-payments`, which builds the client through `payments_client_for_owner`,
 calls `get_balance`, and returns the outcome or the failing step: `configuration`
 (including a `ca_bundle_path` that cannot be loaded), `credential`, `transport`, or
-`refused <code>`. The command prints one JSON line with no credential and exits nonzero on
-failure.
+`refused`, the service's error code in a separate `code` field. Every `detail` is fixed
+text plus public configuration, never an exception message. The command prints one JSON
+line with no credential and exits 0 on `ok`, 1 on a failed step, and 2 on a malformed
+`--account`.
 
 ```console
 $ bare-metal-storefront check-payments --account 00000000-0000-4000-8000-0000000000b2
@@ -864,6 +866,175 @@ bare-metal lane, whose secret overlay already holds its wallet key.
    the base topology fixes stays in the base file, and a deployment's own values in its
    overlay: `docs/development/DEPLOYMENT_AND_CONFIG.md` ("Per-domain stack composition"),
    with the rule in `docs/development/ARCHITECTURE.md`.
+
+## Implementation record
+
+What the build settled beyond the decisions above, and the review findings declined with
+their reasons. `tasks.md` keeps each task's final behaviour and evidence; this keeps the
+rationale.
+
+### The payments kit (D5, D12, D19)
+
+- The balance view and `snapshot()` share one `_release_at` helper, so the two cannot
+  format a maturity differently; the snapshot's bytes are unchanged (vector replay).
+- `check_payments_access` takes a section, a raw mapping or `None`: a missing or invalid
+  section is a `configuration` outcome, so no CLI handles one itself. An invalid
+  section's detail lists only each error's location and pydantic type code, since a key
+  pasted under the wrong name would otherwise be echoed. A `PaymentsProtocolError` (a
+  non-payments server at the URL) is a `transport` step: the kit's transport error
+  already means "could not be reached or its response could not be read", and D12 has
+  four steps. A key variable holding CR or LF is a `credential` failure, checked before
+  the client is built. A malformed `account` raises `ValueError`, the caller's argument
+  rather than the role's access; each CLI turns it into a usage error (exit 2). A trust
+  bundle the client cannot load when it is built (`OSError`) is reported as `transport`
+  with fixed text rather than escaping as a traceback (review 29 F1).
+- The three CLIs share one kit call, `check_configured_payments_access(read_section,
+  account)`: a `ValueError` from the section reader is a `configuration` outcome, so one
+  escaping the call is always a malformed account. Each CLI module has two seams under
+  `TESTING.md`'s command-module convention, `payments_section()` and
+  `payments_transport()`; the VM and API-credit readers import their config module inside
+  the function because their settings resolve on first import, after the root `--config`
+  option.
+- A disabled payments section fails the check at `configuration`, although
+  `payments_client_for_owner` still serves accepted deals while payments is disabled for
+  new ones: a storefront servicing old payment deals with payments disabled reports the
+  check failed.
+- The key-form conflicts (`api_key` with `api_key_env`, either with `development_auth`)
+  are refused whether or not the section is enabled, since a disabled section still builds
+  clients for accepted deals and the one resolution must find one form. A multi-line key
+  is refused because it travels as a header value. An empty `ca_bundle_path` is refused
+  because `ssl.create_default_context(cafile="")` silently loads the default store.
+  `ArkhaiPaymentsConfig`, `DisputeCredential` and `DisputeConfig` set
+  `hide_input_in_errors`: pydantic shows a short input, a three-character key included,
+  whole in a validation error. The preflight's no-key blocker is
+  `arkhai_payments.api_key_missing`.
+- The TLS cases issue a CA and leaf carrying key usage, key identifiers and EKU, which
+  Python 3.13's strict X.509 verification requires. No test shows the process trust store
+  untouched off loopback; that rests on the client setting no process state and httpx
+  consulting `SSL_CERT_FILE` only for `verify=True`.
+- Versioning: a package bumps once per change against the branch it merges into, and an
+  exact pin moves with the bump. Reverting a bump needs `make dist-clean` before
+  `make lock`, since `make lock` resolves a lower bound to the highest wheel in `.dist`.
+- Declined: moving the kit's TLS test into an `integration/` directory (the kit's suite
+  is flat and imports a sibling module); removing the check's second key resolution (it
+  resolves once to classify a failure, and the builder resolves again through the same
+  function); showing the bare-metal loader's refusal message in the outcome (every detail
+  is fixed text, and other loaders' messages may quote input).
+
+### The payments double (D1, D3, D8)
+
+- `PaymentsDouble` is a framework-free service over the engine; `create_app` binds thin
+  FastAPI routes to it. It keeps its own map of approved mandates, since the engine keeps
+  them private and both the repeat check and read authorization need them; an unknown
+  transaction is 404 `transaction_not_found`.
+- Statuses the repository does not record for the service are inferred and documented as
+  such: 422 for `unsupported_asset` and `fee_mismatch` (following the engine's
+  `invalid_mandate`) and 404 for `account_not_found`. Several attachments on one approval:
+  the engine takes one Agreement, so the double passes the first that does not hash to the
+  deal, keeping `deal_mismatch` after the funds check. The `Bearer` scheme matches
+  case-insensitively; success statuses are 200.
+- The suite drives the kit's real `PaymentsClient`, with commented exceptions for the
+  mandate route (the client has no call for it; a `get_mandate` was left out because no
+  consumer reads the route) and three rejection paths the client cannot build.
+- The image installs the project editable two levels deep, since its wheel is not in the
+  wheelhouse; `docs/development/BUILD_AND_PACKAGING.md` documents the one-level case.
+- The leaf key reaches Git history in this branch's earlier commits, so the change lands
+  from a branch cut from `dev`'s tip carrying this branch's tree in one commit (review 83
+  F1, the owner's choice over rewriting history or merging with the public-content check
+  failing).
+- Declined: moving the suite's helpers out of `tests/conftest.py`, which pytest's default
+  import mode serves.
+
+### Storefronts and the VM servicing proof (D2, D12)
+
+- `RespondentPoller.poll` lets the `MediationTransportError` escape, and
+  `VmDealLifecycle.cycle` catches it and logs "VM respondent discovery awaits recovery" at
+  ERROR every cycle, retrying the next; so the VM lane's storefront logs that line while it
+  holds the `.invalid` authority's credential, as expected. Nothing is marked for repair,
+  because the poll fails before it reads a case. `VmDealLifecycle(...,
+  mediation_transport=None)` is the seam the proof injects the DNS failure through.
+- A padded or multi-line `DisputeCredential.api_key` is refused at validation by the rules
+  `MediationCredential` applies, so a credential `credential_available` calls usable is
+  one a client can send. The buyers resolve the credential inside their existing `try`, so
+  an unresolvable one is still a `MediationTransportError` at I/O. The bare-metal
+  settings' `settlement` and `disputecredential` fields are `repr=False`.
+
+### Lanes and stacks (D2, D6, D9, D14–D21, D23)
+
+- Lane storefront configurations are full copies (`storefront.bob.lane.toml`,
+  `storefront.credits.lane.toml`) rather than overlays: the storefronts' Dynaconf loaders
+  merge with `merge_enabled`, which concatenates lists, so an overlay restating `priority`
+  would duplicate entries the settlement registry refuses. A test holds each copy equal to
+  its stack profile less the payments additions.
+- Enabling payments publishes no API-credit payment option by itself: the option builder
+  publishes one only from a publication clause, so the lane copy states a
+  `[pricing].settlements` clause. The API-credit scenario's refund signs with the lane
+  storefront's eip191 key, not an Ed25519 seed.
+- An Ed25519 marketplace credential is unpadded base64url; the first lane run failed on a
+  hex seed.
+- `LANE_OWNED` with no `SERVICE_URL` fails, naming both. `MEDIATION.SERVICE_URL` is a gate
+  only: stages 3–4 file with the authority their Agreement pins and never contact it.
+- The runner hands the buyer key to both the `market` subprocess and the in-process
+  payments clients as a mapping, writing it into no process environment, unlike the
+  `ANSIBLE_CONFIG` precedent, since the requirement forbids the token in the runner's
+  environment.
+- The base files' bring-up without binds was not run directly; the refusal rests on each
+  service's startup code (registries, signers, credits service, sample app, bare-metal
+  definition documents). The bare-metal site starts without its SSH key, which only
+  Ansible reads per job, and its guard went with the others, so a real-mode deployment
+  binding its documents and not its key fails at its first job. The bare-metal buyer
+  service moved whole into the overlay, because Compose interpolates each file before
+  merging and a later file cannot satisfy a guarded `image:`.
+- The lanes run provisioning as `docker,<site>,mock`: mock delivery is selected by the
+  profile name, and `config-mock.yml` is not bound.
+- The full stack mounts the same secret overlays, inert there; `storefront.credits.toml`
+  states no key form, since the payments section refuses two forms even when disabled.
+- `.gitignore` keeps `.e2e-*.env`, since an environment file an earlier run wrote holds a
+  contributor's local paths.
+- Declined: keeping the bare-metal SSH key's guard; returning `REGISTRY_FILTER_SPEC_PATH`
+  and registry-b's gates to the domain files; replacing the VM base file's
+  `${HOME}/.ssh/id_ed25519` bind (an operator's real key, predating the change); pinning
+  `pyyaml` in `test-release-tooling`; dropping the static overlay checks beside the render
+  cases (the render cases skip without Docker Compose); moving the runner-profile cases out
+  of the double's `tests/integration/`; replacing `test_payments_helper.py`'s patch of the
+  default probe (the case shows what that probe receives); hardening the mode check
+  against a multi-word value. `tools/issue-discovery`'s default compose arguments still
+  name `docker-compose.yml` alone, as before.
+
+### The registry (D16)
+
+- The registry parses `ACTIVE_PROFILES` as `arkhai-kit-config`'s `parse_active_profiles`
+  does, restated because it does not depend on that kit, until it moves onto Dynaconf.
+- The served filter specification stays one cached load; `reset_cache(settings=None)` is
+  the seam that makes the next load resolve from a given `Settings`.
+- The chart's profile lines are single-quoted: the dotenv reader decodes only `\\` and
+  `\'` there, so the chart refuses a value ending in a backslash (it would run into the
+  next line) or holding `${` (python-dotenv interpolates every value). A `checksum/config`
+  annotation keeps a values change rolling the registry. `secretProfile` refuses a
+  `secretName` without a profile, and the profile `production`. `core/registry/Dockerfile`
+  lost `ENV PORT`, which as a process variable would override the profile; its `CMD`
+  still hard-codes port 8080, a pre-existing mismatch with a non-default `service.port`.
+- `domains/vms/provisioning/iac/README.md` still shows the four removed registry variables
+  in an example deployment command; it is corrected where that document is next
+  maintained.
+
+### Helm (D3, D11, D12)
+
+- The subchart's Deployment is release-scoped; only its Service name is fixed. Its probes
+  use unverified HTTPS, so they hold whatever certificate is served, while the image's
+  healthcheck trusts only the lane CA. `TOPOLOGY_ROLLOUT_ORDER` leaves the double out, as
+  it leaves dev-env out: a restart loses every payment it holds.
+- `tests.paymentsAccount` is per agent in the storefront chart, one check pod per agent
+  that sets it; the check pod also mounts the Alkahest address book when the agent names
+  one, since the check loads settings as `serve` does.
+- The local release's e2e-tests chart profile carries only the public payments keys:
+  charts accept no credential in values, and the release serves no payment scenario.
+- Validation's Helm part runs every `-payments-check` pod from the release's hooks
+  (review 29 F2), recorded under D12.
+- `topology-secrets.sh` copies Bob's `[[DisputeCredential]]` from the Compose overlay,
+  rewriting each setting as a TOML basic string and refusing a rewrite that does not read
+  back (a character outside the Basic Multilingual Plane becomes a surrogate pair TOML
+  refuses).
 
 ## Open Questions
 

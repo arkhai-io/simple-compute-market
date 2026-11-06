@@ -232,10 +232,9 @@ a real guest or SSH access.
 
 The commit and servicing stages (1–2) run against the VM lane's payments double.
 The lane's two registries recommend a dispute authority under `.invalid` that can
-never answer, and Bob's lane configuration
-(`domains/vms/storefront/storefront.bob.lane.toml`) holds an identity-bound
-`[[DisputeCredential]]` for it, whose variable `compose.vms-lane.yml` sets to a
-public development value. With a usable credential the servicing stage reads the
+never answer, and Bob's secret overlay
+(`dev-env/identities/bob.storefront.secrets.toml`) holds an identity-bound
+`[[DisputeCredential]]` for it, whose `api_key` is a public development value. With a usable credential the servicing stage reads the
 deal's authority view `running`; without one it reads `repair_required`. Bob's
 storefront logs "VM respondent discovery awaits recovery" at ERROR on every
 servicing cycle while that authority cannot be reached, which is expected in the
@@ -249,9 +248,9 @@ authorities, set MEDIATION.SERVICE_URL to the mediation authority's URL — the
 stages reach the authority the registries recommend, and the setting states that
 one accepting cases is there — configure exact signed-registry
 recommendations, seller recommendation consent and an identity-bound
-`[[DisputeCredential]]` for the accepted mediation authority. Its `api_key_env`
-names the seller bearer credential variable; forward that variable into the
-storefront. A running authority without a usable party credential is not enough.
+`[[DisputeCredential]]` for the accepted mediation authority. State it whole in
+the storefront's secret overlay, its `api_key` the seller's bearer credential.
+A running authority without a usable party credential is not enough.
 Development-auth adapters belong to the disposable authority setup, not SCM.
 Before pytest, check Compose health, payment health from host/seller/buyer,
 mediation health and an authenticated publication using

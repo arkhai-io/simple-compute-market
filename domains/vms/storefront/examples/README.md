@@ -28,7 +28,8 @@ service setup see [`kit/arkhai-payments/README.md`](../../../../kit/arkhai-payme
 
 Both roles enable `arkhai.payments.v1` in the strict settlement root and pin the
 same trusted service policy. The service URL comes from operator configuration,
-never from the listing. For example, in each role's public TOML:
+never from the listing. For example, in the buyer's public TOML; a storefront's
+is the same without `api_key_env`:
 
 ```toml
 [Settlement]
@@ -46,8 +47,11 @@ scheme = "ed25519"
 identifier = "<trusted-service-public-identity>"
 ```
 
-Set the named environment variable to that role owner's WorkOS user-scoped API
-key. For loopback development only, replace `api_key_env` with
+The buyer's `api_key_env` names the variable holding its owner's WorkOS
+user-scoped API key. A storefront's key is `api_key` under
+`[Settlement.arkhai_payments]` in its secret overlay, `storefront.secrets.toml`,
+which its values schema keeps out of public configuration. For loopback
+development only, replace the key with
 `development_auth = true` and use the development service origin. Never put an
 API key value in TOML. Choose dispute authorities separately through root
 `[[Dispute]]` entries or signed registry recommendations; the buyer must opt into
