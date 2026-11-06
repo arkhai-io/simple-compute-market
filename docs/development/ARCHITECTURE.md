@@ -393,8 +393,8 @@ registries through one implementation. A bare-metal binding's source is the
 Physical Resource the listing sells. The kit imports no VM, API-credit, bare-metal, provider, or
 deployed-service package.
 
-Every storefront capacity effect — reserve, commit, release, lease truncation —
-passes one guarded boundary, the kit's `CapacityEffects`, composed over any
+Every storefront capacity effect — reserve, commit, lease activation, release,
+lease truncation — passes one guarded boundary, the kit's `CapacityEffects`, composed over any
 aggregate capacity client and acting only at the sites that aggregate names.
 Its guard is the binding's backing delegate, which refuses an effect for a
 listing with no admission authority behind it before any site call; a refused
@@ -1034,7 +1034,10 @@ Negotiation-time availability is advisory. Authoritative reservation occurs at a
 2. Accepted terms create a TTL soft hold where required.
 3. Settlement commits or recreates the reservation before physical execution.
 4. Fulfillment runs against the committed reservation.
-5. Lease expiry or early termination invokes physical teardown before capacity release.
+5. Activation of the delivered lease: the site records, once and from its own clock, the instant the lease began running, addressed by the reservation identity alone.
+6. Lease expiry or early termination invokes physical teardown before capacity release.
+
+Activation is a fact of the lease's lifecycle that the site records, not delivery evidence: the deal lifecycle judges delivery from the storefront's own records, and a lease with no recorded activation, including one older than the record, says nothing about whether it was delivered. It changes neither the lease's window nor admission. The site and every layer of the storefront's guarded capacity path offer it, but as of this writing no delivery path calls it, so every lease's activation is unrecorded. See the [site-capacity architecture](../../openspec/specs/site-capacity/architecture.md#reservation-lifecycle).
 
 A reservation whose negotiated shape changes is superseded, never mutated: `CapacityLedgerService.resize_reservation` atomically releases the old reservation and admits a new one under a new `capacity_reservation_id`, so the reservation's committed dimensions always reflect the shape actually being negotiated. Scheduling (see "Fulfillment" below) MAY further narrow within a reservation's bound for a placement or pricing check against a candidate shape; a scheduling narrower than the reservation reports back exactly what it scheduled, not the reservation's original shape, since that is what gets provisioned if accepted (`openspec/specs/site-capacity/spec.md`'s committed-dimensions-through-scheduling requirement). As of this writing, `resize_reservation` has no negotiation-side caller — this describes the intended negotiation model, not yet-implemented wiring between negotiation and reservation resizing.
 
@@ -1135,7 +1138,10 @@ Configuration resolution, ConfigMap/Secret mounting, stateful-service persistenc
 ### Operators
 
 Sites and storefronts are currently deployed and operated by one business, which
-upgrades them together. Authority boundaries are still drawn as if the two were
+upgrades them together. Accordingly, a storefront calling an operation its site
+does not yet offer is not a supported deployment, and no compatibility path is
+kept for it: a caller that cannot complete the operation has not completed it, and
+nothing treats the outcome as if it had. Authority boundaries are still drawn as if the two were
 independent parties, because that is what decides where each rule belongs. What a
 single operator does not yet need is upgrade-order guidance between independently
 operated sites and storefronts — for example, a site writing a declaration that a

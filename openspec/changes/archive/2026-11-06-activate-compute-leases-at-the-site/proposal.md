@@ -132,3 +132,7 @@ that is `unify-compute-delivery-path`'s evidence.
 - D8: no permanent destination — the implementation cadence is this change's plan,
   not current behaviour.
 - D9 (the instant's representation) to `openspec/specs/site-capacity/spec.md`.
+- D10 (decided at implementation: the aggregate's route order raising the most
+  informative refusal, and `CapacityEffects` refusing a result tagged with another
+  site) to the storefront composition kit in
+  `openspec/specs/market-composition/architecture.md`.

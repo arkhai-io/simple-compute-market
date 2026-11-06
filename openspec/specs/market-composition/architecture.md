@@ -280,15 +280,25 @@ nothing, and an exited or cancelled loop stays distinct from a running one
 whose last cycle failed. The controller's snapshot is what every storefront's
 system status reports as `lifecycle`.
 
-Every capacity effect — reserve, commit, release, lease truncation — passes
-one guarded boundary, `CapacityEffects`, composed over any aggregate capacity
-client and acting only at the sites that aggregate names. It asks the binding's
-delegate to admit the effect before checking the site, so an unbacked listing
-is refused before any site call, and a refusal is a conflict rather than an
-unknown site. `CapacityRuntime` composes one over its own aggregate; a
-storefront with its own aggregate, as bare metal's is, builds one over that,
-so whatever the aggregate records per reservation is still recorded. Nothing
-reserves, commits, releases, or truncates through an aggregate directly.
+Every capacity effect — reserve, commit, lease activation, release, lease
+truncation — passes one guarded boundary, `CapacityEffects`, composed over any
+aggregate capacity client and acting only at the sites that aggregate names. It
+asks the binding's delegate to admit the effect before checking the site, so an
+unbacked listing is refused before any site call, and a refusal is a conflict
+rather than an unknown site. `CapacityRuntime` composes one over its own
+aggregate; a storefront with its own aggregate, as bare metal's is, builds one
+over that, so whatever the aggregate records per reservation is still recorded.
+Because the aggregate is whatever a storefront composes, `CapacityEffects` also
+refuses a reserve or activation result the aggregate tags with a site other than
+the binding's. Nothing reserves, commits, activates, releases, or truncates
+through an aggregate directly. `CapacityEffects` always names the binding's
+site, so a storefront never takes an aggregate's route order, the cache-first
+walk across sites `AggregateCapacityClient` keeps for a caller that names none.
+Where a site refuses with an error rather than a null answer, as commit and
+activation do, route order raises the most informative failure when no site
+accepts: a site's refusal of a reservation it holds (a 409 naming its state)
+over a site that could not be asked, and either over a 404, so a reservation
+claimed by release is never reported as one no site holds.
 Seller-authenticated creation carries the capacity source separately from the
 public resource. The storefront checks that source against the configured site
 topology and the parsed offer, then writes the listing projection and immutable

@@ -264,6 +264,39 @@ an ISO-8601 UTC string, and `LeaseView` parses it to a datetime as it does the l
 window. Integer seconds, the `lease_ended` report's encoding, is the event contract's
 and would give the row two formats for instants.
 
+### D10 — Decided at implementation: the aggregate's route order and the site check
+
+Two questions the design left to the code were settled while implementing section 4,
+the first by the owner at the pre-closeout triage (review 23, F1).
+
+**Route order raises the most informative refusal.** `AggregateCapacityClient.activate_lease`
+keeps a route-order path for a caller that names no site, as the protocol's optional
+`site_id` allows. Truncation's route order swallows each site's exception and returns
+`None`; activation's cannot, because a site refuses an activation with an error (404 or
+409), never `None`, so swallowing would turn every refusal into a silent `None`. Route
+order therefore raises when no site activates the reservation, as commit's does. As
+first written it raised the last site's error, so a 409 from the site holding a
+released reservation could be hidden by a later site's 404, losing D5's distinction;
+a warm cache made it likelier, since the owning site is tried first. Route order now
+ranks failures: a site's refusal with a status other than 404, then a failure with no
+status (a site that could not be asked, which may hold the reservation), then a 404,
+keeping the later of equal rank. The status is read by attribute, since core cannot
+import the site client's error type. Commit's route order had the same flaw and takes
+the same ranking, outside the plan, on the owner's word, because D5 makes activation
+answer as commit does. Rejected: a required `site_id`, which breaks `CapacityClient`'s
+signature and differs from commit and truncation; and leaving it as a recorded limit.
+The path is latent — `CapacityEffects` always names the binding's site — and a first
+version that ranked only non-404 over 404 let an unreachable later site hide a 409.
+
+**`CapacityEffects` refuses a result tagged with another site.** Beyond returning the
+reservation at the binding's site, `CapacityEffects.activate_lease` refuses
+(`CapacityBindingError`) a result the aggregate tags with a site other than the
+binding's, as `reserve` does. The implementation's fresh-context check called this a
+speculative guard, since `AggregateCapacityClient` always tags a site-named result with
+that site; it was kept because `CapacityEffects` is composed over whatever aggregate a
+storefront builds — bare metal builds its own — and `reserve` already checks the same
+seam, so a test with a mocked aggregate can trigger it.
+
 ## Dependents whose documents now differ
 
 Three dependents' documents describe the design this change replaced; each reconciles
@@ -297,9 +330,26 @@ None.
 | D6 both migrations | `openspec/specs/site-capacity/spec.md`; `openspec/specs/site-capacity/architecture.md`, "Current limits" |
 | D7 no event, no push | `openspec/specs/site-capacity/spec.md`; `openspec/specs/site-capacity/architecture.md`, "Reservation lifecycle" |
 | D8 cadence | no permanent destination |
+| D10 route order and the site check | `openspec/specs/market-composition/architecture.md`, "Storefront composition kit" |
 
 ## Design promotion record
 
-No promotion yet: this is the design, not implemented architecture. The table above is
-the record to complete at closeout, with the roadmap and campaign-index updates named
-beside it.
+Promoted at closeout. The four `spec.md` files are written by the archive, which merges
+the change's deltas.
+
+| Accepted decision | Permanent location |
+|---|---|
+| D1 the instant, the transition, the derived phase | `openspec/specs/site-capacity/spec.md`, "A lease records when it was activated" and "Activation records its instant once and changes nothing else" (archive); `openspec/specs/site-capacity/architecture.md#reservation-lifecycle`; `docs/development/ARCHITECTURE.md#capacity-reservation` |
+| D2 the write path | `openspec/specs/market-composition/spec.md`, "Kit-owned capacity and publication lifecycle", and `openspec/specs/storefront-publication/spec.md`, "A listing's origin site is not its admission authority" (archive, modified); `openspec/specs/market-composition/architecture.md#storefront-composition-kit`; `docs/development/ARCHITECTURE.md#capacity-publication-and-multi-domain-storefront-composition`; and `openspec/specs/physical-provisioning/spec.md`, "A lease's executor identity and evidence are fixed once recorded", whose list of a lease's writers now names the site's activation and whose own "activation" now says the fulfillment's (by hand: no delta covers it) |
+| D3 both views | `openspec/specs/compute-provisioning-contract/spec.md`, "A lease view shows when the lease was activated" (archive) |
+| D4 deployed together | `docs/development/ARCHITECTURE.md#operators` |
+| D5 the answers | `openspec/specs/site-capacity/spec.md`, "Activation records its instant once and changes nothing else" (archive) |
+| D6 both migrations | `openspec/specs/site-capacity/spec.md`, "A lease records when it was activated" (archive); `openspec/specs/site-capacity/architecture.md#current-limits` |
+| D7 no event, no push | `openspec/specs/site-capacity/spec.md`, "Activation records its instant once and changes nothing else" (archive); `openspec/specs/site-capacity/architecture.md#reservation-lifecycle` |
+| D8 cadence | no permanent destination: the plan's, not current behaviour |
+| D9 the instant's representation | `openspec/specs/site-capacity/spec.md`, "A lease records when it was activated" (archive) |
+| D10 route order and the site check | `openspec/specs/market-composition/architecture.md#storefront-composition-kit` |
+| Activation by reservation identity alone | `openspec/specs/site-capacity/spec.md`, "Activation is addressed by reservation identity alone" (archive) |
+| Roadmap currency | `docs/development/ROADMAP.md`, Goal 8: the gap row rewritten as archived, and the current state naming the site's activation with no caller wired |
+| Campaign index currency | `openspec/changes/README.md`: this change's row's notes and its link to the archive; the Goal 8 graph and every other row unchanged |
+| Capability index | `openspec/specs/README.md` unchanged: no capability added |
