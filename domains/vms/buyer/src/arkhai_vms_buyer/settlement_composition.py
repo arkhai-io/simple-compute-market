@@ -32,6 +32,7 @@ from market_settlement_runtime import (
 from .chain_cli import chain_app
 from .common import refuse_retired_address_book_keys
 from .escrow_cli import escrow_app
+from .negotiation_amounts import retained_pricing_record
 from .settlement_stages import AlkahestBuyerStage, PaymentsBuyerStage
 
 
@@ -77,9 +78,7 @@ def accepted_listing_record(match: Mapping[str, Any], _proposal: Any) -> dict[st
         return {}
     record = buyer_stage(selected.selection.settlement_schema).listing_record(match)
     if match.get("rate_structure"):
-        record = {**record, **{key: match[key] for key in (
-            "listing_id", "listing_resource", "rate_structure", "settlement_options", "accepted_escrows"
-        ) if key in match}}
+        record = {**record, **retained_pricing_record(match)}
     return record
 
 
