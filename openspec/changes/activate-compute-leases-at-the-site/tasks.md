@@ -83,12 +83,12 @@ transition (D1, D5's refusals, D7, D9; `site-capacity` "A lease records when it 
 activated", "Activation records its instant once and changes nothing else",
 "Activation is addressed by reservation identity alone"). Touches `kit/site`.
 
-- [ ] 2.1 In `kit/site/src/market_site/db.py`, map nullable `activated_at_utc` (ISO-8601
+- [x] 2.1 In `kit/site/src/market_site/db.py`, map nullable `activated_at_utc` (ISO-8601
   text, as `release_requested_at`) on `CapacityReservation`, with a comment that it is
   written only by activation and that null means no activation is recorded (D1,
   08 F3). In `kit/site/src/market_site/ledger.py`, add `activated_at_utc` to
   `_reservation_payload`, null or the recorded instant, on every reservation view (D3).
-- [ ] 2.2 Add `CapacityLedgerService.activate_lease(capacity_reservation_id)` to
+- [x] 2.2 Add `CapacityLedgerService.activate_lease(capacity_reservation_id)` to
   `ledger.py`, under `serialized()` in one session, beside `truncate_lease`:
   - unknown reservation: return `None`, writing nothing;
   - `leased` with a lease end and `activated_at_utc` null: write
@@ -102,7 +102,11 @@ activated", "Activation records its instant once and changes nothing else",
   The method takes no argument but the reservation identity (D1). Its docstring states
   the admissible state, the once-only write, and that activation is a lease-lifecycle
   fact rather than delivery evidence.
-- [ ] 2.3 Extend `kit/site/tests/integration/test_ledger.py` (library integration: the
+  The reservation is read through `_find_reservation` by identity, as
+  `truncate_lease` reads it. The refusals' texts are
+  "reservation <id> is <state>; cannot activate" and "reservation <id> has no lease
+  tail; cannot activate". A retry of an activated lease commits nothing.
+- [x] 2.3 Extend `kit/site/tests/integration/test_ledger.py` (library integration: the
   public ledger API over a real embedded database):
   - first activation records an instant from the site's clock and leaves state, start,
     end and the capacity event feed unchanged;
@@ -122,9 +126,32 @@ activated", "Activation records its instant once and changes nothing else",
   - a new reservation overlapping an activated lease's window is admitted exactly as
     it was before activation.
 
+  Every case above is a test in `test_ledger.py`, through the ledger's public
+  methods over a real SQLite database: the instant is asserted between clock reads
+  taken around the call and at UTC offset zero, every other payload field equal to
+  the pre-activation read, and the event feed unchanged; the restart case runs two
+  ledger instances over one database file (`_file_ledger`); the five released
+  states are parametrized and each reached by `begin_releasing`,
+  `record_release_failed`, `record_unmanaged` or `release`, with the reservation
+  read and the capacity snapshot unchanged after the refusal; admission compares two probes over an overlapping
+  window and the snapshot before and after activation, then reserves the fitting
+  and the non-fitting claim. Evidence: `make -C kit/site test` (its unit and library
+  integration tests) 350 passed; `make dist-ci`, so every consumer installs the
+  changed `kit/site` wheel, then `make test` passed; `make check-change` passed.
+  `make check-packaging` passed (run before this section's commit, as `AGENTS.md`
+  asks once a change's tests pass; section 1 had deferred it to 5.4).
+
 Verification point: `make -C kit/site test`; `make test`.
 End-to-end: none activates a lease; activating callers are `unify-compute-delivery-path`'s
-scenarios. None is owed here.
+scenarios. None is owed here. Confirmed at implementation: no scenario calls the
+ledger's activation; every reservation read and lifecycle-transition answer built by
+`_reservation_payload` now carries a null `activated_at_utc`, which no scenario
+reads. A first reserve's and a resize's answers are built by `_match_payload` and,
+as before, carry no lease field. No `Owed by validation:` line.
+
+Handoff: the restart test builds its own file-backed ledger (`_file_ledger`) rather
+than parametrizing `_make_ledger`, whose in-memory `StaticPool` engine every other
+test shares; the duplication is a few lines and was left.
 
 ## 3. The activation route and the site client
 
