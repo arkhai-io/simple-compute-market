@@ -33,21 +33,28 @@ envelope only through its internal reads for execution and readiness.
 Files: `provisioning/compute/src/compute_provisioning/hosts/service.py`,
 `provisioning/compute/tests/integration/test_host_authority.py`.
 
-- [ ] 1.1 Add `execution_hosts(self, *, enabled_only: bool = True) -> list[ExecutionHost]`
+- [x] 1.1 Add `execution_hosts(self, *, enabled_only: bool = True) -> list[ExecutionHost]`
       to `HostAuthority`, beside `lookup`. It reads in one query, orders by
       `host_id`, and returns each host as an `ExecutionHost` carrying its full
       connection envelope, its protected values included. With `enabled_only`,
       disabled hosts are omitted. No route calls it, and every ordinary read
       (`list_hosts`, `get_host`, `host_definitions`) keeps returning protected
       values by scheme only. (D5)
-- [ ] 1.2 Revise the module docstring's rule, which says that only `lookup`
+      *Done:* `lookup` and `execution_hosts` share a module-level
+      `_execution_host(host)` builder.
+- [x] 1.2 Revise the module docstring's rule, which says that only `lookup`
       returns the full protected envelope. It should now say that only the
       internal reads return it: `lookup` for execution and `execution_hosts`
       for an executor's readiness. Every ordinary read, and every API, log and
       error surface, carries a protected value's scheme only. (MODIFIED
       "Connection secrets stay protected"; `AGENTS.md`, "Python comments and
       docstrings")
-- [ ] 1.3 Add library integration tests in `test_host_authority.py`:
+      *Done,* and the class docstring names the internal reads too. Left for
+      section 4: `hosts/connection.py`'s module docstring says the codec
+      decrypts "just in time for execution" only, which stays true until
+      readiness decrypts; section 4 widens it to the in-memory readiness check
+      the MODIFIED requirement admits (outside that section's file list).
+- [x] 1.3 Add library integration tests in `test_host_authority.py`:
       - `execution_hosts()` returns the enabled hosts in `host_id` order. An
         embedded host's protected value is carried with its stored scheme and
         ciphertext, and a key-file host's `key_path` is carried in its public
@@ -59,12 +66,27 @@ Files: `provisioning/compute/src/compute_provisioning/hosts/service.py`,
         scheme alone.
 
       (D5, MODIFIED "Connection secrets stay protected")
-- [ ] 1.4 **Verification checkpoint.** Library integration: the compute family
+      *Done:* three tests against the module's real SQLite database and its
+      fake codec, which reverses a token for its "protection": the ordered
+      read with the embedded host's `ProtectedValue` and the key-file host's
+      `key_path` (the listing check sits in the first test), the disabled-host
+      filter both ways, and the empty registry.
+- [x] 1.4 **Verification checkpoint.** Library integration: the compute family
       kit's suite, `make test-compute-provisioning`. Then `make test`.
       End-to-end: none. Nothing calls the read until section 5, and no
       end-to-end scenario is owed.
       Owed by validation: `tests.yml`, job `test · test-compute-provisioning`.
       The kit suite passes, including the new `execution_hosts` tests.
+      *Evidence:* `make test-compute-provisioning` (unit and library
+      integration), 530 passed. `make test`, exit 0. End-to-end confirmed:
+      none.
+
+*Handoff (section 1):* the fresh-context check found that the module
+docstring's mention of readiness reading `execution_hosts` is true of the
+read's purpose but not yet of any caller until section 5 wires it; it was kept
+as task 1.2 prescribes. `ExecutionHost` is `(host_id, pool_id, connection)`
+from `compute_provisioning.hosts`; readiness in section 4 can build its
+fixtures with it directly.
 
 ## 2. Ansible output is kept only redacted
 
