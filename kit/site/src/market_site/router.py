@@ -302,6 +302,33 @@ def make_capacity_router(
             lease_end_utc=body.lease_end_utc,
         ))
 
+    @router.post(
+        "/reservations/{capacity_reservation_id}/activate-lease",
+        response_model=ReservationResponse,
+        summary="Record that a lease began running",
+    )
+    def activate_lease(
+        capacity_reservation_id: str,
+        ledger: CapacityLedgerService = Depends(get_ledger),
+    ) -> ReservationResponse:
+        """Record a lease's activation once, by reservation identity alone.
+
+        Answers as commit does: the reservation as the site recorded it, 404
+        for an unknown reservation, and 409 when it is refused, so a caller can
+        tell a release that claimed the lease first from a reservation the site
+        does not hold.
+        """
+        try:
+            reservation = ledger.activate_lease(capacity_reservation_id)
+        except CapacityConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        if reservation is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"reservation {capacity_reservation_id!r} not found",
+            )
+        return ReservationResponse(reservation=reservation)
+
     # ------------------------------------------------------------------
     # Reservation reads (deal-side bookkeeping and operators)
     # ------------------------------------------------------------------

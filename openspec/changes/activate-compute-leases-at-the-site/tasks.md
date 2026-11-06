@@ -161,13 +161,15 @@ and `SiteCapacityClient.activate_lease`, with commit's answers (D2, D5;
 "Activation is addressed by reservation identity alone"). Touches `kit/site`,
 `kit/site-client`, and the route tables of the two services that mount the router.
 
-- [ ] 3.1 In `kit/site/src/market_site/router.py`, add the `activate-lease` route beside
+- [x] 3.1 In `kit/site/src/market_site/router.py`, add the `activate-lease` route beside
   `truncate-lease`, taking no body fields: `ReservationResponse` on success, 404 when
   the ledger returns `None`, 409 with the conflict's text on `CapacityConflictError`,
   as `commit` answers (D5). Add its `capacity_activate_lease` contract, path resource
   `reservation_id`, seller role, to `CAPACITY_ROUTE_CONTRACTS` in
   `kit/site/src/market_site/auth.py`, ordered as its siblings (D2).
-- [ ] 3.2 In `kit/site-client/src/market_site_client/client.py`, add the matching
+  The route declares no body parameter at all; the contract follows
+  `capacity_truncate_lease` in both tables.
+- [x] 3.2 In `kit/site-client/src/market_site_client/client.py`, add the matching
   `CapacityRouteContract` and `activate_lease(*, capacity_reservation_id, request_id=None)`,
   sending no body fields and returning the recorded reservation; a 404 or 409 raises
   `SiteCapacityClientError` with its status, as `commit`'s answers do (D2, D5). Extend
@@ -176,7 +178,20 @@ and `SiteCapacityClient.activate_lease`, with commit's answers (D2, D5;
   table, the signed request carries the reservation in its path and no body field,
   and 404 and 409 surface their status. `kit/site/tests/unit/test_auth_route_parity.py`
   holds the two tables in step.
-- [ ] 3.3 Extend `provisioning/compute/service/tests/integration/test_capacity_api.py`
+  The client sends no request body at all (the identity kit's empty-body sentinel,
+  as a GET does), so the signed body is empty and the reservation is bound only by
+  the path. The fake site's reservations carry `activated_at_utc: null` from
+  reserve, as the real view does; it answers 404, 409 naming the state or the
+  missing lease tail, and otherwise writes an ISO-8601 UTC instant where none is
+  recorded. `test_client.py`: the contract test's sequence now commits with an end,
+  activates, and asserts the operation's position in the signed sequence, its path,
+  its resource and an empty body; an unknown reservation raises with 404 and a held
+  one with 409, the client passing each status through. A retry's same instant is
+  the site's behaviour, proven in section 2 and in 3.3, not by these unit tests.
+  The parity test's parametrized case for the new route passes unchanged.
+  Evidence: `make -C kit/site-client test` (unit) 65 passed; `make -C kit/site test`
+  351 passed, the parity case among them.
+- [x] 3.3 Extend `provisioning/compute/service/tests/integration/test_capacity_api.py`
   (application integration through the typed `SiteCapacityClient` against the
   in-process provisioning app): activation of a committed lease answers 200 with
   `activated_at_utc`; a retry answers the same instant; an unknown reservation 404; a
@@ -186,12 +201,25 @@ and `SiteCapacityClient.activate_lease`, with commit's answers (D2, D5;
   `provisioning/compute/service/tests/unit/test_route_table_composition.py` and
   `domains/apicredits/service/tests/unit/test_route_contract_coverage.py` — and extend
   them only where they enumerate the capacity operations.
+  One test, `test_a_lease_is_activated_once_through_the_canonical_client`, drives
+  every case through `SiteCapacityClient` against the in-process provisioning app:
+  200 with the instant, the same instant on a retry and on a later read, 404, 409
+  naming `released` after a release through the client, and 409 saying "no lease
+  tail" for a lease committed with no end, whose read keeps a null instant. Neither
+  route-table test enumerates capacity operations (each reads the table whole and
+  holds every mounted route to one contract), so neither was extended; both pass
+  with the new contract.
+  Evidence: `make dist-ci`; `make -C provisioning/compute/service test` (unit, then
+  application integration) passed, integration 582 passed;
+  `make -C domains/apicredits/service test` 81 passed; `make test` passed;
+  `make check-change` passed; `make check-packaging` passed.
 
 Verification point: `make -C kit/site test`; `make -C kit/site-client test`;
 `make -C provisioning/compute/service test`; `make -C domains/apicredits/service test`;
 `make test`.
 End-to-end: none calls the route; it is first called by `unify-compute-delivery-path`'s
-wired callers. None is owed here.
+wired callers. None is owed here. Confirmed at implementation: no scenario calls
+`activate-lease`. No `Owed by validation:` line.
 
 ## 4. Activation through the storefront's guarded capacity effects
 
