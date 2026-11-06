@@ -7,16 +7,12 @@ Paths are relative to the repository root.
 Every section below was replanned against the design settled on 2026-11-06 and
 reviewed in design reviews 10 and 19 (`reviews/10-design.triage.md`,
 `reviews/19-design.triage.md`). The earlier plan's four sections were never
-started. They edited the VM adapter's `services/ansible_service.py`,
-`services/host_service.py` and `services/host_operations_service.py`, which
-`bare-metal-mock-provisioned-deal` had already moved into the Ansible
-distribution (`provisioning/compute/ansible/src/compute_provisioning_ansible/`),
-and that move delivered what the earlier sections planned. Decrypted key files
-and the variables file are owner-only and removed on every ending of a run, and
-no second inventory renderer remains. Its reconciliation note of 2026-10-05 said
-as much. What was left of it, a per-invocation directory and a renderer that
-refuses, the reviewed design rejects (D3, D8). Git history holds the earlier
-text.
+started: `bare-metal-mock-provisioned-deal` had moved their files into the
+Ansible distribution (`provisioning/compute/ansible/src/compute_provisioning_ansible/`)
+and delivered what they planned, owner-only decrypted key files and variables
+file removed on every ending of a run, and a single inventory renderer. What was
+left of it, a per-invocation directory and a renderer that refuses, the reviewed
+design rejects (D3, D8). Git history holds the earlier text.
 
 Sections 1 to 5 go from the lower layer up: the compute family kit's host
 authority (`provisioning/compute`), then the Ansible distribution
@@ -40,8 +36,7 @@ Files: `provisioning/compute/src/compute_provisioning/hosts/service.py`,
       disabled hosts are omitted. No route calls it, and every ordinary read
       (`list_hosts`, `get_host`, `host_definitions`) keeps returning protected
       values by scheme only. (D5)
-      *Done:* `lookup` and `execution_hosts` share a module-level
-      `_execution_host(host)` builder.
+      *Done:* `lookup` and `execution_hosts` share `_execution_host(host)`.
 - [x] 1.2 Revise the module docstring's rule, which says that only `lookup`
       returns the full protected envelope. It should now say that only the
       internal reads return it: `lookup` for execution and `execution_hosts`
@@ -49,11 +44,7 @@ Files: `provisioning/compute/src/compute_provisioning/hosts/service.py`,
       error surface, carries a protected value's scheme only. (MODIFIED
       "Connection secrets stay protected"; `AGENTS.md`, "Python comments and
       docstrings")
-      *Done,* and the class docstring names the internal reads too. Left for
-      section 4: `hosts/connection.py`'s module docstring says the codec
-      decrypts "just in time for execution" only, which stays true until
-      readiness decrypts; section 4 widens it to the in-memory readiness check
-      the MODIFIED requirement admits (outside that section's file list).
+      *Done,* in the module and class docstrings.
 - [x] 1.3 Add library integration tests in `test_host_authority.py`:
       - `execution_hosts()` returns the enabled hosts in `host_id` order. An
         embedded host's protected value is carried with its stored scheme and
@@ -66,27 +57,16 @@ Files: `provisioning/compute/src/compute_provisioning/hosts/service.py`,
         scheme alone.
 
       (D5, MODIFIED "Connection secrets stay protected")
-      *Done:* three tests against the module's real SQLite database and its
-      fake codec, which reverses a token for its "protection": the ordered
-      read with the embedded host's `ProtectedValue` and the key-file host's
-      `key_path` (the listing check sits in the first test), the disabled-host
-      filter both ways, and the empty registry.
+      *Done:* three library integration tests over the module's SQLite
+      database and fake codec; the listing check sits in the first.
 - [x] 1.4 **Verification checkpoint.** Library integration: the compute family
       kit's suite, `make test-compute-provisioning`. Then `make test`.
       End-to-end: none. Nothing calls the read until section 5, and no
       end-to-end scenario is owed.
       Owed by validation: `tests.yml`, job `test · test-compute-provisioning`.
       The kit suite passes, including the new `execution_hosts` tests.
-      *Evidence:* `make test-compute-provisioning` (unit and library
-      integration), 530 passed. `make test`, exit 0. End-to-end confirmed:
-      none.
-
-*Handoff (section 1):* the fresh-context check found that the module
-docstring's mention of readiness reading `execution_hosts` is true of the
-read's purpose but not yet of any caller until section 5 wires it; it was kept
-as task 1.2 prescribes. `ExecutionHost` is `(host_id, pool_id, connection)`
-from `compute_provisioning.hosts`; readiness in section 4 can build its
-fixtures with it directly.
+      *Evidence:* `make test-compute-provisioning`, 530 passed; `make test`,
+      exit 0.
 
 ## 2. Ansible output is kept only redacted
 
@@ -105,19 +85,15 @@ Files: `provisioning/compute/ansible/src/compute_provisioning_ansible/ansible.cf
       environment of its own to Ansible's subprocesses. The VM domain's IaC
       `ansible.cfg`, used for running playbooks by hand, is not the service's
       configuration and is left as it is. (D2)
-      *Done:* the file's header comment says why it names no log file and
-      where an operator's own goes. Neither `subprocess.Popen` nor
-      `subprocess.run` in the runner is given an `env`.
+      *Done;* neither subprocess call in the runner is given an `env`.
 - [x] 2.2 Add a unit test that the packaged configuration
       (`DEFAULT_ANSIBLE_CONFIG`, read with `configparser`) states no `log_path`
       in any section. This is the lowest level that can prove the scenario "A
       playbook runs under the packaged configuration": without `log_path` or
       `ANSIBLE_LOG_PATH`, Ansible writes no log. The job's logs are already
       redacted, as `test_executor.py`'s redaction cases prove. (D2)
-      *Done:* `test_the_packaged_configuration_names_no_log_file` (unit) reads
-      the file with `configparser` and checks the defaults and every section.
-      It proves the file states no `log_path`; that Ansible then writes no log
-      is Ansible's documented behaviour, not something the test observes.
+      *Done:* `test_the_packaged_configuration_names_no_log_file` (unit). That
+      Ansible then writes no log is its documented behaviour, not observed.
 - [x] 2.3 Pass the `detail` that `check_connectivity_with_inventory` returns
       through `redact_ansible_output`, with the generic secret fields only,
       since a probe runs no domain's playbook. Do this in both branches: the
@@ -140,22 +116,14 @@ Files: `provisioning/compute/ansible/src/compute_provisioning_ansible/ansible.cf
 
       (D2; the scenarios "A connectivity check's output carries a secret" and
       "An operator configures a log file")
-      *Done:* `test_a_connectivity_checks_output_is_returned_redacted`, both
-      cases (unit; the stand-in is a `/bin/sh` script, writing to stdout and
-      exiting 0 when reachable, to stderr and exiting 1 when not), and
-      `test_an_error_running_the_check_is_returned_redacted`, whose stand-in
-      has no execute bit and is alone on `PATH`, so `subprocess.run` raises
-      `PermissionError`. That error's text names only `ansible` and carries
-      nothing credential-shaped, so the exception case proves only that the
-      branch answers unreachable with the error's text: it would pass without
-      the redactor, and the redaction call on that branch is untested. The
-      one seam that could plant a secret there is a contrived settings object
-      whose arithmetic raises, which was not written.
-      The environment case proves the scenario "An operator configures a log
-      file" only for the connectivity check's subprocess: it inherits the
-      process's `ANSIBLE_CONFIG` and is given no `ANSIBLE_LOG_PATH`. The
-      playbook subprocess's missing `env` rests on reading the code (2.1), and
-      the profile's `ansible_cfg` reaching `ANSIBLE_CONFIG` is task 5.3's.
+      *Done (unit):* `test_a_connectivity_checks_output_is_returned_redacted`
+      (both cases) and `test_an_error_running_the_check_is_returned_redacted`.
+      The exception case's `PermissionError` text carries nothing
+      credential-shaped, so the redaction call on that branch is untested;
+      the branch's unreachable answer is. The environment case covers the
+      check's subprocess; the playbook subprocess's missing `env` rests on
+      reading the code, and the exported configuration is 5.3's. The test
+      level of the stand-in subprocess is recorded in `design.md`.
 - [x] 2.5 **Verification checkpoint.** Unit: the Ansible distribution's suite,
       `make test-compute-provisioning-ansible`. Then `make test`.
       End-to-end: none in a lane. Every lane runs mocked executors and the mock
@@ -166,22 +134,10 @@ Files: `provisioning/compute/ansible/src/compute_provisioning_ansible/ansible.cf
       Owed by validation: `tests.yml`, job `test · test-compute-provisioning-ansible`.
       The distribution's suite passes, including the configuration and
       connectivity-redaction tests.
-      *Evidence:* `make test-compute-provisioning-ansible` (unit), 170 passed,
-      4 skipped (`test_codec.py`'s real-Ansible cases, skipped without
-      `ansible-playbook`, as before). `make test`, exit 0. End-to-end
-      confirmed: none.
-
-*Handoff (section 2):* the fresh-context check held that the stand-in
-connectivity tests start a real `/bin/sh` subprocess, which `TESTING.md` would
-place in integration rather than unit. They stay in `tests/unit/` as task 2.4
-prescribes, beside the existing real-subprocess streaming test in the same
-module; the distribution has no `tests/integration` (its `testpaths` names
-only `tests/unit`). Left for the round's review to weigh, not changed here.
-The service's `.venv` holds a built copy of this distribution, so a
-service-side run sees the new `ansible.cfg` and runner only after the wheel is
-rebuilt and reinstalled, which `make test` does. *Correction (section 4):*
-`make test` reinstalls but does not rebuild `.dist`, so this section's
-`make test` ran the service against an older wheel; see section 4's handoff.
+      *Evidence:* `make test-compute-provisioning-ansible`, 170 passed, 4
+      skipped (the real-Ansible codec cases, without `ansible-playbook`);
+      `make test`, exit 0, though against the service's previously built
+      wheel (section 4's correction).
 
 ## 3. A protected key that cannot be decrypted is named at dispatch and at the probe
 
@@ -207,36 +163,21 @@ tests in `test_ssh_connection.py`, `test_runner.py`, `test_executor.py` and
       - The message carries no ciphertext and no key material.
       - The codec uses `host_id` only for the error.
       - Update the method's docstring to match. (D4)
-      *Done, differing from the plan in two ways:*
-      - The codec checks for an unconfigured key itself, before Fernet, so
-        that cause's message says "because no ssh_decryption_key is
-        configured" and names the one recovery that works there, configuring
-        the key it was protected under: without a key a private key cannot be
-        submitted again (`build` refuses it). Every other cause says "under
-        the configured ssh_decryption_key" with both recoveries D4 names. The
-        catch is `(InvalidToken, ValueError)`, the `ValueError` being
-        `market_config`'s for a configured key that is not a Fernet key; it
-        would also catch a plaintext that is not UTF-8, which the codec never
-        writes.
-      - Catching `InvalidToken` imports `cryptography.fernet`, so the
-        distribution now declares `cryptography>=42.0` at runtime (it was in
-        the `dev` group only) and `make lock` was run. The locks of the
-        distribution, the provisioning service and both domain adapters gained
-        the edge; `cryptography` was already in each of them.
+      *Done,* with two refinements recorded in `design.md`, D4: the no-key
+      cause has its own message and recovery, and the distribution declares
+      `cryptography>=42.0` at runtime (`make lock` run; the locks of the
+      distribution, the service and both domain adapters gained the edge).
 - [x] 3.2 Have `write_inventory` pass the target's `host_id` to
       `decrypt_private_key`. Its existing partial-write cleanup stays as it is,
       and the job executor lets the error propagate: the job engine records it
       with its message and never retries it, as it does
       `RelayUnusableAtExecutionError`. (D4)
-      *Done:* the executor is unchanged; the engine's catch-all records an
-      exception from `execute` as `Internal error: <message>` and fails the
-      job without a retry (`jobs/engine.py`). That record is section 5's to
-      prove through the application.
+      *Done;* the executor is unchanged, and the engine records the error as
+      `Internal error: <message>` without a retry (proved in 5.4).
 - [x] 3.3 Have `probe_connectivity` catch `ProtectedKeyUnreadableError` and
       return `ConnectivityResult(host=<host_id>, reachable=False, detail=<its message>)`.
       Update its docstring. (D4)
-      *Done:* only `write_inventory` sits inside the `try`; the ping runs
-      outside it, under the inventory's context manager.
+      *Done;* only `write_inventory` sits inside the `try`.
 - [x] 3.4 Add unit tests:
       - In `test_ssh_connection.py`: each cause (protected under another key,
         malformed ciphertext, a codec built with no key) raises
@@ -255,18 +196,12 @@ tests in `test_ssh_connection.py`, `test_runner.py`, `test_executor.py` and
         message as its detail, and runs no subprocess.
 
       (D4)
-      *Done (all unit):* `test_a_protected_key_that_cannot_be_decrypted_is_named`
+      *Done (unit):* `test_a_protected_key_that_cannot_be_decrypted_is_named`
       over the three causes and a configured key that is not a Fernet key,
-      asserting each whole message, and that neither the ciphertext, the PEM
-      text, nor either Fernet key appears in it; plus a decrypt that
-      succeeds; the extended runner
-      test also checks the error's cause is Fernet's `InvalidToken`;
-      `test_a_key_that_cannot_be_decrypted_fails_the_run_naming_the_host`
-      runs the real `write_inventory` over a temporary directory that is empty
-      afterwards; `test_a_host_whose_key_cannot_be_decrypted_is_answered_unreachable`
-      uses the module's `_ProbingRunner`, a real `AnsibleRunner` whose ping is
-      overridden, and shows the ping was never called. "Runs no subprocess"
-      is shown that way, not by observing process creation.
+      asserting each whole message and that no ciphertext, PEM text or key
+      appears; the extended runner test; `test_a_key_that_cannot_be_decrypted_fails_the_run_naming_the_host`;
+      and `test_a_host_whose_key_cannot_be_decrypted_is_answered_unreachable`,
+      which shows the ping is never called.
 - [x] 3.5 **Verification checkpoint.** Unit: the Ansible distribution's suite,
       `make test-compute-provisioning-ansible`. Then `make test`.
       End-to-end: none. No lane registers an embedded host, and the mock runner
@@ -275,28 +210,8 @@ tests in `test_ssh_connection.py`, `test_runner.py`, `test_executor.py` and
       Owed by validation: `tests.yml`, job `test · test-compute-provisioning-ansible`.
       The distribution's suite passes, including the typed-error, executor and
       probe tests.
-      *Evidence:* `make lock`; `make test-compute-provisioning-ansible`
-      (unit), 177 passed, 4 skipped (the real-Ansible codec cases, as
-      before); `make test`, exit 0; `make check-packaging`, exit 0, the
-      architecture rules holding. `make test` ran before the fresh-context
-      fixes, which changed only the codec's message text and the codec test,
-      so the distribution's suite was run again after them. End-to-end
-      confirmed: none.
-
-*Handoff (section 3):* the fresh-context check found the error's docstring
-and `decrypt_private_key`'s naming readiness before readiness decrypts; both
-now describe execution only, and section 4 widens them along with the module
-docstrings that say the codec decrypts "only to materialize the connection
-for one execution" (`compute_provisioning_ansible/connection.py`) and "just
-in time for execution" (`compute_provisioning/hosts/connection.py`). It also
-found that "submit the host's private key again" is no recovery when no key is
-configured, so that cause names only configuring the key. Two departures from
-D4's wording are recorded in 3.1's note rather than in `design.md`, for the
-round's review to judge: the no-key cause's own message and recovery, and the
-distribution's runtime `cryptography` dependency, which catching Fernet's
-`InvalidToken` needs (the alternative, `market_config` raising an error of its
-own, would widen this change into `kit/config`). Section 4's readiness calls
-`decrypt_private_key(ciphertext, host_id=...)` and reports `str(error)`.
+      *Evidence:* `make lock`; `make test-compute-provisioning-ansible`, 177
+      passed, 4 skipped; `make test`, exit 0; `make check-packaging`, exit 0.
 
 ## 4. Readiness checks each host as execution would
 
@@ -314,12 +229,9 @@ Files: `provisioning/compute/ansible/src/compute_provisioning_ansible/readiness.
       `collect_ssh_keys_from_hosts` accordingly. If the callable raises, the
       component reports the host registry unreadable, as it does today.
       Imports go at module level. (D5)
-      *Done:* the keywords are `execution_hosts` and `ssh_codec`. Only the
-      call that lists the hosts sits inside the registry's `try`; the list is
-      taken whole first. `collect_ssh_keys_from_hosts(hosts, ssh_codec)` now
-      returns a `HostKeyReport` (`ssh_keys`, `host_reasons`), exported from
-      the module. The imports are at module level, including `inventory_target`
-      from `runner.py`, which raises no cycle.
+      *Done:* keywords `execution_hosts` and `ssh_codec`;
+      `collect_ssh_keys_from_hosts(hosts, ssh_codec)` returns a
+      `HostKeyReport` (`ssh_keys`, `host_reasons`); imports at module level.
 - [x] 4.2 Read each host as execution reads it:
       - Skip a host whose connection kind is not `ssh`: no Ansible executor
         reaches it.
@@ -336,13 +248,9 @@ Files: `provisioning/compute/ansible/src/compute_provisioning_ansible/readiness.
       - Report every other host as it would be without the failing one.
 
       (D5, 19 F1)
-      *Done:* a refusal's reason reads `host '<id>' cannot be executed
-      against: <inventory_target's message>`, unless that message already
-      names the host, as the no-key refusal does; for version 1 it names the
-      version served and says to re-register at it. A decryption failure's
-      reason is the typed error's message as it is. The decrypted plaintext is
-      never bound to a name; that nothing is written rests on reading the
-      code, since no test observes the filesystem around a status read.
+      *Done:* a refusal reads `host '<id>' cannot be executed against:
+      <refusal>` unless the refusal already names the host. The plaintext is
+      never bound to a name; that nothing is written rests on reading the code.
 - [x] 4.3 Make these reasons count as a missing key file's do: once any
       composed Ansible executor is real. Mocked executors need no keys. The
       detail keeps its fields and schema version 1. *Corrected (27 F1):* it
@@ -354,13 +262,9 @@ Files: `provisioning/compute/ansible/src/compute_provisioning_ansible/readiness.
         execution reads them.
 
       The detail carries no plaintext and no ciphertext. (D5)
-      *Done:* host reasons follow the key-file reasons in `not_ready_reasons`.
-      `SshKeyInfo` gained a class docstring saying a refused host has no
-      entry. *Outside the plan's file list:* the module docstrings of
-      `compute_provisioning_ansible/connection.py` and
-      `compute_provisioning/hosts/connection.py`, and `decrypt_private_key`'s,
-      now also name the in-memory readiness check, as section 3's handoff
-      left for this section.
+      *Done:* host reasons follow the key-file reasons. The module docstrings
+      of both `connection.py` modules and `decrypt_private_key`'s also name
+      the in-memory readiness check.
 - [x] 4.4 Add unit tests in `test_readiness.py`. Rewrite its host fixtures as
       `ExecutionHost`s with `ConnectionEnvelope`s protected by a real codec,
       under a `Fernet.generate_key()` key that the module says protects nothing
@@ -382,76 +286,24 @@ Files: `provisioning/compute/ansible/src/compute_provisioning_ansible/readiness.
         (extending `test_the_detail_discloses_no_key_material`).
 
       (D5; the readiness scenarios of the delta)
-      *Done (unit):* every existing test rewritten onto `ExecutionHost`s
-      whose embedded keys a real `SshConnectionCodec` protected, plus eight
-      new test functions (ten cases) covering the listed ones; the three
-      failing causes are one parametrized test whose expected reason is the
-      codec's own message for that ciphertext, and whose other host is a key
-      file. Beyond the list: a version-1 host whose protected key decrypts
-      (the delta scenario's second form), and a connection naming no key. The
-      raising host read is the existing parametrized test, both mocked and
-      real. The delta's "nothing is written to storage" is not observed by a
-      test (see 4.2).
+      *Done (unit):* every listed case, plus a version-1 host whose protected
+      key decrypts and a connection naming no key.
 - [x] 4.5 **Verification checkpoint.** Unit: the Ansible distribution's suite,
       `make test-compute-provisioning-ansible`. Then `make test`.
       End-to-end: none in this section. The composition root is not yet wired
       to the new input; section 5 wires it and names the smoke that reads it.
       Owed by validation: `tests.yml`, job `test · test-compute-provisioning-ansible`.
       The distribution's suite passes, including the reworked readiness tests.
-      *Evidence:* `make test-compute-provisioning-ansible` (unit), 187 passed,
-      4 skipped (the real-Ansible codec cases, as before). `make dist`, then
-      `make test`, exit 0, the provisioning service's suite (644 unit, 579
-      application integration) passing against the rebuilt wheels with
-      section 5's wiring (see the handoff). After the version bumps:
-      `make lock`, `make dist`, `make test` exit 0, `make check-packaging`
-      exit 0.
-      *End-to-end, corrected:* with 5.1 and 5.2 in this commit the
-      composition root is wired, so the `provisioning_readonly` smoke
-      `test_status_reports_execution_and_the_ansible_component`
-      (`e2e-tests/tests/smoke/test_provisioning_smoke.py`) reads the new
-      readiness on a deployed release, as regression evidence only: no lane
-      registers a host whose connection readiness would refuse. *Corrected
-      (28 A1):* no validation part runs that smoke; see 5.5.
-      *Owed by validation, corrected:* also `tests.yml`, job
-      `test · test-provisioning`; the service suite passes with the new
-      composition.
-
-*Handoff (section 4):* the component's new signature breaks the provisioning
-service's composition root, which passed `list_hosts=`, so `make test` could
-not pass at this section's commit with the plan's file list. Tasks 5.1 and 5.2
-(the container's `_make_status_components` and its provider, and the
-integration harness's call) were therefore implemented in this section's
-commit, and are checked under section 5 with a note saying so. Neither
-`make test` nor `make test-provisioning` rebuilds `.dist`: the service installs
-the internal wheels last built there, so a run after a source change proves
-nothing about the service until `make dist` (CI runs `make dist-ci`) rebuilds
-them. A first `make test-provisioning` here passed against section 3's wheel,
-and a first `make test` failed on the stale readiness; both are void. Sections
-1 and 2's `make test` runs had the same blind spot for the service: section
-1's read was not yet called, and section 2's `ansible.cfg` and probe were not
-exercised by the service's suite against the new wheel until this section's
-run. Section 3's `make test` followed a `make lock`, which rebuilds `.dist`,
-so its service run had section 3's code as it stood before that section's
-message fixes.
-
-The fresh-context check found no version bump for packages whose published
-API changed: `arkhai-compute-provisioning` gained `execution_hosts` (section
-1), and `arkhai-compute-provisioning-ansible` changed
-`decrypt_private_key`'s and `ansible_readiness_component`'s signatures
-(sections 3 and 4). Per `docs/development/RELEASING.md`, "Versioning policy",
-this commit bumps `arkhai-compute-provisioning` to 0.26.0 (new API, minor),
-`arkhai-compute-provisioning-ansible` to 0.8.0 (incompatible before 1.0,
-minor), and `arkhai-compute-provisioning-service` to 0.24.0, its readiness
-reporting differently, as an earlier change bumped it for a behaviour change;
-the service's floors on the two move to the new versions, and `make lock`
-refreshed the locks. The domain adapters call neither changed function, so
-their floors stay. The readiness detail keeps schema version 1, as D5 decided;
-the fresh-context check flagged that `RELEASING.md` says a versioned envelope
-is never changed in place, which is for the round's review to weigh against
-D5. Under
-mocked executors only, a host whose connection execution refuses appears
-nowhere in the detail (no entry, and host reasons count only once an executor
-is real); the docstring says so.
+      *Evidence:* `make test-compute-provisioning-ansible`, 187 passed, 4
+      skipped; `make dist`, then `make test`, exit 0 (644 unit, 579
+      application integration in the service). After the version bumps
+      (`design.md`): `make lock`, `make dist`, `make test`,
+      `make check-packaging`, each exit 0. *Correction:* 5.1 and 5.2 landed in
+      this section's commit, since the new signature broke the composition
+      root, so `test · test-provisioning` is owed here too. A service run
+      proves nothing about a changed internal package until `make dist`
+      rebuilds `.dist` (`BUILD_AND_PACKAGING.md`); sections 1 and 2's `make
+      test` runs predate the rebuild. End-to-end evidence is 5.5's.
 
 ## 5. Composition and the running application
 
@@ -474,33 +326,24 @@ and, if no test covers `apply_ansible_config`, a unit test in
       `ssh` codec, `connection_codecs.codec(SSH_CONNECTION_KIND)`, in place of
       the public listing. Add `connection_codecs` to its container provider,
       and update its docstring. (D5)
-      *Done in section 4's commit,* so that commit's `make test` could pass
-      (section 4's handoff). The codec is looked up once, when the components
-      are composed; the hosts are read on each status read.
+      *Done in section 4's commit;* the codec is looked up once at
+      composition, the hosts read on each status read.
 - [x] 5.2 Have the integration harness's `conftest.py` call
       `_make_status_components` with the harness's own `connection_codecs`, so
       status is composed there as it is in production. (D5;
       `docs/development/TESTING.md`, "Integration Tests")
-      *Done in section 4's commit,* for the same reason; the harness's codecs
-      hold `TEST_CONNECTION_KEY`.
+      *Done in section 4's commit;* the harness's codecs hold
+      `TEST_CONNECTION_KEY`.
 - [x] 5.3 Add a unit test of `app_runtime.apply_ansible_config` if none exists.
       It exports the profile's `ansible_cfg` verbatim when set and
       `DEFAULT_ANSIBLE_CONFIG` otherwise, and sets no `ANSIBLE_LOG_PATH`. (D2;
       the scenario "An operator configures a log file")
-      *Done:* none existed. *Outside the plan's file list:*
-      `apply_ansible_config` gained optional `config` and `environ`
-      parameters, the service's settings and `os.environ` when omitted (the
-      startup step passes neither), so the test injects both rather than
-      replacing the module's imported `settings` or touching the process
-      environment (`TESTING.md`, "Unit Tests", mocking convention).
-      `tests/unit/test_apply_ansible_config.py` (unit): an operator
-      configuration stating a `log_path` is exported verbatim; empty, blank,
-      null and absent `ansible_cfg` export the packaged configuration; in
-      every case `ANSIBLE_CONFIG` is the only variable written, so no
-      `ANSIBLE_LOG_PATH`. With section 2's connectivity test this proves the
-      scenario for the exported configuration and the check's subprocess;
-      that the playbook subprocess inherits it rests on the runner passing no
-      `env`.
+      *Done:* none existed. `apply_ansible_config` takes optional `config`
+      and `environ` (the settings and `os.environ` when omitted), so
+      `tests/unit/test_apply_ansible_config.py` injects both: an operator
+      configuration is exported verbatim, an empty, blank, null or absent one
+      exports the packaged configuration, and `ANSIBLE_CONFIG` is the only
+      variable written.
 - [x] 5.4 Add application integration tests in
       `test_unreadable_host_key_api.py`, through the canonical client.
       **Setup:**
@@ -529,26 +372,13 @@ and, if no test covers `apply_ansible_config`, a unit test in
         value. The route returns it redacted.
 
       (D2, D4, D5)
-      *Done (application integration, through the canonical clients):* five
-      tests. The unreadable host is seeded directly in each test that needs
-      it (the API protects every key under the configured key, so cannot
-      store one protected under another); the second host is registered
-      through `client.family.register_host` in the status test, the one that
-      reads it. The job test asserts the whole message is in the job's error
-      (the engine prefixes `Internal error: `), `retry_count` 0 and no
-      `next_retry_at`, and no playbook started. The connectivity test asserts
-      the detail equals the message and that the ping was never called. The
-      status test asserts the host's reason, both keys' `exists`, no reason
-      naming the second host, and that neither ciphertext nor the PEM text is
-      in the status JSON. The harness's playbook path does not exist, so the
-      component is not ready in every harness test; the tests assert the
-      host's own reason, not readiness alone. The redaction test hands both
-      `write_inventory` and `check_connectivity_with_inventory` to a real
-      runner over a `/bin/sh` stand-in `ansible`, as the task prescribes. The
-      fresh-context check noted that this reaches below the point
-      `TESTING.md` says to mock at (the runner, which wraps the subprocess
-      boundary) and repeats section 2's unit proof; it is kept as planned and
-      left for the round's review.
+      *Done (application integration):* five tests, one per case. The
+      unreadable host is seeded directly, since the API protects every key
+      under the configured key. The job test asserts the whole message in
+      the job's error, `retry_count` 0, no `next_retry_at`, and no playbook
+      started; the status test asserts the host's own reason rather than
+      readiness alone, since the harness's playbook path does not exist. The
+      redaction test's level is recorded in `design.md`.
 - [x] 5.5 **Verification checkpoint.** Application integration: the
       provisioning service's suite, `make test-provisioning`, including the
       existing `test_system_api.py`, `test_hosts_api.py` and
@@ -558,86 +388,41 @@ and, if no test covers `apply_ansible_config`, a unit test in
       `test_connectivity_check_on_first_host_if_available` in
       `e2e-tests/tests/smoke/test_provisioning_smoke.py`, which would exercise
       the new readiness wiring and the probe on a deployed release as
-      regression evidence. *Corrected (28 A1):* the provisioning chart's smoke
-      hook runs them only under `make -C helm test` or `make -C helm
-      test-module MODULE=provisioning`; the validation's Helm part runs the
-      e2e-scenarios pod alone (`helm test --filter
-      name=<release>-e2e-tests-e2e-scenarios`) and the payments check, so
-      validation 28 ran neither. The regression evidence for the readiness
-      wiring is the pipeline's stage 00c (`Stage00c_ProvisioningHealth`,
+      regression evidence. *Corrected (28 A1):* no validation part runs that
+      smoke: the provisioning chart's smoke hook runs only under
+      `make -C helm test` or `make -C helm test-module MODULE=provisioning`,
+      and validation's Helm part runs the e2e-scenarios pod and the payments
+      check alone. The readiness wiring's regression evidence is the
+      pipeline's stage 00c (`Stage00c_ProvisioningHealth`,
       `e2e-tests/tests/e2e/roles/helpers/compute_deal_stages.py`), which
-      asserts every status component ready, the `ansible` one composed with
-      `execution_hosts` and the `ssh` codec included; run 42248449359 ran it
-      in `e2e_deal`, `e2e_deal_buyer_cli` and `e2e_bare_metal_mock_deal`, and
-      passed. Under the lanes' mocked executors host reasons do not count, so
-      it shows the wiring composes and reads ready, not what it reports for a
-      host. No lane scenario registers
-      a host whose key cannot be decrypted, and the lanes' executors are
-      mocked, so none exercises the new failure behaviour. None is owed:
-      application integration proves it.
+      asserts every status component ready, in `e2e_deal`,
+      `e2e_deal_buyer_cli` and `e2e_bare_metal_mock_deal`. Under the lanes'
+      mocked executors host reasons do not count, so it shows the wiring
+      composes and reads ready, not what it reports for a host. No lane
+      exercises the new failure behaviour; application integration proves it.
       Owed by validation: `tests.yml`, job `test · test-provisioning`. The
       service suite passes, including `test_unreadable_host_key_api.py`.
-      *Evidence:* `make dist`, then `make test`, exit 0. After the
-      fresh-context fixes (the `apply_ansible_config` seam and its unit test,
-      service code only): `make test-provisioning`, 649 unit passed, 584
-      application integration passed; `make check-packaging`, exit 0;
-      `make check-change`, every check passed. *End-to-end, confirmed with
-      qualifications:* both smoke tests exist under `provisioning_readonly`;
-      no validation part runs them (28 A1, above). `test_status_reports_execution_and_the_ansible_component`
-      checks only that the `ansible` component is present, so it shows the
-      readiness wiring (in place since section 4's commit) composes and
-      answers on a deployed release, not what it reports; under the lanes'
-      mocked executors host reasons do not count.
-      `test_connectivity_check_on_first_host_if_available` skips when no host
-      is registered, so it reaches the probe only on a release with a host.
-
-*Handoff (section 5):* sections 1 to 5 are implemented; closeout (6) remains.
-For closeout's comment check (6.1), the change also added or revised
-comments outside the files 6.1 names: `hosts/connection.py`'s module
-docstring, `compute_provisioning_ansible/connection.py`'s module docstring,
-`runner.py`'s `write_inventory` and `check_connectivity_with_inventory`
-docstrings, and `app_runtime.py`'s `apply_ansible_config`. For 6.3, the
-readiness detail's `exists` and its omission of a refused host are the
-behaviour to check "Execution readiness is reported in system status"
-against. Three items are left for the round's review, recorded in their
-sections: the stand-in-subprocess tests' test level (section 2's and 5.4's),
-the departures from D4's wording and the distribution's runtime `cryptography`
-dependency (3.1), and the readiness detail keeping schema version 1 against
-`RELEASING.md`'s rule on versioned envelopes (section 4's handoff). To prove
-anything about the service after changing a package it installs, run
-`make dist` before `make test` (section 4's handoff).
+      *Evidence:* `make dist`, `make test`, exit 0; `make test-provisioning`,
+      649 unit and 584 application integration passed; `make
+      check-packaging`, exit 0; `make check-change`, every check passed.
 
 *Round fixes (triage of review 27 and validation 28):*
-- **27 F1** (section 4): the readiness detail is published as schema
-  version 2, since an embedded key's `exists` now says whether it decrypts
-  and a refused host has no entry; `readiness.py`'s constant and its comment,
-  the version assertions in `test_readiness.py` and `test_system_api.py`, D5
-  and the proposal's "Wire" paragraph. `arkhai-compute-provisioning-ansible`
-  is already at 0.8.0 for this change's incompatible edits, so no further
-  bump.
-- **27 F2** (the delta): "A protected key that cannot be decrypted is named,
-  not hidden" now covers a ciphertext the codec receives that the configured
-  key cannot read, and says a stored protected value with no ciphertext,
-  which no write stores, fails every read returning that host's connection
-  and leaves readiness reporting the registry unreadable. No code change.
-- **28 A1** (section 5): 4.5, 5.5 and 6.8 corrected; no validation part runs
-  the `provisioning_readonly` smoke, and the pipeline's stage 00c is the
-  readiness wiring's regression evidence.
+- **27 F1:** the readiness detail is published as schema version 2 (D5);
+  `arkhai-compute-provisioning-ansible` was already at 0.8.0.
+- **27 F2:** the delta's "A protected key that cannot be decrypted is named,
+  not hidden" covers ciphertext the configured key cannot read, and states
+  what a stored protected value with no ciphertext does. No code change.
+- **28 A1:** 4.5, 5.5 and 6.8 corrected: the `provisioning_readonly` smoke is
+  not evidence, stage 00c is.
 
-*Evidence:* `make dist`; `make test-compute-provisioning-ansible` (unit), 187
-passed, 4 skipped, again after the final comment edit; `make
-test-provisioning`, 649 unit and 584 application integration passed; `make
-test`, exit 0; `make check-packaging`, exit 0; `make check-comment-hygiene`
-and `make check-change`, every check passed (its history-wording check first
-refused "no longer" in the version comment, reworded to what holds). The fresh-context check of the
-diff found no blocking defect. Fixed from it: 5.5 and 6.8 now name stage 00c
-(the first draft said the change had no end-to-end evidence), the 4.3 and 4.5
-notes no longer contradict the fixes, the smoke's Helm targets are named
-exactly, the readers of the detail are described as "no production code",
-the delta's sentence says a listing fails as a whole, and the version
-comment and a clause of D5 are reworded. Declined: an extra version
-assertion in `test_unreadable_host_key_api.py`, since `test_system_api.py`
-already pins the version at application integration.
+*Evidence:* `make dist`; `make test-compute-provisioning-ansible`, 187 passed,
+4 skipped; `make test-provisioning`, 649 unit and 584 application integration
+passed; `make test`, `make check-packaging`, `make check-comment-hygiene` and
+`make check-change`, each passing.
+
+*Pre-closeout (triage of review 35):* **35 F1:** the delta's redaction
+requirement and scenario, and D2, name the three values a connectivity result
+replaces, and why no domain secret reaches a probe's output. No code change.
 
 ## 6. Closeout
 
@@ -645,7 +430,7 @@ Per `openspec/README.md#plan-closeout-requirements`, in this order. Closeout
 changes documentation only: a part needing a code edit returns the change to
 implementation.
 
-- [ ] 6.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and
+- [x] 6.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and
       read the comments and docstrings this change added or revised for any
       that narrate the review or migration that introduced them. These are:
       `hosts/service.py`'s module docstring and `execution_hosts`;
@@ -653,22 +438,43 @@ implementation.
       `readiness.py`'s docstrings and field descriptions; `ansible.cfg`; and
       `container.py`'s `_make_status_components`. Anything to rewrite returns
       the change to implementation.
-- [ ] 6.2 **Import placement — confirm.** Check the imports this change added,
+      *Confirmed:* `make check-comment-hygiene` passes. Every comment and
+      docstring in the diff from `origin/dev`, including those in
+      `hosts/connection.py`, `runner.py` and `app_runtime.py`, describes
+      current behaviour and names no review, task or migration.
+- [x] 6.2 **Import placement — confirm.** Check the imports this change added,
       in `readiness.py`, `probes.py`, `connection.py`, `container.py`, and the
       new tests, for any still local without a recorded reason. One that should
       move returns the change to implementation.
-- [ ] 6.3 **Documentation compliance.** Re-check D1–D8 against
+      *Confirmed:* every import the change added, in source and tests, is at
+      module level; the diff adds no function-local import.
+- [x] 6.3 **Documentation compliance.** Re-check D1–D8 against
       `openspec/README.md`'s placement rules, and the permanent documents
       against the code they describe:
       - "Connection secrets stay protected" and "Execution readiness is
         reported in system status" against `execution_hosts` and `readiness.py`;
       - the operator handbook's host-definitions section against the export and
         the import route.
-- [ ] 6.4 **Narrative compression.** Compress completed-task notes to final
+      *Done:* normative behaviour (D2, D4, D5, D8) goes to
+      `physical-provisioning/spec.md` through the deltas; operating procedure
+      (D2's log, D4's recovery) to the operator handbook; goal state (D7) to
+      `ROADMAP.md`; campaign state (D6) to the index; D1 and D3 need none.
+      The two MODIFIED requirements match `execution_hosts` (internal, served
+      by no route) and `readiness.py` (refusal through `inventory_target`,
+      in-memory decryption, other kinds skipped). The handbook's export
+      section matches `HostAuthority.host_definitions`. No other permanent
+      document states the packaged log file or embedded keys reported present.
+- [x] 6.4 **Narrative compression.** Compress completed-task notes to final
       behaviour, material validation evidence, deferred work (D3's revisit
       trigger stays in `design.md`), and permanent-documentation destinations,
       moving durable rationale into `design.md` first.
-- [ ] 6.5 **Roadmap currency (D7).** In `docs/development/ROADMAP.md`, "Goal 1 —
+      *Done:* moved to `design.md` first: D4's two refinements (the no-key
+      message, the runtime `cryptography` dependency), the stand-in-subprocess
+      tests' level, and the version bumps. Removed: section handoffs and the
+      fresh-context check narratives, and the stale-wheel narrative, which
+      `BUILD_AND_PACKAGING.md` already states ("Run make dist first"). No
+      work is deferred beyond D3's revisit trigger.
+- [x] 6.5 **Roadmap currency (D7).** In `docs/development/ROADMAP.md`, "Goal 1 —
       Consolidate physical-resource authority in the provisioning service":
       - Remove the gap row "One SSH key reaches every host in an environment,
         so a host prepared by another party cannot be registered with its own
@@ -679,7 +485,10 @@ implementation.
         named at dispatch, at the connectivity check, and in readiness.
 
       Name the edit in the design-promotion record.
-- [ ] 6.6 **Campaign index currency (D6).** In `openspec/changes/README.md`,
+      *Done:* the row is removed, and a current-state paragraph after the
+      host-definitions paragraph says both, and that Ansible's output is kept
+      only redacted by default.
+- [x] 6.6 **Campaign index currency (D6).** In `openspec/changes/README.md`,
       "Lesser goal — Reach hosts and VMs that have no inbound route":
       - Update this change's row.
       - Remove the graph line `contain-embedded-host-key-material ──►
@@ -694,12 +503,23 @@ implementation.
         D3.
 
       Leave other rows' `Depends on` alone. Run `make check-change-index`.
-- [ ] 6.7 **Packaging.** Run `make check-packaging` and resolve every failure it
+      *Done:* the row reads `in closeout` with its evidence; the graph line
+      names this change as independent; the paragraph and the relay row's
+      Notes are rewritten, and so is the campaign's introduction, which said
+      registering a host with its own credential was remaining work. No other
+      row's `Depends on` or status changed. `scripts/change-workflow check
+      index` passes.
+- [x] 6.7 **Packaging.** Run `make check-packaging` and resolve every failure it
       reports. A failure needing a code or lock change returns the change to
       implementation. Then run
       `make check-architecture-change CHANGE=contain-embedded-host-key-material`.
       No exception row is expected, since no new edge crosses a layer.
-- [ ] 6.8 **End-to-end pipeline.** Record the passing run the latest validation
+      *Done:* `make check-packaging`, exit 0 (locks, Python selection, layer,
+      scope, dependency and kind rules all OK); `make
+      check-architecture-change`, "owns no architecture row". The change
+      touched no `.agents/`, `.claude/` or `.codex/` file, so
+      `make check-agent-skills` is not owed.
+- [x] 6.8 **End-to-end pipeline.** Record the passing run the latest validation
       names, its result, and the scenarios that exercise this change: the
       pipeline's stage 00c in `e2e_deal`, `e2e_deal_buyer_cli` and
       `e2e_bare_metal_mock_deal`, as regression evidence that the readiness
@@ -710,7 +530,22 @@ implementation.
       validation part runs it (28 A1). If the pipeline cannot run, record
       an explicit blocker naming its cause and the change that owns it, with
       the validations it gates treated as unrun.
-- [ ] 6.9 **Promotion.** Write the permanent documents this change owes, and
+      *Done:* validation 40 (`reviews/40-validation.md`) passed at
+      `c76f66488`, the merge of `origin/dev` after the pre-closeout triage,
+      which is the commit closeout starts from: pipeline run 42264437201,
+      success, lanes `e2e-vm`, `e2e-bare-metal` and `e2e-apicredits`; stage
+      00c ran in `e2e_deal` and `e2e_deal_buyer_cli` (VM lane) and
+      `e2e_bare_metal_mock_deal` (bare-metal lane), passing. No lane
+      exercises an unreadable key, the log file or connectivity redaction,
+      and the `provisioning_readonly` smoke is not evidence. CI: `tests.yml`
+      run 42264444169, success; the owed jobs `test · test-compute-provisioning`
+      (531 passed), `test · test-compute-provisioning-ansible` (191 passed)
+      and `test · test-provisioning` (653 unit, 589 application integration)
+      passed, every one of the 24 jobs passing, against `dev`'s baseline run
+      42251889872 at `20aa47dfe`, also all passing. Local (`check-packaging`,
+      `test`) and Helm parts passed too. Closeout changes no code, so these
+      runs describe the code the closeout commit carries.
+- [x] 6.9 **Promotion.** Write the permanent documents this change owes, and
       complete the design-promotion record from the destinations below.
       - In `docs/operator-handbook.md`, a new section "## Ansible configuration",
         placed before "## Payments access". It covers:
@@ -755,29 +590,40 @@ implementation.
       `physical-provisioning` has no `index.md`, so no index entry is written.
       No `architecture.md`, `docs/development/ARCHITECTURE.md` or
       `openspec/specs/README.md` change is owed.
-- [ ] 6.10 **Documentation citations.** After promotion, run
+      *Done:* the handbook's "Ansible configuration" section and "A host's
+      protected key no longer decrypts" subsection are written; the recovery
+      names `PUT /api/v1/hosts/{host_id}` and the INI import's `embedded`
+      mode, not `POST /api/v1/hosts`, which registers a new host only. The
+      handbook's version-2 bullet also says readiness names a version-1
+      host. In the relay change: 2A.7 (left unchecked), the progress summary
+      and its 2A.7 item, the promotion row, the sequencing paragraph, the
+      design paragraph, and a correction note on its completed 11.5, which
+      said Goal 1's gap table names this change. The design-promotion record
+      is in `design.md`.
+- [x] 6.10 **Documentation citations.** After promotion, run
       `make check-doc-citations CHANGE=contain-embedded-host-key-material` and
       resolve every match. Then run
       `openspec validate contain-embedded-host-key-material --strict`.
-- [ ] 6.11 **Archival.** Last, once every other part is checked, run
+      *Done:* `make check-doc-citations`, every cited path resolves in the
+      change's 4 documents; `make check-change`, every check passed,
+      `openspec validate --strict` with the pinned validator among them.
+- [x] 6.11 **Archival.** Last, once every other part is checked, run
       `openspec archive contain-embedded-host-key-material -y`. It merges the
       two ADDED and two MODIFIED requirements into
       `openspec/specs/physical-provisioning/spec.md`, with no `--skip-specs`,
       and moves the change under `openspec/changes/archive/`. Point the index
       row at the archived directory, and run `openspec validate --specs --strict`.
+      *Done:* archived with the pinned validator (through `npx`, since `bunx`
+      is not installed here), with no `--skip-specs`: the permanent spec did
+      not yet carry the deltas. The diff of `physical-provisioning/spec.md`
+      holds the two added requirements once each, the two modified ones as the
+      deltas state them with their added scenarios, and nothing else. The
+      index row links `archive/2026-11-06-contain-embedded-host-key-material/`;
+      `make check-change` on the archived change passed, `openspec validate
+      --specs --strict` among its checks.
 
-Planned promotion destinations (6.9):
-
-| Accepted decision | Permanent location |
-|---|---|
-| D1 — the change covers the secret-lifetime gaps that remain | no permanent destination; the index row and the promoted requirements carry its scope |
-| D2 — the packaged configuration names no log file, an operator's own is not overridden, and the connectivity result is redacted | `openspec/specs/physical-provisioning/spec.md#requirement-ansible-output-is-kept-only-redacted-unless-an-operator-configures-otherwise`; `docs/operator-handbook.md#ansible-configuration` |
-| D3 — the existing transient files keep their layout | no permanent destination; "Connection secrets stay protected" governs the layout, and the revisit trigger stays in `design.md` |
-| D4 — a protected key that cannot be decrypted is named at dispatch and at the probe | `openspec/specs/physical-provisioning/spec.md#requirement-a-protected-key-that-cannot-be-decrypted-is-named-not-hidden`; `docs/operator-handbook.md#a-hosts-protected-key-no-longer-decrypts` |
-| D5 — readiness reads hosts through `execution_hosts`, decrypts embedded keys in memory, and refuses a stored connection as execution does | `openspec/specs/physical-provisioning/spec.md#requirement-execution-readiness-is-reported-in-system-status`; `#requirement-connection-secrets-stay-protected`; `docs/operator-handbook.md#a-hosts-protected-key-no-longer-decrypts` |
-| D6 — relay task 2A.7's requirement is met by the existing variables-file handling; no prerequisite edge | `openspec/changes/README.md` (the relay row, graph and paragraph); `openspec/changes/relay-vm-access-without-a-dashboard/tasks.md` (2A.7, the handoff note, the promotion row, the sequencing paragraph) and `design.md` |
-| D7 — per-host keys are registered through the host API and diagnosed when unusable | `docs/development/ROADMAP.md#goal-1--consolidate-physical-resource-authority-in-the-provisioning-service` |
-| D8 — two added and two modified requirements | `openspec/specs/physical-provisioning/spec.md`, by the archive |
+The design-promotion record is in `design.md`, "Design promotion record".
+Closeout ran its parts in the order above.
 
 ## Validation evidence
 

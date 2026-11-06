@@ -155,6 +155,16 @@ the runner's `write_inventory`, which the job path and the probe share, and
 readiness (D5) — has the host in hand, so the job, the probe, and readiness
 report one text for one failure.
 
+Implementation refined two points. The codec checks for an unconfigured key
+itself, before Fernet, so that cause's message says no `ssh_decryption_key` is
+configured and names the one recovery that works there, configuring the key the
+host's key was protected under: without a key, a private key cannot be submitted
+again, since the codec's `build` refuses it. And catching `InvalidToken` imports
+`cryptography.fernet`, so the distribution declares `cryptography` as a runtime
+dependency; it was already in every lock that installs the distribution. The
+alternative, `market_config` raising an error of its own, would widen the change
+into `kit/config` for no difference a caller sees.
+
 A job lets it propagate, as relay execution lets `RelayUnusableAtExecutionError`
 propagate: the job engine records it with its message and never retries it,
 since a retry meets the same configuration. The connectivity probe catches it
@@ -331,6 +341,20 @@ the `ansible` component not ready. The operator handbook, roadmap, and index
 edits, and the revision of the relay change's 2A.7 (D6), are closeout's
 promotion.
 
+Two tests start a stand-in `ansible` `/bin/sh` script first on `PATH`: the
+distribution's connectivity-redaction unit test, and the service's application
+integration test of the connectivity route's redaction. `TESTING.md` would place
+a real subprocess at integration and mock the runner in application integration;
+both were kept as planned, beside the distribution's existing real-subprocess
+streaming test, since the distribution has no integration suite, and the
+implementation review raised no finding on them.
+
+The change bumps `arkhai-compute-provisioning` to 0.26.0 (the new
+`execution_hosts` read), `arkhai-compute-provisioning-ansible` to 0.8.0 (the
+incompatible `decrypt_private_key` and `ansible_readiness_component`
+signatures), and `arkhai-compute-provisioning-service` to 0.24.0 (its readiness
+reports differently), under `docs/development/RELEASING.md`'s versioning policy.
+
 ## Risks / Trade-offs
 
 - An operator who relied on `/app/ansible.log` without configuring it loses it;
@@ -346,3 +370,21 @@ promotion.
 ## Open Questions
 
 None.
+
+## Design promotion record
+
+| Accepted decision | Permanent location |
+|---|---|
+| D1 — the change covers the secret-lifetime gaps that remain | no permanent destination; the index row and the promoted requirements carry its scope |
+| D2 — the packaged configuration names no log file, an operator's own is not overridden, and the connectivity result is redacted with the generic fields | `openspec/specs/physical-provisioning/spec.md#requirement-ansible-output-is-kept-only-redacted-unless-an-operator-configures-otherwise`, by the archive; `docs/operator-handbook.md#ansible-configuration` |
+| D3 — the existing transient files keep their layout | no permanent destination; `openspec/specs/physical-provisioning/spec.md#requirement-connection-secrets-stay-protected` governs the layout, and the revisit trigger stays in this design and in the relay change's revised 2A.7 |
+| D4 — a protected key that cannot be decrypted is named at dispatch and at the probe | `openspec/specs/physical-provisioning/spec.md#requirement-a-protected-key-that-cannot-be-decrypted-is-named-not-hidden`, by the archive; `docs/operator-handbook.md#a-hosts-protected-key-no-longer-decrypts` |
+| D5 — readiness reads hosts through `execution_hosts`, decrypts embedded keys in memory, and refuses a stored connection as execution does; detail schema version 2 | `openspec/specs/physical-provisioning/spec.md#requirement-execution-readiness-is-reported-in-system-status` and `#requirement-connection-secrets-stay-protected`, by the archive; `docs/operator-handbook.md#a-hosts-protected-key-no-longer-decrypts` and `#host-definitions` (the version-2 rule); the schema version's meaning in `readiness.py`'s constant |
+| D6 — relay task 2A.7's requirement is met by the existing variables-file handling; no prerequisite edge | `openspec/changes/README.md` (the relay row's Notes, the campaign graph, its introduction and its paragraph on this change); `openspec/changes/relay-vm-access-without-a-dashboard/tasks.md` (2A.7, the implementation-progress handoff, the promotion row, the sequencing paragraph, and a correction note on 11.5) and `design.md` (the resolved variables file paragraph) |
+| D7 — per-host keys are registered through the host API and diagnosed when unusable | `docs/development/ROADMAP.md#goal-1--consolidate-physical-resource-authority-in-the-provisioning-service` (gap row removed, current state amended) |
+| D8 — two added and two modified requirements | `openspec/specs/physical-provisioning/spec.md`, by the archive |
+
+No `architecture.md`, `docs/development/ARCHITECTURE.md` or
+`openspec/specs/README.md` change is owed: the change adds no repository-wide
+shape, authority boundary or capability, and `physical-provisioning` has no
+`index.md`.
