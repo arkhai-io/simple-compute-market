@@ -1,5 +1,6 @@
 """What every part of the workflow tooling shares: the repository it acts on, the
-format of a change's record set, its error, and its clock. The steps and review
+format of a change's record set, the marker of an unattended run, its error, and its
+clock. The steps and review
 kinds it knows are the graph's (`graph.STEPS`, `graph.KINDS`)."""
 
 from __future__ import annotations
@@ -17,6 +18,13 @@ ORCHESTRATOR = "orchestrator"
 # and so do `next`'s and `find --json`'s outputs and the outcome schema's `$id`; it
 # moves when any of them changes incompatibly, with a command converting the older.
 FORMAT = 2
+# Set in the environment of every unattended run, to the name of the run's step, so
+# a command the run starts can tell it is inside one, and which: the wrapper records
+# that run's outcome, so a step's own recording of it would write it twice, and
+# `run` gives a step only the hooks the engine's hook table lists for it. Any
+# non-empty value marks a run unattended. The marker is internal: no repository or
+# runner reads it.
+UNATTENDED_RUN = "CHANGE_WORKFLOW_UNATTENDED"
 
 Clock = Callable[[], datetime]
 Entry = dict[str, Any]

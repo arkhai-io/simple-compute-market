@@ -35,6 +35,10 @@ exit or by the owner's direction, which checks no exit guard. An unwaivable one
 refuses every entry while it is not met (`entry_refusal`); a waivable one takes the
 owner's direction as its override.
 
+Beside the graph, `HOOK_STEPS` holds which steps may run each of the repository's
+hooks through `scripts/change-workflow run`; like the graph, no repository changes
+it (CW-u4pc).
+
 The change-workflow architecture shows the table as a diagram laid out by hand,
 `openspec/specs/change-workflow/diagrams/change-workflow-graph.drawio`, held to the
 boxes and edges the table draws (`drawing`; see `diagram`). A durable
@@ -443,6 +447,24 @@ _KINDED = {node.step for node in NODES if node.kind}
 STEPS: tuple[str, ...] = tuple(dict.fromkeys(d.runs for d in TABLE if d.runs))
 KINDS: tuple[str, ...] = tuple(dict.fromkeys(node.kind for node in NODES
                                              if node.step == "review" and node.kind))
+
+# Which steps may run each hook through `scripts/change-workflow run`: the workflow's
+# structure, which no repository changes. Only implementation, triage, and the merge
+# make functional changes, so only they relock or run the functional checks;
+# validation changes nothing it validates (CW-af15), and so runs only its own parts.
+# A `pre-commit` reports and changes nothing, so a review may run it. `validation`
+# is the preflight and every part's commands, `cleanup` every part's cleanup as one
+# list. `pre-push` and `post-clone` are run by the engine's own push and clone, by
+# no step.
+HOOK_STEPS: dict[str, frozenset[str]] = {
+    "after-functional-change": frozenset({"implement", "triage", "merge"}),
+    "pre-commit-functional": frozenset({"implement", "triage", "merge"}),
+    "pre-commit": frozenset({"design", "plan", "implement", "triage", "merge", "closeout",
+                             "archive-cleanup", "review"}),
+    "pre-archive": frozenset({"closeout"}),
+    "validation": frozenset({"validate"}),
+    "cleanup": frozenset({"archive-cleanup"}),
+}
 
 
 class TargetError(StepError):

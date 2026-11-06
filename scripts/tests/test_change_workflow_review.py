@@ -666,7 +666,7 @@ def test_a_claude_review_continues_only_a_claude_reviewer(tmp_path: Path) -> Non
 def test_a_review_with_no_reviewer_available_publishes_nothing(tmp_path: Path) -> None:
     root = repository(tmp_path)
 
-    def missing(command, cwd, feed) -> int:
+    def missing(command, cwd, feed, step) -> int:
         raise not_installed("claude")
 
     line = review_and_log(CHANGE, "design", root=root, clock=clock, runner=codex_missing,
@@ -692,7 +692,7 @@ def test_a_file_the_reviewer_cannot_find_is_no_unavailability(tmp_path: Path,
     def codex_lost(command, log) -> int:
         raise not_installed(str(log))
 
-    def claude_lost(command, cwd, feed) -> int:
+    def claude_lost(command, cwd, feed, step) -> int:
         raise not_installed(str(tmp_path / "gone" / "01-design.log"))
 
     line = review_and_log(CHANGE, "design", root=root, clock=clock,
@@ -837,7 +837,7 @@ def test_a_claude_review_signalled_mid_run_is_logged_with_its_session(
     runs = tmp_path / "git" / "change-runs"
     previous = signal.getsignal(signal.SIGTERM)
 
-    def signalled(command, cwd: Path, feed) -> int:
+    def signalled(command, cwd: Path, feed, step) -> int:
         feed(json.dumps({"type": "system", "subtype": "init", "session_id": "c-1"}) + "\n")
         os.kill(os.getpid(), signal.SIGTERM)
         raise AssertionError("SIGTERM did not end the review")

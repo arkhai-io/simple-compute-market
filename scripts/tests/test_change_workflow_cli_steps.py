@@ -560,8 +560,8 @@ sys.path.insert(0, sys.argv[1])
 root, runs, started = Path(sys.argv[2]), Path(sys.argv[3]), sys.argv[4]
 from change_workflow.harness import run_claude
 from change_workflow.wrapper import Wrapper
-def runner(command, cwd, feed):
-    return run_claude([sys.executable, "-c", sys.argv[5], started], cwd, feed)
+def runner(command, cwd, feed, step):
+    return run_claude([sys.executable, "-c", sys.argv[5], started], cwd, feed, step)
 Wrapper(root=root, runner=runner, head=lambda _: "c0ffee", echo=None,
         conversation=lambda _, session: root / "conversations" / f"{session}.jsonl",
         runs=lambda _: runs).run("validate", sys.argv[6])

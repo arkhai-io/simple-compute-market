@@ -164,14 +164,26 @@ table beside the graph), `scripts/change_workflow/harness.py` (the marker),
 `scripts/change_workflow/wrapper.py`, `scripts/change_workflow/cli.py`, and tests in
 `scripts/tests/test_change_workflow_hooks.py`.
 
-- [ ] 2.1 Run a hook's commands (D2, D8, CW-k9vd, CW-v2dq): each command's
+- [x] 2.1 Run a hook's commands (D2, D8, CW-k9vd, CW-v2dq): each command's
   placeholders filled, shell-quoted, and run with `sh -c` from the repository's root,
   its output passed through; a list run in order whatever an earlier command
   reported, the hook failing when any failed and naming each. `{change}` is the
   change's name; `{base}` comes from the landing branch (section 5 supplies it; until
   then the caller gives it). Verify: unit tests for "Two checks fail" (CW-k9vd) and a
   value with spaces and quotes reaching the command as one word.
-- [ ] 2.2 Hold the hook table beside the graph (D9, CW-u4pc): which steps may run
+  - Done: `scripts/change_workflow/hooks.py` (`Hooks`, `fill`). "Two checks fail"
+    passes (unit, the shell faked); the quoting test runs a real `sh` (library
+    integration). `{base}` is `run --base <branch>` until section 5; a command
+    naming a value the run lacks is refused before any command runs. Each hook
+    prints `+ <command>` before each command and ends with the engine's closing
+    line, `[change-workflow] <hook> at <commit>: passed`, or `failed:` and each
+    failed command with its exit status, or `skipped, not declared`; section 3's
+    parts' closing line should keep this form, adding the part, owed workflow,
+    and evidence. Each command, default check, and skip is an `Invoked` (hook,
+    part, owed, phase, check, command, exit status, started, seconds), which
+    section 3 keeps for the run's line; `part`, `owed`, and `phase` are for its
+    parts.
+- [x] 2.2 Hold the hook table beside the graph (D9, CW-u4pc): which steps may run
   `after-functional-change`, `pre-commit-functional`, `pre-commit`, `pre-archive`,
   validation's preflight and parts, and `cleanup`; `pre-push` and `post-clone` run by
   no step. Make the unattended marker (`harness.UNATTENDED_RUN`) carry the run's step
@@ -182,7 +194,25 @@ table beside the graph), `scripts/change_workflow/harness.py` (the marker),
   unattended. Verify: unit tests for "Validation asks for a functional hook"
   (CW-u4pc), an interactive `run` unrestricted, and `record` still refused inside a
   run.
-- [ ] 2.3 Run `pre-commit`'s default checks before its declared commands (D11,
+  - Done: `graph.HOOK_STEPS` (keys `validation` and `cleanup` for section 3); the
+    marker moved to `common.UNATTENDED_RUN` (harness re-uses it), since `hooks`
+    needs it without the harness adapter. The harness's `Runner` takes the step
+    (`run_claude(command, cwd, feed, step)`); the wrapper passes each run's and
+    resume's step, the review its Claude fallback `review`, and `run_codex` sets
+    `review` itself. A marker naming no step runs no hook. `pre-push` and
+    `post-clone` are no choice of `run` (a usage error). Evidence: "Validation asks
+    for a functional hook" and an interactive `run` unrestricted go through
+    `cli.main` with a real `sh` (library integration); `record` refused under
+    `implement`, the wrapper marking a run and its resume, a Claude review marked,
+    and every table entry a step (unit); the harness marking a real child process
+    `validate` and a Codex one `review` (library integration).
+  - Outside the plan, found by the fresh-context check: `workflow.mk` assigned a
+    make variable `CHANGE_WORKFLOW_UNATTENDED`, which overrides the environment
+    variable of that name in every recipe, so any `make` target an unattended run
+    started saw the marker erased, and would have run unrestricted. Renamed
+    `CHANGE_WORKFLOW_HEADLESS`; a library-integration test runs a real `make`
+    including the fragment and reads the marker in a recipe.
+- [x] 2.3 Run `pre-commit`'s default checks before its declared commands (D11,
   CW-c8lw): `index`, `tasks`, `skills`, and `openspec` — the strict validation of the
   change, or of every specification for an archived change — each skipped only when
   `defaults.disable` names it; and add `scripts/change-workflow check change
@@ -191,7 +221,16 @@ table beside the graph), `scripts/change_workflow/harness.py` (the marker),
   D16, CW-i2we); the default validation runs through it. Verify: unit tests for "A
   repository declares its own pre-commit" and "A default check is turned off"
   (CW-c8lw), and "A repository pins the validator" (CW-i2we) with the runner faked.
-- [ ] 2.4 Give `run pre-commit` its tier (D7, CW-e1sg): from the worktree's changes
+  - Done: `index`, `tasks`, and `skills` run in process (`index.main`,
+    `tasks.main`, `skills.main`); `openspec` runs `<command> validate <change>
+    --strict`, or `validate --specs --strict` for an archived change, through the
+    shell. The three scenarios pass (unit, the shell and in-process checks faked),
+    with a failing default not stopping the declared commands, an archived change,
+    `check change` alone, and an absent `pre-commit` recording its skip. `openspec`
+    is handled before argparse, so every argument, flags included, is OpenSpec's;
+    one test runs it through a real `sh` (library integration). It maps a non-zero
+    status to 1, as every subcommand does.
+- [x] 2.4 Give `run pre-commit` its tier (D7, CW-e1sg): from the worktree's changes
   against `HEAD` — staged, unstaged, and untracked — when any path lies outside
   `repository.inert-paths`, run `after-functional-change`, then
   `pre-commit-functional`, then `pre-commit`, each held to the hook table; otherwise
@@ -200,16 +239,42 @@ table beside the graph), `scripts/change_workflow/harness.py` (the marker),
   triage fix changes only documents" (CW-e1sg), a functional change running all three
   in order, a clean worktree running `pre-commit` alone and changing nothing
   (CW-y6mj), and a design step's functional change refused by the table.
-- [ ] 2.5 Run `pre-archive` through `run pre-archive <change>` for closeout, and
+  - Done: `hooks.worktree_changes` (`git status --porcelain=v1 -z
+    --untracked-files=all`, both sides of a rename) and `config.inert`, which
+    matches an entry whole (`docs/` covers `docs/a.md`, not `docsite/a.md`); 4.2
+    should use `config.inert` for the next-step computation too, so the two never
+    disagree. The four scenarios pass, plus staged, untracked, and renamed changes,
+    a functional commit with no `pre-commit-functional` refused, one with it
+    declared empty running none (the commit half of CW-t5hz's "on purpose"), and
+    no inert path making every change functional (library integration, a real Git
+    repository, the shell and default checks faked). The clean-worktree test
+    shows the tier and an unchanged tree with the default checks faked; that the
+    real defaults change nothing rests on their reading only. Every hook of the
+    tier is checked against the table and for missing values before any runs; all
+    run, whatever an earlier one reported. The line naming the first functional
+    path is printed before the table's check, so a refusal is explained.
+  - A change's records outside the inert paths, such as a tracked ledger in a
+    repository declaring none, make a commit functional, as CW-e1sg reads; D7's
+    exemption of records is the next-step computation's, not the tier's.
+- [x] 2.5 Run `pre-archive` through `run pre-archive <change>` for closeout, and
   `after-functional-change` alone through `run after-functional-change <change>`, both
   held to the table (D2, D9). Verify: unit tests that each runs its declared commands
   and that an absent optional hook is skipped, the run saying so (CW-t5hz).
-- [ ] 2.6 Verification: `pytest -q scripts/tests/test_change_workflow_hooks.py
+  - Done: both pass (unit). Outside the plan: `run pre-commit-functional` is also
+    runnable by name, held to the table like the rest.
+- [x] 2.6 Verification: `pytest -q scripts/tests/test_change_workflow_hooks.py
   scripts/tests/test_change_workflow_config.py scripts/tests/test_change_workflow_harness.py
   scripts/tests/test_change_workflow_wrapper.py scripts/tests/test_change_workflow_review.py
   scripts/tests/test_change_workflow_cli.py` (unit, and library integration where a
   real Git repository is used) passes; `make test` passes. End-to-end: none; no
   scenario exercises the workflow tooling.
+  - Done: the six suites and `test_change_workflow_cli_steps.py` pass, 493 tests;
+    `make test-release-tooling` (2465) and `make test` pass. One full run failed
+    `test_check_secrets.py::test_the_audit_reports_what_the_gate_passes`, which
+    passed alone and on every run since; not this section's code. Every runner
+    stand-in in the wrapper, review, and CLI tests now takes the step.
+    End-to-end: confirmed none. `make check-change` fails only on the
+    specification index (10.9).
 
 ## 3. Validation's parts and the invocation record (D3, D10)
 

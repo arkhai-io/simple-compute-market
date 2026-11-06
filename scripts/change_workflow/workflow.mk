@@ -31,11 +31,15 @@ REVIEW_BASE ?= $(CHANGE_WORKFLOW_REVIEW_BASE)
 REVIEW_MODEL ?=
 REVIEW_EFFORT ?=
 
-CHANGE_WORKFLOW_UNATTENDED = $(filter 1,$(UNATTENDED))
+# Named apart from the engine's unattended-run marker, CHANGE_WORKFLOW_UNATTENDED: a
+# makefile assignment overrides the environment variable of its name in every
+# recipe, so a variable of that name would erase the marker in every recipe an
+# unattended run starts, and with it the engine's hook table.
+CHANGE_WORKFLOW_HEADLESS = $(filter 1,$(UNATTENDED))
 CHANGE_WORKFLOW_GRANTS = $(if $(strip $(ALLOW)), --allow '$(subst ;,' --allow ',$(subst ','\'',$(ALLOW)))')
 # How a step's target ends its command: unattended, with the rules granted for the
 # run, or nothing for an interactive session, which no table restricts.
-CHANGE_WORKFLOW_RUN = $(if $(CHANGE_WORKFLOW_UNATTENDED), --unattended$(CHANGE_WORKFLOW_GRANTS))
+CHANGE_WORKFLOW_RUN = $(if $(CHANGE_WORKFLOW_HEADLESS), --unattended$(CHANGE_WORKFLOW_GRANTS))
 CHANGE_WORKFLOW_ARGUMENTS = $(if $(strip $(ARGUMENTS)), --arguments '$(subst ','\'',$(ARGUMENTS))')
 MERGE_FROM = $(or $(strip $(FROM)),$(CHANGE_WORKFLOW_MERGE_FROM))
 
@@ -45,13 +49,13 @@ MERGE_FROM = $(or $(strip $(FROM)),$(CHANGE_WORKFLOW_MERGE_FROM))
 .PHONY: check-agent-skills check-push-ready push-branch change-graph
 
 design: ## Open a Claude Code design session for an OpenSpec change; unattended, ARGUMENTS follows the change in the skill's invocation, as the owner's direction to the design (CHANGE=<change> [UNATTENDED=1 [ARGUMENTS=<text>] [ALLOW='<rule>;<rule>']])
-	@$(CHANGE_WORKFLOW) start design "$(CHANGE)"$(if $(CHANGE_WORKFLOW_UNATTENDED),$(CHANGE_WORKFLOW_ARGUMENTS))$(CHANGE_WORKFLOW_RUN)
+	@$(CHANGE_WORKFLOW) start design "$(CHANGE)"$(if $(CHANGE_WORKFLOW_HEADLESS),$(CHANGE_WORKFLOW_ARGUMENTS))$(CHANGE_WORKFLOW_RUN)
 
 plan: ## Open a Claude Code planning session for an OpenSpec change; unattended, it resumes the design session, and ARGUMENTS follows the change in the skill's invocation, as the owner's direction to the plan (CHANGE=<change> [UNATTENDED=1 [FRESH=1] [ARGUMENTS=<text>] [ALLOW='<rule>;<rule>']])
-	@$(CHANGE_WORKFLOW) start plan "$(CHANGE)"$(if $(CHANGE_WORKFLOW_UNATTENDED),$(if $(filter 1,$(FRESH)), --fresh)$(CHANGE_WORKFLOW_ARGUMENTS))$(CHANGE_WORKFLOW_RUN)
+	@$(CHANGE_WORKFLOW) start plan "$(CHANGE)"$(if $(CHANGE_WORKFLOW_HEADLESS),$(if $(filter 1,$(FRESH)), --fresh)$(CHANGE_WORKFLOW_ARGUMENTS))$(CHANGE_WORKFLOW_RUN)
 
 implement: ## Open a fresh Claude Code session implementing an OpenSpec change; unattended, ARGUMENTS follows the change in the skill's invocation, as a merge's conflicts to resolve, and SESSION_ID continues that implementation session instead (CHANGE=<change> [SECTION=<n>] [SECTIONS=<n-m>] [UNATTENDED=1 [ARGUMENTS=<text>] [SESSION_ID=<id>] [ALLOW='<rule>;<rule>']])
-	@$(CHANGE_WORKFLOW) start implement "$(CHANGE)"$(if $(strip $(SECTIONS)$(SECTION)), --sections "$(or $(strip $(SECTIONS)),$(strip $(SECTION)))")$(if $(CHANGE_WORKFLOW_UNATTENDED),$(CHANGE_WORKFLOW_ARGUMENTS)$(if $(strip $(SESSION_ID)), --session '$(subst ','\'',$(strip $(SESSION_ID)))'))$(CHANGE_WORKFLOW_RUN)
+	@$(CHANGE_WORKFLOW) start implement "$(CHANGE)"$(if $(strip $(SECTIONS)$(SECTION)), --sections "$(or $(strip $(SECTIONS)),$(strip $(SECTION)))")$(if $(CHANGE_WORKFLOW_HEADLESS),$(CHANGE_WORKFLOW_ARGUMENTS)$(if $(strip $(SESSION_ID)), --session '$(subst ','\'',$(strip $(SESSION_ID)))'))$(CHANGE_WORKFLOW_RUN)
 
 review: ## Review an OpenSpec change read-only, in Codex or, when Codex is unavailable, on Claude (CHANGE=<change> KIND=design|implementation|pre-closeout|closeout [REVIEW_BASE=<branch>] [REVIEW_MODEL=<any model id, claude-… on Claude; the owner's choice>] [REVIEW_EFFORT=<effort>] [FRESH=1] [UNVALIDATED=1])
 	@$(CHANGE_WORKFLOW) review "$(CHANGE)" --kind "$(KIND)" --base "$(REVIEW_BASE)" $(if $(strip $(REVIEW_MODEL)),--model "$(REVIEW_MODEL)") $(if $(strip $(REVIEW_EFFORT)),--effort "$(REVIEW_EFFORT)") $(if $(strip $(FRESH)),--fresh) $(if $(filter 1,$(UNVALIDATED)),--unvalidated)

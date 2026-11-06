@@ -71,7 +71,22 @@ _TABLES: dict[str, tuple[str, ...]] = {
 _EVERYWHERE = frozenset({"change", "base"})
 PLACEHOLDERS = frozenset({"change", "base", "remote", "owed", "after"})
 # A name in braces, not the shell's `${…}`.
-_PLACEHOLDER = re.compile(r"(?<!\$)\{([A-Za-z_][A-Za-z0-9_-]*)\}")
+PLACEHOLDER = re.compile(r"(?<!\$)\{([A-Za-z_][A-Za-z0-9_-]*)\}")
+
+
+def placeholders(command: str) -> list[str]:
+    """The placeholders `command` names, in order."""
+    return PLACEHOLDER.findall(command)
+
+
+def inert(path: str, inert_paths: Sequence[str] | None) -> bool:
+    """Whether `path`, relative to the root, lies under one of the inert paths: an
+    entry names a directory or a file, matched whole, so `docs/` covers `docs/a.md`
+    and not `docsite/a.md`. With none declared, no path is inert."""
+    return any(path == entry.rstrip("/") or path.startswith(entry.rstrip("/") + "/")
+               for entry in inert_paths or ())
+
+
 
 # Required fields, by the name `missing` reports.
 PRE_COMMIT_FUNCTIONAL = "hooks.pre-commit-functional"
@@ -155,7 +170,7 @@ def _commands(where: str, value: Any, available: frozenset[str]) -> tuple[str, .
         raise ConfigError(f"{where} must be a command or a list of commands, each a "
                           f"non-empty string; got {value!r}")
     for command in commands:
-        for name in _PLACEHOLDER.findall(command):
+        for name in placeholders(command):
             if name not in PLACEHOLDERS:
                 raise ConfigError(f"{where} names {{{name}}}, which is no placeholder the "
                                   "workflow fills; known: "

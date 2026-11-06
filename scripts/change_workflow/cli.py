@@ -26,11 +26,13 @@ The others reach the module that holds them: `next` the next-step computation,
 a change's clone, `round-view` and `round-done` the round view, `history` the copy
 of a change's history, `cost` its cost report, `push` the guarded push, `config`
 how the repository's workflow configuration resolved, `config load` a step's
-documents, and `config parts` validation's plan for a change, `check` the
-configuration's, index, task-list, push, skill, and round-view checks and the graph
-diagram's comparison with the graph table, and `hook post-compaction` the
-post-compaction hook. `check graph` is internal: it maintains the engine's own
-diagram, and no repository or runner relies on it.
+documents, and `config parts` validation's plan for a change, `run` and `openspec`
+the repository's hooks and its OpenSpec command (`hooks`), `check` the
+configuration's, index, task-list, push, skill, and round-view checks, a change's
+default checks (`check change`), and the graph diagram's comparison with the graph
+table, and `hook post-compaction` the post-compaction hook. `check graph` is
+internal: it maintains the engine's own diagram, and no repository or runner relies
+on it.
 
 Before a step starts, `start` checks the configuration whole and refuses a step
 whose required fields are absent, naming them, before anything is launched or
@@ -55,14 +57,13 @@ from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
 from . import clone as clones
-from . import (config, cost_report, diagram, find, graph, history, hook, index, next_step, push,
-               round_view, skills, tasks)
+from . import (config, cost_report, diagram, find, graph, history, hook, hooks, index,
+               next_step, push, round_view, skills, tasks)
 from .clone import clone_of
-from .common import ORCHESTRATOR, StepError, repository_root
+from .common import ORCHESTRATOR, UNATTENDED_RUN, StepError, repository_root
 from .convert import convert_change
 from .find import ChangeNotFound, change_directory, is_archived
 from .graph import KINDS, STEPS
-from .harness import UNATTENDED_RUN
 from .log import (branch_decisions, direction, history_log_path, last_entries, log_path,
                   note_orchestrator, note_round, open_log, read_log, record_interactive)
 from .records import git_head
@@ -359,9 +360,21 @@ def _parser() -> argparse.ArgumentParser:
     config_.add_argument("action", nargs="?", choices=("load", "parts"), default=None)
     config_.add_argument("subject", nargs="?", default=None, metavar="step|change")
     config_.add_argument("--json", action="store_true", help="print it as JSON")
+    run_ = commands.add_parser(
+        "run", help="run one of the repository's hooks for a change, as the engine's hook "
+                    "table allows the step")
+    run_.add_argument("hook", choices=hooks.NAMED)
+    run_.add_argument("change")
+    run_.add_argument("--base", default=None,
+                      help="the branch the change lands on, for a command naming {base}")
+    commands.add_parser(
+        "openspec", help="run the configured OpenSpec command with the arguments given",
+        add_help=False)
     check = commands.add_parser("check", help="run one of the workflow's checks")
     checks = check.add_subparsers(dest="check", required=True)
     checks.add_parser("config", help="the repository's workflow configuration, checked whole")
+    change_ = checks.add_parser("change", help="pre-commit's default checks of a change, alone")
+    change_.add_argument("change")
     checks.add_parser("index", help="the change index against the change directories")
     tasks_ = checks.add_parser("tasks", help="every task under its own section's heading")
     tasks_.add_argument("change")
@@ -370,9 +383,10 @@ def _parser() -> argparse.ArgumentParser:
     checks.add_parser("round-view", help="fail while a round view is open")
     checks.add_parser("graph", help="where the graph's diagram departs from the graph table")
     hook_ = commands.add_parser("hook", help="run a harness hook")
-    hooks = hook_.add_subparsers(dest="hook", required=True)
-    hooks.add_parser("post-compaction",
-                     help="print what a session re-reads after its context is compacted")
+    harness_hooks = hook_.add_subparsers(dest="hook", required=True)
+    harness_hooks.add_parser("post-compaction",
+                             help="print what a session re-reads after its context is "
+                                  "compacted")
     return parser
 
 
@@ -491,6 +505,15 @@ class _Usage(Exception):
 def main(argv: Sequence[str] | None = None, root: Path | None = None,
          wrapper: Wrapper | None = None, environ: Mapping[str, str] = os.environ,
          launch: Launch = _launch, send: Callable[[int, int], None] = os.kill) -> int:
+    given = list(sys.argv[1:] if argv is None else argv)
+    if given[:1] == ["openspec"]:
+        # Every argument is OpenSpec's, flags included, so none is parsed here.
+        try:
+            root = repository_root() if root is None else root
+            return hooks.run_openspec(config.load(root), given[1:], root)
+        except StepError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
     parser = _parser()
     try:
         args = parser.parse_args(argv)
@@ -593,6 +616,16 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
         return _clone_where(args, root)
     if args.command == "config" and args.action == "parts":
         return _config_parts(args, root)
+    if args.command == "run":
+        return hooks.main(args.hook, args.change, root=root, configuration=config.load(root),
+                          environ=environ, base=args.base)
+    if args.command == "check" and args.check == "change":
+        configuration = config.load(root)
+        try:
+            change_directory(root, args.change)
+        except ChangeNotFound as exc:
+            raise StepError(str(exc)) from exc
+        return 0 if hooks.Hooks(root, configuration, environ).check_change(args.change) else 1
     if (reached := delegated(args)) is not None:
         main_, arguments = reached
         if args.command == "push":

@@ -109,9 +109,12 @@ class FakeClaude:
     def __init__(self, *runs: tuple[list[str], int]) -> None:
         self.runs = list(runs)
         self.commands: list[list[str]] = []
+        # The step each run was marked as the unattended run of.
+        self.steps: list[str] = []
 
-    def __call__(self, command, cwd: Path, feed) -> int:
+    def __call__(self, command, cwd: Path, feed, step: str) -> int:
         self.commands.append(list(command))
+        self.steps.append(step)
         lines, status = self.runs.pop(0)
         for line in lines:
             feed(line)

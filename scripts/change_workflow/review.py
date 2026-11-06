@@ -288,7 +288,7 @@ def _claude_attempt(model: Model, prompt: str, continuing: str | None, draft: Pa
                              system=REVIEW_UNATTENDED)
     try:
         with termination_ends_the_run():
-            status = runner(command, root, stream.feed)
+            status = runner(command, root, stream.feed, "review")
     except FileNotFoundError as exc:
         if not missing_program(exc, command):
             raise

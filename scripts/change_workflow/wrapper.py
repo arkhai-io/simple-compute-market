@@ -307,7 +307,7 @@ class Wrapper:
         named = transcript.relative_to(log.parent).as_posix()
         attempts: list[Stream] = []
         outcome, status, failure, model, stream, passed_over, logged = (
-            self._attempt_models(rules, prompt, schema, models, session, granted,
+            self._attempt_models(step, rules, prompt, schema, models, session, granted,
                                  transcript, progress, attempts))
         extra = {**(extra or {}), **model.entry(), "exit_status": status, "transcript": named}
         if passed_over:
@@ -331,16 +331,17 @@ class Wrapper:
             raise failure
         return line
 
-    def _attempt_models(self, rules: StepRules, prompt: str, schema: dict[str, Any],
+    def _attempt_models(self, step: str, rules: StepRules, prompt: str, schema: dict[str, Any],
                         models: Sequence[Model], session: str | None,
                         granted: Sequence[str], transcript: Path, progress: Path,
                         attempts: list[Stream],
                         ) -> tuple[Entry, int | None, BaseException | None, Model, Stream,
                                    list[Entry], dict[str, Any] | None]:
-        """Run the turn on the first available of `models`: its outcome, exit
-        status, any failure, the model last tried, its stream, the models passed
-        over, and the result the outcome was logged from, when the step gave one.
-        Every attempt's stream is appended to `attempts`."""
+        """Run the turn of `step` on the first available of `models`, marked as that
+        step's unattended run: its outcome, exit status, any failure, the model last
+        tried, its stream, the models passed over, and the result the outcome was
+        logged from, when the step gave one. Every attempt's stream is appended to
+        `attempts`."""
         failure: BaseException | None = None
         passed_over: list[Entry] = []
         outcome: Entry = {}
@@ -359,7 +360,7 @@ class Wrapper:
                 failure, status, reached = None, None, None
                 try:
                     with termination_ends_the_run():
-                        status = self.runner(command, self.root, stream.feed)
+                        status = self.runner(command, self.root, stream.feed, step)
                     reached = unreachable(stream.failure_text(status))
                 except FileNotFoundError as exc:
                     if missing_program(exc, command):
