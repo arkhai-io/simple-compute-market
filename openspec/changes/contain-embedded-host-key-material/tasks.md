@@ -179,7 +179,9 @@ module; the distribution has no `tests/integration` (its `testpaths` names
 only `tests/unit`). Left for the round's review to weigh, not changed here.
 The service's `.venv` holds a built copy of this distribution, so a
 service-side run sees the new `ansible.cfg` and runner only after the wheel is
-rebuilt and reinstalled, which `make test` does.
+rebuilt and reinstalled, which `make test` does. *Correction (section 4):*
+`make test` reinstalls but does not rebuild `.dist`, so this section's
+`make test` ran the service against an older wheel; see section 4's handoff.
 
 ## 3. A protected key that cannot be decrypted is named at dispatch and at the probe
 
@@ -306,13 +308,19 @@ decryption the MODIFIED "Connection secrets stay protected" admits.
 Files: `provisioning/compute/ansible/src/compute_provisioning_ansible/readiness.py`,
 `provisioning/compute/ansible/tests/unit/test_readiness.py`.
 
-- [ ] 4.1 Change `ansible_readiness_component`'s host input. It takes a
+- [x] 4.1 Change `ansible_readiness_component`'s host input. It takes a
       callable listing the enabled hosts as `ExecutionHost`s, in place of
       `list_hosts`, and the `ssh` codec (`SshConnectionCodec`). Rework
       `collect_ssh_keys_from_hosts` accordingly. If the callable raises, the
       component reports the host registry unreadable, as it does today.
       Imports go at module level. (D5)
-- [ ] 4.2 Read each host as execution reads it:
+      *Done:* the keywords are `execution_hosts` and `ssh_codec`. Only the
+      call that lists the hosts sits inside the registry's `try`; the list is
+      taken whole first. `collect_ssh_keys_from_hosts(hosts, ssh_codec)` now
+      returns a `HostKeyReport` (`ssh_keys`, `host_reasons`), exported from
+      the module. The imports are at module level, including `inventory_target`
+      from `runner.py`, which raises no cycle.
+- [x] 4.2 Read each host as execution reads it:
       - Skip a host whose connection kind is not `ssh`: no Ansible executor
         reaches it.
       - Read each `ssh` host through `runner.inventory_target`. For a host it
@@ -328,7 +336,14 @@ Files: `provisioning/compute/ansible/src/compute_provisioning_ansible/readiness.
       - Report every other host as it would be without the failing one.
 
       (D5, 19 F1)
-- [ ] 4.3 Make these reasons count as a missing key file's do: once any
+      *Done:* a refusal's reason reads `host '<id>' cannot be executed
+      against: <inventory_target's message>`, unless that message already
+      names the host, as the no-key refusal does; for version 1 it names the
+      version served and says to re-register at it. A decryption failure's
+      reason is the typed error's message as it is. The decrypted plaintext is
+      never bound to a name; that nothing is written rests on reading the
+      code, since no test observes the filesystem around a status read.
+- [x] 4.3 Make these reasons count as a missing key file's do: once any
       composed Ansible executor is real. Mocked executors need no keys. The
       detail keeps its fields and schema version 1. Rewrite `SshKeyInfo`'s
       field descriptions:
@@ -338,7 +353,14 @@ Files: `provisioning/compute/ansible/src/compute_provisioning_ansible/readiness.
         execution reads them.
 
       The detail carries no plaintext and no ciphertext. (D5)
-- [ ] 4.4 Add unit tests in `test_readiness.py`. Rewrite its host fixtures as
+      *Done:* host reasons follow the key-file reasons in `not_ready_reasons`.
+      `SshKeyInfo` gained a class docstring saying a refused host has no
+      entry. *Outside the plan's file list:* the module docstrings of
+      `compute_provisioning_ansible/connection.py` and
+      `compute_provisioning/hosts/connection.py`, and `decrypt_private_key`'s,
+      now also name the in-memory readiness check, as section 3's handoff
+      left for this section.
+- [x] 4.4 Add unit tests in `test_readiness.py`. Rewrite its host fixtures as
       `ExecutionHost`s with `ConnectionEnvelope`s protected by a real codec,
       under a `Fernet.generate_key()` key that the module says protects nothing
       real. Cover each case:
@@ -359,12 +381,75 @@ Files: `provisioning/compute/ansible/src/compute_provisioning_ansible/readiness.
         (extending `test_the_detail_discloses_no_key_material`).
 
       (D5; the readiness scenarios of the delta)
-- [ ] 4.5 **Verification checkpoint.** Unit: the Ansible distribution's suite,
+      *Done (unit):* every existing test rewritten onto `ExecutionHost`s
+      whose embedded keys a real `SshConnectionCodec` protected, plus eight
+      new test functions (ten cases) covering the listed ones; the three
+      failing causes are one parametrized test whose expected reason is the
+      codec's own message for that ciphertext, and whose other host is a key
+      file. Beyond the list: a version-1 host whose protected key decrypts
+      (the delta scenario's second form), and a connection naming no key. The
+      raising host read is the existing parametrized test, both mocked and
+      real. The delta's "nothing is written to storage" is not observed by a
+      test (see 4.2).
+- [x] 4.5 **Verification checkpoint.** Unit: the Ansible distribution's suite,
       `make test-compute-provisioning-ansible`. Then `make test`.
       End-to-end: none in this section. The composition root is not yet wired
       to the new input; section 5 wires it and names the smoke that reads it.
       Owed by validation: `tests.yml`, job `test · test-compute-provisioning-ansible`.
       The distribution's suite passes, including the reworked readiness tests.
+      *Evidence:* `make test-compute-provisioning-ansible` (unit), 187 passed,
+      4 skipped (the real-Ansible codec cases, as before). `make dist`, then
+      `make test`, exit 0, the provisioning service's suite (644 unit, 579
+      application integration) passing against the rebuilt wheels with
+      section 5's wiring (see the handoff). After the version bumps:
+      `make lock`, `make dist`, `make test` exit 0, `make check-packaging`
+      exit 0.
+      *End-to-end, corrected:* with 5.1 and 5.2 in this commit the
+      composition root is wired, so the `provisioning_readonly` smoke
+      `test_status_reports_execution_and_the_ansible_component`
+      (`e2e-tests/tests/smoke/test_provisioning_smoke.py`) reads the new
+      readiness on a deployed release, as regression evidence only: no lane
+      registers a host whose connection readiness would refuse.
+      *Owed by validation, corrected:* also `tests.yml`, job
+      `test · test-provisioning`; the service suite passes with the new
+      composition.
+
+*Handoff (section 4):* the component's new signature breaks the provisioning
+service's composition root, which passed `list_hosts=`, so `make test` could
+not pass at this section's commit with the plan's file list. Tasks 5.1 and 5.2
+(the container's `_make_status_components` and its provider, and the
+integration harness's call) were therefore implemented in this section's
+commit, and are checked under section 5 with a note saying so. Neither
+`make test` nor `make test-provisioning` rebuilds `.dist`: the service installs
+the internal wheels last built there, so a run after a source change proves
+nothing about the service until `make dist` (CI runs `make dist-ci`) rebuilds
+them. A first `make test-provisioning` here passed against section 3's wheel,
+and a first `make test` failed on the stale readiness; both are void. Sections
+1 and 2's `make test` runs had the same blind spot for the service: section
+1's read was not yet called, and section 2's `ansible.cfg` and probe were not
+exercised by the service's suite against the new wheel until this section's
+run. Section 3's `make test` followed a `make lock`, which rebuilds `.dist`,
+so its service run had section 3's code as it stood before that section's
+message fixes.
+
+The fresh-context check found no version bump for packages whose published
+API changed: `arkhai-compute-provisioning` gained `execution_hosts` (section
+1), and `arkhai-compute-provisioning-ansible` changed
+`decrypt_private_key`'s and `ansible_readiness_component`'s signatures
+(sections 3 and 4). Per `docs/development/RELEASING.md`, "Versioning policy",
+this commit bumps `arkhai-compute-provisioning` to 0.26.0 (new API, minor),
+`arkhai-compute-provisioning-ansible` to 0.8.0 (incompatible before 1.0,
+minor), and `arkhai-compute-provisioning-service` to 0.24.0, its readiness
+reporting differently, as an earlier change bumped it for a behaviour change;
+the service's floors on the two move to the new versions, and `make lock`
+refreshed the locks. The domain adapters call neither changed function, so
+their floors stay. The readiness detail keeps schema version 1, as D5 decided;
+the fresh-context check flagged that `RELEASING.md` says a versioned envelope
+is never changed in place, which is for the round's review to weigh against
+D5. Under
+mocked executors only, a host whose connection execution refuses appears
+nowhere in the detail (no entry, and host reasons count only once an executor
+is real); the docstring says so.
 
 ## 5. Composition and the running application
 
@@ -382,15 +467,20 @@ readiness as the container does; a new integration module
 and, if no test covers `apply_ansible_config`, a unit test in
 `provisioning/compute/service/tests/unit/`.
 
-- [ ] 5.1 Make `_make_status_components(job_executors, host_authority, connection_codecs)`
+- [x] 5.1 Make `_make_status_components(job_executors, host_authority, connection_codecs)`
       pass readiness `host_authority.execution_hosts(enabled_only=True)` and the
       `ssh` codec, `connection_codecs.codec(SSH_CONNECTION_KIND)`, in place of
       the public listing. Add `connection_codecs` to its container provider,
       and update its docstring. (D5)
-- [ ] 5.2 Have the integration harness's `conftest.py` call
+      *Done in section 4's commit,* so that commit's `make test` could pass
+      (section 4's handoff). The codec is looked up once, when the components
+      are composed; the hosts are read on each status read.
+- [x] 5.2 Have the integration harness's `conftest.py` call
       `_make_status_components` with the harness's own `connection_codecs`, so
       status is composed there as it is in production. (D5;
       `docs/development/TESTING.md`, "Integration Tests")
+      *Done in section 4's commit,* for the same reason; the harness's codecs
+      hold `TEST_CONNECTION_KEY`.
 - [ ] 5.3 Add a unit test of `app_runtime.apply_ansible_config` if none exists.
       It exports the profile's `ansible_cfg` verbatim when set and
       `DEFAULT_ANSIBLE_CONFIG` otherwise, and sets no `ANSIBLE_LOG_PATH`. (D2;

@@ -9,8 +9,9 @@ Connection secrets exist only as protected values: a scheme and its ciphertext.
 A secret submitted with a connection is handed to the kind's codec, which turns
 it into a protected value before anything is stored; the host authority never
 encrypts, decrypts, returns, or logs secret material, and a protected value's
-representation never shows its ciphertext. Only the codec decrypts, just in time
-for execution.
+representation never shows its ciphertext. Only the codec decrypts: just in time
+for execution, or in memory, the plaintext discarded at once, to check that a
+value decrypts when an executor's readiness is reported.
 """
 
 from __future__ import annotations

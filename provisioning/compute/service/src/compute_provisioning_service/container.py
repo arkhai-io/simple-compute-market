@@ -145,17 +145,21 @@ def _adapter_bundle(runtime):
     return runtime.adapter_bundle()
 
 
-def _make_status_components(job_executors, host_authority):
+def _make_status_components(job_executors, host_authority, connection_codecs):
     """The readiness components status reports, each built by its implementation.
 
     The Ansible implementation reports on every executor it built, whichever
-    domain contributed it, and on the keys the registered hosts reference.
+    domain contributed it, and on each enabled host's connection as execution
+    would read it: through the host authority's internal read, which carries
+    each protected envelope, and the ``ssh`` codec execution decrypts with.
     """
+    ssh_codec = connection_codecs.codec(SSH_CONNECTION_KIND)
 
     def ansible():
         return ansible_readiness_component(
             executors_by_offering_mode=job_executors.executors_by_offering_mode(),
-            list_hosts=lambda: host_authority.list_hosts(enabled_only=True),
+            execution_hosts=lambda: host_authority.execution_hosts(enabled_only=True),
+            ssh_codec=ssh_codec,
         )
 
     return (StatusComponentProvider(name=ANSIBLE_COMPONENT, collect=ansible),)
@@ -727,6 +731,7 @@ class Container(containers.DeclarativeContainer):
         _make_status_components,
         job_executors=job_executor_table,
         host_authority=host_authority,
+        connection_codecs=connection_codecs,
     )
 
     system_status_service = providers.Singleton(

@@ -5,7 +5,9 @@ A host with an ``ssh`` connection is reached by connecting to ``ssh_host`` on
 a file on the provisioning service's own filesystem and not secret, or
 ``private_key``, key material submitted with the connection, which this codec
 protects with the service's Fernet key (scheme ``fernet-v1``) before anything is
-stored, and decrypts only to materialize the connection for one execution.
+stored, and decrypts only to materialize the connection for one execution, or
+in memory, the plaintext discarded at once, to check that it decrypts when the
+Ansible executor's readiness is reported.
 ``public_host`` and ``public_port`` are the address and port tenants use to reach
 what the host delivers when they reach it on a different route than the
 provisioner does; each, when absent, is the connection's own.
@@ -182,7 +184,8 @@ class SshConnectionCodec:
         )
 
     def decrypt_private_key(self, ciphertext: str, *, host_id: str) -> str:
-        """A protected ``private_key``'s material, for one execution only.
+        """A protected ``private_key``'s material, for one execution or one
+        readiness check, never kept.
 
         ``host_id`` names the host whose key this is, and is used only for the
         error. Raises ``ProtectedKeyUnreadableError`` for every reason the key
