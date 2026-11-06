@@ -218,6 +218,31 @@ async def test_opening_copies_binding_message_and_artifact_in_one_transaction(tm
         "payload": {},
     }
 
+    quoted_terms = {"kind": "opaque.v1", "version": 1, "payload": {"units": 3}}
+    exact_amount = 2**100 + 3
+    await client.save_negotiation_message(
+        negotiation_id=thread_binding.negotiation_id,
+        sender_principal=thread.seller_principal,
+        sender_role="seller",
+        our_price=exact_amount,
+        their_price=exact_amount - 1,
+        proposed_price=exact_amount,
+        action_taken="counter_offer",
+        message_type="counter_proposal",
+        timestamp="2026-08-15T00:00:02Z",
+        provision_terms=quoted_terms,
+    )
+    resumed = SQLiteClient(str(tmp_path / "storefront.db"))
+    transcript = await resumed.load_negotiation_thread(
+        negotiation_id=thread_binding.negotiation_id
+    )
+    assert transcript[-1]["provision_terms"] == quoted_terms
+    assert transcript[-1]["proposed_price"] == exact_amount
+    opening = await resumed.load_negotiation_thread_row(
+        negotiation_id=thread_binding.negotiation_id
+    )
+    assert opening["provision_terms"] == thread.terms_wire
+
     settlement_data = {
         "transaction_id": "a" * 64,
         "mandate": {"from": "buyer-account", "to": "seller-account"},

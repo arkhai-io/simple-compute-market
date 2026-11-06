@@ -614,3 +614,14 @@ BASELINE: Migration[sqlite3.Connection] = Migration(
     "v0_3_0_baseline_core_storefront", _create_baseline
 )
 """Core's market state as the v0.3.0 release's storefront client built it."""
+
+
+def _add_negotiation_message_terms(connection: sqlite3.Connection) -> None:
+    """Keep delivery terms alongside each scalar in the transcript."""
+    connection.execute("ALTER TABLE negotiation_messages ADD COLUMN provision_terms TEXT")
+
+
+MIGRATIONS: tuple[Migration[sqlite3.Connection], ...] = (
+    Migration("20261106_001_negotiation_message_terms", _add_negotiation_message_terms),
+)
+"""Core's migrations after the baseline, composed by every storefront chain."""

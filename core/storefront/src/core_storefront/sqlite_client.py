@@ -1417,6 +1417,7 @@ class SQLiteClient:
         action_taken: str,
         message_type: str,
         timestamp: str,
+        provision_terms: Mapping[str, Any] | None = None,
     ) -> int:
         """Save a negotiation message to the database.
 
@@ -1495,9 +1496,10 @@ class SQLiteClient:
                     INSERT INTO negotiation_messages(
                         negotiation_id, round, sender_role,
                         sender_scheme, sender_identifier, our_price, their_price,
-                        proposed_price, action_taken, message_type, timestamp
+                        proposed_price, action_taken, message_type, timestamp,
+                        provision_terms
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(negotiation_id, round) DO UPDATE SET
                         sender_role = excluded.sender_role,
                         sender_scheme = excluded.sender_scheme,
@@ -1507,7 +1509,8 @@ class SQLiteClient:
                         proposed_price = excluded.proposed_price,
                         action_taken = excluded.action_taken,
                         message_type = excluded.message_type,
-                        timestamp = excluded.timestamp
+                        timestamp = excluded.timestamp,
+                        provision_terms = excluded.provision_terms
                     """,
                     (
                         negotiation_id,
@@ -1521,6 +1524,8 @@ class SQLiteClient:
                         action_taken,
                         message_type,
                         timestamp,
+                        json.dumps(dict(provision_terms), allow_nan=False)
+                        if provision_terms is not None else None,
                     ),
                 )
                 conn.commit()
@@ -1545,7 +1550,7 @@ class SQLiteClient:
                     """
                     SELECT round, sender_role, sender_scheme, sender_identifier,
                            our_price, their_price, proposed_price,
-                           action_taken, message_type, timestamp
+                           action_taken, message_type, timestamp, provision_terms
                     FROM negotiation_messages
                     WHERE negotiation_id = ?
                     ORDER BY round ASC
@@ -1568,6 +1573,9 @@ class SQLiteClient:
                             "action_taken": row[7],
                             "message_type": row[8],
                             "timestamp": row[9],
+                            "provision_terms": (
+                                json.loads(row[10]) if row[10] is not None else None
+                            ),
                         }
                     )
                 return result

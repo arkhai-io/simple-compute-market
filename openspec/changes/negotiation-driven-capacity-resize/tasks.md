@@ -43,11 +43,11 @@ deployment boundary.
       `design.md`. If the decision needs the registry to keep a listing-level field,
       record the dependency on that change here and in the campaign index before
       any task relying on it starts.
-- [ ] 2.2 Add the revised-shape field as a child of `proposal`, typed as the existing
+- [x] 2.2 Add the revised-shape field as a child of `proposal`, typed as the existing
       `ProvisionTerms` envelope, to the continue/advance request models. The
       envelope stays opaque to core; the VM codec decodes its payload as a
       family-grouped capability shape validated by `VM_CAPABILITY_SCHEMA`.
-- [ ] 2.3 Widen `kit/negotiation-runtime`'s `validate_continuation` contract so a
+- [x] 2.3 Widen `kit/negotiation-runtime`'s `validate_continuation` contract so a
       domain sees the decoded revised shape, and carry the shape on `RoundRequest`
       and `RoundEvaluation` so `evaluate_round` and `agreement_terms` receive what
       the round proposed and what was agreed.
@@ -118,6 +118,58 @@ Checkpoint 2026-11-06 (partial implementation; not deployment-ready):
   hooks would send basis points into payments and fail buyer Agreement checks.
   The registry carrier/proof implementation is a parallel dependency and is not
   present on this base; this branch does not implement it.
+
+Continuation checkpoint 2026-11-06 (2.2–2.3; still not deployment-ready):
+
+- The revised child is `proposal.provision_terms`, typed as the existing core
+  `ProvisionTerms` envelope on continue and administrator advance. Its VM payload
+  is a whole family-grouped shape, not a patch or a replacement for duration,
+  start, or SSH credentials. Core preserves all other opaque proposal fields.
+- `NegotiationDomainHooks.decode_revised_terms` decodes a revision against the
+  previous terms; unsupported domains refuse it. The widened continuation hook
+  receives the previous and decoded proposed terms. `RoundRequest.revised_terms`
+  exposes the proposal; `RoundEvaluation.agreed_terms` supplies the seller's
+  effective terms to `agreement_terms` and acceptance.
+- `core/storefront/src/core_storefront/sqlite_client.py` records full effective
+  terms with each transcript message; its additive migration is in
+  `core/storefront/src/core_storefront/sqlite_migrations.py`. Resume reads the last
+  seller-quoted terms, while the opening remains immutable. The VM decoder is in
+  `domains/vms/storefront/src/market_storefront/negotiation_runtime.py`; it validates
+  with the domain's capability schema before flattening for existing VM codecs.
+  API-credit and bare-metal adapters accept the wider hook without enabling
+  shape revisions. `typing-extensions` is explicitly declared for the typed wire
+  dictionary and the affected consumer locks are refreshed.
+- Focused evidence: 62 negotiation-runtime unit tests; 5 VM revision-decoder
+  cases; 70 combined VM decoder, seller-hook, escrow-normalization, hold-cap and
+  negotiate-controller cases; 52 bare-metal runtime/HTTP negotiation cases; 23
+  API-credit unit/integration negotiation cases; all 233 core-storefront tests,
+  with the changed SQLite binding suite rerun separately (14 passed). The
+  SQLite case reloads per-round terms and an exact amount above 2^63 through a
+  new client; the opaque runtime case reconstructs the runtime between revision,
+  no-revision counter and acceptance. No deployed/e2e or independent verification
+  is claimed. These are partial evidence for 2.6, which remains unticked.
+- Checks: `make check-packaging` passes, and `make check-change
+  CHANGE=negotiation-driven-capacity-resize` passes all 12 checks, including comment
+  hygiene, documentation citations and pinned strict OpenSpec validation. No typing
+  suite, deployed/e2e run, promotion or archival has been performed.
+- Corrected attempts: packaging initially refused nine consumer locks after adding
+  the direct `typing-extensions` dependency; `make lock` refreshed those locks and
+  packaging passed. One VM test invocation used nonexistent shortened filenames
+  and collected no tests; rerunning with the existing `test_sync_negotiation_*`
+  filenames passed all 70 cases. No test failure is being carried forward.
+- Reproduce the prepared first use with `make check-packaging`, then
+  `make -C domains/vms/storefront reinit`, then from `domains/vms/storefront` run
+  `uv run --frozen --no-sync pytest tests/unit/test_vm_revised_terms.py
+  tests/unit/test_sync_negotiation_seller_round_hook.py -q`. This uses temporary
+  SQLite state, deterministic development principals, and injected seller policy;
+  no deployed storefront, chain or registry is prepared and no secret is needed.
+- Next: 2.4–2.6, then 2.7–2.11. The old shape-change refusal deliberately remains
+  until feasibility and pricing are composed; changing the shape is not yet a
+  sellable product path. The scalar is still a base-unit amount, not a multiplier.
+  No buyer, rounding, floor or payment-consumer conversion has been attempted.
+  No PR, permanent promotion, archive, deployment boundary or package release is
+  claimed at this checkpoint. The parallel registry carrier/proof dependency is
+  still absent. Preserve the existing 2c boundary and resume from 2.4.
 
 ### 2b. The multiplier
 
