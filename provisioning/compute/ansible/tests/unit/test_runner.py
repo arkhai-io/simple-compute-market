@@ -20,7 +20,11 @@ from compute_provisioning_contracts import ConnectivityResult
 from cryptography.fernet import Fernet, InvalidToken
 from market_config import encrypt_secret
 
-from compute_provisioning_ansible import DEFAULT_ANSIBLE_CONFIG, SshConnectionCodec
+from compute_provisioning_ansible import (
+    DEFAULT_ANSIBLE_CONFIG,
+    ProtectedKeyUnreadableError,
+    SshConnectionCodec,
+)
 from compute_provisioning_ansible.runner import (
     AnsibleRun,
     AnsibleRunner,
@@ -91,9 +95,11 @@ def test_a_key_that_cannot_be_decrypted_leaves_nothing_behind(tmp_path, monkeypa
     runner = AnsibleRunner(SimpleNamespace(), ssh_codec=SshConnectionCodec(_KEY))
     wrong_key = Fernet.generate_key().decode()
 
-    with pytest.raises(InvalidToken):
+    with pytest.raises(ProtectedKeyUnreadableError) as raised:
         runner.write_inventory([_embedded(), _embedded("kvm2", key=wrong_key)], group="nodes")
 
+    assert raised.value.host_id == "kvm2"
+    assert isinstance(raised.value.__cause__, InvalidToken)
     assert list(tmp_path.iterdir()) == []
 
 

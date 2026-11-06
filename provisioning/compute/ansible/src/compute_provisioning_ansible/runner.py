@@ -563,7 +563,8 @@ class AnsibleRunner:
         and every such key file: the caller must ``cleanup()`` it in a
         ``finally`` (or use it as a context manager), and if writing fails
         part way, what was already written is removed before the error
-        propagates.
+        propagates. A key that cannot be decrypted raises
+        ``ProtectedKeyUnreadableError`` naming its host.
         """
         nonce = uuid.uuid4().hex
         directory = Path(tempfile.gettempdir())
@@ -577,7 +578,10 @@ class AnsibleRunner:
                     key_file = directory / f"{host.host_id}_key_{nonce}"
                     inventory.key_paths.append(key_file)
                     _write_owner_only(
-                        key_file, self._ssh_codec.decrypt_private_key(host.ssh_key_value)
+                        key_file,
+                        self._ssh_codec.decrypt_private_key(
+                            host.ssh_key_value, host_id=host.host_id
+                        ),
                     )
                     key_ref = str(key_file)
 

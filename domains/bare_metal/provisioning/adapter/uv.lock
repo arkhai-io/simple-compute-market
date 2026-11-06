@@ -134,6 +134,7 @@ dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
     { name = "arkhai-core" },
     { name = "arkhai-kit-config" },
+    { name = "cryptography" },
     { name = "pydantic" },
 ]
 wheels = [

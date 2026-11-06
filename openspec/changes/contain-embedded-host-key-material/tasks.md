@@ -192,7 +192,7 @@ Files: `provisioning/compute/ansible/src/compute_provisioning_ansible/connection
 tests in `test_ssh_connection.py`, `test_runner.py`, `test_executor.py` and
 `test_probes.py` under `provisioning/compute/ansible/tests/unit/`.
 
-- [ ] 3.1 Define `ProtectedKeyUnreadableError`, a `ValueError` subclass, in
+- [x] 3.1 Define `ProtectedKeyUnreadableError`, a `ValueError` subclass, in
       `connection.py`, export it from the distribution, and give it a `host_id`
       attribute. Change the signature to
       `SshConnectionCodec.decrypt_private_key(ciphertext, *, host_id)`.
@@ -205,15 +205,37 @@ tests in `test_ssh_connection.py`, `test_runner.py`, `test_executor.py` and
       - The message carries no ciphertext and no key material.
       - The codec uses `host_id` only for the error.
       - Update the method's docstring to match. (D4)
-- [ ] 3.2 Have `write_inventory` pass the target's `host_id` to
+      *Done, differing from the plan in two ways:*
+      - The codec checks for an unconfigured key itself, before Fernet, so
+        that cause's message says "because no ssh_decryption_key is
+        configured" and names the one recovery that works there, configuring
+        the key it was protected under: without a key a private key cannot be
+        submitted again (`build` refuses it). Every other cause says "under
+        the configured ssh_decryption_key" with both recoveries D4 names. The
+        catch is `(InvalidToken, ValueError)`, the `ValueError` being
+        `market_config`'s for a configured key that is not a Fernet key; it
+        would also catch a plaintext that is not UTF-8, which the codec never
+        writes.
+      - Catching `InvalidToken` imports `cryptography.fernet`, so the
+        distribution now declares `cryptography>=42.0` at runtime (it was in
+        the `dev` group only) and `make lock` was run. The locks of the
+        distribution, the provisioning service and both domain adapters gained
+        the edge; `cryptography` was already in each of them.
+- [x] 3.2 Have `write_inventory` pass the target's `host_id` to
       `decrypt_private_key`. Its existing partial-write cleanup stays as it is,
       and the job executor lets the error propagate: the job engine records it
       with its message and never retries it, as it does
       `RelayUnusableAtExecutionError`. (D4)
-- [ ] 3.3 Have `probe_connectivity` catch `ProtectedKeyUnreadableError` and
+      *Done:* the executor is unchanged; the engine's catch-all records an
+      exception from `execute` as `Internal error: <message>` and fails the
+      job without a retry (`jobs/engine.py`). That record is section 5's to
+      prove through the application.
+- [x] 3.3 Have `probe_connectivity` catch `ProtectedKeyUnreadableError` and
       return `ConnectivityResult(host=<host_id>, reachable=False, detail=<its message>)`.
       Update its docstring. (D4)
-- [ ] 3.4 Add unit tests:
+      *Done:* only `write_inventory` sits inside the `try`; the ping runs
+      outside it, under the inventory's context manager.
+- [x] 3.4 Add unit tests:
       - In `test_ssh_connection.py`: each cause (protected under another key,
         malformed ciphertext, a codec built with no key) raises
         `ProtectedKeyUnreadableError` with the given `host_id`. Its message
@@ -231,7 +253,19 @@ tests in `test_ssh_connection.py`, `test_runner.py`, `test_executor.py` and
         message as its detail, and runs no subprocess.
 
       (D4)
-- [ ] 3.5 **Verification checkpoint.** Unit: the Ansible distribution's suite,
+      *Done (all unit):* `test_a_protected_key_that_cannot_be_decrypted_is_named`
+      over the three causes and a configured key that is not a Fernet key,
+      asserting each whole message, and that neither the ciphertext, the PEM
+      text, nor either Fernet key appears in it; plus a decrypt that
+      succeeds; the extended runner
+      test also checks the error's cause is Fernet's `InvalidToken`;
+      `test_a_key_that_cannot_be_decrypted_fails_the_run_naming_the_host`
+      runs the real `write_inventory` over a temporary directory that is empty
+      afterwards; `test_a_host_whose_key_cannot_be_decrypted_is_answered_unreachable`
+      uses the module's `_ProbingRunner`, a real `AnsibleRunner` whose ping is
+      overridden, and shows the ping was never called. "Runs no subprocess"
+      is shown that way, not by observing process creation.
+- [x] 3.5 **Verification checkpoint.** Unit: the Ansible distribution's suite,
       `make test-compute-provisioning-ansible`. Then `make test`.
       End-to-end: none. No lane registers an embedded host, and the mock runner
       never decrypts. None is owed: section 5 proves the running application's
@@ -239,6 +273,28 @@ tests in `test_ssh_connection.py`, `test_runner.py`, `test_executor.py` and
       Owed by validation: `tests.yml`, job `test · test-compute-provisioning-ansible`.
       The distribution's suite passes, including the typed-error, executor and
       probe tests.
+      *Evidence:* `make lock`; `make test-compute-provisioning-ansible`
+      (unit), 177 passed, 4 skipped (the real-Ansible codec cases, as
+      before); `make test`, exit 0; `make check-packaging`, exit 0, the
+      architecture rules holding. `make test` ran before the fresh-context
+      fixes, which changed only the codec's message text and the codec test,
+      so the distribution's suite was run again after them. End-to-end
+      confirmed: none.
+
+*Handoff (section 3):* the fresh-context check found the error's docstring
+and `decrypt_private_key`'s naming readiness before readiness decrypts; both
+now describe execution only, and section 4 widens them along with the module
+docstrings that say the codec decrypts "only to materialize the connection
+for one execution" (`compute_provisioning_ansible/connection.py`) and "just
+in time for execution" (`compute_provisioning/hosts/connection.py`). It also
+found that "submit the host's private key again" is no recovery when no key is
+configured, so that cause names only configuring the key. Two departures from
+D4's wording are recorded in 3.1's note rather than in `design.md`, for the
+round's review to judge: the no-key cause's own message and recovery, and the
+distribution's runtime `cryptography` dependency, which catching Fernet's
+`InvalidToken` needs (the alternative, `market_config` raising an error of its
+own, would widen this change into `kit/config`). Section 4's readiness calls
+`decrypt_private_key(ciphertext, host_id=...)` and reports `str(error)`.
 
 ## 4. Readiness checks each host as execution would
 
