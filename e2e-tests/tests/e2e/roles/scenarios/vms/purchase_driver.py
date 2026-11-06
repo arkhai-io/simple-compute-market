@@ -13,7 +13,7 @@ whatever the settlement mechanism.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from market_core.schemas import SettlementOption, compute_rate_total
@@ -137,7 +137,8 @@ class VmPurchaseDriver(VmComputeDealDriver):
             self.storefront_admin_client, "provision", "job_submitted",
             negotiation_id=negotiation_id, timeout=15.0,
         )
-        return self.storefront_client.get_settle_status(negotiation_id).model_dump(mode="json")
+        # The typed client's settle status is a dataclass, not a pydantic model.
+        return asdict(self.storefront_client.get_settle_status(negotiation_id))
 
     def assert_delivery(self, deal_state: Any) -> None:
         """VM delivers through the settlement status the buyer reads, by the

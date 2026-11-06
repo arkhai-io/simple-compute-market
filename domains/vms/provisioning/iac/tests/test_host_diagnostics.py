@@ -302,7 +302,7 @@ class TestHostDiagnosticsTaskNatively(unittest.TestCase):
     def test_a_unit_name_with_a_shell_metacharacter_reaches_the_script_whole(self) -> None:
         """systemd escapes a unit name's dashes as `\\x2d`; unquoted, the shell
         would drop the backslash."""
-        unit = "dev-disk-by\\x2dlabel-data.device"
+        unit = "operator-agent@by\\x2dlabel.service"
 
         fact = self._fact({"management_unit": unit})
 

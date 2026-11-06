@@ -1,5 +1,6 @@
-"""VM's host diagnostics contract: the unit names a request may carry, refused by
-the request model itself, and the typed reading of a succeeded job's result.
+"""VM's host diagnostics contract: the service unit names a request may carry,
+refused by the request model itself, and the typed reading of a succeeded job's
+result.
 
 The boot and invocation IDs are synthetic.
 """
@@ -16,7 +17,7 @@ from vm_provisioning_operator import (
     HostDiagnostics,
     HostDiagnosticsError,
     HostDiagnosticsRequest,
-    check_unit_name,
+    check_service_unit_name,
 )
 
 
@@ -26,16 +27,14 @@ from vm_provisioning_operator import (
         "operator-agent.service",
         "getty@tty1.service",
         "getty@.service",
-        "dev-disk-by\\x2dlabel-data.device",
-        "-.mount",
+        "operator-agent@by\\x2dlabel.service",
         "a..b.service",
-        "machine.slice",
-        "a:b_c.timer",
+        "a:b_c.service",
         "x" * 247 + ".service",
     ],
 )
-def test_a_systemd_unit_name_is_accepted(name):
-    assert check_unit_name(name) == name
+def test_a_systemd_service_unit_name_is_accepted(name):
+    assert check_service_unit_name(name) == name
 
 
 @pytest.mark.parametrize(
@@ -51,15 +50,25 @@ def test_a_systemd_unit_name_is_accepted(name):
         "agent.unknown",
         "@instance.service",
         "x" * 248 + ".service",
+        # Unit names of other types: none reports a main PID or a restart
+        # count, so a diagnostics read of one could not be parsed.
+        "operator-agent.socket",
+        "dev-disk-by\\x2dlabel-data.device",
+        "-.mount",
+        "machine.slice",
+        "a:b_c.timer",
+        "multi-user.target",
     ],
 )
 def test_anything_else_is_refused(name):
-    with pytest.raises(ValueError, match="not a systemd unit name"):
-        check_unit_name(name)
+    with pytest.raises(ValueError, match="not a systemd service unit name"):
+        check_service_unit_name(name)
 
 
-@pytest.mark.parametrize("name", ["../agent.service", "agent service.service", "", "agent"])
-def test_the_request_refuses_a_unit_that_is_not_a_systemd_unit_name(name):
+@pytest.mark.parametrize(
+    "name", ["../agent.service", "agent service.service", "", "agent", "agent.socket"]
+)
+def test_the_request_refuses_a_unit_that_is_not_a_systemd_service_unit_name(name):
     with pytest.raises(ValidationError) as refused:
         HostDiagnosticsRequest(management_unit=name)
 

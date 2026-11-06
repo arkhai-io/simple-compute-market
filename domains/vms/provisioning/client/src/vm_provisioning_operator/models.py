@@ -211,42 +211,42 @@ RELAY_CLIENT_UNIT = "frpc-buyers.service"
 #: The ``result_kind`` of a succeeded host diagnostics job's result.
 HOST_DIAGNOSTICS_RESULT_KIND = "vm_diagnose"
 
-# systemd's unit-name syntax (systemd.unit(5)): a prefix of letters, digits,
-# ":", "-", "_", "." and "\", an optional "@" and instance of the same
-# characters, then a unit type, 255 characters at most. The name reaches the
-# host as an argument to systemctl, so nothing outside this set may.
-_UNIT_NAME = re.compile(
-    r"[A-Za-z0-9:_.\\-]+(?:@[A-Za-z0-9:_.\\-]*)?"
-    r"\.(?:service|socket|device|mount|automount|swap|target|path|timer|slice|scope)"
-)
+# systemd's unit-name syntax (systemd.unit(5)) for a service: a prefix of
+# letters, digits, ":", "-", "_", "." and "\", an optional "@" and instance of
+# the same characters, then ".service", 255 characters at most. The name
+# reaches the host as an argument to systemctl, so nothing outside this set
+# may. Only a service has the main PID and restart count a diagnostics read
+# reports; for any other unit type systemctl reports neither, and the typed
+# parse would refuse the job's result.
+_SERVICE_UNIT_NAME = re.compile(r"[A-Za-z0-9:_.\\-]+(?:@[A-Za-z0-9:_.\\-]*)?\.service")
 _UNIT_NAME_MAX = 255
 
 
-def check_unit_name(name: str) -> str:
-    """Return ``name`` if it is a systemd unit name; raise ``ValueError`` otherwise."""
-    if len(name) > _UNIT_NAME_MAX or not _UNIT_NAME.fullmatch(name):
-        raise ValueError(f"{name!r} is not a systemd unit name")
+def check_service_unit_name(name: str) -> str:
+    """Return ``name`` if it is a systemd service unit name; raise ``ValueError`` otherwise."""
+    if len(name) > _UNIT_NAME_MAX or not _SERVICE_UNIT_NAME.fullmatch(name):
+        raise ValueError(f"{name!r} is not a systemd service unit name")
     return name
 
 
 class HostDiagnosticsRequest(VmActionRequest):
     """The inputs of a host diagnostics job, beside the shared overrides.
 
-    ``management_unit`` names one more unit to report, the operator's own
+    ``management_unit`` names one more service to report, the operator's own
     management client, whose name this repository does not know. One that is
-    not a systemd unit name is refused here, so the typed client refuses it
-    before sending and the route as 422 before any job is queued.
+    not a systemd service unit name is refused here, so the typed client
+    refuses it before sending and the route as 422 before any job is queued.
     """
 
     management_unit: Optional[str] = Field(
         default=None,
-        description="A further systemd unit to report, such as the operator's management client",
+        description="A further systemd service to report, such as the operator's management client",
     )
 
     @field_validator("management_unit")
     @classmethod
     def _unit_name(cls, value: Optional[str]) -> Optional[str]:
-        return value if value is None else check_unit_name(value)
+        return value if value is None else check_service_unit_name(value)
 
 
 class HostDiagnosticsError(ValueError):

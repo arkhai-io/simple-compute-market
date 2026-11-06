@@ -86,8 +86,8 @@ def _check_capacity(host: str) -> _Call:
 
 
 def _diagnose_host(host: str, management_unit: Optional[str]) -> _Call:
-    # The request model refuses a unit that is not a systemd unit name, so an
-    # invalid one raises here and is never sent.
+    # The request model refuses a unit that is not a systemd service unit name,
+    # so an invalid one raises here and is never sent.
     query = HostDiagnosticsRequest(management_unit=management_unit).model_dump(exclude_none=True)
     return _Call(
         "provisioning_host_diagnostics",
@@ -147,7 +147,7 @@ class VmOperatorClient:
         reads the succeeded job's result. The client does not wait on the job.
 
         Raises ``pydantic.ValidationError`` before sending for a
-        ``management_unit`` that is not a systemd unit name.
+        ``management_unit`` that is not a systemd service unit name.
         """
         return await self._run(_diagnose_host(host_id, management_unit))
 

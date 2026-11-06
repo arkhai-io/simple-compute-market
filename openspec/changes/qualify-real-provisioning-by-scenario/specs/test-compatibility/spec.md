@@ -92,7 +92,7 @@ With a ready payments target configured, the bare-metal lane MUST qualify one fi
 #### Scenario: Bare-metal payment purchase is qualified
 
 - **WHEN** the bare-metal payment scenario runs with a ready configured payments target
-- **THEN** three ordered calls discover a distinct backed whole-host listing, negotiate
+- **THEN** the shared purchase stages discover a distinct backed whole-host listing, negotiate
   and approve one hourly payment option with a wallet-free profiled Ed25519 buyer,
   and observe receipt-gated durable mock delivery
 - **AND** recovery reads the original run and resolves its retained signer, repeats the
@@ -260,13 +260,14 @@ never wait out the wall clock for a state it can step to.
 - **THEN** each qualification module reports a blocked skip and writes nothing to the
   stack
 
-### Requirement: A real resource's listing offers every composed mechanism
+### Requirement: A real resource's listing offers every composed deal mechanism
 
 On a real-provisioning target, the listing on the target's resource MUST offer a
-settlement option for each mechanism the storefront composes and reports ready, created
-or adopted through one shared helper. A module adopting the listing MUST require it to
-offer that module's own mechanism and otherwise MUST fail naming the listing and its
-options, changing nothing.
+settlement option for each deal mechanism the storefront composes and reports ready,
+Alkahest and Arkhai payments, created or adopted through one shared helper; contact
+exchange settles no deal and is stated on no compute listing. A module adopting the
+listing MUST require it to offer that module's own mechanism and otherwise MUST fail
+naming the listing and its options, changing nothing.
 
 #### Scenario: An Alkahest module and a qualification module share a stack
 
@@ -281,9 +282,10 @@ options, changing nothing.
 
 ### Requirement: The real-provisioning target names diagnostics and admission inputs
 
-Target version 2 MUST accept an optional `management_unit` on a VM host, a systemd unit
-name, and an optional `admission_log` on relay access, an absolute harness-local path.
-An invalid unit name or a relative path MUST be refused naming the field.
+Target version 2 MUST accept an optional `management_unit` on a VM host, a systemd
+service unit name, and an optional `admission_log` on relay access, an absolute
+harness-local path. An invalid unit name or a relative path MUST be refused naming the
+field.
 
 #### Scenario: A relative admission log path
 

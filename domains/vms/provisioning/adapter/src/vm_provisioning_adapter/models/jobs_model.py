@@ -70,8 +70,8 @@ class VmJobParams:
     # Deal linkage — on-chain escrow UID for recovery queries
     escrow_uid: Optional[str] = None
 
-    # Host diagnostics: a further systemd unit to report, checked against
-    # systemd's unit-name syntax before the job is submitted.
+    # Host diagnostics: a further systemd service to report, checked against
+    # systemd's service unit-name syntax before the job is submitted.
     management_unit: Optional[str] = None
 
     # Retry policy (per-job override)

@@ -4,7 +4,7 @@
 # generation of libvirtd, the buyers' relay client and an optional management
 # unit, changing no service or configuration (files/host_diagnostics.sh says what
 # its guest count may start). The management unit arrives as the job's `management_unit` parameter,
-# already checked against systemd's unit-name syntax by the service; it is
+# already checked against systemd's service unit-name syntax by the service; it is
 # quoted here all the same, as any argument is.
 
 - name: Read the host's diagnostics

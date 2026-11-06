@@ -28,7 +28,7 @@ class HostOperationsService:
         """Submit a host diagnostics job for a registered host.
 
         The request has already refused a management unit that is not a
-        systemd unit name. Raises ``HostNotFoundError`` for an unregistered
+        systemd service unit name. Raises ``HostNotFoundError`` for an unregistered
         host.
         """
         params = dataclasses.replace(

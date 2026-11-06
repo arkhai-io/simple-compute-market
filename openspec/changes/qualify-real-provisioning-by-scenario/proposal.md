@@ -56,7 +56,7 @@ no VM scenario buys through `market buy` in `arkhai.payments.v1`.
   each lease. Each
   transaction is checked against its Agreement and receipt. The buyer's balance drop
   must equal the scenario's own debits, under a dedicated-account precondition.
-- **One listing per real resource** offers every mechanism the stack composes. Adoption
+- **One listing per real resource** offers every deal mechanism the stack composes. Adoption
   requires the adopting module's own mechanism.
 - **A host diagnostics VM operator job** reports boot, kernel, running-guest count, and
   systemd facts for libvirtd, the buyer tunnel client and an optional management unit.

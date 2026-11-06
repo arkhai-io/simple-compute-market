@@ -508,9 +508,10 @@ ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
     --limit kvm1
 ```
 
-- `management_unit` (optional): one more systemd unit to report, such as the
+- `management_unit` (optional): one more systemd service to report, such as the
   operator's own management client. The service and the operator client refuse
-  a value that is not a systemd unit name before any job is queued.
+  a value that is not a systemd service unit name before any job is queued: only
+  a service has the main PID and restart count the fact reports.
 
 The action prints one fact, `host_diagnostics_data` (`files/host_diagnostics.sh`
 reads the host):

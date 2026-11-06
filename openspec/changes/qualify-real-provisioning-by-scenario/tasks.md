@@ -561,7 +561,8 @@ Handoff from section 3:
   which the bare-metal mock deal module already makes. Left for triage: the delta's
   "three ordered calls" (`specs/test-compatibility/spec.md`, the bare-metal purchase
   scenario), which still reads as discovery, negotiation and approval, now through the
-  shared stages.
+  shared stages. Reconciled since: the round's triage (review 55's documentation answer)
+  made the scenario read "the shared purchase stages discover …".
 
 Stopped before 2.1 (now 3.1), under that task's then return-to-design rule (D15): `09b`'s
 settlement wait does not resolve the bare-metal payments deal, by its negotiation or by any
@@ -739,13 +740,23 @@ Handoff from section 4:
   Declined: making `PURCHASE_RUN_EXIT_SECONDS` a driver part. It bounds the wait for a
   command that has already read its settlement ready or ended. A driver whose command
   polls more slowly fails at `Purchase09`, naming the run.
+- **Round 1 triage fix (validation 57 V1).** The pipeline's first run of
+  `e2e_vm_payment_purchase` (run 42267053852) failed at `Purchase04`:
+  `VmPurchaseDriver.purchase_fulfillment` called `model_dump` on the typed client's
+  `SettleStatusResponse`, a dataclass. It now returns `dataclasses.asdict` of it. Unit
+  (`tests/unit/test_vm_purchase_driver.py`, the driver against fake clients returning
+  the storefront client's real `SettleStatusResponse`): the method waits for the
+  storefront's `job_submitted` by negotiation, reads the buyer's settle status, and
+  returns its `fulfillment_id`. `make test-e2e-unit`: 608 passed. The 15 stages after
+  `Purchase04` have still never run against the lane; the fix commit's validation is
+  their first run.
 
 ## 5. One listing offers every composed mechanism on a real resource
 
 Delivers D2: one shared helper creates or adopts the real VM resource's listing, stating a
 settlement for each mechanism the storefront reports ready, and adoption requires the
 adopting module's own mechanism (test-compatibility delta ADDED "A real resource's listing
-offers every composed mechanism"). Replanned against the reviewed design: first numbered 4.
+offers every composed deal mechanism", so renamed by the round's triage). Replanned against the reviewed design: first numbered 4.
 
 Files: `e2e-tests/tests/e2e/roles/helpers/real_provisioning.py` (or a sibling helper
 module); `e2e-tests/tests/e2e/roles/scenarios/vms/test_real_provisioning_deal.py` (its
@@ -781,6 +792,9 @@ listing stage, lines ~350–380); `e2e-tests/tests/unit/test_real_vm_lane.py`.
   creation require a contact settlement that no module on the resource deals by. D2's
   intent is both kinds of module on one stack; the delta's "each mechanism the storefront
   composes and reports ready" reads wider, and its wording is left for triage to reconcile.
+  Reconciled since: the round's triage (review 55's documentation answer) made D2, the
+  proposal and the delta say "each deal mechanism", contact exchange stated on no compute
+  listing.
   The real module's `02b` now states its Alkahest terms as a clause (`ALKAHEST_SETTLEMENT`:
   the deal token, 10 whole tokens an hour, `escrow_kind` `erc20_escrow_obligation_default`
   on `anvil`) in place of `accepted_escrows`. A create request with clauses builds options
@@ -1075,7 +1089,7 @@ Handoff from section 6:
   named, and the stage skips naming `management_unit` (D5). Compare `invocation_id`,
   `restart_count`, `active_state` and `result` across reads. A read can itself start an
   idle libvirtd, so compare libvirtd only across reads taken while the first guest runs,
-  as D5's criterion already says. A unit invalid for systemd raises
+  as D5's criterion already says. A unit that is not a systemd service unit name raises
   `pydantic.ValidationError` in the client before any request.
 - **Seams.** `client.vm` is `VmOperatorClient` over the family transport. In the service's
   integration suite, a class-level `fake_ansible` fixture returning
@@ -1133,6 +1147,39 @@ Handoff from section 6:
   - **Smaller points.** The query model's parameter is named `body`, as the capacity
     check's is. `HostDiagnosticsError` does not pickle.
 
+  The round's triage disposed of these: the missing-unit reading is left to section 8's
+  stage message, and the `adapters` extra stays as it is (deployments install from the
+  lock).
+- **Round 1 triage fix (review 55 F1).** A management unit of another type than a
+  service (`.socket`, `.timer`, `.mount` …) was accepted, but `systemctl show` reports
+  no `MainPID` or `NRestarts` for it, so every such job's result failed the typed parse.
+  The management unit is now restricted to systemd service unit names (D5 amended, both
+  deltas with it): `check_unit_name` became `check_service_unit_name`, its pattern ending
+  in `.service`; the request model, the client's and adapter's docstrings, the task
+  file's comment and the IaC README say so. The earlier notes above that name
+  `check_unit_name` or accept `-.mount` describe the code before this fix. Unit
+  (`provisioning/compute/service/tests/unit/models/test_host_diagnostics.py`): service
+  names with templates, an escape, `..` and 255 characters accepted; `.socket`,
+  `.device`, `.mount`, `.slice`, `.timer` and `.target` names refused beside the earlier
+  malformed ones; the request refuses `agent.socket`, naming `management_unit`. The IaC
+  native case's escaped unit is now a service (`operator-agent@by\x2dlabel.service`).
+  After `make check-packaging` (every check OK, the client wheel rebuilt into `.dist`):
+  `make test-provisioning` 708 unit and 584 application-integration passed;
+  `make test-provisioning-adapter` 292 passed; `make test-provisioning-iac` VM 182
+  passed, 6 native cases skipped. `make test-provisioning-iac-native` passed, but in the
+  provisioning image built during section 6: rebuilding it (`make build-provisioning`)
+  was denied in the triage session, so that run read the earlier copy of the changed
+  native case. The pipeline's `e2e-vm` job builds the image and runs the gate.
+- **Round 1 triage checks (both fixes, 57 V1 and 55 F1).** `make test` passed;
+  `make test-e2e-unit` 608 passed on the final tree; `make check-packaging` every check
+  OK; `make check-change` all 12 checks passed. A fresh-context check of the diff found
+  no code defect. Fixed from it: the new driver test now carries the response's
+  principals (the nested case `asdict` copies); the driver's comment sits above the
+  line it explains; D2's heading and the delta requirement's heading say "deal
+  mechanism"; this note and the section 8 handoff's wording; long delta lines rewrapped.
+  Declined: writing the compensation clause into the qualification requirement now; the
+  triage's disposition puts it in 8.4, which says so.
+
 ## 7. Target fields and the admission-log reader
 
 Delivers the target's optional `management_unit` on a VM host and `admission_log` on relay
@@ -1149,8 +1196,9 @@ Files: `e2e-tests/src/e2e_harness/real_provisioning_target.py`; the target examp
 `e2e-tests/tests/unit/test_real_provisioning_target.py` and a new unit test module for the
 helper.
 
-- [ ] 7.1 Target fields (D5, D9). `VmHost.management_unit: str | None`, checked against
-  systemd's unit-name syntax; `RelayAccess.admission_log: str | None`, an absolute
+- [ ] 7.1 Target fields (D5, D9). `VmHost.management_unit: str | None`, a systemd service
+  unit name checked by the operator client's `check_service_unit_name` (review 55 F1
+  restricted it to services); `RelayAccess.admission_log: str | None`, an absolute
   harness-local path validated as `CleanupOperator.key_path` is. Both join version 2
   without a bump; an older checkout refuses them by name as an unknown field. The target
   example shows both, commented as optional. Unit (`test_real_provisioning_target.py`): a
@@ -1227,6 +1275,15 @@ their wiring; `e2e-tests/README.md`'s marker list.
   module's outcomes are D8's. The delivery-end filing's `Unknown` never fails a stage. No
   module funds the payer: a payer that cannot approve fails the purchase naming the payer
   (D1's topology rule).
+  Compensation (review 55 F2, added by its triage): each module's cleanup, after a stage
+  fails past the buyer's payment approval, refunds an unrefunded payment and ends a
+  delivered guest or host, through `helpers/payment_compensation.py`'s
+  `PurchaseCompensation` with the domain's status, refund and real-lane release (a VM
+  guest's through the expiry path, back-dated and stepped); what it cannot refund or end
+  it reports by negotiation and transaction, as the bare-metal payment purchase does.
+  This task writes the matching clause and scenario into the qualification requirement
+  in the test-compatibility delta, and the design's rationale beside D8. Unit: a failure after approval refunds and releases; a refund that stays
+  refused, or a guest that cannot be ended, is reported naming the purchase.
 - [ ] 8.5 Wiring checks. Unit: each module registered under its marker in no lane
   (absent from every `E2E_*_MODULE`); the observation 2 and observations 4 and 5 modules
   as rows of the purchase source check, extending the purchase stages without replacing a

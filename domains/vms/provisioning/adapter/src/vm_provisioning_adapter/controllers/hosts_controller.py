@@ -67,10 +67,10 @@ def make_host_operations_router(
         the optional ``management_unit``, each unit's active state, invocation
         ID, main PID, restart count, active-enter time and result.
 
-        Returns **422** for a ``management_unit`` that is not a systemd unit
-        name and **404** for an unregistered host, queueing no job. Poll
-        ``GET /api/v1/jobs/{job_id}`` for the job's status; the operator
-        client's ``HostDiagnostics.from_job_result`` reads its result.
+        Returns **422** for a ``management_unit`` that is not a systemd
+        service unit name and **404** for an unregistered host, queueing no
+        job. Poll ``GET /api/v1/jobs/{job_id}`` for the job's status; the
+        operator client's ``HostDiagnostics.from_job_result`` reads its result.
         """
         try:
             return await operations.diagnose(host=host, body=body)

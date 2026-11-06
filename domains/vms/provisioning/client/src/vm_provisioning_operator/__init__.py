@@ -16,7 +16,7 @@ from vm_provisioning_operator.models import (
     HostDiagnosticsRequest,
     UnitDiagnostics,
     VmActionRequest,
-    check_unit_name,
+    check_service_unit_name,
 )
 from vm_provisioning_operator.routes import (
     VM_MOCK_ROUTE_MOUNT,
@@ -39,5 +39,5 @@ __all__ = [
     "HostDiagnosticsError",
     "HostDiagnosticsRequest",
     "UnitDiagnostics",
-    "check_unit_name",
+    "check_service_unit_name",
 ]

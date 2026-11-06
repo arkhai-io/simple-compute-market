@@ -147,19 +147,21 @@ a candidate's qualification reaches for first.
   only externally.
 - **Modules per domain.** They split observation 6 into two partial halves.
 
-### D2. One listing offers every mechanism the stack composes
+### D2. One listing offers every deal mechanism the stack composes
 
 On the real target, the Alkahest real modules and the qualification modules share one
 host, pool, resource and capacity source, and a capacity source backs one listing for
 good.
 
 - **VM:** both modules create or adopt that listing through one shared helper. Creation
-  states a settlement for each mechanism the storefront reports ready.
+  states a settlement for each deal mechanism (Alkahest, Arkhai payments) the storefront
+  reports ready. Contact exchange, which the storefront also composes, settles no deal,
+  so a compute listing states none.
 - **Bare metal:** the published options already are the composed mechanisms.
 - **Adoption** additionally requires the listing to offer the adopting module's own
   mechanism, and otherwise fails naming the listing and its options.
 
-On a stack that composes one mechanism this is one listing with one option.
+On a stack that composes one deal mechanism this is one listing with one option.
 
 **Rejected:**
 
@@ -235,9 +237,14 @@ clients; this is a preference, not a rule.
 - **What it reports:** boot ID, uptime, kernel, the count of running guests, and systemd
   facts (active state, invocation ID, main PID, restart count, active-enter time,
   result) for `libvirtd.service`, `frpc-buyers.service`, and an optional management unit.
-- **The management unit:** passed as a job parameter checked against systemd unit-name
-  syntax, from the target's optional `management_unit`. The management client is
-  operator-owned, so this repository does not know its name.
+- **The management unit:** passed as a job parameter checked against systemd's
+  unit-name syntax for a service (`.service`), from the target's optional
+  `management_unit`. The management client is operator-owned, so this repository does
+  not know its name. Only a service has the main PID and restart count the read reports
+  and the pass criterion compares; for another unit type `systemctl show` reports
+  neither, and the typed parse would refuse every result (review 55 F1, settled in its
+  triage: restricted to service units rather than reporting those fields as
+  unavailable, which would let "adds no restarts" pass vacuously).
 - **Interface:** a submission and a typed parse, as every operator action is.
   - `diagnose_host(host_id, management_unit=None)` on the operator client returns a
     `JobSubmitResponse`, like `list_vms`, so the job ID stays visible for D8's logs.
