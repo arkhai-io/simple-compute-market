@@ -10,6 +10,7 @@ import time
 import httpx
 import pytest
 from market_identity import (
+    EMPTY_BODY,
     Ed25519Signer,
     Eip191Signer,
     Signer,
@@ -119,6 +120,7 @@ async def test_every_public_async_method_uses_the_exact_route_contract(
     assert "resource_id" not in reserved
     committed = await capacity_client.commit(
         capacity_reservation_id=reservation_id,
+        lease_end_utc="2026-07-01 00:00",
         idempotency_ref="0xesc",
         request_id="commit",
     )
@@ -137,6 +139,11 @@ async def test_every_public_async_method_uses_the_exact_route_contract(
     )
     assert truncated is not None
     assert truncated["lease_end_utc"] == "2026-06-01 00:00"
+    activated = await capacity_client.activate_lease(
+        capacity_reservation_id=reservation_id, request_id="activate"
+    )
+    assert activated["capacity_reservation_id"] == reservation_id
+    assert activated["activated_at_utc"] is not None
     released = await capacity_client.release(
         deal_ref={"escrow_uid": "0xesc"},
         failure_reason="provisioning_failed",
@@ -162,6 +169,7 @@ async def test_every_public_async_method_uses_the_exact_route_contract(
         "capacity_reservation_get",
         "capacity_reservations_list",
         "capacity_truncate_lease",
+        "capacity_activate_lease",
         "capacity_release",
         "capacity_events",
     ]
@@ -171,7 +179,18 @@ async def test_every_public_async_method_uses_the_exact_route_contract(
     )
     assert next(
         seen for seen in site.seen_requests if seen["operation"] == "capacity_commit"
-    )["body"] == {"idempotency_ref": "0xesc"}
+    )["body"] == {"lease_end_utc": "2026-07-01 00:00", "idempotency_ref": "0xesc"}
+    activation = next(
+        seen
+        for seen in site.seen_requests
+        if seen["operation"] == "capacity_activate_lease"
+    )
+    assert activation["path"] == (
+        f"/api/v1/capacity/reservations/{reservation_id}/activate-lease"
+    )
+    assert activation["resource"] == reservation_id
+    # The fake records a deep copy, so the empty-body sentinel is compared by type.
+    assert type(activation["body"]) is type(EMPTY_BODY)
     assert next(
         seen
         for seen in site.seen_requests
@@ -563,6 +582,22 @@ async def test_admin_transport_failure_keeps_the_typed_error_contract(
 
     assert excinfo.value.status_code is None
     assert "r1" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_or_refused_activation_surfaces_its_status(
+    capacity_client: SiteCapacityClient,
+) -> None:
+    with pytest.raises(SiteCapacityClientError) as unknown:
+        await capacity_client.activate_lease(capacity_reservation_id="missing")
+    assert unknown.value.status_code == 404
+
+    held = (await capacity_client.reserve(
+        claim={"offering_mode": "vm", "gpu_count": 1}, deal_ref={},
+    ))["capacity_reservation_id"]
+    with pytest.raises(SiteCapacityClientError) as refused:
+        await capacity_client.activate_lease(capacity_reservation_id=held)
+    assert refused.value.status_code == 409
 
 
 @pytest.mark.asyncio

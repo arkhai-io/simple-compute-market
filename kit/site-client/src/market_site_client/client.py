@@ -179,6 +179,14 @@ CAPACITY_ROUTE_CONTRACTS = (
         path_resource="reservation_id",
     ),
     CapacityRouteContract(
+        "POST",
+        re.compile(
+            r"/api/v1/capacity/reservations/(?P<reservation_id>[^/]+)/activate-lease"
+        ),
+        "capacity_activate_lease",
+        path_resource="reservation_id",
+    ),
+    CapacityRouteContract(
         "GET",
         re.compile(r"/api/v1/capacity/reservations"),
         "capacity_reservations_list",
@@ -756,6 +764,27 @@ class SiteCapacityClient(_AuthenticatedSiteClient):
             "/api/v1/capacity/reservations/"
             f"{capacity_reservation_id}/truncate-lease",
             {"lease_end_utc": str(lease_end_utc)},
+            request_id=request_id,
+        )
+        return result.get("reservation")
+
+    async def activate_lease(
+        self,
+        *,
+        capacity_reservation_id: str,
+        request_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Activate a lease; the reservation as the site recorded it.
+
+        The request names the reservation and carries no body: the instant is
+        the site's. A retry answers the instant the first activation recorded.
+        An unknown reservation (404) and a refused one (409) raise
+        :class:`SiteCapacityClientError` carrying the status.
+        """
+        result = await self._request(
+            "POST",
+            "/api/v1/capacity/reservations/"
+            f"{capacity_reservation_id}/activate-lease",
             request_id=request_id,
         )
         return result.get("reservation")

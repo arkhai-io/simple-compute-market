@@ -193,6 +193,33 @@ def _tagged(site: str, payload: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _more_informative(kept: Exception | None, failure: Exception) -> Exception:
+    """The route-order failure worth raising, of the one kept and a new one.
+
+    A site's refusal with a status other than 404 (a 409 naming the
+    reservation's state) comes from the site that holds the reservation and
+    is kept over any other failure. A site that could not be asked may hold
+    it, so its failure is kept over a 404, which says only that one site
+    does not know the reservation. Otherwise a caller could not tell a
+    reservation claimed by release from one no site holds. Among failures of
+    the same rank the later one is kept. Core cannot import the site
+    client's error type, so the status the client's error carries is read
+    by attribute.
+    """
+    if kept is not None and _failure_rank(kept) > _failure_rank(failure):
+        return kept
+    return failure
+
+
+def _failure_rank(failure: Exception) -> int:
+    status = getattr(failure, "status_code", None)
+    if status == 404:
+        return 0
+    if status is None:
+        return 1
+    return 2
+
+
 class AggregateCapacityClient:
     """``CapacityClient`` over N named per-site (``SiteCapacityAuthority``)
     clients.
@@ -406,10 +433,12 @@ class AggregateCapacityClient:
         """Commit at the owning site (cache-first, then the rest).
 
         A site that doesn't know the reservation raises/refuses and the
-        next is tried; if every site refuses, the last error propagates
-        — a commit that lands nowhere must not look like success. Returns
-        the reservation as the owning site recorded it, tagged with that
-        site.
+        next is tried; if every site refuses, an error propagates — a
+        commit that lands nowhere must not look like success — and a site's
+        refusal of a reservation it knows outranks another site's failure,
+        and no site's 404 hides an unreachable site's.
+        Returns the reservation as the owning site recorded it, tagged with
+        that site.
         """
         if site_id is not None:
             committed = await self._sites[site_id].commit(
@@ -421,7 +450,7 @@ class AggregateCapacityClient:
                 deal_ref=deal_ref,
             )
             return None if committed is None else _tagged(site_id, committed)
-        last_error: Exception | None = None
+        failure: Exception | None = None
         for name in self._route_order(capacity_reservation_id):
             try:
                 committed = await self._sites[name].commit(
@@ -437,9 +466,9 @@ class AggregateCapacityClient:
                 logger.warning(
                     "[AGGREGATOR] commit at site %r failed: %s", name, exc,
                 )
-                last_error = exc
-        if last_error is not None:
-            raise last_error
+                failure = _more_informative(failure, exc)
+        if failure is not None:
+            raise failure
         return None
 
     async def release(
@@ -507,6 +536,43 @@ class AggregateCapacityClient:
                 continue
             if truncated is not None:
                 return _tagged(name, truncated)
+        return None
+
+    async def activate_lease(
+        self,
+        *,
+        capacity_reservation_id: str,
+        site_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Activate at the named site, tagged with it; otherwise in route order.
+
+        A site refuses an activation it cannot record with an error, not a
+        null answer, so route order raises an error when none activated it,
+        as commit does: a site's refusal of a reservation it knows (a 409
+        naming its state) outranks another site's failure, and no site's 404
+        hides an unreachable site's.
+        """
+        if site_id is not None:
+            activated = await self._sites[site_id].activate_lease(
+                capacity_reservation_id=capacity_reservation_id,
+            )
+            return None if activated is None else _tagged(site_id, activated)
+        failure: Exception | None = None
+        for name in self._route_order(capacity_reservation_id):
+            try:
+                activated = await self._sites[name].activate_lease(
+                    capacity_reservation_id=capacity_reservation_id,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[AGGREGATOR] lease activation at site %r failed: %s", name, exc,
+                )
+                failure = _more_informative(failure, exc)
+                continue
+            if activated is not None:
+                return _tagged(name, activated)
+        if failure is not None:
+            raise failure
         return None
 
     # -- events ----------------------------------------------------------

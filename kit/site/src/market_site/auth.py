@@ -285,6 +285,12 @@ CAPACITY_ROUTE_CONTRACTS: tuple[SiteRouteContract, ...] = (
         path_resource="reservation_id",
     ),
     _seller(
+        "POST",
+        r"/api/v1/capacity/reservations/(?P<reservation_id>[^/]+)/activate-lease",
+        "capacity_activate_lease",
+        path_resource="reservation_id",
+    ),
+    _seller(
         "GET",
         r"/api/v1/capacity/reservations",
         "capacity_reservations_list",
