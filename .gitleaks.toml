@@ -24,17 +24,3 @@
 [extend]
 path = "scripts/gitleaks-audit.toml"
 disabledRules = ["generic-api-key", "jwt", "curl-auth-header"]
-
-# Public development TLS fixture derived from the published 0xD0 repeated seed;
-# never use it on a public network. Both its canonical path and exact PEM match
-# are required. Other key material at that path remains subject to the rule.
-# The full secret audit retains this key finding through its base configuration.
-[[rules]]
-id = "private-key-block"
-
-[[rules.allowlists]]
-description = "The deterministic public payments-lane TLS leaf at its canonical path"
-condition = "AND"
-regexTarget = "match"
-paths = ['''^tools/payments-lane-double/tls/double\.key\.pem$''']
-regexes = ['''\A-----BEGIN PRIVATE KEY-----\r?\nMC4CAQAwBQYDK2VwBCIEINDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ\r?\n-----END\z''']

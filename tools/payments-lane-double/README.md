@@ -89,9 +89,12 @@ writes the CA certificate (`lane-ca.pem`), the double's leaf certificate
 signatures are deterministic, so the output is the same bytes on every run. The CA's
 private key is never written to a file, but its seed is in the generator, so anyone
 can issue a certificate under the lane CA: it is trusted only inside lanes and local
-releases. `make check-tls`, part of `make test`, regenerates
-into a temporary directory and fails unless the committed files are identical;
-`make tls` rewrites them.
+releases. The two certificates are committed. The leaf key is not, since the
+repository's secret gate refuses a private key block: the image build runs the
+generator and takes the key from it, the same bytes every time. `make check-tls`,
+part of `make test`, regenerates into a temporary directory and fails unless the
+committed certificates are identical; `make tls` rewrites them and writes the key
+beside them, ignored by Git, for running the double outside its image.
 
 Callers trust the lane CA through their payments configuration's
 `ca_bundle_path`, which the kit's client verifies the double against alone; it
@@ -100,7 +103,8 @@ bypass — and no process trust store changes.
 
 ## Running it
 
-The image, `arkhai:payments-lane-double`, carries the fixtures and TLS files at
+The image, `arkhai:payments-lane-double`, carries the fixtures, the certificates and
+the leaf key generated at build at
 `/opt/payments-lane-double`, so it runs with no mounts and no configuration, serving
 HTTPS on port 8443 under the service name `payments-double`. A deployment supplying
 its own server certificate mounts it over `tls/double.pem` and `tls/double.key.pem`

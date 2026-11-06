@@ -394,6 +394,24 @@ in `test`, `build-payments-lane-double`, and its place in `build-dev` and the th
   Final verification and handoff: The separate HTTP peer mirrors the producer and shares PaymentsAuthority. Public deterministic fixtures, TLS regeneration and SSL trusted/untrusted handshakes pass. The default-command image and deployed access check pass; no hosted-ledger or funding claim follows.
   Complete combined evidence is recorded before section 13 and confirmed by 13.8.
 
+- [x] 2.8 The leaf key is generated at image build, not committed (D3; the merge of the
+  branch the change lands on, whose secret gate refuses a committed private key block and
+  admits no fixture by path; the owner chose this over an allowlist entry).
+  `tools/payments-lane-double/`: the Dockerfile's builder stage runs `tls/generate.py`
+  and the runtime stage copies its `double.key.pem`; `Dockerfile.dockerignore` admits the
+  generator and keeps out a locally written key; `cryptography` moves from the dev group
+  to the runtime dependencies, since the image's `--no-dev` environment runs the
+  generator; `check-tls` compares the two committed certificates; `tls/double.key.pem`
+  is removed from Git and ignored, and `make tls` still writes it for running the double
+  outside its image; the README and the generator's docstring say so. A unit test holds
+  the generated key to the committed leaf certificate's public key.
+  Verified: `make test-payments-lane-double` (`check-tls` and 50 passed), `make
+  check-packaging`, and `scripts/tests/test_check_secrets.py`'s tree test once committed.
+  Not run here: the image build (the merge step has no build target); the validation of
+  the merged `HEAD` builds it. The key stays in this branch's earlier commits, so the
+  Public content workflow's commit-range scan of a pull request to `dev` still finds it;
+  how the change lands is the owner's decision at archive cleanup.
+
 ## 3. Storefront `check-payments` and the VM storefront's unreachable authority
 
 Delivers the `check-payments` subcommand on the three storefront CLIs (D12;
@@ -2455,3 +2473,15 @@ archive export failed before Helm; streaming import resolved it without source o
 image changes. Release scaledzero; other namespace replica observations unchanged.
 Both independent review axes report no findings. Hosted funding, accepting
 mediation and physical qualification remain separate.
+
+The authoritative build-time TLS correction supersedes the forward fixture-key
+allowance. The key is removed/ignored and generated from public fixed inputs in
+the image; the public certificate remains unchanged. Imported history is retained:
+`.gitleaksignore` identifies only two exact already-published fixture fingerprints,
+not a path/material exception. New/staged key blocks and current-file audits
+remain refused. The pinned scanner's historical/new/staged/audit regression passes;
+its whole-HEAD test still observes the previous committed key until this merge is
+committed, so a prospective-tree scan is required before commit and that test is
+rerun afterward. Other scanner31tests pass; double50tests and certificate
+reproduction pass; packaging passes. Current policy is promoted to secret-scanning
+documentation; the earlier forward allowance remains only in Git history.

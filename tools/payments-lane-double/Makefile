@@ -2,7 +2,9 @@
 export UV_PYTHON := $(or $(shell cat ../../.python-version 2>/dev/null),$(error ../../.python-version not found))
 
 DIST_DIR ?= ../../.dist
-TLS_FILES := lane-ca.pem double.pem double.key.pem
+# The committed certificates. The leaf key the generator also writes is never
+# committed (the secret gate refuses a private key block); the image builds it.
+TLS_FILES := lane-ca.pem double.pem
 
 .PHONY: build init reinit test test-unit check-tls tls
 
@@ -21,7 +23,7 @@ test-unit: ## Run the unit and library integration suite
 
 # The generator's output is deterministic, so regenerating it must reproduce the
 # committed files byte for byte; a difference means one was edited without the other.
-check-tls: ## Fail unless tls/generate.py reproduces the committed TLS files exactly
+check-tls: ## Fail unless tls/generate.py reproduces the committed certificates exactly
 	@out=$$(mktemp -d) && trap 'rm -rf "$$out"' EXIT && \
 	uv run --find-links $(DIST_DIR) python tls/generate.py "$$out" && \
 	for file in $(TLS_FILES); do \
@@ -30,5 +32,5 @@ check-tls: ## Fail unless tls/generate.py reproduces the committed TLS files exa
 			exit 1; }; \
 	done
 
-tls: ## Regenerate the committed TLS files
+tls: ## Regenerate the committed certificates, and the uncommitted leaf key beside them for running the double outside its image
 	uv run --find-links $(DIST_DIR) python tls/generate.py

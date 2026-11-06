@@ -332,70 +332,6 @@ def test_two_key_fixtures_share_a_file_staged_and_committed(repo: Path) -> None:
     assert checker.scan(repo, base=base) == []
 
 
-# This fixture's private key is public and deterministic; never use it on a public network.
-LANE_TLS_KEY = Path("tools/payments-lane-double/tls/double.key.pem")
-
-
-def lane_tls_key() -> str:
-    return (ROOT / LANE_TLS_KEY).read_text("utf-8")
-
-
-@pytest.mark.usefixtures("gitleaks")
-def test_the_published_lane_tls_fixture_is_allowed_only_by_the_gate(repo: Path) -> None:
-    base = git(repo, "rev-parse", "HEAD")
-    (repo / LANE_TLS_KEY).parent.mkdir(parents=True)
-    stage(repo, str(LANE_TLS_KEY), lane_tls_key())
-
-    assert checker.scan(repo, staged=True) == []
-    git(repo, "commit", "-qm", "public development TLS fixture")
-    assert checker.scan(repo, base=base) == []
-    assert any(f.endswith(f"{LANE_TLS_KEY}:1: private-key-block")
-               for f in checker.audit(repo))
-
-
-@pytest.mark.usefixtures("gitleaks")
-def test_the_lane_key_outside_its_fixture_path_is_refused(repo: Path) -> None:
-    stage(repo, "deploy.pem", lane_tls_key())
-
-    assert any(f.endswith("deploy.pem:1: private-key-block")
-               for f in checker.scan(repo, staged=True))
-
-
-@pytest.mark.usefixtures("gitleaks")
-def test_another_key_at_the_lane_fixture_path_is_refused(repo: Path) -> None:
-    (repo / LANE_TLS_KEY).parent.mkdir(parents=True)
-    block, body = wrapped_key(64)
-    stage(repo, str(LANE_TLS_KEY), "# Public development fixture\n" + block)
-
-    assert_refused_without_echo(checker.scan(repo, staged=True), body,
-                                f"{LANE_TLS_KEY}:2")
-
-
-@pytest.mark.usefixtures("gitleaks")
-def test_another_compact_key_at_the_lane_fixture_path_is_refused(repo: Path) -> None:
-    (repo / LANE_TLS_KEY).parent.mkdir(parents=True)
-    lines = lane_tls_key().splitlines()
-    body = lines[1]
-    # Change only a private-payload base64 digit, retaining the compact PKCS8 shape.
-    lines[1] = body[:40] + ("B" if body[40] == "A" else "A") + body[41:]
-    assert len(lines[1]) == 64
-    stage(repo, str(LANE_TLS_KEY), "\n".join(lines) + "\n")
-
-    assert_refused_without_echo(checker.scan(repo, staged=True), lines[1],
-                                f"{LANE_TLS_KEY}:1")
-
-
-@pytest.mark.usefixtures("gitleaks")
-def test_a_key_beside_the_lane_fixture_is_still_refused(repo: Path) -> None:
-    (repo / LANE_TLS_KEY).parent.mkdir(parents=True)
-    block, body = wrapped_key(64)
-    public = lane_tls_key()
-    stage(repo, str(LANE_TLS_KEY), public + block)
-
-    assert_refused_without_echo(checker.scan(repo, staged=True), body,
-                                f"{LANE_TLS_KEY}:{len(public.splitlines()) + 1}")
-
-
 @pytest.mark.usefixtures("gitleaks")
 @pytest.mark.parametrize("width", [64, 16])
 def test_a_real_key_is_staged(repo: Path, capsys: pytest.CaptureFixture[str],
@@ -603,3 +539,22 @@ def test_an_outgoing_commit_adding_a_key_fixture_is_pushed(branch: Path) -> None
 
     assert pushed.returncode == 0, pushed.stderr
     assert remote_head(branch) == head
+
+
+@pytest.mark.usefixtures("gitleaks")
+def test_historical_fingerprints_do_not_exempt_staged_or_new_keys(repo: Path) -> None:
+    base = git(repo, "rev-parse", "HEAD")
+    block, body = wrapped_key(64)
+    historical = commit(repo, "tls.pem", block, "published fixture")
+    fingerprint = f"{historical}:tls.pem:private-key-block:1"
+    stage(repo, ".gitleaksignore", fingerprint + "\n")
+    assert checker.scan(repo, base=base) == []
+
+    commit(repo, "tls.pem", "no key material\n")
+    stage(repo, "tls.pem", block)
+    assert_refused_without_echo(checker.scan(repo, staged=True), body, "tls.pem:1")
+    git(repo, "commit", "-qm", "new key addition")
+    findings = checker.scan(repo, base=base)
+    assert_refused_without_echo(findings, body, "tls.pem:1")
+    assert all(not finding.startswith(historical + ":") for finding in findings)
+    assert_refused_without_echo(checker.audit(repo), body, "tls.pem:1")

@@ -175,11 +175,15 @@ code branches on `repair_required`, and only the VM scenario asserts the authori
 
 ### D3. A committed development CA and leaf, with deployment injection
 
-`tools/payments-lane-double/tls/` holds a generator and its output: the lane CA
-certificate and the double's leaf certificate and key. The generator derives both keys
+`tools/payments-lane-double/tls/` holds a generator and the two certificates it writes:
+the lane CA certificate and the double's leaf certificate. The generator derives both keys
 from fixed seeds and uses fixed validity, and Ed25519 signatures are deterministic, so a
-check regenerates the files and requires them unchanged. The CA's private key is never
-written. The leaf's SANs are `payments-double`, `localhost` and `127.0.0.1`; the service
+check regenerates the certificates and requires them unchanged. The CA's private key is
+never written. The leaf key is written but never committed: the repository's secret gate
+refuses a committed private key block and admits no fixture by path, so the double's
+image build runs the generator and takes the key from it, the same bytes every build, and
+a unit test holds that key to the committed leaf certificate (merge of the branch the
+change lands on; the owner chose this over an allowlist entry). The leaf's SANs are `payments-double`, `localhost` and `127.0.0.1`; the service
 is named `payments-double` in Compose and in the local release, so the certificate
 matches both. Every value is a labelled public development value, never for a public
 network, following the repository's Anvil-key precedent.
@@ -208,8 +212,8 @@ one release per namespace. In the local two-release topology the double runs in 
 release only: the bare-metal release's values disable its subchart, and its storefront
 reaches the first release's `payments-double` in the same namespace.
 
-The committed fixtures — TLS files, accounts, tokens and the buyer's seed balance — are
-built into the double's image at a fixed path, so Compose runs it without mounts and the
+The committed fixtures — certificates, accounts, tokens and the buyer's seed balance —
+and the leaf key generated at build are built into the double's image at a fixed path, so Compose runs it without mounts and the
 subchart's "committed files" are the image's own. The charts follow the repository's rule
 that a chart accepts only names of existing Secrets and never reads credential files into
 values (`helm/Makefile`): the CA ConfigMap and the seller token, written into each
@@ -224,6 +228,8 @@ step (61, token check).
 
 **Rejected:**
 
+- **Allowlisting the committed leaf key in the secret gate's configuration.** The gate's
+  own design rejects a path allowlist, since it would admit a real key in a test.
 - **Generating the CA per run.** Two mechanisms, Compose and Helm; Helm regenerates on
   every upgrade unless pinned with `lookup`; and the files must reach the test runner.
 - **The double making its CA at startup.** Sharing it with other pods needs cluster API
@@ -823,29 +829,23 @@ those services load (`.env.bob.docker`, `.env.alice.docker`, `api-credits.wallet
 whose `AGENT_PRIV_KEY` the storefronts never read, are deleted. This follows D19 and the
 bare-metal lane, whose secret overlay already holds its wallet key.
 
-### Integration clarification: publishing D4's deterministic TLS fixture
+### Integration clarification: deterministic TLS and published history
 
-The public-content gate's key rule recognizes the committed PKCS8 leaf from D3,
-although MCW-s8gk requires the repository's published development fixtures to pass.
-The leaf and both certificates reproduce exactly from D4's public fixed seeds.
-The gate admits only that exact PEM match at
-`tools/payments-lane-double/tls/double.key.pem`, using an AND of path and match
-criteria on `private-key-block`. It keeps the key rule, its compact-key threshold,
-all provider rules and refusal of in-source exception comments. The audit keeps
-reporting the fixture, because its configuration has no gate-only allowance.
+The authoritative D3 revision supersedes the earlier forward path/material gate
+exception: the image builds its leaf key from the public fixed seed, and the key
+is ignored rather than committed. New and staged key blocks receive no fixture
+exemption; neither a path nor material can authorize an addition.
 
-A directory exemption or turning off private-key detection would also admit an
-unknown credential and is rejected. Regenerating TLS at runtime would contradict
-the committed-fixture design and is unnecessary. A different key at the canonical
-path, the public key at an unrelated path, and a second key beside the fixture
-remain refused; the compact PKCS8 case has its own negative regression. The fixed
-material and canonical path are reviewed configuration, not an assertion a file
-can make about itself. This is a bounded integration correction implementing D4
-and MCW-s8gk, not a fixture-identity guard on running deployments.
+Imported history remains intact. Its two already-published fixture findings are
+baselined by exact immutable commit/path/rule/line fingerprints in
+`.gitleaksignore`, rather than by a key rule or directory allowance. They identify
+only the previously published deterministic leaf; their key bytes agree. A new
+commit necessarily has a different fingerprint. Pinned-scanner regressions prove
+that historical findings are suppressed while the same block staged/committed
+again and current-file audits are refused. No provider rule is weakened.
 
-Durable rationale belongs in the market-change-workflow companion's "Secret
-scanning" passage at promotion; the existing normative requirement already owns
-published-fixture acceptance and private-key refusal.
+Current policy and rationale belong in market-change-workflow's "Secret scanning"
+passage. Historical implementation and its supersession remain in Git history.
 
 ## Effects on other changes
 
@@ -953,4 +953,4 @@ Execution cadence and test provenance stay in change history.
 | D21 Tests holding restated values | Retained and enforced by fixture/bind-source tests | change history only; the tests are their own record |
 | D22 Implementation cadence | Execution cadence retained as history; no permanent behavior | change history only |
 | D23 Storefront wallet keys in the secret overlays | Retained; current behavior and rationale promoted | `docs/development/DEPLOYMENT_AND_CONFIG.md#per-domain-stack-composition`, "Per-domain stack composition"; `dev-env/identities/README.md#what-each-stack-binds` |
-| D4 integration clarification: exact public TLS fixture publication | Retained; current behavior and rationale promoted | `openspec/specs/market-change-workflow/README.md#secret-scanning`, "Secret scanning" |
+| D4 integration clarification: deterministic TLS and historical fingerprints | Superseded forward allowance; generated key and bounded history policy promoted | `openspec/specs/market-change-workflow/README.md#secret-scanning`, "Secret scanning" |

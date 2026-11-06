@@ -5,14 +5,16 @@
 writes ``lane-ca.pem``, ``double.pem`` and ``double.key.pem`` into the directory,
 by default the one this file is in. Every input is fixed — both keys come from the
 seeds below, the serials and validity are constants, and an Ed25519 signature is
-deterministic — so the output is the same bytes on every run, which ``make
-check-tls`` holds the committed files to. The CA's private key is never written
-to a file, but its seed is below, in a public repository: anyone can issue a
-certificate under the lane CA.
+deterministic — so the output is the same bytes on every run. The two
+certificates are committed, and ``make check-tls`` holds them to this output. The
+leaf key is not: the repository's secret gate refuses a private key block, so the
+image build runs this script and takes the key from it. The CA's private key is
+never written to a file, but its seed is below, in a public repository: anyone can
+issue a certificate under the lane CA.
 
 So the seeds, and the CA, the leaf and its key, are public development values,
-committed for lanes and local releases. Never trust the lane CA, or serve with
-this key, on a public network.
+for lanes and local releases. Never trust the lane CA, or serve with this key, on
+a public network.
 """
 
 from __future__ import annotations

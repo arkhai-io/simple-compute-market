@@ -21,6 +21,13 @@ COPY tools/payments-lane-double/src /repo/tools/payments-lane-double/src
 RUN --mount=type=cache,target=/root/.cache/uv \
     python3 /repo/scripts/uv_project.py image --project /repo/tools/payments-lane-double -- --no-dev
 
+# The leaf key is never committed: the repository's secret gate refuses a private
+# key block. tls/generate.py derives it from a public seed, so this writes the
+# same bytes on every build, matching the committed leaf certificate.
+COPY tools/payments-lane-double/tls/generate.py /repo/tools/payments-lane-double/tls/generate.py
+RUN mkdir /repo/tls && \
+    /repo/tools/payments-lane-double/.venv/bin/python /repo/tools/payments-lane-double/tls/generate.py /repo/tls
+
 # Stage 2: the runtime, as an unprivileged user.
 FROM python:${PYTHON_VERSION}-slim-bookworm AS runtime
 
@@ -31,12 +38,13 @@ RUN apt-get update && \
 
 COPY --from=builder /repo/tools/payments-lane-double/.venv /repo/tools/payments-lane-double/.venv
 COPY --from=builder /repo/tools/payments-lane-double/src /repo/tools/payments-lane-double/src
-# The committed fixtures and TLS files, public development values, at the paths
-# the double reads by default, so a lane runs it with no mounts. A deployment
-# supplying its own server certificate mounts it over tls/double.pem and
-# tls/double.key.pem.
+# The committed fixtures and certificates and the generated leaf key, public
+# development values, at the paths the double reads by default, so a lane runs it
+# with no mounts. A deployment supplying its own server certificate mounts it over
+# tls/double.pem and tls/double.key.pem.
 COPY tools/payments-lane-double/fixtures/accounts.toml tools/payments-lane-double/fixtures/dispute-authority.toml /opt/payments-lane-double/fixtures/
-COPY tools/payments-lane-double/tls/lane-ca.pem tools/payments-lane-double/tls/double.pem tools/payments-lane-double/tls/double.key.pem /opt/payments-lane-double/tls/
+COPY tools/payments-lane-double/tls/lane-ca.pem tools/payments-lane-double/tls/double.pem /opt/payments-lane-double/tls/
+COPY --from=builder /repo/tls/double.key.pem /opt/payments-lane-double/tls/double.key.pem
 ENV PATH="/repo/tools/payments-lane-double/.venv/bin:$PATH"
 
 USER appuser
