@@ -18,16 +18,17 @@ from change_workflow.cli import expand_sections, main, parse_sections, split_rul
 from change_workflow.common import StepError
 from change_workflow.log import log_path, read_log, record_outcome
 from change_workflow.running import live_runs, recorded_run, select_run, signal_run, stop
-from change_workflow_fixtures import (CHANGE, COMMIT, DENIALS, VALID, FakeClaude, event_lines,
-                                      log_file, make_wrapper, option, option_rules, repository,
-                                      review_text)
+from change_workflow_fixtures import (CHANGE, COMMIT, DENIALS, VALID, FakeClaude, configured,
+                                      event_lines, log_file, make_wrapper, option, option_rules,
+                                      repository, review_text)
 
 
 def _checkout(path: Path) -> Path:
-    """`path` as a Git checkout: a step that reads `HEAD` is started only once the
-    checkout shows no round view open."""
+    """`path` as a Git checkout with its workflow configuration: a step that reads
+    `HEAD` is started only once the checkout shows no round view open, and one that
+    commits or validates only once the fields it needs are declared."""
     subprocess.run(["git", "init", "-q", str(path)], check=True)
-    return path
+    return configured(path)
 
 
 def test_the_command_line_records_a_branch_decision(

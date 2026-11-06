@@ -45,7 +45,7 @@ CW-g4oz. Touches a new module `scripts/change_workflow/config.py`,
 by validation:` lines), and new tests in
 `scripts/tests/test_change_workflow_config.py`.
 
-- [ ] 1.1 Add `scripts/change_workflow/config.py`, which reads `.agents/workflow.toml`
+- [x] 1.1 Add `scripts/change_workflow/config.py`, which reads `.agents/workflow.toml`
   from the repository the command acts on with `tomllib` and checks all of it as it
   loads (D13, D15, CW-w8ne): the tables and keys the workflow defines — `repository`
   (`protected-branches`, `inert-paths`), `hooks` (`after-functional-change`,
@@ -64,7 +64,17 @@ by validation:` lines), and new tests in
   `scripts/tests/test_change_workflow_config.py`, one per refusal and the scenarios
   "A key is misspelled" (CW-w8ne) and "A placeholder is used where it is
   unavailable" (CW-v2dq).
-- [ ] 1.2 Give each field its kind (D12, CW-t5hz): required —
+  - Done: `config.check` (unit, 31 refusal cases, each naming its field); "A key is
+    misspelled" runs `config`, `config --json`, `check config`, `config load`, and
+    `config parts` through `cli.main`, each refusing with nothing on standard output,
+    and `start design` refusing before launching or logging (unit). A placeholder is
+    a name in braces not preceded by `$`, so `${HOME}` passes; `awk '{print}'` would
+    be refused as an unknown placeholder. `defaults.disable` entries are inline
+    tables `{ check = "…", reason = "…" }`. `openspec.command` is one string and
+    takes no placeholder. Outside the plan: a part's `run`, `start`, or `collect`
+    may not be an empty list (a hook's may), since a part running nothing passes
+    without evidence.
+- [x] 1.2 Give each field its kind (D12, CW-t5hz): required —
   `hooks.pre-commit-functional`, at least one validation part,
   `repository.protected-branches`, the models of each step run unattended and of the
   orchestrating session — and an explicit empty value counting as declared; every
@@ -73,15 +83,47 @@ by validation:` lines), and new tests in
   launching anything (wired into `start` here, for the fields this section's callers
   read). Verify: unit tests for "No functional checks are declared" and "A repository
   declares no functional checks on purpose" (CW-t5hz) against `start implement`.
-- [ ] 1.3 Add `scripts/change-workflow config [--json]`, listing every field and how
+  - Done: `config.missing`, `require`, and `require_for_step`; `start` checks the
+    configuration whole for every step but `orchestrate`, and requires
+    `hooks.pre-commit-functional` of implement, triage, and merge and a part of
+    validate (`config.STEP_NEEDS`), interactive or unattended. "No functional checks
+    are declared" (no session launched, no log line) and the start half of "A
+    repository declares no functional checks on purpose" pass, library integration
+    (a real `git init`, which `start` needs for the round-view check); "a functional
+    commit runs no functional checks" is section 2's. An empty `[validation.parts]`
+    is refused: CW-t5hz asks for at least one part.
+  - Outside the plan: **`.agents/workflow.toml` is written here, not in 6.1.** With
+    `start` refusing implement, triage, merge, and validate without these fields,
+    the next session (sections 4–6), started by the engine as this section leaves
+    it, and this round's validation would be refused in this repository. The file
+    holds the design's listing but `pre-commit` and `pre-push`, whose targets
+    (`make check-repository`, section 8; `make pre-push`, 6.2) do not exist yet:
+    with `pre-push` declared, section 4's push would run a missing target. Its
+    `models` rows copy the step table's. It is unprotected until 7.1's deny rule.
+    `test_the_repositorys_own_configuration_passes_its_check` loads it.
+  - Handoff to section 4: `start` does not yet require
+    `repository.protected-branches` or the step and orchestrator `models`; 4.1 and
+    4.5, which make the push and the wrapper read them, add them to
+    `config.STEP_NEEDS` (and `start orchestrate` to `models.orchestrator`), so
+    CW-t5hz holds whole. `config` imports `graph` (for `STEPS`), and `graph`
+    imports `records`: for 4.2, `records` importing `config` would make a cycle, so
+    pass the inert paths in rather than have `records` load the file.
+- [x] 1.3 Add `scripts/change-workflow config [--json]`, listing every field and how
   it resolved — declared, default, disabled, or absent — with the command it resolves
   to (D16, CW-o6kc), and `scripts/change-workflow check config`, running the check
   alone (D13). Verify: unit tests for the scenario "An optional hook is absent"
   (CW-o6kc) and for `--json`'s structure; a disabled default listed with its reason.
-- [ ] 1.4 Add `scripts/change-workflow config load <step>`, printing `load.common`
+  - Done: `config.resolution`; `--json` is `{"file", "exists", "fields": [{"field",
+    "status", "value"?, "reason"?}]}`, every field the workflow defines, one per
+    step for `load` and `models`, each declared part's keys. Unit tests pass for the
+    `config` half of "An optional hook is absent" (closeout skipping it is 2.5's),
+    the JSON structure, and a disabled default with its reason.
+- [x] 1.4 Add `scripts/change-workflow config load <step>`, printing `load.common`
   then `load.<step>` (D6, CW-l7hn). Verify: unit test for "Design loads the roadmap"
   (CW-l7hn).
-- [ ] 1.5 Add `scripts/change-workflow config parts <change> [--json]`, validation's
+  - Done: unit test passes; a document listed in both is printed once, and a name
+    that is not a step is a usage error.
+- [x] 1.5 Add `scripts/change-workflow config parts <change> [--json]`, validation's
   plan (D3, CW-g4oz): the preflight, then each run of a part in declaration order with
   its shape, its `after`, and its evidence; an owed part once per `Owed by
   validation:` line of a complete section of the change's `tasks.md`, named by its
@@ -89,10 +131,26 @@ by validation:` lines), and new tests in
   `scripts/change_workflow/tasks.py`'s, beside its section parsing. Verify: unit tests
   for "Two sections owe CI workflows" and "No section owes CI evidence" (CW-g4oz),
   and an owed line under an incomplete section ignored.
-- [ ] 1.6 Verification: `pytest -q scripts/tests/test_change_workflow_config.py
+  - Done: `tasks.owed_lines` (the first backticked name after `Owed by
+    validation:`, in a task's text or the section's notes), using
+    `next_step.section_heading`, added beside `read_sections`; the plan is
+    `config.plan`, printed by `cli` so `config` imports neither `tasks` nor `find`.
+    Unit tests pass for the plan halves of both scenarios (starting and recording
+    the runs is section 3's and the skill's) and the incomplete section. Decision
+    the design left open: two lines owing one workflow are one run, owed by both
+    sections, since a run is named, and its marker kept, by part and workflow
+    (D10); CW-g4oz's "once per line" and "once per owed workflow" agree only so.
+- [x] 1.6 Verification: `pytest -q scripts/tests/test_change_workflow_config.py
   scripts/tests/test_change_workflow_cli.py scripts/tests/test_change_workflow_cli_steps.py`
   (unit) passes; `make test` passes. End-to-end: none; no scenario exercises the
   workflow tooling.
+  - Done: the three suites pass, 281 tests (unit, and library integration where a
+    test runs `git init`); `make test-release-tooling` (every script suite, 2421)
+    and `make test` pass. The CLI suites' checkouts (`_repository`, `_checkout`)
+    now write a configuration (`change_workflow_fixtures.configured`), since the
+    steps they start need its fields. End-to-end: confirmed none.
+  - `make check-change` fails, as the preface expects, on the citations of
+    `hooks.py` and its tests (section 2) and the specification index (10.9).
 
 ## 2. Hooks run through the engine (D2, D7, D8, D9, D11)
 
@@ -324,6 +382,9 @@ Implements MCW-r4tx and MCW-k3vy, and D20's repository-side fixes but
   parts <change>` for a fixture change owing `tests.yml` lists the pipeline, `ci
   tests.yml`, local, and Helm after local (MCW-r4tx's scenario), in a test in
   `scripts/tests/test_change_workflow_config.py` that loads the repository's own file.
+  - Amended in section 1: the file exists from section 1 (see 1.2's note), all of
+    the design's listing but `pre-commit` and `pre-push`; this task adds those two,
+    once their targets exist, and checks every field's comment names who uses it.
 - [ ] 6.2 Add `make pre-push REMOTE=<remote>`, running both public-content checks
   (`scripts/check_public_content.py --pre-push` and `scripts/check_secrets.py
   --pre-push`) under Git's hook contract, the ref lines read once from standard input

@@ -239,6 +239,24 @@ def codex_missing(command: Sequence[str], log: Path) -> int:
     raise not_installed("codex")
 
 
+# A repository's workflow configuration: the least a step that commits or validates
+# needs, functional checks declared empty and one part.
+CONFIGURED = """
+[hooks]
+pre-commit-functional = []
+
+[validation.parts.local]
+run = "true"
+"""
+
+
+def configured(root: Path, text: str = CONFIGURED) -> Path:
+    """`root` given `.agents/workflow.toml` holding `text`."""
+    (root / ".agents").mkdir(parents=True, exist_ok=True)
+    (root / ".agents/workflow.toml").write_text(text, "utf-8")
+    return root
+
+
 # A validated ancestor of HEAD, and where the change's records live.
 VALIDATED = "f" * 40
 RECORDS = f"openspec/changes/{CHANGE}"

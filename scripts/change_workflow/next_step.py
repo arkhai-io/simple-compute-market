@@ -314,6 +314,12 @@ def read_sections(tasks: Path) -> list[Section]:
     return sections
 
 
+def section_heading(line: str) -> str | None:
+    """The id of the section `line` heads, `## N. Title`; None for any other line."""
+    match = _SECTION.match(line)
+    return match["id"] if match else None
+
+
 def task_problems(text: str) -> list[str]:
     """Each numbered task of a task list that sits under another section's heading.
 

@@ -24,11 +24,17 @@ change's records into the log's format, shown first and written on the owner's
 The others reach the module that holds them: `next` the next-step computation,
 `find` a change's directory and records, `clone`, `clone where`, and `clone-remove`
 a change's clone, `round-view` and `round-done` the round view, `history` the copy
-of a change's history, `cost` its cost report, `push` the guarded push, `check` the
-index, task-list, push, skill, and round-view checks and the graph diagram's
-comparison with the graph table, and `hook post-compaction` the post-compaction
-hook. `check graph` is internal: it maintains the engine's own diagram, and no
-repository or runner relies on it.
+of a change's history, `cost` its cost report, `push` the guarded push, `config`
+how the repository's workflow configuration resolved, `config load` a step's
+documents, and `config parts` validation's plan for a change, `check` the
+configuration's, index, task-list, push, skill, and round-view checks and the graph
+diagram's comparison with the graph table, and `hook post-compaction` the
+post-compaction hook. `check graph` is internal: it maintains the engine's own
+diagram, and no repository or runner relies on it.
+
+Before a step starts, `start` checks the configuration whole and refuses a step
+whose required fields are absent, naming them, before anything is launched or
+logged (`config.require_for_step`).
 
 The repository is found once, from the working directory, and every subcommand acts
 on it. Every exit status is one of three: 0 for success; 1 for a refusal or a failed
@@ -49,7 +55,7 @@ from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
 from . import clone as clones
-from . import (cost_report, diagram, find, graph, history, hook, index, next_step, push,
+from . import (config, cost_report, diagram, find, graph, history, hook, index, next_step, push,
                round_view, skills, tasks)
 from .clone import clone_of
 from .common import ORCHESTRATOR, StepError, repository_root
@@ -346,8 +352,16 @@ def _parser() -> argparse.ArgumentParser:
     cost = commands.add_parser("cost", help="report what a change's runs cost")
     cost.add_argument("change")
     commands.add_parser("push", help="push exactly HEAD to its own branch, once it may be")
+    config_ = commands.add_parser(
+        "config", help="list how every field of the repository's workflow configuration "
+                       "resolved; `config load <step>` a step's documents; `config parts "
+                       "<change>` validation's plan")
+    config_.add_argument("action", nargs="?", choices=("load", "parts"), default=None)
+    config_.add_argument("subject", nargs="?", default=None, metavar="step|change")
+    config_.add_argument("--json", action="store_true", help="print it as JSON")
     check = commands.add_parser("check", help="run one of the workflow's checks")
     checks = check.add_subparsers(dest="check", required=True)
+    checks.add_parser("config", help="the repository's workflow configuration, checked whole")
     checks.add_parser("index", help="the change index against the change directories")
     tasks_ = checks.add_parser("tasks", help="every task under its own section's heading")
     tasks_.add_argument("change")
@@ -402,6 +416,10 @@ def start(args: argparse.Namespace, root: Path, wrapper: Wrapper, launch: Launch
     _takes(root, args.step, args.change)
     if args.step in ROUND_VIEW_CLOSED:
         _round_view_closed(root)
+    if args.step != ORCHESTRATE:
+        # Checked whole, and the fields the step needs required, before anything
+        # is launched or logged.
+        config.require_for_step(config.load(root), args.step)
     arguments = " ".join(part for part in (words, args.arguments) if part)
     if args.step == ORCHESTRATE:
         model = load_orchestrator(root / STEP_TABLE)
@@ -530,8 +548,35 @@ def delegated(args: argparse.Namespace) -> Delegated | None:
                 "tasks": (tasks.main, [getattr(args, "change", "")]),
                 "push": (push.main, ["check"]),
                 "round-view": (round_view.main, ["check"]),
+                "config": (config.main, ["check"]),
                 "graph": (_graph, None)}[args.check]
+    if args.command == "config" and args.action != "parts":
+        if args.action == "load":
+            if args.subject is None or args.json:
+                raise _Usage("config load takes the step whose documents it prints, and no "
+                             "--json")
+            return config.main, ["load", args.subject]
+        if args.subject is not None:
+            raise _Usage("config alone takes no argument; `config load <step>` and `config "
+                         "parts <change>` take one")
+        return config.main, ["show", *(["--json"] if args.json else [])]
     return None
+
+
+def _config_parts(args: argparse.Namespace, root: Path) -> int:
+    """Validation's plan for the change: the configuration's parts, an owed part
+    once per workflow its complete sections owe."""
+    if args.subject is None:
+        raise _Usage("config parts takes the change whose plan it prints")
+    configuration = config.load(root)
+    try:
+        directory = change_directory(root, args.subject)
+    except ChangeNotFound as exc:
+        raise StepError(str(exc)) from exc
+    runs = config.plan(configuration, tasks.owed_lines(directory / next_step.TASKS_FILE))
+    print(config.plan_json(configuration, runs) if args.json
+          else "\n".join(config.plan_lines(configuration, runs)))
+    return 0
 
 
 def _graph(root: Path) -> int:
@@ -546,6 +591,8 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
         return start(args, root, wrapper, launch)
     if args.command == "clone" and args.change == "where":
         return _clone_where(args, root)
+    if args.command == "config" and args.action == "parts":
+        return _config_parts(args, root)
     if (reached := delegated(args)) is not None:
         main_, arguments = reached
         if args.command == "push":

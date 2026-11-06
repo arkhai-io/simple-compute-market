@@ -26,8 +26,8 @@ from change_workflow import (clone, cli, cost_report, diagram, find, history, ho
 from change_workflow.common import FORMAT, StepError
 from change_workflow.log import log_path, read_log, record_outcome
 from change_workflow.steps import load_orchestrator, load_steps
-from change_workflow_fixtures import (CHANGE, VALID, FakeClaude, event_lines, make_wrapper,
-                                      option_rules)
+from change_workflow_fixtures import (CHANGE, VALID, FakeClaude, configured, event_lines,
+                                      make_wrapper, option_rules)
 
 REPO = Path(__file__).resolve().parents[2]
 FRAGMENT = REPO / "scripts" / "change_workflow" / "workflow.mk"
@@ -50,9 +50,11 @@ def _git(cwd: Path, *args: str) -> str:
 
 
 def _repository(path: Path, *changes: str) -> Path:
-    """A checkout with a commit, and an active directory for each of `changes`."""
+    """A checkout with a commit, its workflow configuration, and an active directory
+    for each of `changes`."""
     path.mkdir(parents=True, exist_ok=True)
     _git(path, "init", "-q", "-b", "main")
+    configured(path)
     for change in changes:
         (path / "openspec/changes" / change).mkdir(parents=True, exist_ok=True)
         (path / "openspec/changes" / change / "README").write_text("x\n", "utf-8")
