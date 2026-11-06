@@ -10,7 +10,9 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from market_core.schemas import Agreement
+from market_core.schemas import Agreement, SettlementOption
+from market_settlement_runtime.buyer_terms import BuyerTermsPolicy
+from market_settlement_runtime.rate_publication import default_buyer_refusals
 from pydantic import ValidationError
 
 from market_arkhai_payments.agreement import (
@@ -46,6 +48,7 @@ class PaymentApproval:
         payer_account: str,
         *,
         client_for_owner: ClientForOwner | None = None,
+        terms_policy: BuyerTermsPolicy | None = None,
     ) -> None:
         if (
             config.fee_bps is None
@@ -55,6 +58,7 @@ class PaymentApproval:
                 "payments fee policy and service identity are required"
             )
         self.config = config
+        self.terms_policy = terms_policy
         self.payer_account = AccountId.model_validate(payer_account).root
         self._client_for_owner: ClientForOwner = client_for_owner or (
             lambda owner: payments_client_for_owner(config, owner)
@@ -83,6 +87,13 @@ class PaymentApproval:
             agreement, self.config, expected_payer=self.payer_account
         )
         check(data.mandate, agreement, policy)
+        if policy.option.period is not None:
+            if self.terms_policy is not None:
+                self.terms_policy.rank(SettlementOption.model_validate(agreement["settlement"]))
+            else:
+                refusals = default_buyer_refusals(policy.lifecycle, has_adapter=True)
+                if refusals:
+                    raise MandatePolicyError("; ".join(refusals))
         return agreement, data
 
     def approve(

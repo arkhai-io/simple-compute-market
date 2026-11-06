@@ -53,9 +53,10 @@ Receipts carry a signed `livemode`, true only from a live payments service.
 
 `MandatePolicy` carries the accepted Agreement's payment facts without defining
 or parsing a shared Agreement model. `derive_mandate(agreement_json, policy)`
-commits to the exact JSON object using RFC 8785, creates one `once` part, and
-returns a generated `Mandate`. The generated models also carry the contract's
-`rate` parts; the once-only builder does not derive them. Every part carries its
+commits to the exact JSON object using RFC 8785 and returns a generated
+`Mandate`: one `once` part for a total quote, or optional setup `once` followed
+by `rate` for a per-period quote. Prices come through the unit-bearing agreed-price
+accessor from the accepted bytes, never today's listing. Every part carries its
 own authorities and hold-extension cap. A once-only mandate has no start or stop
 permission, and preserves the seller and accepted option's dispute authority as reverse
 authorities. Only the dispute authority can extend or lift a hold. Each once
@@ -348,7 +349,76 @@ Snapshot proofs are real fixture signatures, not placeholders. Default fixture
 identities are public deterministic development values and must never be used on
 a public network. Production clients and transport/authentication checks are unchanged.
 
+## Recurring publication and stateless rate servicing
+
+`PaymentsRatePresetHelper` implements the settlement runtime's injected helper
+for both compute storefronts. Terms resolves notices, setup opt-out, bounds,
+delivery deadlines and penalty recommendations; the helper only encodes the
+resolved terms. `period` and `reserve_ahead_seconds` are paired positive fixed-unit
+parameters. Optional `setup_amount` is additional positive minor-unit money in the
+price's asset. Rate presets use `approval_window`; existing once options retain
+`window`. A rate's maximum end is the accepted whole-second start plus its finite
+Agreement duration, never shifted after late activation.
+
+The public registration projects `arkhai_payments.period` as text or missing
+(`None`), and `arkhai_payments.billing_kind` as `total` or `per_period`. Setup
+beside rate remains `per_period`; there is no fabricated zero-length period.
+`arkhai_payments.approval_window` projects approval timing, not adjudication.
+Missing values use the existing clause descriptor's missing-value rule; no
+presence operator is added.
+
+A composition's `RateServicing` must select `rate_contract_revision()` at
+publication, acceptance and new materialization. The default deployed
+compositions have no declaration and emit no recurring offers. Withdrawal refuses
+new materialization but does not reinterpret stored mandates during recovery.
+The helper and a passing fixture are not a running continuation or live authority
+qualification. Bare-metal supplies its own explicit setup price or opts out; the
+helper invents no domain setup default.
+
+`RatePaymentAdapter` accepts an exact stored commitment, account credential
+factory, snapshot verifier, durable sequence floor and injectable clock. It
+exports immutable `PaymentOperation` descriptors through `describe` and
+`billing_operations`. The caller persists the exact descriptor/digest before
+calling `submit(..., journaled_digest=descriptor.digest)` or
+`start_billing(key, evidence, journaled_digest=operations_digest(descriptors))`.
+The latter uses only the end service's supplied billing key and the shared
+versioned `DeliveryEvidence`; activation, ready, reservation and fulfillment
+references are required. Site verification and journal persistence belong to
+the caller. No rate call allocates another billing-start key or stores a ledger.
+The continuation composition must pass these descriptors from its journal; the
+once-only end-service caller alone is not recurring enablement.
+
+`authorize` is read-only for commit, dispatch, physical start and disclose.
+Disclosure additionally requires `billing_operation_key` and a matching verified
+start event containing the same activation envelope. Unknown, unverified,
+regressing or stale snapshots never allow delivery. Pre-start reservations prove
+initial funding without inventing a funded-through date. Effective stops,
+exhaustion and maximum ends refuse; a future pending stop remains a bound.
+
+`read` exposes per-part starts, funding, pending and winning final stops, release
+instants, ordered events and open extension references. A raw `stop_request` is
+not a final stop. Watch consumes the winning per-part final record independently
+of the event cursor, because a notice can mature without a new event sequence.
+The winning entry owns partial-period treatment. No local refund or clawback
+corrects it; seller exceptional ends still use the dispute adapter's
+`delivery_end` path, not a seller payment command.
+
 ## Local first use
+
+From a clean checkout, run `make dist-ci` once, then:
+
+```sh
+make -C kit/arkhai-payments first-use-rate
+```
+
+This starts no server and needs no credentials. The invocation owns its deterministic
+fixture accounts, signer, funding/state and injected clock. It opens the library's
+rate surface directly: setup/rate derivation, buyer check, pure admission,
+activation-bound start with response loss and same-key replay, disclosure, seller
+notice and verified final stop. Its JSON is labelled fixture evidence, not hosted
+qualification. `examples/rate.py` is also the runnable entry point for a fresh
+verifier.
+
 
 The committed `examples/local_e2e.py` exercises the `PaymentsClient` primitives
 (approval, buyer and seller polling, Agreement deposit, receipt verification,

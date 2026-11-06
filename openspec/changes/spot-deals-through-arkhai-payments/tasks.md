@@ -1,6 +1,6 @@
 # Tasks — hosted compute rate parts and seller notice
 
-This is a design-stage plan; no implementation tasks are complete. Work through
+Sections 1–3 are authorized for implementation on the stacked open-ended-terms base; sections 4–6 and closeout remain pending maintainer review. Work through
 the sections in order, committing coherent implementation chunks. The foundation's
 round-2 snapshot verifier and revised vendoring must land before rate state is
 consumed. No section implements another verifier, continuation daemon or site
@@ -8,7 +8,7 @@ renewal policy.
 
 Verification levels follow docs/development/TESTING.md. The targets below extend
 the existing owning suites; select their focused cases during implementation.
-New fixture/qualification coverage follows maintainer review of this plan. Full
+New fixture/qualification coverage follows maintainer review of this plan. For the sections 1–3 assignment, checked tasks record delivered library interfaces and focused validation; the enumerated full qualification matrix remains section 6 work, not evidence claimed by those checkmarks. Full
 pipeline evidence is required at closeout, not as a substitute for focused tests.
 
 ## 1. Confirm dependency gates and freeze the consumer interface
@@ -17,29 +17,28 @@ Files: kit/arkhai-payments/schema/SOURCE.md, schema/payments.schema.json,
 test-vectors/payments.json; the lifecycle adapter protocols supplied by the
 foundation; this design's D1–D7.
 
-- [ ] 1.1 Confirm agreed-evidence-and-early-termination supplies the codec, command
+- [x] 1.1 Confirm agreed-evidence-and-early-termination supplies the codec, command
       contracts, hosted once adapter, evidence-store/journal seam, per-part contract
       vendoring and round-2 verified-snapshot interface. Record the actual schema
       and vector hashes. Gate task 3.5 on foundation 10.4, 10.5 and 12.3;
       gate task 4.5 on foundation 7.5 round 2, after 12.3 and 13.3.
       Do not edit generated models to mimic an unvendored contract.
-- [ ] 1.2 Confirm negotiate-open-ended-compute-terms supplies the price accessor
+- [x] 1.2 Confirm negotiate-open-ended-compute-terms supplies the price accessor
       with its period unit, common term shape, listing bounds and two front-door
       servicing gates. Gate on terms 1.3/2.1/2.2/3.1/3.2 resolving the horizon into
       `duration_seconds` before signature, including whole-second rate starts. Freeze period plus reserve_ahead_seconds and the recommended setup_amount shape with that consumer. Require the accepted rate-structure
       carrier/digest from negotiation-driven-capacity-resize gate 2.1a; refuse an
       unresolved pricing reference rather than read the current listing.
-- [ ] 1.3 Freeze operation descriptors, consume the foundation-owned versioned
+- [x] 1.3 Freeze operation descriptors, consume the foundation-owned versioned
       activation envelope (including site activation reference/instant), verified rate
       observations and rate re-anchoring output for convergence. Foundation
       in-process contract fakes cover kit library integration; the HTTP lane
       doubles gate only lane/e2e execution. No kit depends on runnable tooling.
-- [ ] 1.4 Obtain or explicitly gate on published signed snapshot/start/mixed-part
+- [x] 1.4 Obtain or explicitly gate on published signed snapshot/start/mixed-part
       vectors and partial-reversal-before/after-stop traces. Identify missing
       authority conformance evidence without replacing it with a double claim.
       Verify explicit partialPeriod on rate stop entries and rate ends on the
-      returned-capable revision and dispute chosen-entry payloads. Once ends have no
-      partialPeriod.
+      returned-capable revision and dispute chosen-entry payloads. The published schema requires an inert returned partialPeriod on once ends too; preserve the foundation encoding (see dependency-contracts.md).
       Confirm delivery_end remains a dispute intent/request and mediation's
       published standard self-penalty uses its own chosen stop entry with returned.
       Producer evidence gates that package; there is no seller restitution entry
@@ -64,7 +63,7 @@ kit/arkhai-payments/tests/test_mandates.py, test_buyer.py,
 test_settlement_config.py; both domains' storefront settlement_composition.py,
 publication configuration/builders and their focused publication suites.
 
-- [ ] 2.1 Add paired period/reserve_ahead_seconds validation, fixed-unit/positive
+- [x] 2.1 Add paired period/reserve_ahead_seconds validation, fixed-unit/positive
       constraints, optional setup_amount, the finite term requirement and
       early_termination.settles_through as the only term-end input, whole-second
       rate Agreement start at materialization and
@@ -79,10 +78,10 @@ publication configuration/builders and their focused publication suites.
       setup/rate projection in test_settlement_config.py. Entitled notice pays none;
       emergency without notice pays the capped mediation penalty, never a seller payment-adapter correction.
       Gate setup-bearing presets on foundation 12.1 vendoring delivery_end and both signature vectors, not another payments wire change; rate-only opt-out remains available. Verify malformed pairs, calendar periods, setup opt-out, the pending-revision refusal and insufficient lead.
-- [ ] 2.2 Derive setup-once then rate deterministically through the accessor and
+- [x] 2.2 Derive setup-once then rate deterministically through the accessor and
       codec. Include rate end, afterStop hold, maxHoldExtension and exact per-part
       authorities/notices. On the returned-capable revision require partialPeriod
-      on rate stop entries and rate ends, never once ends;
+      on rate stop entries and rate ends; retain the inert once-end field required by the published schema;
       dispute rate stop is {account, notice: PT0S, partialPeriod: chosen} and its
       stop event supplies treatment. Keep rate start payee-only and seller stop
       entries only for accepted entitlements: spot notice, none on on-demand.
@@ -93,7 +92,7 @@ publication configuration/builders and their focused publication suites.
       through the foundation codec to end.partialPeriod: preset last_boundary;
       explicitly disclosed started_period for interim spot/on-demand when only charged is expressible.
       Refuse unsupported terms rather than round term durations or downgrade.
-- [ ] 2.3 Extend the buyer's exact mandate check for mixed parts, ordering, price,
+- [x] 2.3 Extend the buyer's exact mandate check for mixed parts, ordering, price,
       asset, hold, cap and stop authorities. Verify explicit zero payer notice is
       preserved exactly. Use the foundation's notice_seconds/settles_through
       authority mapping; reject retired exposure_seconds and stop+exposure.
@@ -105,20 +104,20 @@ publication configuration/builders and their focused publication suites.
       prevents physical preemption: the premature-stop penalty and a buyer case over
       held money (bond reserved) are the remedy; the seller's own exit is the
       mechanically ruled self-penalty.
-- [ ] 2.4 Supply setup-bearing on-demand/spot presets with explicit setup pricing
+- [x] 2.4 Supply setup-bearing on-demand/spot presets with explicit setup pricing
       and seller opt-out: the setup part is an ordinary once part ending at the
       later of the Agreement start and approval, owed from approval; verify that a
       buyer's stop before activation leaves it with the seller and that the
       seller's self-penalty for non-delivery returns it. The bare-metal preset
       ships no setup default; VM's may default to zero. Bind all terms into option
       identity; invent no amount or bare-metal minimum-spend gate.
-- [ ] 2.5 Supply the preset helper to the terms-owned VM/bare-metal publication
+- [x] 2.5 Supply the preset helper to the terms-owned VM/bare-metal publication
       adapters through their injected preset-helper interface; helper availability
       gates rate emission, not the terms change's archive. Do not implement generic
       option emission a second time. Prove
       accepted option plus bound rate structure survive repricing before
       materialization/restart; preserve reserved/API-credit once behavior.
-- [ ] 2.6 Add the materialization servicing-declaration gate: refuse undeclared
+- [x] 2.6 Add the materialization servicing-declaration gate: refuse undeclared
       rate servicing, including for accepted options after declaration withdrawal.
       The terms change retains publication/acceptance gate ownership.
 
@@ -138,7 +137,7 @@ kit/arkhai-payments/tests/test_client.py, test_seller.py and
 tests/integration/ for real journal consumers injected at the public adapter seam.
 Journal persistence itself belongs to convergence.
 
-- [ ] 3.1 Translate rate start, entitled stop/notice and partial reverse into
+- [x] 3.1 Translate rate start, entitled stop/notice and partial reverse into
       explicit per-part commands with operation-derived stable keys. Require
       the foundation's versioned activation envelope after verified site activation. Delivery
       authorization remains pure; implement the separate start_billing effect using
@@ -149,15 +148,15 @@ Journal persistence itself belongs to convergence.
       and identical retry against the in-process contract fake; changed-content
       key reuse is refused by caller journal comparison; pass its descriptor/digest
       to the stateless adapter for comparison, with authority refusal as backstop.
-- [ ] 3.2 Expose verified per-part start/pendingStop/stop, funded-through, extension
+- [x] 3.2 Expose verified per-part start/pendingStop/stop, funded-through, extension
       refs, releaseAt and event ordering to lifecycle read/watch. Verify exhaustion
       and maximum-term causes, missing pre-start funding as unknown, and refusal to
       use unverified/regressing snapshots through the foundation verifier.
-- [ ] 3.3 Export immutable operation descriptors for caller write-before-call,
+- [x] 3.3 Export immutable operation descriptors for caller write-before-call,
       then resolve unknown from authority events before another monetary delta.
       Implement D4's refusal classification, including transaction_stopped start
       failure, read-before-insufficient-funds reconciliation and matured shortfall.
-- [ ] 3.4 Map settles_through to partialPeriod through the foundation codec:
+- [x] 3.4 Map settles_through to partialPeriod through the foundation codec:
       started_period/charged, last_boundary/returned, stop/prorated. Gate each
       value on vendored capability at publication and acceptance; interim spot
       and on-demand use fixed charged semantics on all present entries and ends,
@@ -172,7 +171,7 @@ Journal persistence itself belongs to convergence.
       Verify human rulings state treatment; delivery_end preserves payer notice and
       treatment. delivery_end is the dispute intent for mediation's only
       mechanical criterion: payee filing or valid concurrence under mapping/time/replay guards, including receipt-backed payer claims; other cases stay triaged.
-- [ ] 3.5 Verify the hosted adapter against foundation 10.4, 10.5 and 12.3's
+- [x] 3.5 Verify the hosted adapter against foundation 10.4, 10.5 and 12.3's
       journaled delivery_end filing path and qualified mediation mapping. Consume
       deal-lifecycle's “A seller's exceptional end is a dispute filing”; do not
       reimplement seller filing or journal ownership. Observe filing response-loss/
@@ -180,7 +179,7 @@ Journal persistence itself belongs to convergence.
       penalty after refunds. Verify no seller payment calls, exceptional-end payment
       operation, direct-payment fallback or second correction journal. Report missing
       dispute intent/request/mapping or producer qualification to foundation.
-- [ ] 3.6 Implement the pure rate authorize hook for commit/dispatch/start/disclose
+- [x] 3.6 Implement the pure rate authorize hook for commit/dispatch/start/disclose
       under D4's phase table and settlement-servicing delta. Return reason,
       operation identity and verified provenance with allow/refuse/pending. Verify
       absent/unreachable/unverified/regressing evidence, wrong phase/deal, initial

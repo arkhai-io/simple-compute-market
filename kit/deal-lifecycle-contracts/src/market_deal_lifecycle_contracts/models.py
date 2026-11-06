@@ -15,7 +15,7 @@ Reference = Annotated[str, Field(min_length=1)]
 Instant = Annotated[int, Field(strict=True, ge=0)]
 Amount = Annotated[str, Field(pattern=r"^(0|[1-9][0-9]*)$")]
 CommandKind = Literal["start", "stop", "reverse", "dispute", "delivery_end", "append"]
-PaymentEventKind = Literal["start", "stop", "collect", "reverse", "award", "return", "extend", "lift"]
+PaymentEventKind = Literal["start", "stop", "stop_request", "collect", "reverse", "award", "return", "extend", "lift"]
 DisputeEventKind = Literal["filed", "appended", "ruled", "closed"]
 LifecycleState = Literal["unstarted", "running", "ending", "ended", "repair_required"]
 
@@ -55,6 +55,7 @@ class PaymentEvent(WireModel):
     extension_ref: Reference | None = None
     sequence: Annotated[int, Field(strict=True, ge=0)]
     authority_record_ref: Reference
+    settles_through: Literal["started_period", "last_boundary", "stop"] | None = None
 
     @model_validator(mode="after")
     def required_effect_fields(self) -> PaymentEvent:
@@ -202,6 +203,20 @@ class OpenExtension(WireModel):
     until: Instant | None
 
 
+class PaymentPartObservation(WireModel):
+    """Verified payment bounds, with requests distinct from controlling ends."""
+
+    part: Reference
+    started_at: Instant | None = None
+    end_at: Instant | None = None
+    funded_through: Instant | None = None
+    initial_reservation: bool | None = None
+    pending_stop: PaymentEvent | None = None
+    final_stop: PaymentEvent | None = None
+    release_at: Instant | None = None
+    evidence_ref: Reference
+
+
 class AuthorityView(WireModel):
     outcome: LifecycleOutcome
     # None means the adapter cannot supply a complete payout observation.
@@ -209,6 +224,7 @@ class AuthorityView(WireModel):
     payouts: dict[str, Instant | None] | None = None
     state: LifecycleState | None = None
     events: list[PaymentEvent] = Field(default_factory=list)
+    parts: list[PaymentPartObservation] = Field(default_factory=list)
     disputes: list[DisputeEvent] = Field(default_factory=list)
     cases: list[CaseRecord] = Field(default_factory=list)
     extensions: list[OpenExtension] = Field(default_factory=list)

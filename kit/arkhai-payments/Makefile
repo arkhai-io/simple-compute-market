@@ -3,10 +3,13 @@ export UV_PYTHON := $(or $(shell cat ../../.python-version 2>/dev/null),$(error 
 
 DIST_DIR ?= ../../.dist
 
-.PHONY: build init reinit test test-unit typecheck check-vectors check-generated generate-models first-use
+.PHONY: build init reinit test test-unit typecheck check-vectors check-generated generate-models first-use first-use-rate
 
 first-use: reinit ## Drive once lifecycle against the invocation-owned authority fixture
 	uv run python examples/lifecycle.py
+
+first-use-rate: reinit ## Drive rate derivation, pure admission, billing retry and notice against an owned fixture
+	uv run python examples/rate.py
 
 build: ## Build the wheel into the shared .dist/
 	uv build --wheel --out-dir $(DIST_DIR)
@@ -22,7 +25,7 @@ test-unit: ## Run the unit suite
 	uv run pytest tests -q
 
 typecheck: ## Type-check the package and the local example
-	uv run mypy src examples/local_e2e.py examples/lifecycle.py
+	uv run mypy src examples/local_e2e.py examples/lifecycle.py examples/rate.py
 
 check-vectors: ## Verify the published conformance vectors
 	uv run python scripts/check_vectors.py
