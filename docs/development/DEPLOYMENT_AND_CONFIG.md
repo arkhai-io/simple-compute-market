@@ -220,8 +220,10 @@ the charts select no CA by default and never set `SSL_CERT_FILE`.
 
 The payments `api_key`, dispute `api_key` entries and wallet `private_key` belong
 in the storefront runtime Secret's `storefront.secrets.toml`, not values `config`.
-The values schemas refuse secret fields, including dispute credentials in any
-supported key spelling. Trust and service policy remain ordinary configuration.
+The values schemas refuse payments `api_key` and `api_key_env`, including null
+and any supported key spelling, and refuse every `DisputeCredential` entry. A
+storefront receives credentials through its secret overlay; buyer providers may
+still use the shared model's environment-variable reference form. Trust and service policy remain ordinary configuration.
 `tests.paymentsAccount` enables an actual `check-payments` Helm test using the
 same image, configuration, Secret, signer and CA projections as the Deployment,
 with no storefront PVC, health probes or network-overlay privileges.

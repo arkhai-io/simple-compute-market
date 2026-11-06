@@ -259,21 +259,35 @@ _DISPUTE_CREDENTIAL = {
 }
 
 
-def test_a_dispute_credentials_token_is_refused_and_its_entry_closed(definition) -> None:
-    """A dispute credential's token reaches the storefront only through its
-    secret overlay, so the entry is typed by the credential model with its
-    token refused in any spelling, as null too, and its other fields closed."""
-    entry = _section(definition, "DisputeCredential")["items"]
-    assert entry["additionalProperties"] is False
-    assert _allowed(entry, "interface", "origin", "account", "record_key", "api_key_env")
-    assert _withheld(entry, "api_key")
-    assert not _refusals(definition, {"DisputeCredential": [_DISPUTE_CREDENTIAL]})
-    for spelling in ("api_key", "API_KEY"):
-        for value in ("a-token", None):
-            stated = [{**_DISPUTE_CREDENTIAL, spelling: value}]
-            assert _refusals(definition, {"DisputeCredential": stated}), (spelling, value)
-            assert _refusals(definition, {"disputecredential": stated}), (spelling, value)
-    assert _refusals(definition, {"DisputeCredential": [{**_DISPUTE_CREDENTIAL, "token": "x"}]})
+def test_a_dispute_credential_is_refused_whole(definition) -> None:
+    """A dispute credential reaches the storefront only through its secret
+    overlay, never by a variable its configuration names, so no entry is
+    accepted in ``config``: not with its token, not naming a variable, not
+    without either, and not as null, in any spelling of the section."""
+    assert _section(definition, "DisputeCredential") is False
+    for section in ("DisputeCredential", "disputecredential", "DISPUTECREDENTIAL"):
+        for stated in (
+            [{**_DISPUTE_CREDENTIAL, "api_key": "a-token"}],
+            [{**_DISPUTE_CREDENTIAL, "api_key_env": "DISPUTE_API_KEY"}],
+            [_DISPUTE_CREDENTIAL],
+            [],
+            None,
+        ):
+            assert _refusals(definition, {section: stated}), (section, stated)
+
+
+def test_a_payments_key_named_by_variable_is_refused(definition) -> None:
+    """The payments key reaches the storefront only through its secret overlay,
+    so ``api_key_env`` is refused beside ``api_key``, in any spelling and as
+    null; the rest of the section stays accepted."""
+    payments = _field(_section(definition, "Settlement"), "arkhai_payments")
+    assert _withheld(payments, "api_key", "api_key_env")
+    accepted = {"enabled": True, "service_url": "https://payments.example"}
+    assert not _refusals(definition, {"Settlement": {"arkhai_payments": accepted}})
+    for spelling in ("api_key_env", "API_KEY_ENV", "Api_Key_Env"):
+        for value in ("ARKHAI_PAYMENTS_API_KEY", None):
+            stated = {"Settlement": {"Arkhai_Payments": {**accepted, spelling: value}}}
+            assert _refusals(definition, stated), (spelling, value)
 
 
 def test_a_null_removing_a_section_a_field_or_a_delivery_instance_validates(definition) -> None:
@@ -410,15 +424,3 @@ def test_public_delivery_settings_are_accepted() -> None:
 
 def test_an_instance_of_an_unshipped_sink_stays_open_when_spelled_correctly() -> None:
     assert _accepts({"enabled": ["pager"], "pager": {"sink": "pager", "anything": 1}})
-
-
-
-def test_dispute_credentials_accept_public_metadata_and_refuse_secret_keys(definition) -> None:
-    # Public synthetic authority metadata and token; never for a public network.
-    public = {"interface": "example.dispute.v1", "origin": "https://dispute.invalid",
-              "account": "fixture-account", "record_key": "fixture-public-key"}
-    for section in ("DisputeCredential", "disputecredential", "DISPUTECREDENTIAL"):
-        assert not _refusals(definition, {section: [public]})
-        for key in ("api_key", "API_KEY", "Api_Key"):
-            for value in ("public-test-token", None):
-                assert _refusals(definition, {section: [{**public, key: value}]}), (section, key)

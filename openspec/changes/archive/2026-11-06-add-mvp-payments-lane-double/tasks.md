@@ -2159,6 +2159,71 @@ no new production behavior or design decision was introduced by these integratio
   `arkhai-bob-runtime` carries should name Bob's `[[DisputeCredential]]` beside the
   payments `api_key`, and its list of what the storefront values schema refuses should
   name a dispute credential's `api_key`.
+- [x] 12.7 Pre-closeout triage fix (74 F1): the named-variable credential paths refused in
+  public `config`. 12.6 refused a dispute credential's token but still accepted an entry
+  naming `api_key_env`, and `[Settlement.arkhai_payments].api_key_env` was accepted too,
+  though the delta's requirement forbids a variable named by configuration and the chart
+  sets none that could hold a key.
+  - Both storefront schema generators now refuse `[[DisputeCredential]]` whole
+    (`False`, in any spelling and as null) and `api_key_env` in the payments fragment,
+    beside the secret-marked `api_key`. The refusal is the generators', not a `roles`
+    marker on `ArkhaiPaymentsConfig.api_key_env`, which the settlement runtime would
+    also enforce when a seller's configuration loads (D19, "Values schemas"). The
+    generators import `ARKHAI_PAYMENTS_CONFIG_KEY` from `market_arkhai_payments`, which
+    both packages declare, and no longer import `DisputeCredential`.
+  - The three committed schemas were regenerated with `make helm-values-schema`; the
+    diff is the two refusals alone.
+  - Tests. Unit, in each storefront's `test_values_schema.py`:
+    `test_a_dispute_credential_is_refused_whole` (with its token, naming a variable,
+    with neither, empty, and null, under three spellings of the section) and
+    `test_a_payments_key_named_by_variable_is_refused` (three spellings, a value and
+    null, the rest of the section accepted); they replace the 12.6 test that asserted
+    `api_key_env` allowed. Bare metal's closed-document test now excludes
+    `disputecredential` from the settings the definition accepts. Chart render, in each
+    chart's `tests/test_render.py`: `test_a_payments_key_named_by_variable_is_refused`
+    and `test_a_dispute_credential_is_refused_in_public_configuration` (token and
+    variable), the VM ones through the umbrella and the chart alone.
+  - The delta's requirement names the three refusals; the scenario "The public
+    configuration names a payments key's variable" is added and "The public
+    configuration states a dispute credential" replaces "…a dispute credential's token".
+    D19 gains "Values schemas".
+  Evidence:
+  - Unit: `make test-storefront`, 1215 unit passed (1 skipped, as before) and 526
+    application-integration passed; `make test-bare-metal`, storefront 585 passed, after
+    the closed-document test was corrected (its first run failed only there, on the
+    refused `disputecredential`).
+  - Chart render: `make -C helm test-render` passes, with the four new cases.
+  - `make check-packaging` all OK; `make test` exited 0 with no failure. Both ran
+    before the fresh-context fixes, which changed only comments and docstrings in the
+    two generators and the two charts' render tests, and change documents; `make -C
+    helm test-render`, `make check-comment-hygiene` and `make check-change` ran after
+    them and pass.
+  - Fresh-context check of the diff: no correctness, import or hygiene defect; the
+    refusals hold in every spelling and as null, and no Helm values file, fixture or
+    test states a storefront `DisputeCredential` or `api_key_env`. Fixed from it: the
+    comments said the chart sets no variable `api_key_env` could name, though it sets
+    the signing credential's; they now say no variable the chart sets holds a key.
+    Recorded here, as it asked. Its documentation findings are closeout's (below).
+  Handoff to closeout, revising 12.6's:
+  - `DEPLOYMENT_AND_CONFIG.md`: its list of what the storefront definition refuses
+    (around "Storefront agents: pass-through configuration") should name the payments
+    `api_key_env` and every `[[DisputeCredential]]` entry, not only a dispute
+    credential's `api_key`; its `[Settlement]` passage resolving "an `api_key_env`
+    reference" and its `[[DisputeCredential]]` example using `api_key_env` need the
+    storefront's secret-overlay form beside the buyer's.
+  - Seller documents still configuring a storefront's key by variable:
+    `docs/seller-quickstart.md` (its `[Settlement.arkhai_payments]` example and the
+    sentence after it), `domains/vms/storefront/examples/README.md`, and the comment in
+    `domains/apicredits/storefront/src/apicredits_storefront/settings.toml`.
+  - `e2e-tests/README.md`: its external-deployment passage forwards a variable for the
+    storefront's `[[DisputeCredential]]`, and its lane passage places Bob's credential
+    in `storefront.bob.lane.toml`; it is in `dev-env/identities/bob.storefront.secrets.toml`.
+  - `openspec/specs/deployment-state/spec.md`, "Marketplace deployment config contains
+    consumer data only", and `architecture.md`'s matching passage still say a payments
+    consumer configures an environment-variable name for its key. No delta modifies
+    that requirement, so archive would leave it contradicting this change's; closeout
+    adds a MODIFIED delta naming the secret-overlay `api_key` for a storefront and
+    `api_key_env` for a buyer.
 
 ## 13. Closeout
 
@@ -2365,3 +2430,15 @@ local tool/storage retries are retained as environmental failures, not passes.
 Independent integration review's duplicate JSON-key finding was corrected by
 canonical regeneration and confirmed independently. Hosted funding, accepting
 mediation and physical-machine qualification remain outside this source proof.
+
+The later authoritative credential-path correction is incorporated before final
+PR handoff. Both storefront generators and their three schemas now refuse
+payments `api_key_env` and whole `DisputeCredential` entries in public config,
+including null/casing; buyer-provider support in the shared model remains intact.
+The amended deployment requirement is promoted and operating guidance updated.
+Four superseded integration tests accepting public dispute metadata were removed
+in favor of the authoritative whole-entry refusal tests. Initial focused failures
+were those obsolete expectations; the reconciled suites pass35VM schema,
+13bare-metal schema and94chart render tests. Canonical schema generation and
+packaging pass. Current corrected-source review and validation remain pending;
+1744c3384's complete evidence is retained with its exact scope.

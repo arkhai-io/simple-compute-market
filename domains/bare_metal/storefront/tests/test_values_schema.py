@@ -63,7 +63,9 @@ def test_the_document_is_closed_to_the_settings_the_storefront_reads() -> None:
     definition = values_schema.storefront_config_definition()
 
     assert definition["additionalProperties"] is False
-    assert _allowed(definition, *BareMetalStorefrontSettings.model_fields)
+    # The storefront reads its dispute credentials from its secret overlay
+    # alone, so that one setting it reads is refused here.
+    assert _allowed(definition, *(set(BareMetalStorefrontSettings.model_fields) - {"disputecredential"}))
     for section in ("Identity", "registry", "capacity", "pricing", "negotiation", "Wallet"):
         assert _field(definition, section)["additionalProperties"] is False, section
     peer = _field(_field(definition, "Identity"), "service_peers")["additionalProperties"]
@@ -137,21 +139,37 @@ _DISPUTE_CREDENTIAL = {
 }
 
 
-def test_a_dispute_credentials_token_is_refused_and_its_entry_closed() -> None:
-    """A dispute credential's token reaches the storefront only through its
-    secret overlay, so the entry is typed by the credential model with its
-    token refused in any spelling, as null too, and its other fields closed."""
-    entry = _field(values_schema.storefront_config_definition(), "DisputeCredential")["items"]
-    assert entry["additionalProperties"] is False
-    assert _allowed(entry, "interface", "origin", "account", "record_key", "api_key_env")
-    assert _field(entry, "api_key") is False
-    assert not _refusals({"DisputeCredential": [_DISPUTE_CREDENTIAL]})
-    for spelling in ("api_key", "API_KEY"):
-        for value in ("a-token", None):
-            stated = [{**_DISPUTE_CREDENTIAL, spelling: value}]
-            assert _refusals({"DisputeCredential": stated}), (spelling, value)
-            assert _refusals({"disputecredential": stated}), (spelling, value)
-    assert _refusals({"DisputeCredential": [{**_DISPUTE_CREDENTIAL, "token": "x"}]})
+def test_a_dispute_credential_is_refused_whole() -> None:
+    """A dispute credential reaches the storefront only through its secret
+    overlay, never by a variable its configuration names, so no entry is
+    accepted in ``config``: not with its token, not naming a variable, not
+    without either, and not as null, in any spelling of the section."""
+    assert _field(values_schema.storefront_config_definition(), "DisputeCredential") is False
+    for section in ("DisputeCredential", "disputecredential", "DISPUTECREDENTIAL"):
+        for stated in (
+            [{**_DISPUTE_CREDENTIAL, "api_key": "a-token"}],
+            [{**_DISPUTE_CREDENTIAL, "api_key_env": "DISPUTE_API_KEY"}],
+            [_DISPUTE_CREDENTIAL],
+            [],
+            None,
+        ):
+            assert _refusals({section: stated}), (section, stated)
+
+
+def test_a_payments_key_named_by_variable_is_refused() -> None:
+    """The payments key reaches the storefront only through its secret overlay,
+    so ``api_key_env`` is refused beside ``api_key``, in any spelling and as
+    null; the rest of the section stays accepted."""
+    settlement = _field(values_schema.storefront_config_definition(), "Settlement")
+    payments = _field(settlement, "arkhai_payments")
+    assert _field(payments, "api_key") is False
+    assert _field(payments, "api_key_env") is False
+    accepted = {"enabled": True, "service_url": "https://payments.example"}
+    assert not _refusals({"Settlement": {"arkhai_payments": accepted}})
+    for spelling in ("api_key_env", "API_KEY_ENV", "Api_Key_Env"):
+        for value in ("ARKHAI_PAYMENTS_API_KEY", None):
+            stated = {"Settlement": {"Arkhai_Payments": {**accepted, spelling: value}}}
+            assert _refusals(stated), (spelling, value)
 
 
 def test_a_null_removing_a_section_a_field_or_a_delivery_instance_validates() -> None:
@@ -190,15 +208,3 @@ def test_the_definition_carries_no_defaults_references_or_markers() -> None:
     for node in _walk(values_schema.storefront_config_definition()):
         if isinstance(node, dict):
             assert not {"default", "$ref", "$defs", "secret", "required"} & set(node), node
-
-
-def test_dispute_credentials_accept_public_metadata_and_refuse_secret_keys() -> None:
-    definition = values_schema.storefront_config_definition()
-    # Public synthetic authority metadata and token; never for a public network.
-    public = {"interface": "example.dispute.v1", "origin": "https://dispute.invalid",
-              "account": "fixture-account", "record_key": "fixture-public-key"}
-    for section in ("DisputeCredential", "disputecredential", "DISPUTECREDENTIAL"):
-        assert not _refusals({section: [public]})
-        for key in ("api_key", "API_KEY", "Api_Key"):
-            for value in ("public-test-token", None):
-                assert _refusals({section: [{**public, key: value}]}), (section, key)

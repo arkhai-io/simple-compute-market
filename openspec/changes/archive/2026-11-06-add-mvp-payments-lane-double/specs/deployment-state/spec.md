@@ -31,7 +31,7 @@ The storefront and bare-metal storefront charts MUST offer an option that mounts
 
 ### Requirement: A storefront's secrets reach it through its secret overlay
 
-A storefront's payments key, dispute credentials and wallet key MUST reach it as settings in its secret overlay (`storefront.secrets.toml`, or the API-credit storefront's secret layer), which a deployment supplies from a Secret, never as an environment variable its configuration names and never in a chart's public `config`. The storefront charts MUST offer no option that exposes a payments key as an environment variable, and their values schema MUST refuse a secret payments or dispute credential setting in `config`.
+A storefront's payments key, dispute credentials and wallet key MUST reach it as settings in its secret overlay (`storefront.secrets.toml`, or the API-credit storefront's secret layer), which a deployment supplies from a Secret, never as an environment variable its configuration names and never in a chart's public `config`. The storefront charts MUST offer no option that exposes a payments key as an environment variable, and their values schema MUST refuse in `config`, in any spelling and as null, the payments key `[Settlement.arkhai_payments].api_key`, the variable reference `[Settlement.arkhai_payments].api_key_env`, and every `[[DisputeCredential]]` entry.
 
 #### Scenario: A storefront is configured for payments
 
@@ -43,9 +43,14 @@ A storefront's payments key, dispute credentials and wallet key MUST reach it as
 - **WHEN** a release's agent `config` states `[Settlement.arkhai_payments].api_key`
 - **THEN** the values schema refuses it before anything renders
 
-#### Scenario: The public configuration states a dispute credential's token
+#### Scenario: The public configuration names a payments key's variable
 
-- **WHEN** a release's agent `config` states a `[[DisputeCredential]]` entry with its `api_key`
+- **WHEN** a release's agent `config` states `[Settlement.arkhai_payments].api_key_env`
+- **THEN** the values schema refuses it before anything renders, and the rest of the payments section is accepted
+
+#### Scenario: The public configuration states a dispute credential
+
+- **WHEN** a release's agent `config` states a `[[DisputeCredential]]` entry, whether with its `api_key`, with an `api_key_env`, or with neither
 - **THEN** the values schema refuses it before anything renders: the whole entry, its token included, belongs in the secret overlay
 
 #### Scenario: A storefront offers only payments
