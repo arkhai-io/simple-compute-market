@@ -168,7 +168,7 @@ class TestSystemStatus:
         assert component is not None
         assert (component.detail.kind, component.detail.schema_version) == (
             ANSIBLE_READINESS_KIND,
-            1,
+            2,
         )
         detail = AnsibleReadinessDetail.model_validate(component.detail.payload)
         assert {(p.offering_mode, p.path, p.exists) for p in detail.playbooks} == {

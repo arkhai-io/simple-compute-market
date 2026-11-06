@@ -172,8 +172,17 @@ the plaintext at once. A key that fails reports `exists: false`, documented for
 an embedded key as "decrypts under the configured key", and adds a not-ready
 reason naming the host. As with a missing key file, it counts once any Ansible
 executor is real, since mocked executors need no keys. The detail keeps its
-fields and its schema version 1: only the documented meaning of `exists` for an
-embedded key widens, and a reader already handles `false` for a key file.
+fields and is published as schema version 2 (27 F1): `exists` for an embedded
+key no longer means present, and a host whose connection execution refuses has
+no entry, so a version-1 reader's meaning no longer holds, and
+`docs/development/RELEASING.md`, "Versioning policy", forbids changing a
+versioned contract in place. No production code reads the detail (status
+carries it opaquely, and tests outside the distribution read only its model or
+its Ansible version), and before 1.0 the release introducing version 2 stops
+producing version 1. Rejected: keeping version 1 because only a value range widens,
+which the release rule does not allow and which ignores the dropped entries;
+and keeping `exists` meaning present with decryption reported only in the
+reasons, which keeps the misstatement this decision removes.
 
 The public host listing carries protected values by scheme only, so it gives
 readiness nothing to decrypt (10 F1). The host authority gains an internal read,

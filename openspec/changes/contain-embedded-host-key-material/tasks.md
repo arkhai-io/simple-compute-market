@@ -345,7 +345,8 @@ Files: `provisioning/compute/ansible/src/compute_provisioning_ansible/readiness.
       code, since no test observes the filesystem around a status read.
 - [x] 4.3 Make these reasons count as a missing key file's do: once any
       composed Ansible executor is real. Mocked executors need no keys. The
-      detail keeps its fields and schema version 1. Rewrite `SshKeyInfo`'s
+      detail keeps its fields and schema version 1. *Corrected (27 F1):* it
+      is published as schema version 2 (D5). Rewrite `SshKeyInfo`'s
       field descriptions:
       - for an embedded key, `exists` means it decrypts under the configured
         key;
@@ -409,7 +410,8 @@ Files: `provisioning/compute/ansible/src/compute_provisioning_ansible/readiness.
       `test_status_reports_execution_and_the_ansible_component`
       (`e2e-tests/tests/smoke/test_provisioning_smoke.py`) reads the new
       readiness on a deployed release, as regression evidence only: no lane
-      registers a host whose connection readiness would refuse.
+      registers a host whose connection readiness would refuse. *Corrected
+      (28 A1):* no validation part runs that smoke; see 5.5.
       *Owed by validation, corrected:* also `tests.yml`, job
       `test · test-provisioning`; the service suite passes with the new
       composition.
@@ -554,9 +556,22 @@ and, if no test covers `apply_ansible_config`, a unit test in
       End-to-end: `provisioning_readonly` smoke —
       `test_status_reports_execution_and_the_ansible_component` and
       `test_connectivity_check_on_first_host_if_available` in
-      `e2e-tests/tests/smoke/test_provisioning_smoke.py`. The validation's Helm
-      part runs them, and they exercise the new readiness wiring and the probe
-      on a deployed release as regression evidence. No lane scenario registers
+      `e2e-tests/tests/smoke/test_provisioning_smoke.py`, which would exercise
+      the new readiness wiring and the probe on a deployed release as
+      regression evidence. *Corrected (28 A1):* the provisioning chart's smoke
+      hook runs them only under `make -C helm test` or `make -C helm
+      test-module MODULE=provisioning`; the validation's Helm part runs the
+      e2e-scenarios pod alone (`helm test --filter
+      name=<release>-e2e-tests-e2e-scenarios`) and the payments check, so
+      validation 28 ran neither. The regression evidence for the readiness
+      wiring is the pipeline's stage 00c (`Stage00c_ProvisioningHealth`,
+      `e2e-tests/tests/e2e/roles/helpers/compute_deal_stages.py`), which
+      asserts every status component ready, the `ansible` one composed with
+      `execution_hosts` and the `ssh` codec included; run 42248449359 ran it
+      in `e2e_deal`, `e2e_deal_buyer_cli` and `e2e_bare_metal_mock_deal`, and
+      passed. Under the lanes' mocked executors host reasons do not count, so
+      it shows the wiring composes and reads ready, not what it reports for a
+      host. No lane scenario registers
       a host whose key cannot be decrypted, and the lanes' executors are
       mocked, so none exercises the new failure behaviour. None is owed:
       application integration proves it.
@@ -567,8 +582,8 @@ and, if no test covers `apply_ansible_config`, a unit test in
       service code only): `make test-provisioning`, 649 unit passed, 584
       application integration passed; `make check-packaging`, exit 0;
       `make check-change`, every check passed. *End-to-end, confirmed with
-      qualifications:* both smoke tests exist under `provisioning_readonly`,
-      unrun until validation. `test_status_reports_execution_and_the_ansible_component`
+      qualifications:* both smoke tests exist under `provisioning_readonly`;
+      no validation part runs them (28 A1, above). `test_status_reports_execution_and_the_ansible_component`
       checks only that the `ansible` component is present, so it shows the
       readiness wiring (in place since section 4's commit) composes and
       answers on a deployed release, not what it reports; under the lanes'
@@ -591,6 +606,38 @@ dependency (3.1), and the readiness detail keeping schema version 1 against
 `RELEASING.md`'s rule on versioned envelopes (section 4's handoff). To prove
 anything about the service after changing a package it installs, run
 `make dist` before `make test` (section 4's handoff).
+
+*Round fixes (triage of review 27 and validation 28):*
+- **27 F1** (section 4): the readiness detail is published as schema
+  version 2, since an embedded key's `exists` now says whether it decrypts
+  and a refused host has no entry; `readiness.py`'s constant and its comment,
+  the version assertions in `test_readiness.py` and `test_system_api.py`, D5
+  and the proposal's "Wire" paragraph. `arkhai-compute-provisioning-ansible`
+  is already at 0.8.0 for this change's incompatible edits, so no further
+  bump.
+- **27 F2** (the delta): "A protected key that cannot be decrypted is named,
+  not hidden" now covers a ciphertext the codec receives that the configured
+  key cannot read, and says a stored protected value with no ciphertext,
+  which no write stores, fails every read returning that host's connection
+  and leaves readiness reporting the registry unreadable. No code change.
+- **28 A1** (section 5): 4.5, 5.5 and 6.8 corrected; no validation part runs
+  the `provisioning_readonly` smoke, and the pipeline's stage 00c is the
+  readiness wiring's regression evidence.
+
+*Evidence:* `make dist`; `make test-compute-provisioning-ansible` (unit), 187
+passed, 4 skipped, again after the final comment edit; `make
+test-provisioning`, 649 unit and 584 application integration passed; `make
+test`, exit 0; `make check-packaging`, exit 0; `make check-comment-hygiene`
+and `make check-change`, every check passed (its history-wording check first
+refused "no longer" in the version comment, reworded to what holds). The fresh-context check of the
+diff found no blocking defect. Fixed from it: 5.5 and 6.8 now name stage 00c
+(the first draft said the change had no end-to-end evidence), the 4.3 and 4.5
+notes no longer contradict the fixes, the smoke's Helm targets are named
+exactly, the readers of the detail are described as "no production code",
+the delta's sentence says a listing fails as a whole, and the version
+comment and a clause of D5 are reworded. Declined: an extra version
+assertion in `test_unreadable_host_key_api.py`, since `test_system_api.py`
+already pins the version at application integration.
 
 ## 6. Closeout
 
@@ -654,10 +701,13 @@ implementation.
       No exception row is expected, since no new edge crosses a layer.
 - [ ] 6.8 **End-to-end pipeline.** Record the passing run the latest validation
       names, its result, and the scenarios that exercise this change: the
-      `provisioning_readonly` smoke of section 5, as regression evidence for
-      the readiness wiring and the probe. Record also that no lane scenario
-      exercises an unreadable key, the log file, or connectivity redaction,
-      which application integration proves. If the pipeline cannot run, record
+      pipeline's stage 00c in `e2e_deal`, `e2e_deal_buyer_cli` and
+      `e2e_bare_metal_mock_deal`, as regression evidence that the readiness
+      wiring composes and reads ready under mocked executors. Record also
+      that no lane scenario exercises an unreadable key, the log file, or
+      connectivity redaction, which application integration proves, and that
+      the `provisioning_readonly` smoke of section 5 is not evidence, since no
+      validation part runs it (28 A1). If the pipeline cannot run, record
       an explicit blocker naming its cause and the change that owns it, with
       the validations it gates treated as unrun.
 - [ ] 6.9 **Promotion.** Write the permanent documents this change owes, and

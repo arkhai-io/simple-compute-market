@@ -96,9 +96,11 @@ than a server error. The `ansible` status component reports not ready for such a
 host where it reported ready, and for an enabled host still stored at an `ssh`
 version execution refuses.
 
-**Wire.** The readiness detail keeps its fields and schema version 1; `exists`
-may now be `false` for an embedded key, as it already may for a key file. No API
-contract changes.
+**Wire.** The readiness detail keeps its fields and is published as schema
+version 2: `exists` for an embedded key says whether it decrypts, and a host
+whose stored connection execution refuses has no `ssh_keys` entry. Version 1 is
+no longer produced; no production code reads the detail, which status carries
+opaquely. No API contract changes.
 
 **State.** Nothing to migrate. No schema change, and no stored value is
 reinterpreted.

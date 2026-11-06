@@ -96,7 +96,7 @@ def no_ansible() -> None:
 
 def _detail(component) -> AnsibleReadinessDetail:
     assert component.name == ANSIBLE_COMPONENT
-    assert (component.detail.kind, component.detail.schema_version) == (ANSIBLE_READINESS_KIND, 1)
+    assert (component.detail.kind, component.detail.schema_version) == (ANSIBLE_READINESS_KIND, 2)
     return AnsibleReadinessDetail.model_validate(component.detail.payload)
 
 

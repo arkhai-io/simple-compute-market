@@ -32,9 +32,14 @@ from .runner import inventory_target
 
 #: The component's name in system status.
 ANSIBLE_COMPONENT = "ansible"
-#: The kind and schema version of the component's detail.
+#: The kind and schema version of the component's detail. At version 2 an
+#: embedded key's ``exists`` says whether it decrypts under the configured key,
+#: and a host whose stored connection execution refuses has no ``ssh_keys``
+#: entry. This distribution produces only version 2; a version-1 detail reports
+#: embedded keys present without trying them, so a reader of version 1 refuses
+#: version 2.
 ANSIBLE_READINESS_KIND = "compute_provisioning.ansible.readiness"
-ANSIBLE_READINESS_SCHEMA_VERSION = 1
+ANSIBLE_READINESS_SCHEMA_VERSION = 2
 
 
 class FileInfo(BaseModel):
