@@ -292,8 +292,10 @@ None.
 | D1 the instant, the transition, the derived phase | `openspec/specs/site-capacity/spec.md`; `openspec/specs/site-capacity/architecture.md`, reservation lifecycle; capacity reservation in `docs/development/ARCHITECTURE.md` |
 | D2 the write path | `openspec/specs/market-composition/spec.md`, `openspec/specs/storefront-publication/spec.md`; `openspec/specs/market-composition/architecture.md` and `docs/development/ARCHITECTURE.md`, the capacity effects each names |
 | D3 both views | `openspec/specs/compute-provisioning-contract/spec.md` |
-| D4 deployed together | `docs/development/ARCHITECTURE.md`, deployment topology |
-| D5, D6, D7, D9 | `openspec/specs/site-capacity/spec.md` |
+| D4 deployed together | `docs/development/ARCHITECTURE.md`, "Operators" under deployment topology, which already states that one business upgrades sites and storefronts together |
+| D5, D9 | `openspec/specs/site-capacity/spec.md` |
+| D6 both migrations | `openspec/specs/site-capacity/spec.md`; `openspec/specs/site-capacity/architecture.md`, "Current limits" |
+| D7 no event, no push | `openspec/specs/site-capacity/spec.md`; `openspec/specs/site-capacity/architecture.md`, "Reservation lifecycle" |
 | D8 cadence | no permanent destination |
 
 ## Design promotion record

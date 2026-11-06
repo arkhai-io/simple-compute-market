@@ -120,11 +120,15 @@ that is `unify-compute-delivery-path`'s evidence.
   `openspec/specs/market-composition/architecture.md` and
   `docs/development/ARCHITECTURE.md`.
 - D3 (both views) to `openspec/specs/compute-provisioning-contract/spec.md`.
-- D4 (storefront and site deployed together) to the deployment topology in
-  `docs/development/ARCHITECTURE.md`.
+- D4 (storefront and site deployed together) to "Operators", under deployment
+  topology, in `docs/development/ARCHITECTURE.md`, which already states that one
+  business upgrades both together; closeout adds that no compatibility path is kept
+  for an operation the site lacks.
 - D5 (the answers) to `openspec/specs/site-capacity/spec.md`.
-- D6 (both migrations) to `openspec/specs/site-capacity/spec.md`.
-- D7 (no event, no push) to `openspec/specs/site-capacity/spec.md`.
+- D6 (both migrations) to `openspec/specs/site-capacity/spec.md`, and the shared
+  row's consequence to "Current limits" in `openspec/specs/site-capacity/architecture.md`.
+- D7 (no event, no push) to `openspec/specs/site-capacity/spec.md` and the
+  reservation-lifecycle section of `openspec/specs/site-capacity/architecture.md`.
 - D8: no permanent destination — the implementation cadence is this change's plan,
   not current behaviour.
 - D9 (the instant's representation) to `openspec/specs/site-capacity/spec.md`.
