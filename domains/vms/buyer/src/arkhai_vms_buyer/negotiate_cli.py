@@ -38,6 +38,7 @@ from .run_log import RunLog
 from .settlement_composition import (
     buyer_stage,
     resolve_buyer_settlement_policy,
+    buyer_compute_disclosure,
     buyer_lifecycle_disclosure,
 )
 
@@ -142,7 +143,7 @@ def register(app: typer.Typer) -> None:
             "--duration-hours",
             "-t",
             help="Lease duration the buyer wants (hours, fractional ok). "
-            "Required for fresh runs — sent on /negotiate/new and "
+            "Required for reserved; optional for recurring — sent on /negotiate/new and "
             "validated server-side against the listing's max_duration_seconds. "
             "Resumed runs read it from the run-log.",
         ),
@@ -354,9 +355,9 @@ def register(app: typer.Typer) -> None:
             )
             raise typer.Exit(2)
 
-        if resume_state is None and (duration_hours is None or duration_hours <= 0):
+        if duration_hours is not None and duration_hours <= 0:
             typer.secho(
-                "Fresh runs require --duration-hours (the buyer's lease ask).",
+                "--duration-hours must be positive when supplied.",
                 err=True,
                 fg=typer.colors.RED,
             )
@@ -385,8 +386,14 @@ def register(app: typer.Typer) -> None:
                     "settlement option"
                 )
 
+            try:
+                rows = buyer_compute_disclosure(
+                    selected_settlement.option, listing=listing_dict, duration_seconds=duration_seconds,
+                )
+            except ValueError as exc:
+                raise typer.BadParameter(str(exc)) from exc
             emit_lifecycle_disclosure(
-                buyer_lifecycle_disclosure(selected_settlement.option),
+                rows + buyer_lifecycle_disclosure(selected_settlement.option),
                 title=f"Selected option {selected_settlement.option.option_id}: lifecycle terms",
             )
             selected_stage = buyer_stage(
@@ -527,11 +534,10 @@ def register(app: typer.Typer) -> None:
         escrow_proposal: EscrowProposal | None = None
         settlement_selection: SettlementSelection | None = None
         if resume_state is None:
-            assert duration_seconds is not None
             assert selected_settlement is not None
             assert resolved_ssh_public_key is not None
             provision_terms = make_vm_provision_terms(
-                duration_seconds=int(duration_seconds),
+                duration_seconds=duration_seconds,
                 start_utc=requested_start_utc,
                 ssh_public_key=resolved_ssh_public_key,
             )

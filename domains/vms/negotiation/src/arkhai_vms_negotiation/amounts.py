@@ -111,7 +111,7 @@ def quote_from_multiplier(
     listing: Any,
     proposal: Mapping[str, Any],
     multiplier_bps: int,
-    duration_seconds: int,
+    duration_seconds: int | None,
     requested_shape: Mapping[str, Mapping[str, Any]] | None = None,
     *,
     price_basis: PriceBasis = PriceBasis(unit="total"),
@@ -123,9 +123,9 @@ def quote_from_multiplier(
     """
     if isinstance(multiplier_bps, bool) or not isinstance(multiplier_bps, int) or multiplier_bps < 0:
         raise ValueError("multiplier_bps must be a non-negative integer")
-    if isinstance(duration_seconds, bool) or not isinstance(duration_seconds, int) or duration_seconds <= 0:
-        raise ValueError("duration_seconds must be a positive integer")
     seconds = price_basis.period_seconds if price_basis.unit == "per_period" else duration_seconds
+    if isinstance(seconds, bool) or not isinstance(seconds, int) or seconds <= 0:
+        raise ValueError("duration_seconds must be a positive integer for a whole-term quote")
     assert seconds is not None
     amount = math.ceil(
         shape_hourly_amount(listing, proposal, requested_shape)

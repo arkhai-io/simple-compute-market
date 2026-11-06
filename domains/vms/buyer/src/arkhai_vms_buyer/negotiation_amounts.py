@@ -22,6 +22,27 @@ from .pricing_record import retained_pricing_record, verify_pricing_acceptance, 
 from .settlement_composition import buyer_settlement_registry
 
 
+def priced_unit_count(
+    listing: Any, proposal: Any, duration_seconds: int | float | None,
+    *, project_billing: BillingProjection | None = None,
+) -> float:
+    """Scale hourly bounds by one billing period, never a recurring horizon."""
+    if hasattr(proposal, "model_dump"):
+        proposal = proposal.model_dump(mode="json")
+    if proposal and "option_id" in proposal:
+        proposal = {"settlement_selection": proposal}
+    if listing is not None and proposal and "settlement_selection" in proposal:
+        basis = selected_billing_basis(
+            listing, proposal, project_billing or buyer_settlement_registry().project_billing,
+        )
+        if basis.unit == "per_period":
+            assert basis.period_seconds is not None
+            return basis.period_seconds / 3600.0
+    if duration_seconds is None or duration_seconds <= 0:
+        raise ValueError("reserved selections require an explicit positive duration")
+    return float(duration_seconds) / 3600.0
+
+
 def amount_codec(
     listing: Any, proposal: Any, *, project_billing: BillingProjection | None = None,
 ) -> NegotiationAmountCodec | None:
@@ -59,7 +80,7 @@ def amount_codec(
             if terms.compute_resource is not None else None
         )
         return quote_from_multiplier(
-            listing, proposal, value, int(terms.duration_seconds), shape, price_basis=basis,
+            listing, proposal, value, terms.duration_seconds, shape, price_basis=basis,
         )
 
     def effective(terms: Any, revision: Any):

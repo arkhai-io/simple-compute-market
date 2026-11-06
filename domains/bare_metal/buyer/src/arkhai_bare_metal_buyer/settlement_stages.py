@@ -9,8 +9,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from market_arkhai_payments import PaymentApproval, create_arkhai_payments_registration
-from market_arkhai_payments.settlement_config import payments_billing_basis
-from market_core.schemas import agreed_price, compute_rate_total, rate_scales_by_time
+from market_core.schemas import AgreedPrice, rate_scales_by_time
+from market_settlement_runtime.buyer_terms import option_quote
+from market_settlement_runtime import SettlementConfigurationRegistry
 from market_deal_lifecycle_contracts.models import Accepted, CommitMessage, Pending
 
 from .evidence import evidence_store
@@ -40,30 +41,26 @@ def _time_price(option: Any) -> Any:
     if len(amount_rates) != 1:
         raise ValueError("buy requires one priced payment option")
     if not rate_scales_by_time(amount_rates[0]):
-        raise ValueError("bare-metal purchase currently requires an hourly option")
+        raise ValueError("bare-metal purchase requires a time-priced option")
     return amount_rates[0]
 
 
-def purchase_quote(option: Any, duration_seconds: int) -> int:
-    """The total a purchase of ``option`` for ``duration_seconds`` pays, in base units.
-
-    It is the rate over the duration, truncated to whole base units: the same rule the
-    seller applies to an exact selection, so both sides name one amount for every
-    whole-second duration. A total that truncates to zero is refused; there is nothing
-    to pay and no mandate for it.
-    """
-
-    total = compute_rate_total(_time_price(option), duration_seconds)
-    if total < 1:
-        raise ValueError(
-            f"the option prices {duration_seconds} seconds at zero base units; "
-            "request a longer duration"
-        )
-    return total
+def purchase_quote(
+    option: Any, duration_seconds: int | None, *, registry: SettlementConfigurationRegistry | None = None,
+) -> int:
+    """One whole-term or per-period quote, never scaled by a recurring horizon."""
+    registry = registry or SettlementConfigurationRegistry((create_arkhai_payments_registration(),))
+    quote = option_quote(option, duration_seconds, registry=registry)
+    if quote.amount < 1:
+        raise ValueError("quote is zero base units; request a longer term or period")
+    return quote.amount
 
 
-def require_quoted_agreement(outcome: Any, *, amount: int, duration_seconds: int) -> None:
-    """Refuse an accepted Agreement that does not pay ``amount`` for ``duration_seconds``.
+def require_quoted_agreement(
+    outcome: Any, *, amount: int, duration_seconds: int | None,
+    quote: AgreedPrice | None = None, registry: SettlementConfigurationRegistry | None = None,
+) -> None:
+    """Refuse accepted money/unit or an explicitly requested duration mismatch.
 
     The mandate is derived from the Agreement and checked against it, so this is where
     the buyer holds the Agreement to the quote it requested, before any approval.
@@ -72,15 +69,19 @@ def require_quoted_agreement(outcome: Any, *, amount: int, duration_seconds: int
     agreement = outcome.agreement
     if agreement is None:
         raise ValueError("accepted payment negotiation omitted its Agreement")
-    if agreement.duration_seconds != duration_seconds:
+    if duration_seconds is not None and agreement.duration_seconds != duration_seconds:
         raise ValueError(
             f"seller Agreement is for {agreement.duration_seconds} seconds, "
             f"not the {duration_seconds} requested"
         )
-    quote = agreed_price(agreement, project_billing=payments_billing_basis)
-    if quote.unit != "total" or quote.amount != amount:
+    registry = registry or SettlementConfigurationRegistry((create_arkhai_payments_registration(),))
+    accepted = registry.agreed_price(agreement)
+    if accepted.amount != amount or (quote is not None and accepted != quote) or (
+        quote is None and accepted.unit != "total"
+    ):
         raise ValueError(
-            f"seller Agreement price {quote.amount} ({quote.unit}) differs from the quoted {amount} total"
+            f"seller Agreement price {accepted.amount} ({accepted.unit}) differs from the quoted {amount} "
+            f"{quote.unit if quote is not None else 'total'}"
         )
 
 

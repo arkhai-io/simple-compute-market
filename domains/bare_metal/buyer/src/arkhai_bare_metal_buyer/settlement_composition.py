@@ -2,10 +2,12 @@
 
 from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
 from market_core import SettlementStageTable
+from market_settlement_runtime import SettlementConfigurationRegistry
+from market_arkhai_payments import create_arkhai_payments_registration
 from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from market_deal_lifecycle.selection import AuthoritySelection
 from market_deal_lifecycle.terms import TermContext
-from market_settlement_runtime.buyer_terms import BuyerTermsPolicy, lifecycle_disclosure
+from market_settlement_runtime.buyer_terms import BuyerTermsPolicy, compute_disclosure, lifecycle_disclosure
 
 from .settlement_stages import PaymentStage
 
@@ -18,6 +20,14 @@ def buyer_term_context(mechanism: str, *, allow_unprotected_terms: bool = False)
         dispute_interfaces=frozenset({MEDIATION_INTERFACE}),
         allow_missing_delivery_deadline=allow_unprotected_terms,
     )
+
+
+def buyer_settlement_registry():
+    return SettlementConfigurationRegistry((create_arkhai_payments_registration(),))
+
+
+def buyer_compute_disclosure(option, **kwargs):
+    return compute_disclosure(option, registry=buyer_settlement_registry(), **kwargs)
 
 
 def buyer_lifecycle_disclosure(option):
