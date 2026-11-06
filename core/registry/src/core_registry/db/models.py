@@ -172,6 +172,10 @@ class Listing(Base):
         ForeignKey("publishers.publisher_id", ondelete="CASCADE"),
         nullable=False,
     )
+    # The document and seller evidence share the publication transaction.
+    published_document = Column(JSON, nullable=True)
+    publisher_publication = Column(JSON, nullable=True)
+    publisher_updates = Column(JSON, nullable=True)
     listing_resource = Column(
         JSON, nullable=False
     )  # registry-specific shape (e.g. ComputeResource)

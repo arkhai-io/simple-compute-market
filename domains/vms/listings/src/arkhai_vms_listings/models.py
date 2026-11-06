@@ -486,6 +486,10 @@ class Listing(BaseModel):
             "as primary_rate * agreed_duration_seconds / 3600."
         ),
     )
+    rate_structure: dict[str, list[dict[str, str]]] | None = Field(
+        default=None, description="Resolved family rates published as a listing-level term"
+    )
+
     oracle_address: str | None = Field(
         default=None,
         description="The oracle wallet address used for arbitration and escrow workflows",
