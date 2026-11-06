@@ -685,7 +685,10 @@ All three binders move, and the opaque `settle_status`/`is_terminal` form is rem
   `obligation_ref`: the Alkahest path, since a payments deal adopts no settlement-runtime
   obligation.
 - **API credits:** its evidence by reference and by negotiation, its delivery status its
-  issuance progress. Planning confirms which record supplies an Alkahest deal's escrow.
+  issuance progress. Its Alkahest evidence records the escrow as its `settlement_ref`
+  (`apicredits_storefront/settlement_stages.py:576`, the reference being the
+  settlement's mechanism reference), so an escrow resolves by reference as it does
+  through `public_ref` today.
 
 Wire paths and responses are unchanged, as are schemas and migrations; every storefront
 answers for a superset of the references it answered before. An older bare-metal
