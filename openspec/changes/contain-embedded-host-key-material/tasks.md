@@ -98,25 +98,32 @@ Files: `provisioning/compute/ansible/src/compute_provisioning_ansible/ansible.cf
 (`check_connectivity_with_inventory`),
 `provisioning/compute/ansible/tests/unit/test_runner.py`.
 
-- [ ] 2.1 Remove `log_path = ./ansible.log` from the distribution's packaged
+- [x] 2.1 Remove `log_path = ./ansible.log` from the distribution's packaged
       `ansible.cfg`, so that under the service's default configuration Ansible
       writes no log file. Change nothing that would override an operator's own
       `ansible_cfg`. The runner sets no `ANSIBLE_LOG_PATH` and passes no
       environment of its own to Ansible's subprocesses. The VM domain's IaC
       `ansible.cfg`, used for running playbooks by hand, is not the service's
       configuration and is left as it is. (D2)
-- [ ] 2.2 Add a unit test that the packaged configuration
+      *Done:* the file's header comment says why it names no log file and
+      where an operator's own goes. Neither `subprocess.Popen` nor
+      `subprocess.run` in the runner is given an `env`.
+- [x] 2.2 Add a unit test that the packaged configuration
       (`DEFAULT_ANSIBLE_CONFIG`, read with `configparser`) states no `log_path`
       in any section. This is the lowest level that can prove the scenario "A
       playbook runs under the packaged configuration": without `log_path` or
       `ANSIBLE_LOG_PATH`, Ansible writes no log. The job's logs are already
       redacted, as `test_executor.py`'s redaction cases prove. (D2)
-- [ ] 2.3 Pass the `detail` that `check_connectivity_with_inventory` returns
+      *Done:* `test_the_packaged_configuration_names_no_log_file` (unit) reads
+      the file with `configparser` and checks the defaults and every section.
+      It proves the file states no `log_path`; that Ansible then writes no log
+      is Ansible's documented behaviour, not something the test observes.
+- [x] 2.3 Pass the `detail` that `check_connectivity_with_inventory` returns
       through `redact_ansible_output`, with the generic secret fields only,
       since a probe runs no domain's playbook. Do this in both branches: the
       output of `ansible -m ping`, and the text of an exception raised while
       running it. The timeout's detail is fixed text. (D2)
-- [ ] 2.4 Add unit tests in `test_runner.py` for the check, with a stand-in
+- [x] 2.4 Add unit tests in `test_runner.py` for the check, with a stand-in
       `ansible` executable placed first on `PATH`
       (`monkeypatch.setenv("PATH", …)`). That stand-in is the seam; the
       `subprocess` import is not patched (`docs/development/TESTING.md`, "Unit
@@ -133,7 +140,23 @@ Files: `provisioning/compute/ansible/src/compute_provisioning_ansible/ansible.cf
 
       (D2; the scenarios "A connectivity check's output carries a secret" and
       "An operator configures a log file")
-- [ ] 2.5 **Verification checkpoint.** Unit: the Ansible distribution's suite,
+      *Done:* `test_a_connectivity_checks_output_is_returned_redacted`, both
+      cases (unit; the stand-in is a `/bin/sh` script, writing to stdout and
+      exiting 0 when reachable, to stderr and exiting 1 when not), and
+      `test_an_error_running_the_check_is_returned_redacted`, whose stand-in
+      has no execute bit and is alone on `PATH`, so `subprocess.run` raises
+      `PermissionError`. That error's text names only `ansible` and carries
+      nothing credential-shaped, so the exception case proves only that the
+      branch answers unreachable with the error's text: it would pass without
+      the redactor, and the redaction call on that branch is untested. The
+      one seam that could plant a secret there is a contrived settings object
+      whose arithmetic raises, which was not written.
+      The environment case proves the scenario "An operator configures a log
+      file" only for the connectivity check's subprocess: it inherits the
+      process's `ANSIBLE_CONFIG` and is given no `ANSIBLE_LOG_PATH`. The
+      playbook subprocess's missing `env` rests on reading the code (2.1), and
+      the profile's `ansible_cfg` reaching `ANSIBLE_CONFIG` is task 5.3's.
+- [x] 2.5 **Verification checkpoint.** Unit: the Ansible distribution's suite,
       `make test-compute-provisioning-ansible`. Then `make test`.
       End-to-end: none in a lane. Every lane runs mocked executors and the mock
       runner, which starts no Ansible. The real-provisioning markers
@@ -143,6 +166,20 @@ Files: `provisioning/compute/ansible/src/compute_provisioning_ansible/ansible.cf
       Owed by validation: `tests.yml`, job `test · test-compute-provisioning-ansible`.
       The distribution's suite passes, including the configuration and
       connectivity-redaction tests.
+      *Evidence:* `make test-compute-provisioning-ansible` (unit), 170 passed,
+      4 skipped (`test_codec.py`'s real-Ansible cases, skipped without
+      `ansible-playbook`, as before). `make test`, exit 0. End-to-end
+      confirmed: none.
+
+*Handoff (section 2):* the fresh-context check held that the stand-in
+connectivity tests start a real `/bin/sh` subprocess, which `TESTING.md` would
+place in integration rather than unit. They stay in `tests/unit/` as task 2.4
+prescribes, beside the existing real-subprocess streaming test in the same
+module; the distribution has no `tests/integration` (its `testpaths` names
+only `tests/unit`). Left for the round's review to weigh, not changed here.
+The service's `.venv` holds a built copy of this distribution, so a
+service-side run sees the new `ansible.cfg` and runner only after the wheel is
+rebuilt and reinstalled, which `make test` does.
 
 ## 3. A protected key that cannot be decrypted is named at dispatch and at the probe
 

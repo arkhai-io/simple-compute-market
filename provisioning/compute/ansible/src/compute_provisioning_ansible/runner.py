@@ -621,6 +621,9 @@ class AnsibleRunner:
         """Run ``ansible -m ping`` using the supplied *inventory_path*.
 
         The caller renders the inventory and is responsible for cleaning it up.
+        The result's ``detail`` leaves the service, so it is redacted, with the
+        generic secret fields only, since a probe runs no domain's playbook:
+        Ansible's output and the text of an error running it alike.
         """
         cmd = [
             "ansible",
@@ -651,13 +654,17 @@ class AnsibleRunner:
             )
         except Exception as exc:
             return ConnectivityResult(
-                host=host, reachable=False, detail=f"Failed to run ansible ping: {exc}"
+                host=host,
+                reachable=False,
+                detail=redact_ansible_output(f"Failed to run ansible ping: {exc}"),
             )
 
         reachable = returncode == 0
         detail = stdout.strip() if reachable else (stderr.strip() or stdout.strip())
         logger.info("Connectivity check for %s: reachable=%s", host, reachable)
-        return ConnectivityResult(host=host, reachable=reachable, detail=detail)
+        return ConnectivityResult(
+            host=host, reachable=reachable, detail=redact_ansible_output(detail)
+        )
 
 
 __all__ = [
