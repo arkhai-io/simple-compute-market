@@ -21,14 +21,16 @@ left and never reclones:
    the workspace's, so no push goes to the workspace;
 4. link `.claude/settings.local.json` to the workspace's, so the owner's local
    permissions have one source;
-5. start the bootstrap, `make init`, in the background, recording in the clone's
-   Git directory its process and log while it runs, then its exit status.
+5. start the bootstrap, the workflow configuration's `post-clone` as the clone's
+   checkout declares it, in the background, recording in the clone's Git directory
+   the commands it resolved to, its process and log while it runs, then its exit
+   status; with no `post-clone` declared it succeeds at once, running nothing.
 
 A directory that is not a clone of the workspace, a clone with another branch
 checked out, and one with uncommitted changes are refused, naming the directory,
 and nothing is deleted: each means someone else's work is there. A rerun restarts
 a failed bootstrap and leaves a running or succeeded one alone; a failed one is
-never retried by itself, since `make init` failing is almost always the
+never retried by itself, since a bootstrap failing is almost always the
 environment, and a silent retry would hide it.
 
 `remove`, run by the owner in the workspace once the change has merged, deletes
@@ -61,13 +63,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Sequence
 
+from . import config
 from .common import StepError, repository_root
 from .find import WORKSPACE_REMOTE, workspace_of
 from .history import HistoryError, Synced, differences, report, sync
 from .running import runs_in_progress
 
 DEFAULT_FROM = "dev"
-BOOTSTRAP_COMMAND = ("make", "init")
+POST_CLONE = "post-clone"
 SETTINGS = Path(".claude/settings.local.json")
 # In the clone's Git directory: which change and branch the clone was made for,
 # the bootstrap's process and log, and its exit status once it has one.
@@ -77,9 +80,13 @@ BOOTSTRAP_LOG = "change-bootstrap.log"
 BOOTSTRAP_STATUS = "change-bootstrap.status"
 RUNNING, SUCCEEDED, FAILED, ABSENT = "running", "succeeded", "failed", "absent"
 
-# Starts `command` in `cwd` detached from this process, its output to `log` and
-# its exit status to `status` once it ends, and returns its process id.
+# Starts the bootstrap's shell commands in `cwd` detached from this process, as a
+# hook's list runs (`bootstrap_command`), recording them, its output to `log` and its
+# exit status to `status` once it ends, and returns its process id.
 Spawn = Callable[[Sequence[str], Path, Path, Path], int]
+# The bootstrap's commands as the clone's checkout declares them, unfilled; None when
+# it declares no `post-clone`.
+PostClone = Callable[[Path], Sequence[str] | None]
 
 
 class CloneError(RuntimeError):
@@ -268,35 +275,61 @@ def _record_fields(command: Sequence[str], log: Path) -> dict[str, object]:
             "started": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
 
 
-def _spawn(command: Sequence[str], cwd: Path, log: Path, status: Path) -> int:
+def _configured_post_clone(clone: Path) -> Sequence[str] | None:
+    """The `post-clone` the clone's checkout declares, which the bootstrap runs: the
+    change's branch may change it, and the bootstrap prepares that branch."""
+    return config.load(clone).hook(POST_CLONE)
+
+
+def bootstrap_command(commands: Sequence[str]) -> list[str]:
+    """One process running each of the hook's commands with `sh -c`, in order,
+    whatever an earlier one reported, and exiting with the first failure's status,
+    as a hook's list runs."""
+    if len(commands) == 1:
+        return ["sh", "-c", commands[0]]
+    script = 'status=0; for command in "$@"; do sh -c "$command" || ' \
+             '{ code=$?; [ "$status" -ne 0 ] || status=$code; }; done; exit "$status"'
+    return ["sh", "-c", script, "sh", *commands]
+
+
+def _spawn(commands: Sequence[str], cwd: Path, log: Path, status: Path) -> int:
     # Run from `make change-clone`, the bootstrap would otherwise run under that
     # make's flags, as a sub-make of it.
     environment = {key: value for key, value in os.environ.items()
                    if key not in ("MAKEFLAGS", "MFLAGS", "MAKELEVEL", "MAKEOVERRIDES")}
     # The record sits beside the status, in the clone's Git directory.
     record = status.with_name(BOOTSTRAP)
-    fields = json.dumps(_record_fields(command, log))[1:]
+    fields = json.dumps(_record_fields(commands, log))[1:]
     process = subprocess.Popen(["sh", "-c", _SUPERVISOR, "sh", str(log), str(status),
-                                str(record), fields, *command], cwd=cwd, env=environment,
-                               stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                               stderr=subprocess.DEVNULL, start_new_session=True)
+                                str(record), fields, *bootstrap_command(commands)], cwd=cwd,
+                               env=environment, stdin=subprocess.DEVNULL,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                               start_new_session=True)
     return process.pid
 
 
-def start_bootstrap(clone: Path, command: Sequence[str] = BOOTSTRAP_COMMAND,
+def start_bootstrap(clone: Path, commands: Sequence[str] | None,
                     spawn: Spawn = _spawn) -> Bootstrap:
-    """Start the bootstrap, forgetting a failed one's record and status first."""
+    """Start the bootstrap running `commands`, the hook's resolved commands,
+    forgetting a failed one's record and status first; with none, record it
+    succeeded at once, having run nothing."""
     status = _git_path(clone, BOOTSTRAP_STATUS)
     log = _git_path(clone, BOOTSTRAP_LOG)
     record = _git_path(clone, BOOTSTRAP)
     status.unlink(missing_ok=True)
     record.unlink(missing_ok=True)
-    pid = spawn(command, clone, log, status)
+    if not commands:
+        log.write_text(f"{config.CONFIGURATION.as_posix()} declares no {POST_CLONE} "
+                       "commands, so the bootstrap ran nothing.\n", "utf-8")
+        record.write_text(json.dumps({"pid": None, **_record_fields([], log)}), "utf-8")
+        status.write_text("0\n", "utf-8")
+        return bootstrap_state(clone)
+    pid = spawn(commands, clone, log, status)
     if not record.is_file():
         # The supervisor has not run yet, or the spawn is one that writes no
         # record; the pid is the same either way.
         aside = record.with_name(f"{BOOTSTRAP}.{os.getpid()}.tmp")
-        aside.write_text(json.dumps({"pid": pid, **_record_fields(command, log)}), "utf-8")
+        aside.write_text(json.dumps({"pid": pid, **_record_fields(commands, log)}), "utf-8")
         aside.replace(record)
     return bootstrap_state(clone)
 
@@ -409,9 +442,10 @@ def _settle_upstreams(clone: Path, branch: str) -> None:
 
 
 def create(workspace: Path, change: str, *, branch: str | None = None,
-           from_ref: str = DEFAULT_FROM, bootstrap: Sequence[str] = BOOTSTRAP_COMMAND,
+           from_ref: str = DEFAULT_FROM, bootstrap: PostClone = _configured_post_clone,
            spawn: Spawn = _spawn) -> Created:
-    """Create the change's clone, or finish one an interrupted run left."""
+    """Create the change's clone, or finish one an interrupted run left. The
+    bootstrap runs the `post-clone` the clone's checkout declares (`bootstrap`)."""
     _check_name(change)
     workspace = workspace.resolve()
     if workspace_of(workspace) is not None:
@@ -489,7 +523,14 @@ def create(workspace: Path, change: str, *, branch: str | None = None,
 
     state = bootstrap_state(target)
     if state.state in (ABSENT, FAILED):
-        state = start_bootstrap(target, bootstrap, spawn)
+        try:
+            commands = bootstrap(target)
+            resolved = [config.fill(command, {"change": change, "base": from_ref})
+                        for command in commands or ()]
+        except StepError as exc:
+            raise CloneError(f"the clone's bootstrap cannot be started: {exc}; the clone is "
+                             "made, and running this again starts it") from exc
+        state = start_bootstrap(target, resolved, spawn)
         done.append("bootstrap")
     return Created(target, branch, tuple(done), state)
 

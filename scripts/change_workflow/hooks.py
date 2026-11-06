@@ -64,11 +64,11 @@ from typing import Any, Callable, Mapping, Sequence
 
 from . import index, skills, tasks
 from .common import SESSION_ID, UNATTENDED_RUN, Clock, Entry, StepError, utc_now
-from .config import (DEFAULT_CHECKS, PLACEHOLDER, PRE_COMMIT_FUNCTIONAL, Configuration,
-                     ConfigError, inert, placeholders, require)
+from .config import (DEFAULT_CHECKS, PRE_COMMIT_FUNCTIONAL, Configuration, fill, placeholders,
+                     require)
 from .find import ChangeNotFound, change_directory, is_archived
 from .graph import HOOK_STEPS, STEPS
-from .records import git_head
+from .records import git_head, inert
 from .running import git_state, invocations_directory, keep_invocations
 
 # The hooks `run` runs by name.
@@ -117,18 +117,6 @@ def capture(command: str, root: Path) -> tuple[int, str | None]:
         if line.strip():
             last = line.strip()
     return process.wait(), last
-
-
-def fill(command: str, values: Mapping[str, str]) -> str:
-    """`command` with each placeholder replaced by its value, shell-quoted. The
-    configuration's check has refused any placeholder unknown where it is used, so a
-    placeholder without a value is one this invocation does not supply."""
-    def value(name: str) -> str:
-        if name not in values:
-            raise HookError(f"{{{name}}} has no value in this run")
-        return shlex.quote(values[name])
-
-    return PLACEHOLDER.sub(lambda match: value(match.group(1)), command)
 
 
 def _in_process(check: str, change: str, root: Path) -> int:
@@ -244,9 +232,9 @@ class Hooks:
         for command in commands:
             for name in placeholders(command):
                 if name not in values:
-                    flag = {"base": "--base <branch>"}.get(name, name)
-                    raise HookError(f"{where} names {{{name}}}, which this run was not "
-                                    f"given; give it with {flag}")
+                    flag = {"base": "--base <branch>"}.get(name)
+                    raise HookError(f"{where} names {{{name}}}, which this run was not given"
+                                    + (f"; give it with {flag}" if flag else ""))
 
     def run_commands(self, hook: str, commands: Sequence[str], values: Mapping[str, str],
                      **labels: str | None) -> list[Invoked]:
@@ -358,6 +346,16 @@ class Hooks:
             return self.pre_commit(change, base, changed())
         self.allow(name)
         return self.finish(name, self.hook(name, change, base))
+
+    def engine_hook(self, name: str, values: Mapping[str, str]) -> bool:
+        """A hook the engine runs itself, as the guarded push runs `pre-push`, held
+        to no step's listing: its commands with `values`, or skipped, saying so,
+        when it is not declared."""
+        commands = self.configuration.hook(name)
+        if commands is None:
+            return self.finish(name, self.skip(name, "not declared"))
+        self.needs(commands, values, f"hooks.{name}")
+        return self.finish(name, self.run_commands(name, commands, values))
 
     def check_change(self, change: str) -> bool:
         """The default checks alone, as `check change` runs them."""
@@ -559,7 +557,7 @@ def main(hook: str, change: str, *, root: Path, configuration: Configuration,
             passed = runner.cleanup(change, base)
         else:
             passed = runner.named(hook, change, base, lambda: worktree_changes(root))
-    except (ChangeNotFound, ConfigError, HookError) as exc:
+    except (ChangeNotFound, StepError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     finally:

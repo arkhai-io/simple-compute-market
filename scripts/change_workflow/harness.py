@@ -5,7 +5,7 @@ under the `dontAsk` permission mode, told to end its turn with an outcome matchi
 the outcome schema, and streaming its events. A review runs first in Codex's
 read-only sandbox (`codex exec`), whose plain output is condensed into progress.
 A harness that is missing, not signed in, or at its usage limit cannot serve its
-model, and the run falls to the next model of its row; a network error says
+model, and the run falls to the step's next model; a network error says
 nothing of the model's availability, so it is retried on the same model and never
 passed over.
 """

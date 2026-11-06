@@ -1,5 +1,6 @@
 """A validation record clears a commit when it names that commit, or an ancestor that
-differs from it only in changes' records."""
+differs from it only in changes' records, or, where a caller asks, those and the
+repository's inert paths."""
 
 from __future__ import annotations
 
@@ -8,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from change_workflow.records import changed_since, validation_problem
+from change_workflow.records import changed_since, exempting, validation_problem
 from change_workflow_fixtures import (CHANGE, HEAD, RECORDS, VALIDATED, repository, reviews_of,
                                       validation_text)
 
@@ -46,6 +47,38 @@ def test_a_validation_of_an_ancestor_clears_head_when_only_records_changed(
         assert problem is None
     else:
         assert problem is not None and reason in problem
+
+
+@pytest.mark.parametrize("inert_paths, path, exempt", [
+    (("openspec/", "docs/"), "docs/agents/change-workflow.md", True),
+    (("openspec/", "docs/"), "openspec/specs/x/spec.md", True),
+    (("openspec/", "docs/"), "docsite/index.md", False),
+    (("openspec/", "docs/"), "scripts/x.py", False),
+    (("docs/", "assets/"), "assets/logo.svg", True),
+    (("docs/", "assets/"), "openspec/changes/README.md", False),
+    # With no inert path declared, only changes' records are exempt.
+    (None, "docs/agents/change-workflow.md", False),
+    (None, f"{RECORDS}/interventions.jsonl", True),
+    ((), f"{RECORDS}/reviews/05-validation.md", True),
+])
+def test_a_path_is_exempt_when_it_is_a_record_or_inert(inert_paths, path: str,
+                                                       exempt: bool) -> None:
+    assert exempting(inert_paths)(path) is exempt
+
+
+def test_a_validation_of_an_ancestor_clears_head_past_inert_paths_when_asked(
+        tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    (reviews_of(root) / "03-validation.md").write_text(validation_text(VALIDATED, "passed"),
+                                                       "utf-8")
+
+    def images(*_: object) -> list[str]:
+        return ["assets/logo.svg"]
+
+    assert validation_problem(reviews_of(root), HEAD, root, images,
+                              exempt=exempting(("assets/",))) is None
+    assert "also changes assets/logo.svg" in (
+        validation_problem(reviews_of(root), HEAD, root, images) or "")
 
 
 def test_the_paths_changed_since_are_read_from_git(tmp_path: Path) -> None:

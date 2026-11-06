@@ -128,6 +128,8 @@ def conversations(tmp_path: Path) -> Path:
 
 def make_wrapper(tmp_path: Path, claude: FakeClaude) -> Wrapper:
     (tmp_path / "openspec/changes" / CHANGE).mkdir(parents=True, exist_ok=True)
+    if not (tmp_path / ".agents/workflow.toml").exists():
+        configured(tmp_path)
     return Wrapper(root=tmp_path, runner=claude, head=lambda _: COMMIT, clock=clock,
                    echo=None,
                    conversation=lambda _, session: conversations(tmp_path) / f"{session}.jsonl",
@@ -194,12 +196,13 @@ def review_text(kind: str = "design", findings: str = FINDING) -> str:
 
 
 def repository(tmp_path: Path, *records: str) -> Path:
+    """A repository holding the change's `records`, and the least configuration."""
     reviews = tmp_path / "openspec/changes" / CHANGE / "reviews"
     reviews.mkdir(parents=True)
     for name in records:
         (reviews / name).parent.mkdir(parents=True, exist_ok=True)
         (reviews / name).write_text("x", "utf-8")
-    return tmp_path
+    return configured(tmp_path)
 
 
 def writing(text: str, status: int = 0, calls: list[list[str]] | None = None,
@@ -242,15 +245,35 @@ def codex_missing(command: Sequence[str], log: Path) -> int:
     raise not_installed("codex")
 
 
-# A repository's workflow configuration: the least a step that commits or validates
-# needs, functional checks declared empty and one part.
+# The models of a step's unattended runs, as the configuration names them: each step
+# on Opus, validation and archive cleanup on Sonnet, and the review on Codex first.
+MODELS = """
+[models]
+orchestrator = { model = "claude-opus-5-5", effort = "medium" }
+review = [{ harness = "codex", model = "gpt-6-sol", effort = "high" },
+          { harness = "claude", model = "claude-opus-5-5", effort = "high" }]
+design = [{ harness = "claude", model = "claude-opus-5-5", effort = "high" }]
+plan = [{ harness = "claude", model = "claude-opus-5-5", effort = "high" }]
+triage = [{ harness = "claude", model = "claude-opus-5-5", effort = "high" }]
+implement = [{ harness = "claude", model = "claude-opus-5-5", effort = "high" }]
+validate = [{ harness = "claude", model = "claude-sonnet-5-5", effort = "medium" }]
+merge = [{ harness = "claude", model = "claude-opus-5-5", effort = "high" }]
+closeout = [{ harness = "claude", model = "claude-opus-5-5", effort = "high" }]
+archive-cleanup = [{ harness = "claude", model = "claude-sonnet-5-5", effort = "medium" }]
+"""
+
+# A repository's workflow configuration: the least every step needs, its protected
+# branches, its functional checks declared empty, one part, and every step's models.
 CONFIGURED = """
+[repository]
+protected-branches = ["main", "dev"]
+
 [hooks]
 pre-commit-functional = []
 
 [validation.parts.local]
 run = "true"
-"""
+""" + MODELS
 
 
 def configured(root: Path, text: str = CONFIGURED) -> Path:

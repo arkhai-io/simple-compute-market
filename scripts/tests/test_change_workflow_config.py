@@ -14,8 +14,8 @@ from change_workflow.cli import main
 from change_workflow.config import ConfigError
 from change_workflow.next_step import TASKS_FILE
 from change_workflow.tasks import owed_lines
-from change_workflow_fixtures import (CHANGE, VALID, FakeClaude, configured, event_lines,
-                                      make_wrapper)
+from change_workflow_fixtures import (CHANGE, CONFIGURED, MODELS, VALID, FakeClaude, configured,
+                                      event_lines, make_wrapper)
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 
@@ -65,6 +65,11 @@ def _checked(text: str) -> config.Configuration:
      "hooks.pre-commit names {target}, which is no placeholder the workflow fills"),
     ("[hooks]\npre-commit = 'make CHANGE={change} REMOTE={remote}'\n",
      "hooks.pre-commit names {remote}, which is not available there"),
+    # The guarded push pushes a branch, not a change: it has the remote alone.
+    ("[hooks]\npre-push = 'make pre-push REMOTE={remote} CHANGE={change}'\n",
+     "hooks.pre-push names {change}, which is not available there"),
+    ("[hooks]\npre-push = ['make pre-push BASE={base}']\n",
+     "hooks.pre-push names {base}, which is not available there"),
     ("[validation.parts.local]\nrun = 'make WORKFLOW={owed}'\n",
      "validation.parts.local.run names {owed}, which is not available there"),
     ("[validation.parts.ci]\nowed = true\nstart = 'make run-ci W={owed} AFTER={after}'\n"
@@ -86,7 +91,7 @@ def test_a_malformed_configuration_is_refused_naming_the_field(text: str, named:
 def test_placeholders_fill_where_they_are_available_and_the_shells_own_pass() -> None:
     checked = _checked("""
 [hooks]
-pre-push = "make pre-push REMOTE={remote} CHANGE={change}"
+pre-push = "make pre-push REMOTE={remote}"
 pre-commit = ["echo ${HOME}", "awk '{print $1}' x", "make check CHANGE={change} BASE={base}"]
 
 [validation.parts.ci]
@@ -166,12 +171,12 @@ def test_no_functional_checks_are_declared(tmp_path: Path,
     """CW-t5hz: `start implement` refuses before launching a session, naming the
     field."""
     claude = FakeClaude()
-    configured(_checkout(tmp_path), "[validation.parts.local]\nrun = 'true'\n")
+    configured(_checkout(tmp_path), CONFIGURED.replace("pre-commit-functional = []\n", ""))
 
     assert main(["start", "implement", CHANGE, "--sections", "1", "--unattended"],
                 root=tmp_path, wrapper=make_wrapper(tmp_path, claude)) == 1
 
-    assert "implement needs hooks.pre-commit-functional" in capsys.readouterr().err
+    assert "implement needs hooks.pre-commit-functional, which" in capsys.readouterr().err
     assert claude.commands == []
     assert not (tmp_path / "openspec/changes" / CHANGE / "reviews").exists()
 
@@ -191,7 +196,7 @@ def test_a_repository_declares_no_functional_checks_on_purpose(tmp_path: Path) -
     """CW-t5hz: an explicit empty value declares the field, so implementation
     starts."""
     claude = FakeClaude((event_lines(VALID["finished"]), 0))
-    configured(_checkout(tmp_path), "[hooks]\npre-commit-functional = []\n")
+    configured(_checkout(tmp_path), CONFIGURED)
 
     assert main(["start", "implement", CHANGE, "--sections", "1", "--unattended"],
                 root=tmp_path, wrapper=make_wrapper(tmp_path, claude)) == 0
@@ -199,18 +204,48 @@ def test_a_repository_declares_no_functional_checks_on_purpose(tmp_path: Path) -
     assert len(claude.commands) == 1
 
 
-def test_a_step_needing_no_required_field_starts_with_no_file(tmp_path: Path) -> None:
+def test_with_no_file_every_step_is_refused_its_protected_branches_and_models(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     claude = FakeClaude((event_lines(VALID["finished"]), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    (tmp_path / ".agents/workflow.toml").unlink()
 
     assert main(["start", "design", CHANGE, "--unattended"], root=tmp_path,
-                wrapper=make_wrapper(tmp_path, claude)) == 0
+                wrapper=wrapper) == 1
+
+    assert ("design needs repository.protected-branches, models.design, which "
+            ".agents/workflow.toml does not declare (there is no such file)"
+            in capsys.readouterr().err)
+    assert claude.commands == []
 
 
 def test_validation_needs_one_part_however_empty_its_table(tmp_path: Path) -> None:
     checked = _checked("[validation]\nparts = {}\n")
 
-    with pytest.raises(ConfigError, match="validate needs validation.parts"):
+    with pytest.raises(ConfigError, match="validate needs .*validation.parts"):
         config.require_for_step(checked, "validate")
+
+
+def test_an_interactive_step_needs_no_models(tmp_path: Path) -> None:
+    """Only an unattended run runs on the configured models; the owner's interactive
+    session runs on their own."""
+    checked = _checked(CONFIGURED.replace(MODELS, ""))
+
+    config.require_for_step(checked, "implement")
+    with pytest.raises(ConfigError, match="models.implement"):
+        config.require_for_step(checked, "implement", unattended=True)
+    with pytest.raises(ConfigError, match="models.orchestrator"):
+        config.require_for_step(checked, "orchestrate")
+
+
+def test_a_fable_model_is_accepted() -> None:
+    """A repository that never wants a model does not list it; none is forbidden."""
+    checked = _checked('[models]\nimplement = [{ harness = "claude", '
+                       'model = "claude-fable-5-1", effort = "high" }]\n'
+                       'orchestrator = { model = "claude-fable-5-1" }\n')
+
+    assert checked.step_models("implement")[0].model == "claude-fable-5-1"
+    assert checked.orchestrator_model().model == "claude-fable-5-1"
 
 
 # `config`: every field and how it resolved.

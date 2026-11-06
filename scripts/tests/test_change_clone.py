@@ -59,6 +59,10 @@ def workspace(tmp_path: Path) -> Path:
     # records and evidence.
     (work / ".gitignore").write_text(
         ".claude/settings.local.json\n.snapshot/\nopenspec/changes/**/reviews/\n", "utf-8")
+    # The evidence directory history copies from, as a validation part declares it.
+    (work / ".agents").mkdir()
+    (work / ".agents/workflow.toml").write_text(
+        "[validation.parts.local]\nrun = 'true'\nevidence = '.snapshot/validation/'\n", "utf-8")
     _commit(work, "README.md", "1\n")
     _git(work, "remote", "add", "origin", str(origin))
     _git(work, "push", "-q", "origin", "dev")
@@ -82,8 +86,10 @@ class Spawned:
 
 
 def _create(workspace: Path, spawn: Spawned | None = None, **options) -> clones.Created:
-    return clones.create(workspace, CHANGE, bootstrap=("make", "init"),
-                         spawn=spawn or Spawned(), **options)
+    """The clone, its checkout declaring `post-clone = "make init"` unless a test
+    gives the bootstrap another way to read it."""
+    options.setdefault("bootstrap", lambda _: ("make init",))
+    return clones.create(workspace, CHANGE, spawn=spawn or Spawned(), **options)
 
 
 def _git_file(clone: Path, name: str) -> Path:
@@ -109,7 +115,7 @@ def test_a_fresh_clone_has_both_remotes_the_branch_the_link_and_a_bootstrap(
     assert _git(clone, "rev-parse", "HEAD") == _git(workspace, "rev-parse", "dev")
     assert os.readlink(clone / ".claude/settings.local.json") == str(
         workspace.resolve() / ".claude/settings.local.json")
-    assert spawn.calls == [(["make", "init"], clone)]
+    assert spawn.calls == [(["make init"], clone)]
     assert created.bootstrap == clones.Bootstrap("succeeded",
                                                  _git_file(clone, clones.BOOTSTRAP_LOG))
     assert json.loads(_git_file(clone, clones.BOOTSTRAP).read_text("utf-8"))["pid"] == os.getpid()
@@ -347,12 +353,72 @@ def test_the_real_spawn_records_the_commands_output_and_exit_status(workspace: P
     status = _git_file(clone, clones.BOOTSTRAP_STATUS)
     status.unlink()
 
-    pid = clones._spawn(["sh", "-c", "echo building; exit 3"], clone, log, status)
+    pid = clones._spawn(["echo building; exit 3"], clone, log, status)
     os.waitpid(pid, 0)
 
     assert log.read_text("utf-8") == "building\n"
     assert status.read_text("utf-8") == "3\n"
     assert clones.bootstrap_state(clone).state == "failed"
+
+
+def _committed_configuration(workspace: Path, text: str) -> None:
+    (workspace / ".agents").mkdir(exist_ok=True)
+    (workspace / ".agents/workflow.toml").write_text(text, "utf-8")
+    _git(workspace, "add", "--all")
+    _git(workspace, "commit", "-q", "-m", "configure")
+
+
+def _waited(clone: Path) -> clones.Bootstrap:
+    """The bootstrap's state once its process, this test's child, has ended."""
+    os.waitpid(json.loads(_git_file(clone, clones.BOOTSTRAP).read_text("utf-8"))["pid"], 0)
+    return clones.bootstrap_state(clone)
+
+
+def test_the_bootstrap_failed(workspace: Path) -> None:
+    """CW-8npg's recorded state, library integration with the real spawn: the
+    clone's checkout's `post-clone` runs every command whatever an earlier one
+    reported, and the state records the commands it resolved to, its log, and the
+    first failure's status. The computation's reading of a failed bootstrap is the
+    next-step suite's."""
+    _committed_configuration(workspace, '[hooks]\npost-clone = ["echo for {change}; exit 4", '
+                                        '"echo second; exit 5"]\n')
+
+    created = clones.create(workspace, CHANGE)
+
+    state = _waited(created.clone)
+    assert state == clones.Bootstrap("failed", _git_file(created.clone, clones.BOOTSTRAP_LOG))
+    assert state.log is not None and state.log.read_text("utf-8") == f"for {CHANGE}\nsecond\n"
+    assert _git_file(created.clone, clones.BOOTSTRAP_STATUS).read_text("utf-8") == "4\n"
+    recorded = json.loads(_git_file(created.clone, clones.BOOTSTRAP).read_text("utf-8"))
+    assert recorded["command"] == [f"echo for {CHANGE}; exit 4", "echo second; exit 5"]
+    assert recorded["log"] == str(state.log)
+
+
+def test_the_state_names_the_command_the_bootstrap_resolved_to(workspace: Path) -> None:
+    spawn = Spawned(status=None)
+
+    created = _create(workspace, spawn, bootstrap=lambda _: ("make init NAME={change}",))
+
+    assert spawn.calls == [([f"make init NAME={CHANGE}"], created.clone)]
+    recorded = json.loads(_git_file(created.clone, clones.BOOTSTRAP).read_text("utf-8"))
+    assert recorded["command"] == [f"make init NAME={CHANGE}"]
+
+
+@pytest.mark.parametrize("declared", ["", "[hooks]\npost-clone = []\n"])
+def test_a_clone_with_no_post_clone_is_usable_at_once(workspace: Path, declared: str) -> None:
+    """With no `post-clone`, or one declared empty, the bootstrap succeeds at once,
+    running nothing, and the clone is usable."""
+    if declared:
+        _committed_configuration(workspace, declared)
+    spawn = Spawned()
+
+    created = clones.create(workspace, CHANGE, spawn=spawn)
+
+    assert spawn.calls == []
+    assert created.bootstrap.state == "succeeded"
+    assert clones.where(workspace, CHANGE) == created.clone
+    recorded = json.loads(_git_file(created.clone, clones.BOOTSTRAP).read_text("utf-8"))
+    assert recorded["command"] == []
 
 
 def test_the_real_spawn_records_itself_before_its_command_runs(workspace: Path) -> None:
@@ -366,7 +432,7 @@ def test_the_real_spawn_records_itself_before_its_command_runs(workspace: Path) 
     ready = _git_file(clone, "bootstrap-ready")
 
     # The process that spawned it records nothing, as when it is killed at once.
-    pid = clones._spawn(["sh", "-c", f"touch {ready}; sleep 30"], clone, log, status)
+    pid = clones._spawn([f"touch {ready}; sleep 30"], clone, log, status)
     try:
         deadline = time.monotonic() + 10
         while not ready.exists() and time.monotonic() < deadline:

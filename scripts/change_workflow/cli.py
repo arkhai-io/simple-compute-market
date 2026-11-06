@@ -9,9 +9,9 @@ archived change for a step whose node takes only an active one, an active change
 for archive cleanup — and, for implementation and every step after it, an open
 round view (`ROUND_VIEW_CLOSED`); then it opens the change's workflow log with a line
 carrying the record set's format, refusing records of another format
-(`log.open_log`). `start orchestrate` opens the orchestrating session on the step
-table's `[orchestrator]` row. `resume` resumes a waiting run with the owner's answer;
-`review` runs a review; `stop` sends SIGTERM to the change's run in progress — in its
+(`log.open_log`). `start orchestrate` opens the orchestrating session on the model
+and effort the workflow configuration's `models.orchestrator` names. `resume`
+resumes a waiting run with the owner's answer; `review` runs a review; `stop` sends SIGTERM to the change's run in progress — in its
 clone when it has one, else in this checkout — on the owner's word, which the run
 logs as `stopped`; `log` and `note` read and write the workflow log, `note --resumes`
 recording the owner's direction to revisit a finished triage; `watch` follows the
@@ -36,7 +36,8 @@ on it.
 
 Before a step starts, `start` checks the configuration whole and refuses a step
 whose required fields are absent, naming them, before anything is launched or
-logged (`config.require_for_step`).
+logged (`config.require_for_step`): an unattended run also needs its step's models,
+and the orchestrating session its own.
 
 The repository is found once, from the working directory, and every subcommand acts
 on it. Every exit status is one of three: 0 for success; 1 for a refusal or a failed
@@ -69,12 +70,11 @@ from .log import (branch_decisions, direction, history_log_path, last_entries, l
 from .records import git_head
 from .review import DEFAULT_BASE, review_and_log
 from .running import drop_invocations, invocations_directory, kept_invocations, stop
-from .steps import STEP_TABLE, load_orchestrator
 from .watch import denial_report, watch
 from .wrapper import Wrapper
 
 DESCRIPTION = "Run the steps of an OpenSpec change, and keep its workflow log."
-ORCHESTRATE = "orchestrate"
+ORCHESTRATE = config.ORCHESTRATOR_STEP
 # The steps `start` starts: every step the graph runs but the review, which has a
 # subcommand of its own, and the orchestrating session.
 STARTABLE = tuple(step for step in STEPS if step != "review") + (ORCHESTRATE,)
@@ -219,11 +219,11 @@ def _parser() -> argparse.ArgumentParser:
     review.add_argument("--base", default=DEFAULT_BASE)
     review.add_argument("--model", default=None,
                         help="the owner's choice of reviewer for this run, outside the review "
-                             "row's policy: a claude- model runs on Claude, any other on Codex, "
+                             "models' policy: a claude- model runs on Claude, any other on Codex, "
                              "with no fallback")
     review.add_argument("--effort", default=None,
                         help="the owner's choice of effort for this run: the given model's, or "
-                             "every entry's of the review row")
+                             "every entry's of the review's models")
     review.add_argument("--fresh", action="store_true",
                         help="start a new reviewer session instead of continuing the last one")
     review.add_argument("--unvalidated", action="store_true",
@@ -440,13 +440,13 @@ def start(args: argparse.Namespace, root: Path, wrapper: Wrapper, launch: Launch
     _takes(root, args.step, args.change)
     if args.step in ROUND_VIEW_CLOSED:
         _round_view_closed(root)
-    if args.step != ORCHESTRATE:
-        # Checked whole, and the fields the step needs required, before anything
-        # is launched or logged.
-        config.require_for_step(config.load(root), args.step)
+    # Checked whole, and the fields the step needs required, before anything is
+    # launched or logged.
+    configuration = config.load(root)
+    config.require_for_step(configuration, args.step, unattended=args.unattended)
     arguments = " ".join(part for part in (words, args.arguments) if part)
     if args.step == ORCHESTRATE:
-        model = load_orchestrator(root / STEP_TABLE)
+        model = configuration.orchestrator_model()
         command = ["claude", "--model", model.model,
                    *(["--effort", model.effort] if model.effort else []),
                    f"/change-{ORCHESTRATE} {args.change}"]

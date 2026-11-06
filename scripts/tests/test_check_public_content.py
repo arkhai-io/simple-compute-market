@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import io
 import os
+import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -36,6 +38,68 @@ def stage(repo: Path, text: str, name: str = 'notes.md') -> None:
 def personal_path() -> str:
     # Assemble a synthetic prohibited value so the guard also scans this test.
     return '/home/' + 'fixture-person' + '/work'
+
+
+ROOT = Path(__file__).resolve().parents[2]
+COMMAND = ROOT / 'scripts/change-workflow'
+
+
+@pytest.fixture
+def branch(repo: Path, tmp_path: Path) -> Path:
+    """`repo` on a change branch tracked nowhere yet, beside a bare `origin` holding
+    `dev`, with this check in its tree and a workflow configuration whose `pre-push`
+    runs it as the guarded push runs a pre-push hook; both ignored so the worktree
+    stays clean."""
+    remote = tmp_path / 'remote.git'
+    subprocess.run(['git', 'init', '-q', '--bare', str(remote)], check=True)
+    git(repo, 'remote', 'add', 'origin', str(remote))
+    git(repo, 'push', '-q', '-u', 'origin', 'dev')
+    git(repo, 'checkout', '-q', '-b', 'feat/change')
+    script = repo / 'scripts' / Path(checker.__file__).name
+    script.parent.mkdir()
+    script.write_text(Path(checker.__file__).read_text('utf-8'), 'utf-8')
+    (repo / '.agents').mkdir()
+    (repo / '.agents/workflow.toml').write_text(
+        '[repository]\nprotected-branches = ["main", "dev"]\n[hooks]\n'
+        f'pre-push = "{shlex.quote(sys.executable)} scripts/{script.name} --pre-push '
+        '{remote}"\n', 'utf-8')
+    with (repo / '.git/info/exclude').open('a', encoding='utf-8') as exclude:
+        # The repository is the test's own directory, which holds the remote too.
+        exclude.write('/scripts/\n/.agents/\n/remote.git/\n')
+    return repo
+
+
+def push(repo: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run([str(COMMAND), 'push'], cwd=repo, capture_output=True, text=True)
+
+
+def remote_head(repo: Path) -> str:
+    return git(repo, 'ls-remote', 'origin', 'refs/heads/feat/change').split('\t')[0]
+
+
+def test_the_check_passes_a_clean_guarded_push(branch: Path) -> None:
+    (branch / 'notes.md').write_text('notes\n')
+    git(branch, 'add', 'notes.md')
+    git(branch, 'commit', '-qm', 'notes')
+
+    assert push(branch).returncode == 0
+    assert remote_head(branch) == git(branch, 'rev-parse', 'HEAD')
+
+
+@pytest.mark.parametrize('removed_later', [False, True])
+def test_private_content_refuses_the_guarded_push(branch: Path, removed_later: bool) -> None:
+    stage(branch, personal_path())
+    git(branch, 'commit', '-qm', 'notes')
+    if removed_later:
+        git(branch, 'rm', '-q', 'notes.md')
+        git(branch, 'commit', '-qm', 'remove notes')
+
+    pushed = push(branch)
+
+    assert pushed.returncode == 1
+    assert remote_head(branch) == ''
+    assert 'personal home path' in pushed.stderr
+    assert personal_path() not in pushed.stderr + pushed.stdout
 
 
 def test_staged_scan_uses_index_and_redacts_values(repo: Path, capsys) -> None:

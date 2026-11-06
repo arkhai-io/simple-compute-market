@@ -648,9 +648,11 @@ def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         (work / "openspec/changes" / change).mkdir(parents=True)
         (work / "openspec/changes" / change / "README").write_text("x\n", "utf-8")
     (work / ".gitignore").write_text(".claude/settings.local.json\n", "utf-8")
-    # The clone's bootstrap is its `make init`; here it only exits, with the status
-    # a test sets.
+    # The clone's bootstrap is the configuration's `post-clone`, `make init`; here it
+    # only exits, with the status a test sets.
     (work / "Makefile").write_text("init:\n\t@exit $${INIT_STATUS:-0}\n", "utf-8")
+    (work / ".agents").mkdir()
+    (work / ".agents/workflow.toml").write_text('[hooks]\npost-clone = "make init"\n', "utf-8")
     _git(tmp_path, "init", "-q", "--bare", "-b", "dev", str(tmp_path / "origin.git"))
     _git(work, "init", "-q", "-b", "dev")
     _git(work, "add", "--all")

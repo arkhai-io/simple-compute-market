@@ -391,7 +391,7 @@ Touches `scripts/change_workflow/push.py`, `records.py`, `next_step.py`,
 `history.py`, `hook.py`, `steps.py`, `wrapper.py`, `cli.py` (`start orchestrate`),
 and `clone.py` (the bootstrap).
 
-- [ ] 4.1 The guarded push refuses `repository.protected-branches` where it refused
+- [x] 4.1 The guarded push refuses `repository.protected-branches` where it refused
   `push.PROTECTED`, and runs `hooks.pre-push` through the hook runner with `{remote}`
   and Git's one ref line on its input where it ran `push.PRE_PUSH_CHECKS`, refusing
   with the hook's reasons; with no `pre-push` it pushes once its own check passes
@@ -399,7 +399,30 @@ and `clone.py` (the bootstrap).
   Verify: tests in `scripts/tests/test_check_push_ready.py` (library integration, a
   real Git repository) for "The worktree is dirty", "The pre-push check refuses", "The
   repository provides no pre-push check", and a configured protected branch refused.
-- [ ] 4.2 The next-step computation and the records read `repository.inert-paths`
+  - Done: `push.pre_push` runs the hook with `Hooks.engine_hook` (held to no step's
+    listing, skipped saying so when undeclared), each command fed the ref line and
+    its output, both streams in order, sent to standard error, so the check's
+    "Ready to push" stays alone on standard output. The push requires
+    `repository.protected-branches`, refusing naming it, and `config.STEP_NEEDS`
+    now requires it of every step but the review (1.2's handoff). The four
+    scenarios pass, plus a push with no protected branches declared refused naming
+    the field, a silent failure named by its exit status, and the run's line
+    listing the hook (library integration: real Git, a bare remote, and a real
+    `sh` running each test's check script).
+  - Decision the design left open, found by the fresh-context check: `pre-push`
+    takes `{remote}` alone, and the configuration's check refuses `{change}` and
+    `{base}` there (config suite, unit). D8 gives those two "everywhere", but the
+    guarded push pushes a branch, not a change, so it has neither to give, and D13
+    refuses a placeholder unavailable where it is used when the file is checked,
+    not at the push.
+  - Outside the plan: until 6.2's `make pre-push` exists, this repository's
+    `pre-push` runs its two public-content scripts as a list, so the guarded push
+    keeps checking what it sends; 6.2 replaces it. The two tests that ran this
+    repository's own public-content script through the push moved to
+    `test_check_public_content.py`, reaching the engine as the command, since
+    `test_change_workflow_command.py` holds that a test naming one of this
+    repository's scripts is the repository's, not the engine's.
+- [x] 4.2 The next-step computation and the records read `repository.inert-paths`
   where they read `records.DOCUMENTATION`, with no inert path when none is declared
   (D7, CW-n7ra, CW-trdu, CW-j1ab, CW-gqav, CW-8tdv, CW-tnp6). Verify: tests in
   `scripts/tests/test_change_next_step.py` and
@@ -407,15 +430,44 @@ and `clone.py` (the bootstrap).
   images inert" (CW-n7ra), the existing documentation-correction and pre-closeout
   cases with `openspec/` and `docs/` declared, and the same commits read as code with
   no inert path declared.
-- [ ] 4.3 History copies each declared part's `evidence` where it copied
+  - Done: `records.inert` (moved from `config`, which re-exports it) and
+    `records.exempting(inert_paths)`, a record or an inert path. The graph names an
+    exemption by kind, `graph.RECORDS` or `graph.INERT`, which the computation
+    resolves from the configuration read once as it starts (`inert_paths` seam);
+    `changed_outside_documentation` is `changed_outside_inert`. The review's
+    pre-closeout check reads the same. The guards' and the review entry guard's
+    texts say "inert paths", so the graph diagram's source and export were edited
+    to match (`check graph` holds them to the table). Evidence (unit): "A
+    repository marks images inert" from a real configuration file; the existing
+    cases with `openspec/` and `docs/` declared (the tests' default seam); the merge,
+    pre-closeout, and closeout-correction cases read as code with none declared,
+    and, in the merge and pre-closeout cases, records still exempt; a malformed
+    configuration leaving the change
+    unclassified; `exempting` and `validation_problem` in the records suite; the
+    review admitting a document commit after a pre-closeout triage only with inert
+    paths declared.
+- [x] 4.3 History copies each declared part's `evidence` where it copied
   `history.VALIDATION` and `history.E2E_LOGS`, reading the cited runs and commits as
   it does (D3, D10). Verify: `scripts/tests/test_change_history.py` (library
   integration) passes with the evidence declared, and copies nothing for an
   undeclared directory.
-- [ ] 4.4 The post-compaction hook re-reads `load.common` where it read
+  - Done: `Configuration.evidence()` lists each declared directory once; history
+    reads the clone's checkout's configuration. A record citing `<directory>/<name>`
+    names it under that directory; a validated commit (first twelve characters)
+    and a pipeline run name no directory, so they are copied from whichever
+    declared directories hold them, and reported absent under each when none does.
+    The suite passes with the workspace declaring this repository's evidence
+    directories, and a clone declaring only `.snapshot/validation/` copies nothing
+    under `.snapshot/e2e-logs/` (library integration, real clones). Clone removal's
+    tests declare their evidence directory the same way.
+- [x] 4.4 The post-compaction hook re-reads `load.common` where it read
   `hook.REQUIRED` (D6, CW-l7hn). Verify: a unit test of `hook post-compaction` naming
   the configured documents.
-- [ ] 4.5 Models come from the configuration (D5, CW-ebmo, CW-zq4h, CW-w2ld): the
+  - Done: tests for the configured documents (a step's additions not named), none
+    configured, and a malformed configuration named while the session is still told
+    to re-read its skill's guidance; one reads this repository's own file. Library
+    integration, not unit: `hook.context` reads the branch with a real `git`.
+- [x] 4.5 Models come from the configuration (D5, CW-ebmo, CW-zq4h, CW-w2ld): the
   wrapper reads each step's ordered models from `models.<step>`, and `start
   orchestrate` from `models.orchestrator`; the engine refuses two models of one
   vendor for a step and a Codex model on any step but the review, naming the step;
@@ -427,19 +479,71 @@ and `clone.py` (the bootstrap).
   for "A step's first model is available" (CW-ebmo), "A row names two models of one
   vendor" (CW-zq4h), "The owner starts the orchestrating session" (CW-w2ld), and a
   Fable model in the configuration no longer refused.
-- [ ] 4.6 The clone's bootstrap runs `hooks.post-clone` through the hook runner where
+  - Done: the policy is `config._models`, checked as the file loads;
+    `Configuration.step_models` and `orchestrator_model` refuse naming the field when
+    absent. `start` requires `models.<step>` of an unattended run and
+    `models.orchestrator` of `start orchestrate` (`require_for_step(…, unattended=)`,
+    1.2's handoff); an interactive step needs no models. The review reads
+    `models.review` (`review_models` takes the models, not the step's rules).
+    `StepRules` has no `models`; `load_orchestrator` is gone. Evidence (unit):
+    CW-ebmo through the wrapper, the configured first model running and named on
+    the line — one Claude model, since CW-zq4h admits no Codex model and no second
+    Claude model on a wrapper step, so the fall to the next model stays proven with
+    the models given directly, and the review's Codex-then-Claude in the review
+    suite — and a step with no models refused before launching; CW-zq4h and each
+    policy refusal naming the step (steps suite); a
+    Fable model accepted (config suite); this repository's models per step. CW-w2ld
+    is `test_the_owner_starts_the_orchestrating_session` in
+    `test_change_workflow_cli.py`, beside the other `start orchestrate` tests,
+    not in `test_change_workflow_cli_steps.py` (library integration: a real
+    `git init`, the launch faked).
+  - The shared fixtures' least configuration (`CONFIGURED`) now holds the
+    protected branches and every step's models (`MODELS`), and `make_wrapper` and
+    `repository()` write it where a root has none.
+- [x] 4.6 The clone's bootstrap runs `hooks.post-clone` through the hook runner where
   it ran `clone.BOOTSTRAP_COMMAND`, succeeding at once with none declared, and its
   recorded state holds the resolved command beside its log and exit status (D10,
   CW-8npg). Verify: tests in `scripts/tests/test_change_clone.py` (library
   integration) for "The bootstrap failed", a clone with no `post-clone` usable at
   once, and the state naming the command.
-- [ ] 4.7 Verification: `pytest -q scripts/tests/test_check_push_ready.py
+  - Done, not through `Hooks`: the bootstrap outlives the call, so it is spawned in
+    the background as before, each command with `sh -c` in one process that runs
+    them all and exits with the first failure's status (`bootstrap_command`); the
+    `post-clone` is read from the clone's checkout once its branch is checked out,
+    filled with `{change}` and, until 5.1 records the landing branch, `{base}` as
+    `--from`. The record's `command` is the resolved commands; with none declared,
+    or `[]`, the state is written succeeded with an empty `command` and nothing
+    spawned. The spawn seam takes the hook's commands. Evidence (library
+    integration): the recorded state of "The bootstrap failed" with the real spawn
+    (both commands ran, status the first failure's, log and record named); its
+    THEN, the computation bringing it to the owner and a rerun restarting it, rests
+    on the next-step suite and `test_rerunning_restarts_a_failed_bootstrap`; a clone
+    with no `post-clone` or an empty one usable at once; and the state naming the
+    filled command. The engine's messages on a failed or running bootstrap name
+    its `post-clone`, not `make init`.
+  - Outside the plan: `fill` moved from `hooks` to `config` (`hooks` imports it),
+    since `clone` importing `hooks` would close a cycle through `tasks` and
+    `next_step`. `cli.ORCHESTRATE` is `config.ORCHESTRATOR_STEP`.
+  - Fresh-context check, declined: reporting a validated commit or pipeline run no
+    evidence directory holds under every declared directory (4.3) names paths no
+    part writes; kept, since which directory a commit's or run's evidence goes to
+    is no field, and naming every candidate is true where naming one would guess.
+- [x] 4.7 Verification: `pytest -q scripts/tests/test_check_push_ready.py
   scripts/tests/test_change_next_step.py scripts/tests/test_change_workflow_records.py
   scripts/tests/test_change_history.py scripts/tests/test_change_workflow_steps.py
   scripts/tests/test_change_workflow_wrapper.py scripts/tests/test_change_workflow_cli_steps.py
   scripts/tests/test_change_clone.py` (unit, and library integration where a real Git
   repository or process is used) passes; `make test` passes. End-to-end: none; no
   scenario exercises the workflow tooling.
+  - Done: the eight suites with the review, config, hooks, CLI, graph, harness,
+    post-compaction, public-content, secrets, command, and parallel-validation
+    suites pass, 1119 tests; `make test-release-tooling` (`test_check_secrets.py`
+    and `test_validate_parallel.py` updated to declare their `pre-push` and
+    `post-clone`) and `make test` pass. End-to-end: confirmed none. `make
+    check-change` fails only on the specification index (10.9).
+  - Handoff to section 5: `{base}` reaches the bootstrap as `--from`; 5.1 replaces
+    it with the recorded landing branch. `next_step` still imports
+    `clone.DEFAULT_FROM` for the merge's default (5.2).
 
 ## 5. The landing branch and the remote are derived (D4)
 

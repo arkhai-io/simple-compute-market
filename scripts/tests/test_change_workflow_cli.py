@@ -21,13 +21,13 @@ from typing import Callable, Sequence
 
 import pytest
 
-from change_workflow import (clone, cli, cost_report, diagram, find, history, hook, index,
+from change_workflow import (clone, cli, config, cost_report, diagram, find, history, hook, index,
                              next_step, push, round_view, skills, tasks)
 from change_workflow.common import FORMAT, StepError
 from change_workflow.log import log_path, read_log, record_outcome
-from change_workflow.steps import load_orchestrator, load_steps
-from change_workflow_fixtures import (CHANGE, VALID, FakeClaude, configured, event_lines,
-                                      make_wrapper, option_rules)
+from change_workflow.steps import load_steps
+from change_workflow_fixtures import (CHANGE, CONFIGURED, VALID, FakeClaude, configured,
+                                      event_lines, make_wrapper, option_rules)
 
 REPO = Path(__file__).resolve().parents[2]
 FRAGMENT = REPO / "scripts" / "change_workflow" / "workflow.mk"
@@ -520,17 +520,17 @@ def test_start_refuses_records_of_another_format_and_starts_nothing(
     assert {path.name: path.read_text("utf-8") for path in reviews.iterdir()} == before
 
 
-def test_start_orchestrate_opens_the_session_on_the_orchestrator_row(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_owner_starts_the_orchestrating_session(tmp_path: Path) -> None:
+    """CW-w2ld: on the model and effort the configuration's `models.orchestrator`
+    names."""
     root = _repository(tmp_path / "workspace", CHANGE)
-    (root / ".claude").mkdir()
-    (root / ".claude/change-steps.toml").write_text(
-        '[orchestrator]\nmodel = "claude-opus-5-5"\neffort = "medium"\n', "utf-8")
-    monkeypatch.chdir(root)
+    configured(root, CONFIGURED.replace(
+        'orchestrator = { model = "claude-opus-5-5", effort = "medium" }',
+        'orchestrator = { model = "claude-sonnet-5-5", effort = "low" }'))
     launched = Launched()
 
     assert cli.main(["start", "orchestrate", CHANGE], root=root, launch=launched) == 0
-    assert launched.commands == [["claude", "--model", "claude-opus-5-5", "--effort", "medium",
+    assert launched.commands == [["claude", "--model", "claude-sonnet-5-5", "--effort", "low",
                                   f"/change-orchestrate {CHANGE}"]]
 
 
@@ -542,54 +542,47 @@ def test_start_orchestrate_takes_the_change_alone(tmp_path: Path, flags: list[st
                     launch=Launched()) == 2
 
 
-def test_start_orchestrate_refuses_a_table_without_the_row(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture[str]) -> None:
+def test_start_orchestrate_refuses_a_configuration_without_its_model(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root = _repository(tmp_path / "workspace", CHANGE)
-    (root / ".claude").mkdir()
-    (root / ".claude/change-steps.toml").write_text("", "utf-8")
-    monkeypatch.chdir(root)
+    configured(root, CONFIGURED.replace(
+        'orchestrator = { model = "claude-opus-5-5", effort = "medium" }\n', ""))
+    launched = Launched()
 
     status, _, err = _printed(capsys, lambda: cli.main(["start", "orchestrate", CHANGE],
-                                                       root=root, launch=Launched()))
+                                                       root=root, launch=launched))
     assert status == 1
-    assert "[orchestrator]" in err
+    assert "models.orchestrator" in err
+    assert launched.commands == []
 
 
-@pytest.mark.parametrize("row,problem", [
-    ('model = "claude-opus-5-5"\nallow = ["Bash(ls)"]', "carries no permission rules"),
-    ('model = "claude-opus-5-5"\ndeny = []', "carries no permission rules"),
-    ('effort = "medium"', "names a model"),
-    ('model = "claude-opus-5-5"\nmodels = []', "names a model"),
-    ('model = "claude-fable-5-1"', "never runs on"),
-    ('model = "claude-opus-5-5"\neffort = ""', "not a name"),
+@pytest.mark.parametrize("entry,problem", [
+    ('{ model = "claude-opus-5-5", allow = ["Bash(ls)"] }', "models.orchestrator.allow is no field"),
+    ('{ model = "claude-opus-5-5", harness = "claude" }', "models.orchestrator.harness is no field"),
+    ('{ effort = "medium" }', "models.orchestrator.model must be a non-empty string"),
+    ('{ model = "claude-opus-5-5", effort = "" }', "models.orchestrator.effort must be"),
 ])
-def test_an_orchestrator_row_is_a_model_and_effort_and_nothing_else(
-        tmp_path: Path, row: str, problem: str) -> None:
-    table = tmp_path / "change-steps.toml"
-    table.write_text(f"[orchestrator]\n{row}\n", "utf-8")
-
+def test_the_orchestrators_model_is_a_model_and_effort_and_nothing_else(
+        entry: str, problem: str) -> None:
     with pytest.raises(StepError, match=problem):
-        load_orchestrator(table)
-    with pytest.raises(StepError, match=problem):
-        load_steps(table)
+        config.check(f"[models]\norchestrator = {entry}\n", Path("workflow.toml"))
 
 
-def test_this_repositorys_orchestrator_row_is_opus_at_medium_effort() -> None:
+def test_this_repositorys_orchestrator_is_opus_at_medium_effort() -> None:
     # The orchestrating session relays and routes rather than judging: it needs a
     # large context for a change's relayed turns, not a high effort.
-    model = load_orchestrator(REPO / ".claude/change-steps.toml")
+    model = config.load(REPO).orchestrator_model()
     assert (model.harness, model.model, model.effort) == ("claude", "claude-opus-5-5", "medium")
-    load_steps(REPO / ".claude/change-steps.toml")
 
 
-def test_an_orchestrator_row_gives_its_model_and_effort(tmp_path: Path) -> None:
+def test_the_step_table_accepts_and_ignores_its_models_and_orchestrator_row(
+        tmp_path: Path) -> None:
     table = tmp_path / "change-steps.toml"
-    table.write_text('[orchestrator]\nmodel = "claude-opus-5-5"\neffort = "medium"\n', "utf-8")
+    table.write_text('[orchestrator]\nmodel = "claude-opus-5-5"\neffort = "medium"\n'
+                     '[steps.design]\nskill = "change-design"\n'
+                     'models = [{ harness = "claude", model = "claude-opus-5-5" }]\n', "utf-8")
 
-    model = load_orchestrator(table)
-    assert (model.harness, model.model, model.effort) == ("claude", "claude-opus-5-5", "medium")
-    assert load_steps(table) == {}
+    assert set(load_steps(table)) == {"design"}
 
 
 # `find --json`.

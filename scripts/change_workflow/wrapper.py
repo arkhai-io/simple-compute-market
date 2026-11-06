@@ -1,7 +1,8 @@
 """Running a step unattended, and resuming a waiting run with the owner's answer.
 
 `Wrapper.run` starts the step's skill as a headless Claude Code session on the first
-available of the models the step's row names, in order: a model whose harness is
+available of the step's models, which the repository's workflow configuration names
+in order of preference (`models.<step>`): a model whose harness is
 missing, not signed in, or at its usage limit is passed over, and the line names
 each one passed over and the model that ran; a network error is retried on the
 same model, never passed over. `Wrapper.resume` continues the session of a waiting
@@ -35,6 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from . import config
 from .common import ORCHESTRATOR, Clock, Entry, StepError, repository_root, utc_now
 from .cost import conversation_file, measured_before, measured_cost, read_conversation
 from .harness import (NETWORK_RETRIES, Runner, claude_command, missing_program, run_claude,
@@ -184,7 +186,7 @@ class Wrapper:
         if sections and step != "implement":
             raise StepError("only implementation takes sections")
         session = None
-        models = rules.models
+        models = config.load(self.root).step_models(step)
         extra: Entry = {}
         if continuing is not None:
             if step != "implement":
@@ -192,7 +194,7 @@ class Wrapper:
             if fresh:
                 raise StepError("a run continuing a session cannot also start fresh")
             previous = continued_run(read_log(log), change, continuing)
-            session, models = continuing, _session_models(previous, rules)
+            session, models = continuing, _session_models(previous, models)
             extra["continues"] = previous["seq"]
         elif rules.resume_from and not fresh:
             previous = last_run(log, [rules.resume_from, step])
@@ -202,7 +204,7 @@ class Wrapper:
                                 f"{step} with --fresh, or {previous['step']} again")
             if previous is not None:
                 session = previous["session"]
-                models = _session_models(previous, rules)
+                models = _session_models(previous, models)
         if sections:
             extra["sections"] = list(sections)
         if granted:
@@ -226,7 +228,7 @@ class Wrapper:
         and noted on this run's log line, never added to the step table, so the
         step's next run is held to its table again.
 
-        The session resumes on the model it ran on, never the next in its row: a
+        The session resumes on the model it ran on, never the step's next one: a
         session cannot move between harnesses, so a resume whose model is
         unavailable ends stopped, saying when its limit resets.
         """
@@ -272,7 +274,7 @@ class Wrapper:
             extra["granted"] = list(granted)
         # Framed, so an answer starting with `-` is never read as a flag.
         return self._turn(step, steps[step], change, log, f"The owner's answer: {answer}",
-                          _session_models(previous, steps[step]),
+                          _session_models(previous, config.load(self.root).step_models(step)),
                           session=previous["session"], granted=granted, extra=extra)
 
     def _turn(self, step: str, rules: StepRules, change: str, log: Path, prompt: str,
@@ -299,7 +301,7 @@ class Wrapper:
         network error is retried on the same model, and then stops the run. The
         line names the last model tried even when none could run, with
         `unavailable` saying so: a resume of that run continues its session on
-        that model, never the next in the row.
+        that model, never the step's next one.
 
         The line goes to the log where the change is when the run ends: closeout
         archives the change it runs for, moving `reviews/` while the run writes
@@ -478,7 +480,7 @@ def continued_run(entries: Sequence[Entry], change: str, session: str) -> Entry:
     return named[-1]
 
 
-def _session_models(previous: Entry, rules: StepRules) -> tuple[Model, ...]:
+def _session_models(previous: Entry, models: Sequence[Model]) -> tuple[Model, ...]:
     """The model a run continuing `previous`'s session runs on: the one it ran on.
 
     A line written before runs recorded their model names none; the step's first
@@ -487,4 +489,4 @@ def _session_models(previous: Entry, rules: StepRules) -> tuple[Model, ...]:
     if isinstance(previous.get("model"), str) and previous["model"]:
         return (Model(previous.get("harness") or "claude", previous["model"],
                       previous.get("effort")),)
-    return rules.models[:1]
+    return tuple(models[:1])

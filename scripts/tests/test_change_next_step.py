@@ -18,6 +18,7 @@ from change_workflow.common import FORMAT, StepError
 from change_workflow.find import change_directory
 from change_workflow.log import (append_entry, log_path, note_orchestrator, note_round,
                                  read_log, record_outcome, unused_direction)
+from change_workflow_fixtures import configured
 
 CHANGE = "shape-bounds"
 # The review kind the design records below are named for.
@@ -162,10 +163,12 @@ FIX = ["scripts/change_next_step.py"]
 RECORDS_ONLY = [f"openspec/changes/{CHANGE}/interventions.jsonl"]
 
 
-# The change is worked in the checkout the computation runs in, with no clone,
-# unless a test says otherwise.
+# The change is worked in the checkout the computation runs in, with no clone, and
+# the repository declares `openspec/` and `docs/` inert, unless a test says otherwise.
+INERT = ("openspec/", "docs/")
 HERE = {"branch": lambda _: f"feat/{CHANGE}", "workspace": lambda _: None,
-        "clone": lambda *_: None, "merging": lambda _: False}
+        "clone": lambda *_: None, "merging": lambda _: False,
+        "inert_paths": lambda _: INERT}
 
 
 def _next(root: Path, *, uncommitted: bool = False, changed: list[str] | None = FIX,
@@ -994,6 +997,56 @@ def test_a_documentation_correction_at_closeout_needs_no_validation(tmp_path: Pa
                                   "openspec/specs/change-workflow/spec.md"])
 
     assert result["step"] == "archive-cleanup"
+
+
+# The inert paths are the repository's (CW-n7ra): the engine reads none of its own.
+
+def test_a_repository_marks_images_inert(tmp_path: Path) -> None:
+    """CW-n7ra's scenario, the inert paths read from the repository's own
+    configuration file."""
+    root = _repository(tmp_path, "in implementation")
+    configured(root, '[repository]\ninert-paths = ["docs/", "assets/"]\n')
+    _merged(root, reviewed="e" * 40)
+
+    assert _next(root, changed=["assets/logo.svg"], inert_paths=nxt._inert_paths)["step"] \
+        == "closeout"
+    assert _next(root, changed=DOCUMENTS[:1], inert_paths=nxt._inert_paths)["step"] \
+        == "validate"
+
+
+@pytest.mark.parametrize("arrange,changed", [
+    (lambda root: _merged(root, reviewed="e" * 40), DOCUMENTS),
+    (lambda root: _pre_closeout(root, to=_to("review", "pre-closeout"), reviewed="e" * 40),
+     DOCUMENTS),
+])
+def test_with_no_inert_path_declared_documents_are_read_as_code(tmp_path: Path, arrange,
+                                                                changed) -> None:
+    root = _repository(tmp_path, "in implementation")
+    arrange(root)
+
+    assert _next(root, changed=changed, inert_paths=lambda _: None)["step"] == "validate"
+    # Changes' records stay exempt whatever the repository declares.
+    assert _next(root, changed=RECORDS_ONLY, inert_paths=lambda _: None)["step"] != "validate"
+
+
+def test_with_no_inert_path_declared_a_documentation_correction_is_validated(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in closeout", archived=True)
+    _closeout_triaged(root)
+
+    result = _next(root, changed=["docs/agents/change-workflow.md"], inert_paths=lambda _: None)
+
+    assert (result["step"], result["target"]) == ("validate", {"step": "archive-cleanup"})
+
+
+def test_a_malformed_configuration_leaves_the_change_unclassified(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in design")
+    configured(root, "[repository]\ninert = []\n")
+
+    result = _next(root, inert_paths=nxt._inert_paths)
+
+    assert result["step"] == "unclassified"
+    assert "repository.inert is no field" in result["reason"]
 
 
 def test_the_owners_waiver_directs_archive_cleanup_past_a_missing_validation(

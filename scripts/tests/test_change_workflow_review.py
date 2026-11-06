@@ -1,5 +1,5 @@
-"""A review runs read-only on the review row's models, is published only when it is
-a review, and its outcome is logged."""
+"""A review runs read-only on the models the configuration names for it, is
+published only when it is a review, and its outcome is logged."""
 
 from __future__ import annotations
 
@@ -12,16 +12,17 @@ from typing import Sequence
 
 import pytest
 
+from change_workflow import config
 from change_workflow.log import log_path, note_orchestrator, read_log
 from change_workflow.review import (ReviewError, claim_record, prior_session, review_and_log,
                                     review_models, run_review)
 from change_workflow.running import Terminated, live_runs
 from change_workflow.steps import Model, load_steps
-from change_workflow_fixtures import (ALTERNATIVES, CHANGE, FINDING, HEAD, RECORDS, VALIDATED,
-                                      FakeClaude,
-                                      claude_review, clock, codex_missing, codex_saying,
-                                      not_installed, option, option_rules, repository,
-                                      review_text, reviews_of, validation_text, writing)
+from change_workflow_fixtures import (ALTERNATIVES, CHANGE, CONFIGURED, FINDING, HEAD, MODELS,
+                                      RECORDS, VALIDATED, FakeClaude, claude_review, clock,
+                                      codex_missing, codex_saying, configured, not_installed,
+                                      option, option_rules, repository, review_text, reviews_of,
+                                      validation_text, writing)
 
 
 def test_a_review_is_published_and_its_transcript_kept_apart(tmp_path: Path) -> None:
@@ -75,7 +76,7 @@ def test_design_review_names_no_base(tmp_path: Path) -> None:
     assert "Base:" not in calls[0][-1]
 
 
-def test_a_review_runs_on_the_review_rows_codex_entry(tmp_path: Path) -> None:
+def test_a_review_runs_on_its_configured_codex_entry(tmp_path: Path) -> None:
     root = repository(tmp_path)
     calls: list[list[str]] = []
 
@@ -86,18 +87,28 @@ def test_a_review_runs_on_the_review_rows_codex_entry(tmp_path: Path) -> None:
     assert calls[0][calls[0].index("--config") + 1] == 'model_reasoning_effort="high"'
 
 
-def test_the_owners_model_replaces_the_review_rows_for_one_run() -> None:
-    rules = load_steps()["review"]
+def test_the_owners_model_replaces_the_configured_models_for_one_run(tmp_path: Path) -> None:
+    models = config.load(repository(tmp_path)).step_models("review")
 
-    assert review_models(rules, "claude-fable-5-1") == (
+    assert review_models(models, "claude-fable-5-1") == (
         Model("claude", "claude-fable-5-1", "high"),)
-    assert review_models(rules, "gpt-6-astra", "low") == (
+    assert review_models(models, "gpt-6-astra", "low") == (
         Model("codex", "gpt-6-astra", "low"),)
-    assert review_models(rules, "gpt-6-astra") == (
+    assert review_models(models, "gpt-6-astra") == (
         Model("codex", "gpt-6-astra", "high"),)
-    assert review_models(rules, effort="low") == (Model("codex", "gpt-6-sol", "low"),
-                                                  Model("claude", "claude-opus-5-5", "low"))
-    assert review_models(rules) == rules.models
+    assert review_models(models, effort="low") == (Model("codex", "gpt-6-sol", "low"),
+                                                   Model("claude", "claude-opus-5-5", "low"))
+    assert review_models(models) == models
+
+
+def test_a_review_with_no_models_configured_is_refused_naming_the_field(tmp_path: Path) -> None:
+    root = configured(repository(tmp_path), CONFIGURED.replace(MODELS, ""))
+
+    with pytest.raises(ReviewError, match="models.review"):
+        run_review(CHANGE, "design", root=root, runner=writing(review_text()),
+                   head=lambda _: HEAD)
+    # Refused before the reviewer ran: no record is published.
+    assert not [path for path in reviews_of(root).iterdir() if path.suffix == ".md"]
 
 
 def test_a_review_on_the_owners_model_is_recorded_as_an_override(tmp_path: Path) -> None:
@@ -273,6 +284,7 @@ def test_unknown_change_or_kind_is_refused(tmp_path: Path, change: str, kind: st
 def test_a_closeout_review_of_an_archived_change_is_recorded_in_the_archive(tmp_path: Path) -> None:
     archived = tmp_path / "openspec/changes/archive" / f"2026-10-14-{CHANGE}"
     archived.mkdir(parents=True)
+    configured(tmp_path)
 
     path = run_review(CHANGE, "closeout", root=tmp_path,
                       runner=writing(review_text("closeout")), head=lambda _: HEAD)
@@ -452,14 +464,25 @@ def test_a_ledger_commit_after_validation_admits_a_pre_closeout_review(tmp_path:
 DOCUMENTS = ["openspec/changes/README.md", f"{RECORDS}/specs/x/spec.md"]
 
 
-def test_a_document_commit_after_a_pre_closeout_triage_admits_the_next_review(
-        tmp_path: Path) -> None:
-    root = repository(tmp_path)
+INERT = CONFIGURED.replace("[repository]\n",
+                           '[repository]\ninert-paths = ["openspec/", "docs/"]\n')
+
+
+def _triaged_pre_closeout(tmp_path: Path, text: str) -> Path:
+    """A pre-closeout review triaged after a validation of an ancestor of HEAD, in a
+    repository configured with `text`."""
+    root = configured(repository(tmp_path), text)
     (reviews_of(root) / "03-validation.md").write_text(validation_text(VALIDATED, "passed"),
                                                        "utf-8")
     (reviews_of(root) / "04-pre-closeout.md").write_text("x", "utf-8")
     (reviews_of(root) / "04-pre-closeout.triage.md").write_text("## Next\n\nAnother round\n",
                                                                "utf-8")
+    return root
+
+
+def test_a_document_commit_after_a_pre_closeout_triage_admits_the_next_review(
+        tmp_path: Path) -> None:
+    root = _triaged_pre_closeout(tmp_path, INERT)
 
     path = run_review(CHANGE, "pre-closeout", root=root, head=lambda _: HEAD,
                       changed_since=lambda *_: DOCUMENTS,
@@ -468,9 +491,20 @@ def test_a_document_commit_after_a_pre_closeout_triage_admits_the_next_review(
     assert path.name == "05-pre-closeout.md"
 
 
+def test_with_no_inert_path_declared_a_document_commit_needs_validating(
+        tmp_path: Path) -> None:
+    """CW-n7ra: the engine reads no inert path of its own."""
+    root = _triaged_pre_closeout(tmp_path, CONFIGURED)
+
+    with pytest.raises(ReviewError, match="openspec/changes/README.md"):
+        run_review(CHANGE, "pre-closeout", root=root, head=lambda _: HEAD,
+                   changed_since=lambda *_: DOCUMENTS,
+                   runner=writing(review_text("pre-closeout")))
+
+
 def test_a_document_commit_before_any_pre_closeout_review_needs_validating(
         tmp_path: Path) -> None:
-    root = repository(tmp_path)
+    root = configured(repository(tmp_path), INERT)
     (reviews_of(root) / "03-validation.md").write_text(validation_text(VALIDATED, "passed"),
                                                        "utf-8")
 

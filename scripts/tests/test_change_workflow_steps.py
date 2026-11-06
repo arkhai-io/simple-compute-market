@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from change_workflow import steps
+from change_workflow import config, steps
 from change_workflow.common import StepError
 from change_workflow.graph import STEPS
 from change_workflow.steps import Model, load_steps
@@ -62,10 +62,11 @@ def test_the_step_table_names_each_step() -> None:
 
 
 def test_each_step_runs_on_the_models_its_work_needs() -> None:
-    """Design, triage, implementation, the merge, and closeout on Opus at high effort;
-    validation and archive cleanup on Sonnet at medium; the review on Codex, then
-    Claude."""
-    models = {name: rules.models for name, rules in load_steps().items()}
+    """This repository's configuration: design, triage, implementation, the merge, and
+    closeout on Opus at high effort; validation and archive cleanup on Sonnet at
+    medium; the review on Codex, then Claude."""
+    configuration = config.load(ROOT)
+    models = {name: configuration.step_models(name) for name in STEPS}
 
     assert models == {"design": (OPUS,), "plan": (OPUS,), "triage": (OPUS,),
                       "implement": (OPUS,), "merge": (OPUS,), "closeout": (OPUS,),
@@ -103,26 +104,34 @@ def test_no_rule_names_a_make_target_the_command_stands_behind() -> None:
 
 
 @pytest.mark.parametrize("models,problem", [
-    ("", "needs a skill and models"),
-    ("models = []\n", "a list of one or more models"),
-    ('models = [{ harness = "claude", model = "claude-fable-5-1" }]\n', "never runs on"),
-    ('models = [{ harness = "claude", model = "astra-2" }]\n', "never runs on"),
-    ('models = [{ harness = "claude", model = "claude-opus-5-5" }, '
-     '{ harness = "claude", model = "claude-sonnet-5-5" }]\n', "two models of one vendor"),
-    ('models = [{ harness = "claude", effort = "high" }]\n', "without a model"),
-    ('models = [{ harness = "codex", model = "gpt-6-sol" }]\n', "Codex runs only the review"),
-    ('models = [{ harness = "gemini", model = "g" }]\n', "harness 'gemini'"),
-    ('models = [{ harness = "claude", model = "m", speed = "fast" }]\n', "a key other than"),
+    ("[]", "must be a list of one or more models"),
+    ('[{ harness = "claude", model = "claude-opus-5-5" }, '
+     '{ harness = "claude", model = "claude-sonnet-5-5" }]', "two models of one vendor"),
+    ('[{ harness = "claude", effort = "high" }]', r"models.triage\[0\].model must be"),
+    ('[{ harness = "codex", model = "gpt-6-sol" }]', "Codex runs only the review"),
+    ('[{ harness = "gemini", model = "g" }]', r"harness must be one of claude, codex"),
+    ('[{ harness = "claude", model = "m", speed = "fast" }]', "speed is no field"),
 ])
-def test_a_row_naming_models_the_policy_forbids_is_refused(
-        tmp_path: Path, models: str, problem: str) -> None:
-    table = tmp_path / "steps.toml"
-    table.write_text(f'[steps.triage]\nskill = "change-triage"\n{models}', "utf-8")
-
+def test_models_the_policy_forbids_are_refused_naming_the_step(models: str,
+                                                                problem: str) -> None:
+    """CW-zq4h: the configuration's models are held to the policy as it is read."""
     with pytest.raises(StepError, match=problem) as refused:
-        load_steps(table)
+        config.check(f"[models]\ntriage = {models}\n", Path("workflow.toml"))
 
-    assert "triage row" in str(refused.value)
+    assert "models.triage" in str(refused.value)
+
+
+def test_a_row_names_two_models_of_one_vendor() -> None:
+    """CW-zq4h's scenario: the engine refuses the configuration, naming the step."""
+    with pytest.raises(StepError, match="for the review step"):
+        config.check('[models]\nreview = [{ harness = "codex", model = "gpt-6-sol" }, '
+                     '{ harness = "codex", model = "gpt-6-luna" }]\n', Path("workflow.toml"))
+
+
+def test_the_step_table_holds_no_models() -> None:
+    """The step table names each step's skill and rules; models are the
+    configuration's, and a row carrying them is accepted unread."""
+    assert not hasattr(load_steps()["design"], "models")
 
 
 PUSHES = ["git push origin HEAD", "scripts/change-workflow push", "uv run git push",

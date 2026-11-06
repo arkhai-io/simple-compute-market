@@ -11,8 +11,8 @@ file, every field is absent.
 
 A hook, a validation part's command, or the preflight holds one shell command or a
 list of them. A command names the values it needs as placeholders the engine
-fills in, shell-quoted: `{change}` and `{base}` anywhere, `{remote}` only in
-`pre-push`, `{owed}` only in an owed part's `run`, `start`, and `collect`, and
+fills in, shell-quoted: `{change}` and `{base}` anywhere but `pre-push`, which has
+`{remote}` alone, `{owed}` only in an owed part's `run`, `start`, and `collect`, and
 `{after}` only in a `collect`. `openspec.command` takes none: the arguments it is
 run with follow it. A placeholder is a name in braces not preceded by `$`, so the
 shell's own `${VAR}` passes through; any other name in braces, known or not, is
@@ -23,11 +23,16 @@ that need it, naming the field, before anything is launched (`missing`); an
 explicit empty value counts as declared, so a repository says "nothing here"
 deliberately, but a validation part always names a command.
 
+Each step's models, in order of preference, and the orchestrating session's model
+are held to the workflow's model policy as they are read: no step names two models
+of one vendor, and only the review names a Codex model. No model is forbidden: a
+repository that never wants one does not list it.
+
 `config` lists every field and how it resolved, `config load <step>` the documents
 a step's skill reads, and `config parts <change>` validation's plan for the change.
 
 Contract: openspec/specs/change-workflow/spec.md, CW-f3qk, CW-w8ne, CW-t5hz,
-CW-v2dq, CW-l7hn, CW-o6kc, CW-g4oz, and CW-i2we.
+CW-v2dq, CW-l7hn, CW-o6kc, CW-g4oz, CW-i2we, CW-n7ra, CW-ebmo, CW-zq4h, and CW-w2ld.
 """
 
 from __future__ import annotations
@@ -35,6 +40,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shlex
 import sys
 import tomllib
 from dataclasses import dataclass, field
@@ -43,7 +49,7 @@ from typing import Any, Mapping, Sequence
 
 from .common import ORCHESTRATOR, StepError, repository_root
 from .graph import STEPS
-from .steps import HARNESSES
+from .steps import HARNESSES, Model
 
 # The configuration's place in the repository the command acts on.
 CONFIGURATION = Path(".agents/workflow.toml")
@@ -67,8 +73,10 @@ _TABLES: dict[str, tuple[str, ...]] = {
     "models": (ORCHESTRATOR, *STEPS),
     "validation": ("preflight", "parts"),
 }
-# The placeholders every command may use.
+# The placeholders every command may use, but `pre-push`'s: the guarded push pushes a
+# branch, not a change, so it has the remote alone to give.
 _EVERYWHERE = frozenset({"change", "base"})
+_PRE_PUSH = frozenset({"remote"})
 PLACEHOLDERS = frozenset({"change", "base", "remote", "owed", "after"})
 # A name in braces, not the shell's `${…}`.
 PLACEHOLDER = re.compile(r"(?<!\$)\{([A-Za-z_][A-Za-z0-9_-]*)\}")
@@ -79,13 +87,16 @@ def placeholders(command: str) -> list[str]:
     return PLACEHOLDER.findall(command)
 
 
-def inert(path: str, inert_paths: Sequence[str] | None) -> bool:
-    """Whether `path`, relative to the root, lies under one of the inert paths: an
-    entry names a directory or a file, matched whole, so `docs/` covers `docs/a.md`
-    and not `docsite/a.md`. With none declared, no path is inert."""
-    return any(path == entry.rstrip("/") or path.startswith(entry.rstrip("/") + "/")
-               for entry in inert_paths or ())
+def fill(command: str, values: Mapping[str, str]) -> str:
+    """`command` with each placeholder replaced by its value, shell-quoted. The
+    configuration's check has refused any placeholder unknown where it is used, so a
+    placeholder without a value is one this invocation does not supply."""
+    def value(name: str) -> str:
+        if name not in values:
+            raise StepError(f"{{{name}}} has no value in this run")
+        return shlex.quote(values[name])
 
+    return PLACEHOLDER.sub(lambda match: value(match.group(1)), command)
 
 
 # Required fields, by the name `missing` reports.
@@ -156,6 +167,25 @@ class Configuration:
         each once."""
         return list(dict.fromkeys((*self.load.get("common", ()), *self.load.get(step, ()))))
 
+    def step_models(self, step: str) -> tuple[Model, ...]:
+        """The models a step's unattended runs use, in order of preference; refused,
+        naming the field, when the configuration names none."""
+        require(self, f"models.{step}", needed_by=f"an unattended {step} run")
+        return tuple(Model(entry["harness"], entry["model"], entry.get("effort"))
+                     for entry in self.models[step])
+
+    def orchestrator_model(self) -> Model:
+        """The orchestrating session's model and effort; refused, naming the field,
+        when the configuration names none."""
+        require(self, f"models.{ORCHESTRATOR}", needed_by="the orchestrating session")
+        entry = self.models[ORCHESTRATOR]
+        return Model("claude", entry["model"], entry.get("effort"))
+
+    def evidence(self) -> list[str]:
+        """Every declared part's evidence directory, each once, in declaration order."""
+        return list(dict.fromkeys(part.evidence for part in self.parts or ()
+                                  if part.evidence is not None))
+
     @property
     def shown(self) -> str:
         return CONFIGURATION.as_posix()
@@ -218,16 +248,32 @@ def _model(where: str, entry: Any, *, harness: bool) -> dict[str, Any]:
 
 
 def _models(table: dict[str, Any]) -> dict[str, Any]:
+    """Each step's models, in order of preference, refusing what the workflow's model
+    policy forbids, naming the step.
+
+    A harness is one vendor's, so two entries of one harness are two models of one
+    vendor: an outage or a usage limit takes both down, and the second is no
+    fallback. Codex runs only the review, the one step its read-only sandbox can
+    hold to its limits; a writing sandbox cannot refuse a commit or a relock.
+    """
     models: dict[str, Any] = {}
     for key, value in table.items():
         where = f"models.{key}"
         if key == ORCHESTRATOR:
             models[key] = _model(where, value, harness=False)
             continue
-        if not isinstance(value, list):
-            raise ConfigError(f"{where} must be a list of models; got {value!r}")
-        models[key] = [_model(f"{where}[{index}]", entry, harness=True)
-                       for index, entry in enumerate(value)]
+        if not isinstance(value, list) or not value:
+            raise ConfigError(f"{where} must be a list of one or more models; got {value!r}")
+        entries = [_model(f"{where}[{index}]", entry, harness=True)
+                   for index, entry in enumerate(value)]
+        harnesses = [entry["harness"] for entry in entries]
+        if len(set(harnesses)) != len(harnesses):
+            raise ConfigError(f"{where} names two models of one vendor for the {key} step, "
+                              "which an outage or a usage limit takes down together")
+        if "codex" in harnesses and key != "review":
+            raise ConfigError(f"{where} names a Codex model for the {key} step; Codex runs "
+                              "only the review")
+        models[key] = entries
     return models
 
 
@@ -312,7 +358,7 @@ def check(text: str, path: Path) -> Configuration:
     repository = tables.get("repository", {})
     hooks_table = tables.get("hooks", {})
     hooks = {name: _commands(f"hooks.{name}", value,
-                             _EVERYWHERE | ({"remote"} if name == "pre-push" else set()))
+                             _PRE_PUSH if name == "pre-push" else _EVERYWHERE)
              for name, value in hooks_table.items()}
     validation = tables.get("validation", {})
     load = {key: _strings(f"load.{key}", value)
@@ -371,15 +417,21 @@ def missing(configuration: Configuration, *fields: str) -> list[str]:
     return absent
 
 
-# The required fields `start` checks for each step: implementation, triage, and the
-# merge make functional commits, so they need the functional checks; validation runs
-# the declared parts.
+# The name `start` gives the orchestrating session, which is no step of the graph.
+ORCHESTRATOR_STEP = "orchestrate"
+
+# The required fields `start` checks for each step: every step but the review, which
+# writes nothing, pushes, so it needs the protected branches; implementation, triage,
+# and the merge make functional commits, so they need the functional checks;
+# validation runs the declared parts.
 STEP_NEEDS: dict[str, tuple[str, ...]] = {
-    "implement": (PRE_COMMIT_FUNCTIONAL,),
-    "triage": (PRE_COMMIT_FUNCTIONAL,),
-    "merge": (PRE_COMMIT_FUNCTIONAL,),
-    "validate": (PARTS,),
-}
+    step: (PROTECTED_BRANCHES,) for step in STEPS if step != "review"}
+STEP_NEEDS.update({
+    "implement": (PROTECTED_BRANCHES, PRE_COMMIT_FUNCTIONAL),
+    "triage": (PROTECTED_BRANCHES, PRE_COMMIT_FUNCTIONAL),
+    "merge": (PROTECTED_BRANCHES, PRE_COMMIT_FUNCTIONAL),
+    "validate": (PROTECTED_BRANCHES, PARTS),
+})
 
 
 def require(configuration: Configuration, *fields: str, needed_by: str) -> None:
@@ -391,9 +443,16 @@ def require(configuration: Configuration, *fields: str, needed_by: str) -> None:
                           + "; an empty value declares it deliberately")
 
 
-def require_for_step(configuration: Configuration, step: str) -> None:
-    """Refuse a step whose required fields are absent, before anything is launched."""
-    require(configuration, *STEP_NEEDS.get(step, ()), needed_by=step)
+def require_for_step(configuration: Configuration, step: str, *,
+                     unattended: bool = False) -> None:
+    """Refuse a step whose required fields are absent, before anything is launched:
+    an unattended run also needs its step's models, and the orchestrating session
+    needs its own."""
+    if step == ORCHESTRATOR_STEP:
+        require(configuration, f"models.{ORCHESTRATOR}", needed_by="the orchestrating session")
+        return
+    require(configuration, *STEP_NEEDS.get(step, ()),
+            *((f"models.{step}",) if unattended else ()), needed_by=step)
 
 
 # Resolution: every field and how it resolved.

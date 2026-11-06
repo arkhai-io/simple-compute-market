@@ -20,6 +20,9 @@ after-functional-change = ["make lock"]
 pre-commit-functional = ["make check-packaging", "make test"]
 # change-closeout, once, before the archive.
 pre-archive = ["make check-packaging", "make check-architecture-change CHANGE={change}"]
+# Engine, guarded push: before anything is sent, under Git's hook contract.
+pre-push = ["python3 scripts/check_public_content.py --pre-push {remote}",
+            "python3 scripts/check_secrets.py --pre-push {remote}"]
 # Engine, `clone`: as a clone is made, in the background; implementation and
 # validation wait for it.
 post-clone = "make init"

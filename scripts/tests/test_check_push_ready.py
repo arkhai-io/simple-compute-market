@@ -2,14 +2,17 @@
 
 The guard's meaning is Git's own state — attachment, upstream configuration, what a
 push sends — so a temporary repository with a bare remote is the lowest level that
-proves it; a fake Git would only restate the guard's assumptions. The repository's
-pre-push checks are absent unless a test provides one.
+proves it; a fake Git would only restate the guard's assumptions. Each repository's
+workflow configuration protects `main` and `dev` and declares no `pre-push` unless a
+test provides one.
 """
 
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -18,9 +21,13 @@ from change_workflow import cli
 from change_workflow import push as guard
 from change_workflow.common import SESSION_ID, UNATTENDED_RUN
 from change_workflow.running import invocations_directory, kept_invocations
-from change_workflow_fixtures import CHANGE, SESSION, VALID, FakeClaude, event_lines, make_wrapper
+from change_workflow_fixtures import (CHANGE, SESSION, VALID, FakeClaude, configured, event_lines,
+                                      make_wrapper)
 
-PUBLIC_CONTENT, SECRETS = (script for script, *_ in guard.PRE_PUSH_CHECKS)
+# Two pre-push checks a test provides, each a script the configuration's `pre-push`
+# runs.
+PUBLIC_CONTENT, SECRETS = "checks/first_check.py", "checks/second_check.py"
+PROTECTED = '[repository]\nprotected-branches = ["main", "dev"]\n'
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -53,7 +60,21 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     _git(work, "push", "-q", "-u", "origin", "dev")
     _git(work, "checkout", "-q", "-b", "feat/change")
     _commit(work, "slice")
+    _configure(work)
     return work
+
+
+def _configure(repo: Path, text: str = PROTECTED, checks: tuple[str, ...] = ()) -> None:
+    """The repository's workflow configuration, ignored so the worktree stays clean:
+    `text`, and a `pre-push` running each of `checks` as Git runs a pre-push hook."""
+    pre_push = ("[hooks]\npre-push = [" + ", ".join(
+        f'"{shlex.quote(sys.executable)} {name} --pre-push {{remote}}"' for name in checks)
+        + "]\n") if checks else ""
+    configured(repo, text + pre_push)
+    exclude = repo / ".git/info/exclude"
+    if "/.agents/" not in exclude.read_text("utf-8"):
+        with exclude.open("a", encoding="utf-8") as stream:
+            stream.write("/.agents/\n")
 
 
 def _remote_head(repo: Path, branch: str) -> str:
@@ -109,12 +130,35 @@ def test_a_protected_branch_is_refused(repo: Path, branch: str) -> None:
     _git(repo, "checkout", "-q", "-B", branch)
     before = _remote_head(repo, branch)
 
-    target, problems = guard.check(repo)
+    target, problems = guard.check(repo, ("main", "dev"))
 
     assert target is None
     assert any("protected" in problem for problem in problems)
     assert guard.main(["push"], root=repo) == 1
     assert _remote_head(repo, branch) == before
+
+
+def test_a_configured_protected_branch_is_refused_and_no_other(
+        repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-f3qk: the engine holds no branch name of its own."""
+    _configure(repo, '[repository]\nprotected-branches = ["trunk"]\n')
+    _git(repo, "checkout", "-q", "-B", "trunk")
+
+    assert guard.main(["push"], root=repo) == 1
+    assert "trunk is a protected branch" in capsys.readouterr().err
+    assert _remote_head(repo, "trunk") == ""
+
+    _git(repo, "checkout", "-q", "-B", "dev")
+    assert guard.main(["push"], root=repo) == 0
+
+
+def test_a_push_with_no_protected_branches_declared_is_refused_naming_the_field(
+        repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _configure(repo, "")
+
+    assert guard.main(["push"], root=repo) == 1
+    assert "repository.protected-branches" in capsys.readouterr().err
+    assert _remote_head(repo, "feat/change") == ""
 
 
 @pytest.mark.parametrize("dirt", ["tracked", "untracked"])
@@ -147,18 +191,29 @@ def test_every_refusal_is_reported_at_once(repo: Path) -> None:
     _git(repo, "branch", "--set-upstream-to=origin/dev")
     (repo / "scratch.txt").write_text("scratch", "utf-8")
 
-    _, problems = guard.check(repo)
+    _, problems = guard.check(repo, ("main", "dev"))
 
     assert len(problems) == 2
 
 
-def _provide_check(repo: Path, source: str, name: str = PUBLIC_CONTENT) -> None:
-    """Give the repository a pre-push check, ignored so the worktree stays clean."""
-    script = repo / name
-    script.parent.mkdir(parents=True, exist_ok=True)
-    script.write_text(source, "utf-8")
-    with (repo / ".git/info/exclude").open("a", encoding="utf-8") as exclude:
-        exclude.write(f"/{name}\n")
+def _provide_check(repo: Path, source: str, *names: str) -> None:
+    """Give the repository pre-push checks running `source`, each ignored so the
+    worktree stays clean, and declare them its `pre-push`."""
+    for name in names or (PUBLIC_CONTENT,):
+        script = repo / name
+        script.parent.mkdir(parents=True, exist_ok=True)
+        script.write_text(source, "utf-8")
+        with (repo / ".git/info/exclude").open("a", encoding="utf-8") as exclude:
+            exclude.write(f"/{name}\n")
+    _configure(repo, checks=names or (PUBLIC_CONTENT,))
+
+
+def test_the_repository_provides_no_pre_push_check(repo: Path) -> None:
+    """CW-p7kq: with no `pre-push` declared, the push goes once its own check passes."""
+    head = _git(repo, "rev-parse", "HEAD")
+
+    assert guard.main(["push"], root=repo) == 0
+    assert _remote_head(repo, "feat/change") == head
 
 
 def test_the_pre_push_check_is_run_as_a_git_hook_and_its_refusal_stops_both_actions(
@@ -173,8 +228,11 @@ def test_the_pre_push_check_is_run_as_a_git_hook_and_its_refusal_stops_both_acti
 
     for action in ("check", "push"):
         assert guard.main([action], root=repo) == 1
-        err = capsys.readouterr().err
-        assert f"REFUSED: --pre-push origin | {ref} {head} {ref} {'0' * 40}" in err
+        captured = capsys.readouterr()
+        # The hook's reasons are on standard error, and nothing of it on standard
+        # output.
+        assert f"REFUSED: --pre-push origin | {ref} {head} {ref} {'0' * 40}" in captured.err
+        assert captured.out == ""
     assert _remote_head(repo, "feat/change") == ""
 
 
@@ -184,7 +242,9 @@ def test_a_pre_push_check_failing_silently_is_named(
     _provide_check(repo, "import sys\nsys.exit(3)\n")
 
     assert guard.main(["push"], root=repo) == 1
-    assert "exited with status 3" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert f"{PUBLIC_CONTENT} --pre-push origin (exit 3)" in err
+    assert "pre-push hook refused the push" in err
     assert _remote_head(repo, "feat/change") == ""
 
 
@@ -194,6 +254,9 @@ def test_a_steps_push_refused_by_the_pre_push_hook_is_on_the_runs_line(repo: Pat
     _provide_check(repo, "import sys\nprint('REFUSED: a private path')\nsys.exit(1)\n")
     with (repo / ".git/info/exclude").open("a", encoding="utf-8") as exclude:
         exclude.write("/openspec/changes/*/reviews/\n")
+    # The validation run's own model, beside the guarded push's configuration.
+    configured(repo, (repo / ".agents/workflow.toml").read_text("utf-8")
+               + '\n[models]\nvalidate = [{ harness = "claude", model = "claude-sonnet-5-5" }]\n')
     pushed: list[int] = []
 
     class Pushing(FakeClaude):
@@ -224,47 +287,11 @@ def test_a_push_outside_any_session_keeps_nothing(repo: Path) -> None:
     assert kept is not None and not kept.exists()
 
 
-def _provide_this_repositorys_check(repo: Path) -> None:
-    """This repository's own pre-push check, the public-content scan, where the
-    engine looks for it."""
-    provided = Path(__file__).resolve().parents[2] / PUBLIC_CONTENT
-    _provide_check(repo, provided.read_text("utf-8"))
-
-
-def test_this_repositorys_check_passes_a_clean_push(repo: Path) -> None:
-    _provide_this_repositorys_check(repo)
-
-    assert guard.main(["push"], root=repo) == 0
-    assert _remote_head(repo, "feat/change") == _git(repo, "rev-parse", "HEAD")
-
-
-@pytest.mark.parametrize("removed_later", [False, True])
-def test_private_content_refuses_publication(
-    repo: Path, capsys: pytest.CaptureFixture[str], removed_later: bool
-) -> None:
-    _provide_this_repositorys_check(repo)
-    # Synthetic prohibited account assembled so this test remains publishable.
-    private = "/home/" + "fixture-person" + "/work"
-    (repo / "notes.md").write_text(private, "utf-8")
-    _git(repo, "add", "notes.md")
-    _git(repo, "commit", "-qm", "notes")
-    if removed_later:
-        _git(repo, "rm", "-q", "notes.md")
-        _git(repo, "commit", "-qm", "remove notes")
-
-    assert guard.main(["push"], root=repo) == 1
-    assert _remote_head(repo, "feat/change") == ""
-    err = capsys.readouterr().err
-    assert "personal home path" in err
-    assert private not in err
-
-
 def test_every_pre_push_check_runs_and_each_refusal_is_reported(
     repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    for name in (PUBLIC_CONTENT, SECRETS):
-        _provide_check(repo, f"import sys\nprint('REFUSED: {name}', file=sys.stderr)\n"
-                             "sys.exit(1)\n", name)
+    _provide_check(repo, "import sys\nprint('REFUSED: ' + sys.argv[0], file=sys.stderr)\n"
+                         "sys.exit(1)\n", PUBLIC_CONTENT, SECRETS)
 
     assert guard.main(["push"], root=repo) == 1
 

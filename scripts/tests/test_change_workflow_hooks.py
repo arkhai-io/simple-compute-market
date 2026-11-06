@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from change_workflow import config, hooks
+from change_workflow import config, hooks, records
 from change_workflow.cli import main
 from change_workflow.common import SESSION_ID, StepError
 from change_workflow.graph import HOOK_STEPS, STEPS
@@ -23,7 +23,7 @@ from change_workflow.log import read_log
 from change_workflow.review import review_and_log, run_review
 from change_workflow.running import (drop_invocations, invocations_directory, keep_invocations,
                                      kept_invocations)
-from change_workflow_fixtures import (CHANGE, NETWORK, SESSION, VALID, FakeClaude,
+from change_workflow_fixtures import (CHANGE, MODELS, NETWORK, SESSION, VALID, FakeClaude,
                                       claude_review, codex_missing, configured, event_lines,
                                       make_wrapper, review_text)
 from change_workflow_fixtures import repository as repository_with_records
@@ -308,7 +308,7 @@ def test_an_absent_pre_commit_runs_the_defaults_and_records_its_skip(tmp_path: P
                                         ("docsite/a.md", False), ("openspec/x", False),
                                         ("README.md", True)])
 def test_an_inert_path_is_matched_whole(path: str, inert: bool) -> None:
-    assert config.inert(path, ["docs/", "README.md"]) == inert
+    assert records.inert(path, ["docs/", "README.md"]) == inert
 
 
 def test_check_change_runs_the_defaults_alone(tmp_path: Path) -> None:
@@ -742,7 +742,8 @@ def test_validations_helm_part_fails(repository: Path) -> None:
     """CW-q5fy: library integration, a real `sh` and Git directory; the run's line
     lists the part with its resolved command and exit status 2."""
     configured(_ignoring_records(repository),
-               "[validation.parts.helm]\nrun = 'exit 2'\nevidence = '.snapshot/validation/'\n")
+               "[validation.parts.helm]\nrun = 'exit 2'\nevidence = '.snapshot/validation/'\n"
+               + MODELS)
     ran: list[int] = []
 
     class Validating(FakeClaude):

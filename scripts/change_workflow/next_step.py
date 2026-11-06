@@ -93,7 +93,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from . import graph
+from . import config, graph
 from .clone import ABSENT as BOOTSTRAP_ABSENT
 from .clone import DEFAULT_FROM
 from .clone import FAILED as BOOTSTRAP_FAILED
@@ -108,7 +108,7 @@ from .graph import owner as _owner
 from .index import INDEX, Row, index_rows
 from .log import (LOG, NewerFormat, branch_decisions, log_path, older, ran, read_log,
                   refuse_newer, standing, undeclared)
-from .records import (RECORD as _RECORD_FILE, ChangedSince, changed_since, is_documentation, is_record,
+from .records import (RECORD as _RECORD_FILE, ChangedSince, changed_since, exempting, is_record,
                       latest_validation, validation_problem, validation_result)
 from .round_view import RoundError, View, open_view
 
@@ -357,6 +357,11 @@ def _merging(root: Path) -> bool:
     return merge.returncode == 0
 
 
+def _inert_paths(root: Path) -> tuple[str, ...] | None:
+    """The repository's inert paths, from its workflow configuration."""
+    return config.load(root).inert_paths
+
+
 def _uncommitted(root: Path, path: Path) -> bool:
     """Whether `path` has changes Git has not committed, or Git cannot say."""
     status = subprocess.run(["git", "status", "--porcelain", "--", str(path)], cwd=root,
@@ -590,9 +595,13 @@ class Computation:
                  clone: Callable[[Path, str], Path | None] = clone_of,
                  bootstrap: Callable[[Path], Bootstrap] = bootstrap_state,
                  merging: Callable[[Path], bool] = _merging,
-                 join: Join = ROUND_JOIN) -> None:
+                 join: Join = ROUND_JOIN,
+                 inert_paths: Callable[[Path], Sequence[str] | None] = _inert_paths) -> None:
         self.root = root
         self.state = State(change)
+        # Read once, and checked whole as the configuration always is: a malformed
+        # file leaves the change unclassified rather than routed on half of it.
+        self._exempt = {graph.RECORDS: is_record, graph.INERT: exempting(inert_paths(root))}
         self._merging = merging
         self._head = head
         self._view = view
@@ -819,9 +828,9 @@ class Computation:
             return self.clone_step("this clone's bootstrap was never started, so its "
                                    "creation is unfinished", {"CHANGE": state.change})
         if state.bootstrap.state == BOOTSTRAP_FAILED:
-            # Not retried by itself: `make init` failing is almost always the
+            # Not retried by itself: a bootstrap failing is almost always the
             # environment, and a silent retry would hide it.
-            return _owner(f"the clone's bootstrap, `make init`, failed — an environmental "
+            return _owner(f"the clone's bootstrap, its `post-clone`, failed — an environmental "
                           f"failure; its log is {state.bootstrap.log}, and `make change-clone "
                           f"CHANGE={state.change}` in the workspace restarts it",
                           environmental=True, log=str(state.bootstrap.log))
@@ -839,7 +848,7 @@ class Computation:
         if result.get("step") in ("design", "plan") or phase in ("design", "planning"):
             return None
         return {"step": "wait", "waits": result,
-                "reason": f"the clone's bootstrap, `make init`, is still running (log: "
+                "reason": f"the clone's bootstrap, its `post-clone`, is still running (log: "
                           f"{state.bootstrap.log}); {result['step']} waits for it"}
 
     def route(self) -> Result:
@@ -1421,10 +1430,11 @@ class Computation:
                    and e.get("resolves") == run.get("seq")
                    and isinstance(e.get("next"), Mapping) for e in self.state.log)
 
-    def validated(self, why: str, exempt: Callable[[str], bool] = is_record,
+    def validated(self, why: str, exempt: str = graph.RECORDS,
                   failed: Node | None = None) -> Result | None:
         """None when the latest validation passed for `HEAD`, or for an ancestor it
-        differs from only in `exempt` paths, changes' records by default. Otherwise
+        differs from only in `exempt` paths, changes' records by default, or those
+        and the inert paths (`graph.INERT`). Otherwise
         validation, when the latest record describes another commit; `failed`, when
         given and the record describes `HEAD` and failed; or the owner, when it
         describes `HEAD` and did not pass — an `inconclusive` result is missing
@@ -1434,7 +1444,7 @@ class Computation:
         if head is None:
             return {"step": "validate", "reason": f"{why}: HEAD cannot be read"}
         if problem := validation_problem(reviews, head, self.root, self._changed_since,
-                                         require_passed=False, exempt=exempt):
+                                         require_passed=False, exempt=self._exempt[exempt]):
             return {"step": "validate", "reason": f"{why}: {problem}"}
         record = latest_validation(reviews)
         result = validation_result(record) if record else None
@@ -1451,7 +1461,7 @@ class Computation:
                           validation=result)
         return None
 
-    def fixed_since(self, review: Record, exempt: Callable[[str], bool] = is_record) -> bool:
+    def fixed_since(self, review: Record, exempt: str = graph.RECORDS) -> bool:
         """Whether `HEAD` changed more than `exempt` paths, changes' records by
         default, since `review` read it: a fix the triage accepted has been
         committed."""
@@ -1462,11 +1472,12 @@ class Computation:
         if changed is None:
             # Not an ancestor: HEAD is not the reviewed commit, however it moved.
             return True
-        return any(not exempt(path) for path in changed)
+        return any(not self._exempt[exempt](path) for path in changed)
 
-    def changed_outside_documentation(self, review: Record) -> str | None:
-        """A path outside `openspec/` and `docs/` that `HEAD` changes since the commit
-        `review` read, if there is one: a correction that needs validating."""
+    def changed_outside_inert(self, review: Record) -> str | None:
+        """A path outside the inert paths and changes' records that `HEAD` changes
+        since the commit `review` read, if there is one: a correction that needs
+        validating."""
         reviewed, head = review.reviewed_commit, self.state.head
         if reviewed is None or head is None or head.startswith(reviewed):
             return None
@@ -1474,7 +1485,7 @@ class Computation:
         if changed is None:
             # Not an ancestor: what HEAD changes since it cannot be told.
             return f"{head[:12]}, which does not descend from {reviewed[:12]},"
-        return next((path for path in changed if not is_documentation(path)), None)
+        return next((path for path in changed if not self._exempt[graph.INERT](path)), None)
 
     def blocked_on_prerequisite(self) -> Result | None:
         """A design that ended blocked, until its prerequisite's row reaches this
