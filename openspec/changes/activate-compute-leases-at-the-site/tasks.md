@@ -323,17 +323,24 @@ compute contract (D3; `compute-provisioning-contract` "A lease view shows when t
 was activated"). Touches `provisioning/compute/contracts`, `provisioning/compute` and
 the provisioning service's tests.
 
-- [ ] 5.1 In `provisioning/compute/contracts/src/compute_provisioning_contracts/contracts.py`,
+- [x] 5.1 In `provisioning/compute/contracts/src/compute_provisioning_contracts/contracts.py`,
   add `activated_at_utc: datetime | None = None` to `LeaseView`, its docstring saying
   the site's activation records it and that null means no activation is recorded
   (08 F3); the contract version stays `3.0` (D3). In
   `provisioning/compute/src/compute_provisioning/leases.py`, map it in `lease_view()`
   through `_parsed`, as the window is (D9).
-- [ ] 5.2 Unit tests: `provisioning/compute/contracts/tests/unit/test_contracts.py` — a
+  The field's comment sits on the field (`#:`) and adds D1's clause that the instant
+  is a lease-lifecycle fact, not delivery evidence; the class docstring's and
+  `leases.py`'s module docstring's lists of writers name the site's capacity API as
+  the one that records activation.
+- [x] 5.2 Unit tests: `provisioning/compute/contracts/tests/unit/test_contracts.py` — a
   view with the instant round-trips; a payload without the field parses with `None`;
   `provisioning/compute/tests/unit/test_lease_route_service.py` — `lease_view()` maps
   a recorded instant and a null.
-- [ ] 5.3 Extend `provisioning/compute/service/tests/integration/test_leases_api.py`
+  Done as planned, through `LeaseRouteService.get` over the fake lease registry for
+  the mapping. Evidence: `make -C provisioning/compute/contracts test` (unit) 154
+  passed; `make -C provisioning/compute test` 528 passed.
+- [x] 5.3 Extend `provisioning/compute/service/tests/integration/test_leases_api.py`
   (application integration through the typed compute provisioning client and site
   client against the in-process app): a lease activated through the site client reads
   through `get_lease` and `list_leases` with the same instant; an unactivated lease
@@ -342,16 +349,45 @@ the provisioning service's tests.
   or the compute route table's tests, that no compute lease route accepts an
   activation (`compute-provisioning-contract` scenario "A caller looks for an
   activation operation on the contract").
-- [ ] 5.4 Run `make check-packaging` once every suite above passes, and resolve what it
+  `test_a_lease_shows_the_instant_the_site_s_activation_recorded`, parametrized
+  over `vm` and `bare_metal`, reserves, commits and activates through the typed
+  `SiteCapacityClient` (only the host and its declaration are seeded directly), and
+  reads an activated and an unactivated lease through the seller's `get_lease` and
+  the operator's `list_leases` on the typed compute client: the activated lease
+  carries the site's instant, parsed, on both; the other carries null on both.
+  The confirmation that no lease route accepts an activation is a unit test of the
+  service's assembled route table,
+  `test_route_table_composition.py::test_the_lease_routes_read_and_end_leases_and_none_activates_one`:
+  every contribution's lease routes are pinned to exactly list, get,
+  release-oversight, terminate, retry-release and force-release, so any added lease
+  route fails it. The endpoint-coverage test needed no change. In the same file, an
+  existing test and docstring that called the recording of an executor target
+  "activation" now say the fulfillment became active, so the word has one meaning.
+  Evidence: `make -C provisioning/compute/client test` 86 passed;
+  `make -C provisioning/compute/service test` unit 648 passed, application
+  integration 584 passed.
+- [x] 5.4 Run `make check-packaging` once every suite above passes, and resolve what it
   reports (`AGENTS.md`, "Tests and diagnostics"); no section changes a dependency or a
   lock, so it is expected to pass unchanged.
+  After `make dist-ci` and `make test` passed on this section's final tree,
+  `make check-packaging` passed unchanged (every lock current, layer, scope,
+  dependency and kind rules hold). Sections 2–4 also ran it before their commits;
+  section 1 did not. `make check-change` passed. No typing check is part of the
+  plan or of `make test`; none was run.
 
 Verification point: `make -C provisioning/compute/contracts test`;
 `make -C provisioning/compute test`; `make -C provisioning/compute/client test`;
 `make -C provisioning/compute/service test`; `make test`; `make check-packaging`.
 End-to-end: `e2e_deal`, `e2e_bare_metal_deal` and `e2e_bare_metal_mock_deal` read
 `LeaseView` for end reports during recovery and keep passing with the optional field
-present and null; none activates. None is owed.
+present and null; none activates. None is owed. Corrected at implementation: every
+scenario reading `LeaseView` reads it with the field present and null, and none
+asserts on it or activates. Those that read it include `e2e_deal` and
+`e2e_bare_metal_mock_deal` (the shared compute-deal stages, through
+`e2e-tests/tests/e2e/roles/helpers/compute_deal.py`), the VM lifecycle scenarios
+built on `e2e-tests/tests/e2e/roles/scenarios/vms/lifecycle_deal.py`, and the real
+lanes; `e2e_bare_metal_deal` and the real-provisioning lanes need a real host, so
+no pipeline lane runs them. No `Owed by validation:` line.
 
 ## 6. Closeout
 
