@@ -339,6 +339,43 @@ is task 1.2. No runtime implementation, new tests, deployment or
 permanent-document promotion was performed; packaging and runtime suites are future
 implementation gates, not claimed evidence here.
 
+## Dependency re-verification (2026-11-06)
+
+The stacked resize implementation does not give `Agreement.amount` the meaning
+D2 assumes. Its `design.md`, "Slice B scalar and payment boundary", deliberately
+keeps policy scalars separate from monetary outcomes:
+
+- `domains/vms/negotiation/src/arkhai_vms_negotiation/amounts.py` applies the
+  multiplier as exact rational arithmetic, rounds upward once, and refuses a
+  result above uint256. The default floor is 10,000 basis points.
+- `domains/vms/storefront/src/market_storefront/negotiation_runtime.py`,
+  `_build_response_artifacts` and `_with_agreement`, put that computed payment
+  in the Agreement and mechanism artifacts. The scalar survives in the transcript
+  and the thread's `agreed_price`, not in `Agreement.amount`.
+- `domains/vms/storefront/tests/integration/test_vm_multiplier.py` explicitly
+  asserts the derived monetary amount in the Agreement, persisted Agreement
+  bytes and settlement plan. The existing test passes on the merged stack.
+- `core/tests/unit/test_rate_helpers.py` still verifies truncating generic rate
+  arithmetic. Resize did not move its upward-rounding shape quote into core.
+- The registry top-level `rate_structure` and retained seller publication proof
+  are available after PR #349's merge; their carrier/authority decisions D-a–D-e
+  are not reopened by this finding.
+
+**Decision needed before task 1.1 can close:** either preserve the existing
+monetary Agreement carrier and make the unit-bearing accessor label the accepted
+monetary quote (with recurring amounts derived per period before acceptance), or
+change the accepted Agreement to carry the multiplier, together with an explicit
+acceptance-bound pricing carrier and coordinated settlement-reader migration.
+The former is recommended because it preserves the signed and persisted
+settlement contract delivered by resize. It requires revising D2 and the
+10,000-bps Agreement scenario, not silently interpreting today's monetary amount
+as basis points. The latter follows D2's present wording but is a protocol and
+recovery change, not a mechanical accessor migration. No choice is made here;
+production behavior remains unchanged until the owner answers.
+
+Evidence and repeatable focused commands:
+`docs/attachments/negotiate-open-ended-compute-terms/dependency-contract.md`.
+
 ## Design promotion record
 
 Destinations are planned, not claims of implemented behavior.

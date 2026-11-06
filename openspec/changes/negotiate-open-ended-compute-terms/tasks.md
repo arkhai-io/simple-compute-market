@@ -1,6 +1,7 @@
 # Tasks — open-ended compute terms
 
-Design-stage plan; no implementation is claimed. Verification levels follow
+Implementation started on the stacked resize and registry branches. No product
+behavior has changed yet. Verification levels follow
 `docs/development/TESTING.md`. New acceptance test implementation requires the
 maintainer's approval; the scenarios below are the intended contract, not tests
 added by this reconciliation.
@@ -24,6 +25,35 @@ added by this reconciliation.
   servicing-declaration contracts. The option carries no maximum term: the horizon
   is resolved into `duration_seconds` at acceptance and the option's ID is unchanged
   from the registry to the Agreement (D5). Setup-bearing preset publication and acceptance wait for foundation 12.1's delivery_end revision and vectors, not another payments wire change; preserve valid setup-free options while it is pending.
+
+### Dependency-contract checkpoint (2026-11-06)
+
+- Base: `ba77a3b30` (`resize-multiplier`, PR #350); merged
+  `registry-as-published` (PR #349) as `faa339eea`. D-a–D-e remain accepted
+  for implementation, pending maintainer review. The webapp owner authorized
+  implementation before design review; the campaign row records that disposition.
+- Task 1.1 was exercised, but remains unchecked because the observed contract
+  contradicts D2: resize negotiates basis points but writes the **derived monetary
+  total** to `Agreement.amount`. The multiplier remains in the transcript and
+  `negotiation_threads.agreed_price`. `design.md`'s dependency re-verification
+  records the decision needed before changing this signed carrier.
+- Focused evidence: `make dist-ci` passed; core's existing `test_rate_helpers.py`
+  and `test_settlement_options.py` passed (21 tests); VM storefront's existing
+  unit and library-integration `test_vm_multiplier.py` files passed (8 tests).
+  The latter uses real SQLite and runtime calls, not the application's HTTP client.
+  Exact commands/results are in
+  `docs/attachments/negotiate-open-ended-compute-terms/dependency-contract.md`.
+  `make check-packaging`, `make check-change CHANGE=negotiate-open-ended-compute-terms`
+  and pinned strict OpenSpec validation passed. The change check initially
+  refused missing D1–D8 destination bullets; commit `7cb03533e` names the already
+  planned post-review destinations without promoting behavior.
+- No tests were added, no production readers migrated, and tasks 1.2 onward
+  have not started. No deployment/E2E or closeout evidence is claimed.
+- Restart here: resolve the scalar-versus-money question in design D2, update
+  its delta and tasks to the chosen contract, then finish 1.1 and proceed to 1.2.
+  Do not divide or multiply the current Agreement amount as if it were basis
+  points. Use `make dist-ci` and the focused commands in the evidence packet
+  to recreate the local package environments; they are not committed state.
 
 ## 2. Quote and capacity terms
 
