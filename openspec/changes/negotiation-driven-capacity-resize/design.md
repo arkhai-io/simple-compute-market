@@ -228,6 +228,38 @@ retry later, or accept the seller's counter. A domain that composes neither of
 the first two negotiates shapes on price alone and says so in its composition
 rather than silently.
 
+### Slice A composition and reference-price scale
+
+The VM composition resolves the requested shape's quantitative predicate from the
+listing's durable site/pool binding and the held pool projection, then reads the
+stored VM override and parsed configured default through the existing listing-shape
+resolver. The override replaces the hint's shape list whole; only the advertised
+base shape's constraints apply. Missing/unreadable policy refuses as
+`shape_policy_unavailable`, never as an unconstrained fallback. Admissibility
+refuses as `shape_inadmissible`; the categorical guard refuses as
+`shape_commercially_infeasible`. Requested-shape authoritative feasibility is
+**not checked**. Existing listing-source confirmation concerns the advertised
+shape alone and is not evidence that the requested shape fits.
+
+The VM-specific seller hook receives the effective grouped requested shape.
+For a shape-priced scalar option it evaluates both the advertised and requested
+shapes through `price_vm_shape` in that selected asset. Their exact rational
+ratio rescales the already-materialized option rate, reusing its base-unit scale
+without a token metadata RPC or an inferred decimal precision. Both composed
+prices must be positive. A selected asset with no matching family rates refuses
+as `shape_price_unavailable`, never falling back to another asset's rates.
+This preserves the current absolute scalar and truncation semantics until 2b;
+it is not the multiplier or payment-consumer conversion. Flat-priced listings
+remain shape-fixed, as the existing design's open question anticipates.
+
+Round-zero flat compute requests remain partial: omitted dimensions inherit the
+listing once, and the complete effective shape is recorded with the seller quote.
+A later grouped revision remains a whole shape and never inherits omitted
+families. Continuation validates policy before its fallback reference can price
+anything; exit performs no reference pricing, so withdrawn or unpriceable terms
+cannot prevent the buyer leaving. Revisit the scale bridge at the 2b conversion:
+quote derivation and upward rounding then have one shared amount contract.
+
 ### The agreed shape reaches the claim through the accepted artifacts
 
 `build_vm_accepted_artifacts` writes the settlement order from the listing
