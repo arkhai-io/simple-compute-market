@@ -462,7 +462,6 @@ class VmSettlementRepository:
             "fulfillment_uid",
             "provisioning_job_id",
             "connection_details",
-            "tenant_credentials",
             "reason",
             "capacity_reservation_id",
             "settlement_resource_id",

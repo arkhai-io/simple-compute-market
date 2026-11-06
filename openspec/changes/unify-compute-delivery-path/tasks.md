@@ -814,19 +814,51 @@ Files under `domains/vms/storefront/src/market_storefront/`: `settlement_composi
 `vm_fulfillment_service.py` is deleted and no credential is written any more (5.2's
 notes); the live read goes through `delivery_ports.py`'s path.
 
-- [ ] 6.1 `settle` and `settle-status` obtain credentials through the library's access
+- [x] 6.1 `settle` and `settle-status` obtain credentials through the library's access
       check over provisioning's fulfillment result, filling the existing typed response;
       stop writing `tenant_credentials` and core's `credentials` rows (D5).
-- [ ] 6.2 Declare `settle` and `settle-status` credential-capable beside their operation
+      Done. `delivery_ports.read_vm_credentials` runs the path's `read_access` with a
+      fetch of provisioning's result at the binding's site and returns the tenant
+      credential (`password`, `key_type`) or `None`; the settle controller's
+      `_with_credentials` fills `tenant_credentials` from it on settle and settle-status
+      answers, and answers without one when access is refused (not available, not
+      started, ended) or provisioning cannot serve the result now (logged;
+      `ComputeProvisioningError`). `serialize_settlement_job` projects no stored
+      credential. The writes stopped in section 5 (5.2's notes); `update_vm_delivery`
+      no longer accepts `tenant_credentials`. The provisioning clients `vm_delivery_path`
+      builds from the runtime are now built on first use (`_BuiltOnUse`), so an access
+      read refused before its fetch, or a drive stopping before a site call, needs no
+      configured sites; the fulfillment client defaults to the deal lifecycle's.
+- [x] 6.2 Declare `settle` and `settle-status` credential-capable beside their operation
       names; record their outcomes without `tenant_credentials`; an exact retry of
       `settle-status` runs the access check again and is refused after an end with a
       signed answer; an exact retry of `settle` resumes the same operation and rebuilds
       only its access part; reservation, skew, changed-request rejection and signing are
       unchanged (D5).
-- [ ] 6.3 Migration: clear `tenant_credentials`, core `credentials` rows written for VM
+      Done in `middleware/seller_auth.py`: `CREDENTIAL_CAPABLE_ROUTES` maps
+      `SETTLE.operation` and `SETTLE_STATUS.operation` to the members holding access
+      material; `without_access_material` strips them from the outcome
+      `record_replay_outcome` stores (the caller's signed answer is whole), and an exact
+      retry of a declared route runs the route instead of replaying. An exact
+      settle-status retry after an end answers 410 through the middleware's signing; a
+      first request after an end answers without credentials. An exact settle retry
+      resumes the stage's operation (the payment stage re-runs `coordinator.start`; the
+      Alkahest stage returns its recorded outcome) and rebuilds only an
+      acknowledgement's access part, never a refusal's; after an end it resumes and
+      answers without credentials rather than refusing, since the operation it carries
+      has already resumed. The settle-status route no longer replays its recorded body
+      itself. Core is unchanged.
+- [x] 6.3 Migration: clear `tenant_credentials`, core `credentials` rows written for VM
       listings, and the `tenant_credentials` member of every recorded body in
       `auth_replay_reservations`, leaving each record's status and completion (D2).
-- [ ] 6.4 Verify: application integration in
+      Done: `20261106_002_vm_credentials_cleared` (`_clear_vm_credentials` in
+      `utils/migrations.py`) nulls `tenant_credentials` on `vm_delivery_records` and
+      `escrows`, deletes core `credentials` rows for every listing not bound to another
+      offering mode (VM-bound and unbound legacy listings; a combined storefront's other
+      domains keep theirs), and removes the top-level `tenant_credentials` member from
+      every recorded body, re-encoded as core records bodies; status and completion
+      kept; idempotent.
+- [x] 6.4 Verify: application integration in
       `domains/vms/storefront/tests/integration/test_settle_controller.py` and
       `test_payment_settlement.py` for settle-status populated by a live read, an exact
       retry refused after an admitted end with no recorded body returned, the replay
@@ -835,6 +867,49 @@ notes); the live read goes through `delivery_ports.py`'s path.
       `tests/unit/test_migrations.py`. Run `make test-storefront` and `make test`.
       End-to-end: `e2e_deal` and `e2e_deal_buyer_cli` read credentials through
       settle-status once deployed.
+      Application integration through the canonical typed client, in
+      `tests/integration/test_vm_delivery_path.py`'s payment rig rather than the two
+      files named (`test_settle_controller.py` covers only the admin settle routes, and
+      `test_payment_settlement.py`'s harness replaces VM's hook): settle-status after
+      delivery carries the live tenant credential while the delivery record, core's
+      `credentials` and every recorded body hold none; an exact settle-status retry
+      after an end (recorded through end service's journal, since the end route also
+      drives a physical end the rig's site does not serve) is refused 410 with no
+      credential, its reservation's recorded outcome kept, and a first request after it
+      answers without credentials; an exact settle retry resumes the same operation
+      (one fulfillment) and its answer's access part is rebuilt live while the recorded
+      body holds none, and after an end the retry resumes and answers without one; a
+      storefront reopened on a database seeded with a recorded body, a stored delivery
+      credential and a `credentials` row clears all three, the record staying a
+      completed 200. Unit (`test_migrations.py`): the clearing strips only bodies that
+      carry the member, leaves an in-flight record as it is, nulls the stored copy and
+      keeps only another offering mode's `credentials` rows, idempotently;
+      `serialize_settlement_job` projects no stored credential
+      (`test_settlement_composition.py`). `test_settlement_start_authority.py` replaces
+      `delivery_ports.read_vm_credentials` on its module, as it replaces
+      `buyer_auth._verify`, for a deal still provisioning.
+      `make test-storefront`: unit 1166 passed, integration 545 passed. `make test`
+      passed whole. No dependency changed, so no relock; `make check-packaging` passed
+      with section 5. `make check-change` fails only on the closeout citation (9.9).
+      End-to-end: `e2e_deal` and `e2e_deal_buyer_cli` read credentials through
+      settle-status once deployed (`compute_deal_driver.assert_delivery`), confirmed;
+      with section 5 they are the round's evidence for VM delivery on the path. Owed by
+      validation: none.
+      Fresh-context check: no layering, comment, import, documentation or packaging
+      defect. Fixed from it: an exact settle retry after an end resumes and answers
+      without credentials instead of 410 (the operation had already resumed); a refusal
+      body never gains credentials; the clearing keeps another offering mode's
+      `credentials` rows; a provisioning error answers without credentials instead of
+      500; the settle retry test now checks the rebuilt access part, and the refusal
+      test the kept reservation. Declined: a container provider for the credential
+      reader in place of the unit test's module replacement (the test already replaces
+      `buyer_auth._verify` the same way, and the provider would serve only tests);
+      ending through the lifecycle route in the rig (it drives a physical end the rig
+      does not serve); a separate migration suite for the upgrade test.
+      Handoff for section 7: bare metal's `access` and `status` join the same
+      declaration shape in bare metal's own middleware (`response_auth.py`), with
+      `host`, `port` and `username` as the members; `kit-owned-storefront-auth-and-persistence`
+      reads both declarations.
 
 ## 7. Bare metal on the family path, through core's hook
 

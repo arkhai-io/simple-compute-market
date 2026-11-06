@@ -389,6 +389,24 @@ class VmDeliveryDomain:
         return ContinuationState.ACKNOWLEDGED
 
 
+class _BuiltOnUse:
+    """A storefront client built from the runtime only when first used.
+
+    The site and provisioning clients need the storefront's configured sites;
+    a drive that stops before any site call, and an access read refused
+    before its fetch, use neither.
+    """
+
+    def __init__(self, build: Callable[[], Any]) -> None:
+        self._build = build
+        self._built: Any = None
+
+    def __getattr__(self, name: str) -> Any:
+        if self._built is None:
+            self._built = self._build()
+        return getattr(self._built, name)
+
+
 def vm_delivery_path(
     db: Any,
     *,
@@ -399,19 +417,22 @@ def vm_delivery_path(
     """The delivery path over VM's ports, composed from the storefront's runtime.
 
     ``capacity`` is the guarded capacity effects and ``fulfillment`` the
-    per-site fulfillment client, each built from the storefront's runtime when
-    not given. ``composition`` is the settlement composition, by default the
-    one the storefront resolved: its deal lifecycle supplies end service and
-    the payment-adapter table, and its stages the continuation.
+    per-site fulfillment client; the fulfillment client defaults to the deal
+    lifecycle's, and each is otherwise built from the storefront's runtime.
+    ``composition`` is the settlement composition, by default the one the
+    storefront resolved: its deal lifecycle supplies end service and the
+    payment-adapter table, and its stages the continuation.
     """
     composition = composition if composition is not None else _container.resolved_settlement_composition
     lifecycle = getattr(composition, "lifecycle", None)
     if lifecycle is None:
         raise RuntimeError("VM delivery requires the storefront's deal lifecycle")
     if capacity is None:
-        capacity = build_capacity_runtime(lambda: db).effects()
+        capacity = _BuiltOnUse(lambda: build_capacity_runtime(lambda: db).effects())
     if fulfillment is None:
-        fulfillment = build_fulfillment_client(build_capacity_runtime(lambda: db).client())
+        fulfillment = lifecycle.fulfillment or _BuiltOnUse(
+            lambda: build_fulfillment_client(build_capacity_runtime(lambda: db).client())
+        )
     site_fulfillment = VmSiteFulfillment(fulfillment)
     domain = VmDeliveryDomain(
         db,
@@ -427,6 +448,37 @@ def vm_delivery_path(
         capacity=capacity,
         fulfillment=site_fulfillment,
     )
+
+
+async def read_vm_credentials(
+    db: Any, negotiation_id: str, *, composition: Any = None,
+) -> dict[str, Any] | None:
+    """The deal's tenant credentials, read live through the path's access check.
+
+    The credentials come from provisioning's fulfillment result, fetched only
+    while the deal is available, started and admitted, and discarded if an
+    end is admitted during the fetch; nothing stores them. ``None`` means the
+    delivery carries no tenant credential. Raises the path's ``AccessRefused``
+    when the read is refused.
+    """
+    composition = composition if composition is not None else _container.resolved_settlement_composition
+    lifecycle = getattr(composition, "lifecycle", None)
+    if lifecycle is None:
+        raise RuntimeError("VM delivery requires the storefront's deal lifecycle")
+    client = lifecycle.fulfillment or _BuiltOnUse(
+        lambda: build_fulfillment_client(build_capacity_runtime(lambda: db).client())
+    )
+    path = vm_delivery_path(db, fulfillment=client, composition=composition)
+    binding = await db.load_thread_binding(negotiation_id=negotiation_id)
+
+    async def fetch(fulfillment_id: str, capacity_reservation_id: str) -> dict[str, Any] | None:
+        result = await client.get_fulfillment_result(
+            fulfillment_id, capacity_reservation_id=capacity_reservation_id, site_id=binding.site_id,
+        )
+        tenant = (fulfillment_result_connection(result).get("authentication") or {}).get("tenant")
+        return dict(tenant) if tenant else None
+
+    return await path.read_access(negotiation_id, fetch)
 
 
 FailurePolicy = Callable[..., Awaitable[Any]]

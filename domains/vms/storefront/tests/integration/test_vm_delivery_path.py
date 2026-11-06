@@ -1,4 +1,5 @@
-"""VM deals delivered through the compute family's delivery path.
+"""VM deals delivered through the compute family's delivery path, and their
+credentials read live by the settle routes, never stored or replayed.
 
 SQLite persistence, the domain registry, VM's fulfillment hook and delivery
 ports, the delivery path, end service and the deal lifecycle are real
@@ -10,7 +11,11 @@ and its authentication middleware, with the payments kit's fake behind
 publication read and write a chain, enter the same hook through core's
 ``fulfill_domain`` with the settlement already verified and the stage's chain
 submission and claim binding replaced at its own parameters. The
-fulfillment-request tests call VM's delivery port directly.
+fulfillment-request tests call VM's delivery port directly. The settle routes'
+credential tests read the replay store and the upgrade's clearing of every
+stored copy from the same database. An end is recorded through end service's
+journal directly, since the end route would also drive a physical end this
+rig's site does not serve.
 """
 
 from __future__ import annotations
@@ -36,10 +41,11 @@ from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_rec
 from market_capacity_publication import CapacityEffects
 from market_deal_lifecycle_client import LifecycleClient
 from market_deal_lifecycle_contracts.models import CommitMessage
-from market_deal_servicing import EndSession, create_lifecycle_router
+from market_deal_servicing import Classification, EndSession, FinalRequest, create_lifecycle_router
 from market_deal_servicing.evidence import transaction
 from market_identity import TrustedIdentitySet
 from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
+from storefront_client import StorefrontClientError
 
 import market_storefront.container as _container
 from market_storefront.controllers.settle_controller import router, settlements_router
@@ -107,7 +113,9 @@ async def payment_rig(tmp_path):
         coordinator = VmPaymentsCoordinator(
             domain=domain, db=db, stage=stage, capacity=CapacityEffects(site), fulfillment=provisioning,
         )
-        lifecycle = VmDealLifecycle(db, SELLER, coordinator, RegistryDisputePolicy.from_document({}))
+        lifecycle = VmDealLifecycle(
+            db, SELLER, coordinator, RegistryDisputePolicy.from_document({}), fulfillment=provisioning,
+        )
         coordinator.lifecycle = lifecycle
         composition = SimpleNamespace(
             payments_coordinator=coordinator, seller_stages=domain.settlement.seller_stages,
@@ -183,6 +191,120 @@ async def test_a_payment_deal_is_activated_before_billing_and_available_without_
         "version": 1, "record_ref": reservation, "activated_at": row["activated_at_utc"],
     }
     assert row["fulfillment_phase"] == "activated"
+
+
+def _recorded_bodies(db: SQLiteClient) -> list[dict]:
+    with sqlite3.connect(db.db_path) as conn:
+        return [
+            json.loads(row[0]) for row in conn.execute(
+                "SELECT response_body FROM auth_replay_reservations WHERE response_body IS NOT NULL"
+            )
+        ]
+
+
+def _end_now(rig) -> None:
+    """Record an end due now, as the buyer's end route records one."""
+    now = rig.lifecycle.clock()
+    with transaction(rig.db.db_path) as conn:
+        EndSession(conn).record_end(FinalRequest(
+            negotiation_id=NEGOTIATION, source_ref="buyer-end", ended_at=now, observed_at=now,
+            actor=BUYER.identity, cause="buyer_surrender", source="end_delivery",
+        ), now=now, classification=Classification(kind="buyer_surrender", evidence_refs=["buyer-end"]))
+
+
+@pytest.mark.asyncio
+async def test_settle_status_reads_credentials_live_and_records_none(payment_rig):
+    rig = await payment_rig()
+    await rig.settle()
+    await rig.delivered()
+
+    status = await rig.buyer.get_settle_status(NEGOTIATION)
+
+    assert status.status == "ready"
+    assert status.tenant_credentials == {"password": "tenant-pw", "key_type": "generated"}
+    assert _row(rig.db, NEGOTIATION)["tenant_credentials"] is None
+    with sqlite3.connect(rig.db.db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM credentials").fetchone()[0] == 0
+    assert all("tenant_credentials" not in body for body in _recorded_bodies(rig.db))
+
+
+@pytest.mark.asyncio
+async def test_an_exact_settle_status_retry_after_an_end_is_refused(payment_rig):
+    rig = await payment_rig()
+    await rig.settle()
+    await rig.delivered()
+    first = await rig.buyer.get_settle_status(NEGOTIATION, request_id="status-1")
+    assert first.tenant_credentials
+    _end_now(rig)
+
+    with pytest.raises(StorefrontClientError) as refused:
+        await rig.buyer.get_settle_status(NEGOTIATION, request_id="status-1")
+
+    assert refused.value.status_code == 410
+    assert "tenant-pw" not in str(refused.value)
+    # The request's reservation stays in force: its recorded outcome is kept.
+    with sqlite3.connect(rig.db.db_path) as conn:
+        assert conn.execute(
+            "SELECT response_status FROM auth_replay_reservations WHERE request_id='status-1'"
+        ).fetchone() == (200,)
+    # A first request after the end answers without credentials.
+    later = await rig.buyer.get_settle_status(NEGOTIATION)
+    assert later.tenant_credentials is None
+
+
+@pytest.mark.asyncio
+async def test_an_exact_settle_retry_resumes_and_rebuilds_only_its_access_part(payment_rig):
+    rig = await payment_rig()
+    await rig.settle()
+    await rig.delivered()
+    first = await rig.buyer.settle_agreement(NEGOTIATION, request_id="settle-1")
+    retried = await rig.buyer.settle_agreement(NEGOTIATION, request_id="settle-1")
+
+    credentials = {"password": "tenant-pw", "key_type": "generated"}
+    assert first.extra["tenant_credentials"] == retried.extra["tenant_credentials"] == credentials
+    assert len(rig.provisioning.begins) == 1
+    assert all("tenant_credentials" not in body for body in _recorded_bodies(rig.db))
+
+    # After an end the retry still resumes the same operation, now with no
+    # access part to give.
+    _end_now(rig)
+    ended = await rig.buyer.settle_agreement(NEGOTIATION, request_id="settle-1")
+    assert "tenant_credentials" not in ended.extra
+    assert len(rig.provisioning.begins) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_storefront_upgrading_with_recorded_credentials_clears_every_copy(payment_rig):
+    rig = await payment_rig()
+    await rig.settle()
+    await rig.delivered()
+    await rig.buyer.get_settle_status(NEGOTIATION, request_id="recorded-1")
+    recorded = {"status": "ready", "tenant_credentials": {"password": "kept-at-rest"}}
+    with sqlite3.connect(rig.db.db_path) as conn:
+        conn.execute(
+            "UPDATE auth_replay_reservations SET response_body=? WHERE request_id='recorded-1'",
+            (json.dumps(recorded),),
+        )
+        conn.execute(
+            "UPDATE vm_delivery_records SET tenant_credentials=? WHERE negotiation_id=?",
+            (json.dumps({"password": "kept-at-rest"}), NEGOTIATION),
+        )
+        conn.execute(
+            "INSERT INTO credentials (id, listing_id, role, granted_to, password, created_at) "
+            "VALUES ('c-1', 'vm-payment-listing', 'tenant', 'self', 'kept-at-rest', '2026-01-01')"
+        )
+        conn.execute("DELETE FROM schema_migrations WHERE id='20261106_002_vm_credentials_cleared'")
+
+    SQLiteClient(rig.db.db_path, registry=rig.db.domain_registry)
+
+    with sqlite3.connect(rig.db.db_path) as conn:
+        status, body = conn.execute(
+            "SELECT response_status, response_body FROM auth_replay_reservations WHERE request_id='recorded-1'"
+        ).fetchone()
+        assert conn.execute("SELECT COUNT(*) FROM credentials").fetchone()[0] == 0
+    assert status == 200
+    assert json.loads(body) == {"status": "ready"}
+    assert _row(rig.db, NEGOTIATION)["tenant_credentials"] is None
 
 
 @pytest.mark.asyncio

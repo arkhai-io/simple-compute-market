@@ -618,7 +618,11 @@ async def persist_vm_settlement_outcome(
 
 
 def serialize_settlement_job(row: Mapping[str, Any]) -> dict[str, Any]:
-    """Preserve the legacy settle route's public/private response projection."""
+    """The settle routes' projection of a settlement job.
+
+    It carries no credential: a settle route reads its access part live
+    through the delivery path's access check.
+    """
     out: dict[str, Any] = {
         "escrow_uid": row.get("escrow_uid"),
         "negotiation_id": row.get("negotiation_id"),
@@ -641,12 +645,6 @@ def serialize_settlement_job(row: Mapping[str, Any]) -> dict[str, Any]:
             out[key] = value
     if row.get("is_primary") is not None:
         out["is_primary"] = bool(row["is_primary"])
-    tenant_credentials = row.get("tenant_credentials")
-    if tenant_credentials:
-        try:
-            out["tenant_credentials"] = json.loads(tenant_credentials)
-        except Exception:
-            out["tenant_credentials"] = tenant_credentials
     return out
 
 

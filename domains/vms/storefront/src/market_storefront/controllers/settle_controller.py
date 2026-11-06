@@ -6,6 +6,8 @@ import json
 import logging
 from typing import Any
 
+from compute_delivery import AccessRefused
+from compute_provisioning_client import ComputeProvisioningError
 from market_core.schemas import settlement_option_schema
 from core_storefront.models.settle_models import (
     EvaluateSettleRequest,
@@ -29,6 +31,7 @@ from market_storefront_kit import LifecycleRouteError, refuse_introduction_settl
 from storefront_client.settlement_routes import SETTLE_STATUS
 
 import market_storefront.container as _container
+from market_storefront import delivery_ports
 from market_storefront.middleware import buyer_auth
 from market_storefront.middleware.admin_auth import require_admin_key
 from market_storefront.models.settle_models import (
@@ -46,6 +49,40 @@ SETTLED_BY_INTRODUCTION = "a contact exchange completes by introduction, not set
 
 router = APIRouter(prefix="/api/v1/settle", tags=["settle"])
 settlements_router = APIRouter(prefix="/api/v1", tags=["settlements"])
+
+
+async def _with_credentials(
+    payload: dict[str, Any], negotiation_id: str | None, *, refuse_after_end: bool = False,
+) -> dict[str, Any]:
+    """``payload`` with its access part read live: the deal's tenant credentials.
+
+    The credentials are read through the delivery path's access check, never
+    from storage, so they appear only while the deal is available and started
+    and no end is admitted. With ``refuse_after_end`` — an exact retry of the
+    status read, whose earlier answer an end has made ungivable — a refusal
+    because delivery ended refuses the request; otherwise the answer goes out
+    without credentials. A fulfillment result provisioning cannot serve now
+    leaves the answer without credentials for the buyer's next read.
+    """
+    answer = {key: value for key, value in payload.items() if key != "tenant_credentials"}
+    if not negotiation_id:
+        return answer
+    try:
+        credentials = await delivery_ports.read_vm_credentials(
+            _container.resolved_sqlite_client, negotiation_id,
+        )
+    except AccessRefused as exc:
+        if refuse_after_end and exc.reason == "ended":
+            raise HTTPException(
+                status_code=410, detail="delivery has ended; no credential is disclosed",
+            ) from exc
+        return answer
+    except ComputeProvisioningError as exc:
+        logger.warning("[SETTLE] credentials for %s are unavailable now: %s", negotiation_id, exc)
+        return answer
+    if credentials:
+        answer["tenant_credentials"] = credentials
+    return answer
 
 
 @cbv(router)
@@ -103,7 +140,16 @@ class SettleController:
             composition=composition, db=self._db, configured_chains=_container,
         )
         if isinstance(started, JSONResponse):
-            return started
+            # The stage answered whole, an exact retry's recorded outcome
+            # included. A settle resumes its operation on an exact retry, so
+            # only an acknowledgement's access part is rebuilt by a live read;
+            # a refusal has none.
+            if started.status_code >= 400:
+                return started
+            return JSONResponse(
+                content=await _with_credentials(json.loads(started.body), body.negotiation_id),
+                status_code=started.status_code,
+            )
         result, persisted_buyer = started
         serialized = (
             serialize_settlement_job(result)
@@ -119,7 +165,10 @@ class SettleController:
             mode="json"
         )
         status_code = 200 if result.get("status") in ("ready", "failed") else 202
-        return JSONResponse(content=serialized, status_code=status_code)
+        return JSONResponse(
+            content=await _with_credentials(serialized, body.negotiation_id),
+            status_code=status_code,
+        )
 
     @router.get(
         "/{escrow_uid}/status",
@@ -147,18 +196,16 @@ class SettleController:
             escrow_uid,
             buyer_principal,
         )
-        if auth.exact_retry and auth.recorded_outcome is not None:
-            status_code, payload = auth.recorded_outcome
-            if status_code >= 400:
-                raise HTTPException(status_code=status_code, detail=payload)
-            return SettleStatusResponse.model_validate(payload)
-
+        # A credential read: an exact retry reads again rather than replaying
+        # the earlier answer, so after an end it is refused.
         serialized = serialize_settlement_job(job)
         serialized["buyer_principal"] = buyer_principal.model_dump(mode="json")
         serialized["seller_principal"] = (
             _container.resolved_marketplace_signer.identity.model_dump(mode="json")
         )
-        return SettleStatusResponse(**serialized)
+        return SettleStatusResponse(**await _with_credentials(
+            serialized, job.get("negotiation_id"), refuse_after_end=auth.exact_retry,
+        ))
 
 
 # ---------------------------------------------------------------------------

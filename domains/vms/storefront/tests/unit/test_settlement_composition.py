@@ -710,7 +710,8 @@ def test_serialize_keeps_physical_and_onchain_fulfillment_ids_distinct():
 
     assert serialized["fulfillment_id"] == "physical-123"
     assert serialized["fulfillment_uid"] == "0xonchain"
-    assert serialized["tenant_credentials"] == {"password": "secret"}
+    # A stored credential is never projected; the settle routes read it live.
+    assert "tenant_credentials" not in serialized
     assert "obligation_ref" not in serialized
 
 
