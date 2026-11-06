@@ -338,6 +338,11 @@ async def _status_code(call) -> int:
 @pytest.mark.asyncio
 async def test_settlement_is_pending_until_a_verified_receipt_then_delivers_once(make):
     h = await make()
+    with sqlite3.connect(h.db.db_path) as conn:
+        conn.execute(
+            "UPDATE negotiation_threads SET agreed_price = ? WHERE negotiation_id = ?",
+            ("10000", NEGOTIATION),
+        )
     pending = await h.settle()
     assert pending.pending and pending.retryable
     assert pending.settlement_ref == h.data.transaction_id
