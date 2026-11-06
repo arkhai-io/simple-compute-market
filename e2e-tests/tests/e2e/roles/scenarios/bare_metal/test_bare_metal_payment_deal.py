@@ -35,17 +35,14 @@ from typing import Any, Optional
 
 import pytest
 from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
-from core_buyer.profile_service import BuyerProfileService
-from core_buyer.run_log import read_run, read_run_identity
+from core_buyer.run_log import read_run
 from market_arkhai_payments import ArkhaiPaymentsConfig, agreement_from_bytes
 from market_deal_lifecycle_client import LifecycleClient
 from market_deal_lifecycle_contracts.models import CommitMessage
-from market_identity import Ed25519Signer, IdentityScheme, ProfileRepository, create_signer
+from market_identity import Ed25519Signer
 from market_pool_overrides import SyncPoolOverrideClient
-from registry_client import SyncRegistryClient
-from storefront_client import SyncStorefrontClient
 
-from tests.e2e.roles.buyer_cli import BuyerCli, _toml_quote, create_profiled_buyer_cli
+from tests.e2e.roles.buyer_cli import BuyerCli
 from tests.e2e.roles.helpers.buyer_purchase_stages import (
     Purchase01_PayerBalanceBefore,
     Purchase02_ListingDiscovered,
@@ -89,9 +86,7 @@ from tests.e2e.roles.helpers.payment_compensation import (
 )
 from tests.e2e.roles.helpers.payments import (
     buyer_payments_client,
-    buyer_payments_environment,
     configured_payments,
-    payment_config_toml,
     payment_setting,
 )
 from tests.e2e.roles.scenarios.bare_metal.compute_deal_driver import WHOLE_HOST_CAPACITY
@@ -102,6 +97,11 @@ from tests.e2e.roles.scenarios.bare_metal.publication_stages import (
 from tests.e2e.roles.scenarios.bare_metal.purchase_driver import (
     HOURLY_GROSS,
     BareMetalPurchaseDriver,
+    bare_metal_purchase_cli,
+    purchase_fulfillment_transport,
+    purchase_registry_client,
+    purchase_signer,
+    seller_refund,
 )
 
 pytestmark = [
@@ -128,20 +128,6 @@ class BareMetalPurchaseState(PurchaseState):
     refund: Optional[Any] = None
 
 
-def _purchase_signer(cli: BuyerCli, run_id: str | None = None) -> Any:
-    service = BuyerProfileService(
-        repository=ProfileRepository(cli.data_dir / "arkhai/buyer/profiles.json"),
-        environ=cli.credential_env,
-        run_logs_directory=cli.run_dir,
-    )
-    if run_id is None:
-        return service.resolve_fresh_signer()[1]
-    recorded = read_run_identity(run_id, directory=cli.run_dir)
-    return service.resolve_recovery_signer(
-        profile_id=recorded.profile_id, principal=recorded.principal,
-    )[1]
-
-
 @pytest.fixture(scope="module")
 def payments_config() -> ArkhaiPaymentsConfig:
     lane_setting("registry_url")
@@ -157,31 +143,8 @@ def payments_config() -> ArkhaiPaymentsConfig:
 
 @pytest.fixture(scope="module")
 def purchase_cli(payments_config, buyer_cli_binary, tmp_path_factory) -> BuyerCli:
-    url = lane_setting("registry_url")
-    scheme = lane_setting("registry_scheme")
-    identifier = lane_setting("registry_identifier")
-    authority = lane_setting("registry_authority_id")
-    sections = (
-        "[bare_metal]",
-        f"registry_url = {_toml_quote(url)}",
-        f"registry_authority = {_toml_quote(authority)}",
-        "registry_principals = [{ scheme = " + _toml_quote(scheme)
-        + ", identifier = " + _toml_quote(identifier) + " }]",
-        f"payer_account = {_toml_quote(str(payment_setting('BUYER_ACCOUNT')))}",
-        "",
-        *payment_config_toml(payments_config, table="bare_metal.arkhai_payments"),
-    )
-    return create_profiled_buyer_cli(
-        binary=buyer_cli_binary,
-        base=tmp_path_factory.mktemp("bare_metal_payment_buyer"),
-        domain_identity="bare_metal.v1",
-        marketplace_scheme=IdentityScheme.ED25519,
-        marketplace_credential=str(payment_setting("BUYER_MARKETPLACE_CREDENTIAL")),
-        registries=(url,),
-        registry_authorities={url: {"authority": authority,
-                                   "identities": [{"scheme": scheme, "identifier": identifier}]}},
-        credential_environment=buyer_payments_environment(payments_config),
-        toml_sections=sections,
+    return bare_metal_purchase_cli(
+        payments_config, buyer_cli_binary, tmp_path_factory.mktemp("bare_metal_payment_buyer"),
     )
 
 
@@ -193,23 +156,13 @@ def deal_state() -> BareMetalPurchaseState:
 @pytest.fixture(scope="module")
 def purchase_fulfillment(purchase_cli) -> BareMetalFulfillmentTransport:
     """The purchase profile's own fulfillment transport."""
-    signer = _purchase_signer(purchase_cli)
-    return BareMetalFulfillmentTransport(
-        seller_url=lane_setting("storefront_url"),
-        principal=signer.identity,
-        signer=signer,
-        resolve_seller_principals=lambda: _pinned("storefront"),
-    )
+    return purchase_fulfillment_transport(purchase_cli)
 
 
 @pytest.fixture(scope="module")
 def purchase_registry(purchase_cli):
     """The registry, signed as the purchase profile rather than the lane buyer."""
-    client = SyncRegistryClient(
-        lane_setting("registry_url"), signer=_purchase_signer(purchase_cli), caller_role="buyer",
-        expected_registries=_pinned("registry"),
-        registry_authority=lane_setting("registry_authority_id"),
-    )
+    client = purchase_registry_client(purchase_cli)
     yield client
     client.close()
 
@@ -258,19 +211,6 @@ def _release(transport, negotiation_id, fulfillment_id, provisioning_client, adm
     return released
 
 
-def _seller_refund(negotiation_id: str):
-    """Refund the purchase as the lane's pinned seller; a repeat returns the same result."""
-    seller = create_signer(
-        lane_setting("storefront_scheme"), str(payment_setting("SELLER_MARKETPLACE_CREDENTIAL")),
-    )
-    assert seller.identity in _pinned("storefront").identities
-    with SyncStorefrontClient(
-        lane_setting("storefront_url"), signer=seller, caller_role="seller",
-        expected_publishers=_pinned("storefront"),
-    ) as storefront:
-        return storefront.refund_settlement(negotiation_id)
-
-
 @pytest.fixture(scope="module")
 def purchase_cleanup(
     purchase_cli, purchase_fulfillment, deal_driver: BareMetalPurchaseDriver,
@@ -289,7 +229,7 @@ def purchase_cleanup(
         status=lambda negotiation_id: fulfillment_or_none(
             purchase_fulfillment.status, negotiation_id,
         ),
-        refund=_seller_refund,
+        refund=seller_refund,
         release=lambda negotiation_id, status: _release(
             purchase_fulfillment, negotiation_id, str(status["fulfillment_id"]),
             provisioning_client, storefront_admin_client,
@@ -444,7 +384,7 @@ class TestStage09d_SettlementReDriven:
         require_state(deal_state, "purchase_run", "negotiation_id", "settlement_id",
                       "fulfillment_id", "agreement", "settlement_status")
         run_id = deal_state.purchase_run.run_id
-        signer = _purchase_signer(purchase_cli, run_id)
+        signer = purchase_signer(purchase_cli, run_id)
         assert signer.identity == purchase_fulfillment.principal
         _, accepted, approved, ended = ordered_events(
             read_run(run_id, signer=signer, directory=purchase_cli.run_dir),
@@ -503,7 +443,7 @@ class TestStage11_SellerRefundsTheHeldPayment:
         held and its reverse takes every part.
         """
         require_state(deal_state, "negotiation_id", "settlement_id", "teardown_fulfillment_id")
-        refunded = _seller_refund(deal_state.negotiation_id)
+        refunded = seller_refund(deal_state.negotiation_id)
         assert refunded.status == "refunded", refunded
         assert refunded.settlement_ref == deal_state.settlement_id, refunded
         with buyer_payments_client(payments_config, str(payment_setting("BUYER_ACCOUNT"))) as client:

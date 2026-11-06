@@ -75,6 +75,18 @@ PURCHASES = (
         mock=True,
         ending=EXPIRY,
     ),
+    Purchase(
+        "vms_qualification",
+        ROLES / "scenarios" / "vms" / "test_vm_qualification.py",
+        mock=False,
+        ending=EXPIRY,
+    ),
+    Purchase(
+        "bare_metal_qualification",
+        ROLES / "scenarios" / "bare_metal" / "test_bare_metal_qualification.py",
+        mock=False,
+        ending=BUYER_TEARDOWN,
+    ),
 )
 
 

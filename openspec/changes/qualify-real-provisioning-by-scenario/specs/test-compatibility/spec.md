@@ -213,6 +213,12 @@ never wait out the wall clock for a state it can step to.
   cycle, reading the consumed-UID history through the working-data operator route before
   and after.
 
+A module whose stage fails after the buyer approved a payment MUST, in its cleanup, refund
+that payment if it is not refunded, unless the module had begun ending the purchase
+itself, and MUST end a delivered guest or host through its lease's own lifecycle; it MUST
+report by negotiation and transaction any payment it cannot refund and any delivery it
+cannot end. A purchase the module ended itself is left as it is.
+
 #### Scenario: The first session survives the second guest
 
 - **WHEN** the observation 2 module creates and then tears down the second guest
@@ -253,6 +259,16 @@ never wait out the wall clock for a state it can step to.
 - **THEN** existing listings are adopted with identities, states and pauses intact, no
   duplicate host, pool, resource, allocator or listing appears, unexpired relay
   quarantine is retained, and the consumed-UID history is unchanged
+
+#### Scenario: A qualification stage fails after the payment is approved
+
+- **WHEN** a stage of a qualification module fails after the buyer approved a purchase's
+  payment, before the module ended that purchase
+- **THEN** the module's cleanup refunds the payment as the seller, retrying while its
+  receipt may still verify, unless the module had begun ending the purchase, then ends
+  any guest or host delivered for it through its lease's expiry or reclaim
+- **AND** a refund that stays refused, or a delivery that cannot be read or ended, fails
+  the cleanup naming the purchase's negotiation and transaction
 
 #### Scenario: No target is configured
 

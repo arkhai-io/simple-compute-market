@@ -59,12 +59,12 @@ REAL_REGION = "e2e-real-host"
 #: to be recorded, where the settle status names no fulfillment yet.
 DISPATCH_BOUND_SECONDS = 60
 #: The settle statuses that show the storefront dispatched nothing: a refund
-#: begun before any delivery was recorded, since a recorded delivery's own
-#: status is what settle status reports. Recovery takes every other status as
-#: an accepted settlement, one the storefront adds later included: passing over
-#: an accepted one leaves a guest running unreported, where reporting one that
-#: dispatched nothing costs an operator a look.
-UNDISPATCHED_SETTLE_STATUSES = frozenset({"refunding"})
+#: begun or finished before any delivery was recorded, since a recorded
+#: delivery's own status is what settle status reports. Recovery takes every
+#: other status as an accepted settlement, one the storefront adds later
+#: included: passing over an accepted one leaves a guest running unreported,
+#: where reporting one that dispatched nothing costs an operator a look.
+UNDISPATCHED_SETTLE_STATUSES = frozenset({"refunding", "refunded"})
 
 
 @dataclass

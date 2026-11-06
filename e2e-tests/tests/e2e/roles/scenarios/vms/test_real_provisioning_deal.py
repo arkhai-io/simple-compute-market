@@ -54,11 +54,9 @@ from __future__ import annotations
 import logging
 import time
 from datetime import datetime, timezone
-from decimal import Decimal
 
 import pytest
 from market_alkahest.plans import ALKAHEST_MECHANISM
-from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
 
 from e2e_harness.real_provisioning_target import TargetNotConfigured, load_real_provisioning_target
 from e2e_harness.settings import settings
@@ -70,7 +68,6 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     E2E_LEASE_EXPIRY_BACKDATE,
     alkahest_opening,
     DURATION_HOURS,
-    LISTED_HOURLY_RATE,
     Stage00_LifecycleHeld,
     Stage00a_StorefrontHealth,
     Stage00b_RegistryReachable,
@@ -101,12 +98,12 @@ from tests.e2e.roles.helpers.compute_deal import (
 )
 from tests.e2e.roles.helpers.escrow import create_buyer_escrow
 from tests.e2e.roles.helpers.domain_deal import require_state
-from tests.e2e.roles.helpers.payments import payment_setting
 from tests.e2e.roles.helpers.ssh_access import memory_within_tolerance, ssh_session
 from tests.e2e.roles.scenarios.vms.composed_listing import (
     create_or_adopt_listing,
     listing_mechanisms,
-    payments_settlement,
+    listing_settlements,
+    real_target_resource,
 )
 from tests.e2e.roles.scenarios.vms.conftest import (
     capacity_site_id,
@@ -114,7 +111,6 @@ from tests.e2e.roles.scenarios.vms.conftest import (
     step_listing_reconciliation,
 )
 from tests.e2e.roles.scenarios.vms.real_compute_deal_driver import (
-    REAL_REGION,
     REAL_RESOURCE_ID,
     JobWatch,
     RealVmComputeDealDriver,
@@ -140,37 +136,6 @@ pytestmark = [
     ),
     pytest.mark.e2e_vm_real_provisioning,
 ]
-
-#: The canonical deal's asking rate on the dev chain's deal token, stated in
-#: whole tokens an hour, which the storefront's Alkahest composition publishes
-#: in the token's base units as ``LISTED_HOURLY_RATE``; the deal settles on the
-#: escrow the published option names.
-ALKAHEST_SETTLEMENT = {
-    "mechanism": ALKAHEST_MECHANISM,
-    "asset": DEAL_TOKEN["contract_address"],
-    "rate": str(Decimal(LISTED_HOURLY_RATE) / 10 ** DEAL_TOKEN["decimals"]),
-    "per": "hour",
-    "mechanism_input": {"chain": "anvil", "escrow_kind": "erc20_escrow_obligation_default"},
-}
-
-
-def listing_settlements() -> dict[str, dict]:
-    """The settlement this module states for each mechanism it can.
-
-    Alkahest always; Arkhai payments where the run names the seller's payments
-    account, so a stack composing it lists the resource with both, and a module
-    dealing on the resource through Arkhai payments finds it offered
-    (``composed_listing.py``).
-    """
-    settlements = {ALKAHEST_MECHANISM: ALKAHEST_SETTLEMENT}
-    seller_account = payment_setting("SELLER_ACCOUNT")
-    if seller_account:
-        settlements[ARKHAI_PAYMENTS_MECHANISM] = payments_settlement(
-            seller_account=str(seller_account),
-            dispute_window=str(payment_setting("DISPUTE_WINDOW", "P7D")),
-        )
-    return settlements
-
 
 # ---------------------------------------------------------------------------
 # The target, and what the module writes nothing before
@@ -230,14 +195,7 @@ def buyer_key(ssh):
 @pytest.fixture(scope="module")
 def offer_resource(real_vm_target) -> dict:
     """The target's explicit guest listing shape, and no GPU."""
-    return {
-        "offering_mode": "vm",
-        "interruptible": True,
-        "resource_id": REAL_RESOURCE_ID,
-        **real_vm_target.listing_shape.model_dump(),
-        "sla": 90.0,
-        "region": REAL_REGION,
-    }
+    return real_target_resource(real_vm_target)
 
 
 @pytest.fixture(scope="module")

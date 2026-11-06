@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shlex
 import stat
@@ -14,6 +15,8 @@ from _pytest.mark.expression import Expression
 
 from e2e_harness.real_provisioning_target import BareMetalHost
 from tests.e2e.roles.helpers.ssh_access import SshEndpoint, SshKey, SshSession
+
+log = logging.getLogger(__name__)
 
 PROBE = Path(__file__).with_name("working_data_probe.py")
 QUALIFICATION_MARKER = "e2e_bare_metal_bounded_cleanup"
@@ -90,6 +93,21 @@ class WorkingDataQualification:
         """Authenticate the pinned route and read established policy before any writes."""
         self.state.update(self._operator("policy", needed_uids=2 if self.cycle == "normal" else 1))
 
+    def repair_planted_fixture(self) -> bool:
+        """Remove the planted foreign descendant if it is still there, so an
+        ordinary reclaim can complete; whether there was one to remove."""
+        if "foreign_child" not in self.state or self.state.get("fixture_repaired"):
+            return False
+        assert self._operator("repair")["fixture_only_repaired"]
+        self.state["fixture_repaired"] = True
+        return True
+
+    def consumed_uids(self) -> list[int]:
+        """The host ledger's consumed-UID history, read through the pinned
+        operator route's ``policy`` operation, which changes nothing and, asked
+        for no unused UID, requires none."""
+        return list(self._operator("policy", needed_uids=0)["consumed"])
+
     def seed(self, *, ssh: SshSession, endpoint: SshEndpoint, key: SshKey,
              reservation_id: str) -> None:
         uid = int(ssh.run(endpoint, key, "id -u").strip())
@@ -126,11 +144,18 @@ class WorkingDataQualification:
             driver.jobs.sleep(min(1.0, max(0.0, deadline - driver.jobs.clock())))
         logs = driver.provisioning_client.get_job_logs(job.job_id).logs or ""
         assert "foreign descendant" in logs, "failed attempt did not prove the intended unsafe-tree refusal"
+        # The operator's notification of the refusal is this record, read
+        # through the typed job API: log where it was observed.
+        log.info("Reclaim job %s of reservation %s refused: %s, retry %s of %s, next at %s; "
+                 "observed through the provisioning job API", job.job_id, reservation,
+                 observation.error, observation.retry_count, observation.max_retries,
+                 observation.next_retry_at)
         assert deal_state.deal_lease.refresh()["status"] == "releasing"
         assert deal_state.deal_lease.resource_consumed(storefront_admin_client, deal_state.reserved_resource_id), "unsafe cleanup advertised available capacity"
         # The foreign child is inside a selected UID-owned directory. The
         # helper must refuse that tree; foreign top-level entries are preserved.
         assert self._operator("repair")["fixture_only_repaired"]
+        self.state["fixture_repaired"] = True
         driver.assert_management_connected()
         self.state["refusal_observed"] = True
 

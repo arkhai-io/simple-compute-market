@@ -360,6 +360,27 @@ structure the process would benefit from.
 **Rejected:** a versioned outcome record per observation, written to a restricted
 directory. It is structure to maintain before any run has shown it is needed.
 
+**Which stages an observation requires.** A shared stage is declared with an empty body,
+so it cannot carry its own declaration. Every stage of a qualification module requires the
+module's observation, or its cycle's in the module that runs once per cycle; a stage of
+the module's own may narrow that to fewer. A stage the run did not collect counts as not
+run, so deselecting a stage cannot turn an observation made.
+
+**Compensation** (review 55 F2, settled in its triage). The qualification purchases are
+real payments to a hosted target and deliveries on real hosts, so a module failing part
+way must not leave either outstanding. Its cleanup, after a stage fails past the buyer's
+approval, refunds an unrefunded payment as the seller and ends a delivered guest or host
+through its lease's own lifecycle: a VM guest by expiry, back-dated and stepped, a
+bare-metal tenancy by its reclaim, as the real lanes' recovery does. It reuses the
+bare-metal lane purchase's compensation, each domain supplying its status read, refund and
+release. What it cannot refund or end it reports by negotiation and transaction, for the
+operator. A purchase the module ended itself is left: its payment is the qualification's
+own, and refunding a completed purchase would be a second, unqualified operation. One the
+module had begun ending (its lease's expiry requested, or the buyer's teardown asked for)
+is not refunded either, for the same reason, but its delivery is still ended. A module
+run once per cycle runs a cycle's compensation as that cycle's last stage, so a failure
+in it counts against that cycle's observation, not the next cycle's.
+
 ### D9. Grant admission is read from the plugin's log at a target-named path
 
 The admission plugin's decision log is a documented contract

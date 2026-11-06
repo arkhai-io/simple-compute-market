@@ -25,6 +25,7 @@ from tests.e2e.roles.helpers.qualification import (
     record_report,
     relay_lease_record,
     require_admitted,
+    run_stage,
     stage_result,
 )
 from tests.unit.test_real_provisioning_target import EXAMPLE
@@ -279,41 +280,85 @@ def test_a_failed_teardown_fails_the_stage():
     assert stage_result("test_stage", ["4"], reports).outcome == "failed"
 
 
-def _module(**classes):
+def _module(observations=("2",), **classes):
+    """A qualification module; a class given ``None`` takes the module's default."""
     module = ModuleType("qualification_module")
-    module.OBSERVATIONS = ("2",)
-    for name, observations in classes.items():
+    module.OBSERVATIONS = observations
+    for name, declared in classes.items():
         body = {"test_" + name.lower(): lambda self: None}
-        if observations is not None:
-            body["observations"] = observations
+        if declared is not None:
+            body["observations"] = declared
         setattr(module, "Test" + name, type("Test" + name, (), body))
     return module
 
 
-def _item(cls, name, *reports):
-    item = SimpleNamespace(name=name, originalname=name, cls=cls, stash=pytest.Stash())
+def _item(module, cls, name, *reports, cycle=None):
+    item = SimpleNamespace(name=name, originalname=name, cls=cls, module=module,
+                           stash=pytest.Stash(), session=SimpleNamespace(items=[]))
+    if cycle is not None:
+        item.callspec = SimpleNamespace(params={module.CYCLE_PARAM: cycle})
     for report in reports:
         record_report(item, report)
     return item
 
 
-def test_reports_are_kept_only_for_declared_stages_and_logged(caplog):
-    module = _module(Reads=("2",), Readiness=None)
-    declared = _item(module.TestReads, "test_reads", _report("setup", "passed"),
+def test_reports_are_kept_for_required_stages_only_and_logged(caplog):
+    module = _module(Reads=None, Readiness=())
+    required = _item(module, module.TestReads, "test_reads", _report("setup", "passed"),
                      _report("call", "skipped", "management_unit is not set"))
-    undeclared = _item(module.TestReadiness, "test_readiness", _report("setup", "passed"),
-                       _report("call", "failed"))
-    assert REPORTS not in undeclared.stash
+    opted_out = _item(module, module.TestReadiness, "test_readiness", _report("setup", "passed"),
+                      _report("call", "failed"))
+    assert REPORTS not in opted_out.stash
     with caplog.at_level("INFO"):
-        (outcome,) = log_observation_outcomes(module, [declared, undeclared])
+        (outcome,) = log_observation_outcomes(module, [required, opted_out])
     assert outcome.outcome == "unproven"
     assert ("Observation 2: unproven: TestReads::test_reads: management_unit is not set"
             in caplog.text)
 
 
-def test_a_declared_stage_the_run_did_not_collect_reads_as_not_run():
-    module = _module(Purchase=("2",), Reads=("2",))
-    ran = _item(module.TestPurchase, "test_purchase", _report("setup", "passed"),
+def test_a_module_run_once_per_cycle_resolves_each_cycles_observation():
+    module = _module(observations=("4", "5"), Shared=None, Refusal={"refusal": ("5",)})
+    module.CYCLE_PARAM = "cleanup_cycle"
+    module.CYCLE_OBSERVATIONS = {"normal": ("4",), "refusal": ("5",)}
+    passed = (_report("setup", "passed"), _report("call", "passed"))
+    items = [
+        _item(module, module.TestShared, "test_shared", *passed, cycle="normal"),
+        _item(module, module.TestRefusal, "test_refusal", _report("setup", "passed"),
+              _report("call", "skipped", "the normal cycle plants nothing"), cycle="normal"),
+        _item(module, module.TestShared, "test_shared", *passed, cycle="refusal"),
+        _item(module, module.TestRefusal, "test_refusal", _report("setup", "passed"),
+              _report("call", "failed"), cycle="refusal"),
+    ]
+    four, five = log_observation_outcomes(module, items)
+    assert (four.outcome, four.stages) == ("made", ("TestShared::test_shared",))
+    assert (five.outcome, five.stages) == ("failed", ("TestRefusal::test_refusal",))
+
+
+def test_a_cycle_that_never_ran_leaves_its_observation_unproven():
+    module = _module(observations=("4", "5"), Shared=None)
+    module.CYCLE_PARAM = "cleanup_cycle"
+    module.CYCLE_OBSERVATIONS = {"normal": ("4",), "refusal": ("5",)}
+    items = [_item(module, module.TestShared, "test_shared", _report("setup", "passed"),
+                   _report("call", "passed"), cycle="normal")]
+    four, five = log_observation_outcomes(module, items)
+    assert four.outcome == "made"
+    assert (five.outcome, five.stages) == ("unproven", ("TestShared::test_shared[refusal]",))
+
+
+def test_run_stage_runs_a_shared_body_on_the_given_fixtures():
+    seen = {}
+
+    class Shared:
+        def test_body(self, deal_state, deal_driver):
+            seen.update(state=deal_state, driver=deal_driver)
+
+    run_stage(Shared, deal_state="second", deal_driver="driver")
+    assert seen == {"state": "second", "driver": "driver"}
+
+
+def test_a_stage_the_run_did_not_collect_reads_as_not_run():
+    module = _module(Purchase=None, Reads=None)
+    ran = _item(module, module.TestPurchase, "test_purchase", _report("setup", "passed"),
                 _report("call", "passed"))
     (outcome,) = log_observation_outcomes(module, [ran])
     assert outcome.outcome == "unproven"
@@ -352,6 +397,7 @@ class TestDeselected:
 
 
 class TestUndeclared:
+    observations = ()
     def test_undeclared(self):
         pass
 

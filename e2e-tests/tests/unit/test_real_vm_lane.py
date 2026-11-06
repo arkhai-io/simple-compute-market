@@ -39,7 +39,7 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     Stage09b_SettlementReadyAndCredentials,
 )
 from tests.e2e.roles.scenarios.vms.composed_listing import (
-    create_or_adopt_listing, listing_mechanisms,
+    ALKAHEST_SETTLEMENT, create_or_adopt_listing, listing_mechanisms,
 )
 from tests.e2e.roles.scenarios.vms.host_registry import (
     provision_e2e_executor, register_e2e_host, register_e2e_pool,
@@ -631,9 +631,9 @@ def test_a_module_whose_mechanism_is_not_ready_creates_nothing():
 
 
 def test_the_real_modules_alkahest_rate_is_the_canonical_asking_rate_in_whole_tokens():
-    assert real_lane.ALKAHEST_SETTLEMENT["rate"] == "10"
-    assert real_lane.ALKAHEST_SETTLEMENT["asset"] == DEAL_TOKEN["contract_address"]
-    assert int(real_lane.ALKAHEST_SETTLEMENT["rate"]) * 10 ** DEAL_TOKEN["decimals"] == LISTED_HOURLY_RATE
+    assert ALKAHEST_SETTLEMENT["rate"] == "10"
+    assert ALKAHEST_SETTLEMENT["asset"] == DEAL_TOKEN["contract_address"]
+    assert int(ALKAHEST_SETTLEMENT["rate"]) * 10 ** DEAL_TOKEN["decimals"] == LISTED_HOURLY_RATE
 
 
 def test_an_open_listing_of_the_targets_shape_is_paused_and_adopted():

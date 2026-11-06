@@ -93,6 +93,8 @@ class PurchaseState(ComputeDealState):
     ``expected_host_id``.
     """
 
+    #: The payer account the run names, whose balance ``Purchase01`` read.
+    payer_account: Optional[str] = None
     #: The payer's available balance by asset before the purchase, read with
     #: the buyer's own token.
     payer_available_before: Optional[dict[str, int]] = None
@@ -105,6 +107,9 @@ class PurchaseState(ComputeDealState):
     #: The seller's acceptance artifact: the mandate and its transaction
     #: (``PaymentSettlementData``).
     payment_settlement: Optional[Any] = None
+    #: The buyer's teardown has been asked for: from then on the purchase is
+    #: being ended, not abandoned, whatever ``Purchase10``'s checks find.
+    _buyer_teardown_requested: bool = False
 
 
 class PurchaseDriver(ComputeDealDriver, Protocol):
@@ -166,6 +171,7 @@ class Purchase01_PayerBalanceBefore:
         payer = str(payment_setting("BUYER_ACCOUNT"))
         with buyer_payments_client(payments_config, payer) as client:
             before = _available(client.get_balance(payer))
+        deal_state.payer_account = payer
         deal_state.payer_available_before = before
         log.info("[p01] Payer %s available before the purchase: %s", payer, before)
 
@@ -222,6 +228,10 @@ class Purchase03_Bought:
         before its approval fails here with its exit status. A run that has
         not committed is stopped here, so no stage after it depends on a
         purchase still in flight.
+
+        A run that records no approval fails naming the payer: funding the
+        payer is the deployment's, never the scenario's, so a payer that
+        cannot pay is what the failure must point at.
         """
         require_state(deal_state, "seller_listing_id", "purchase_option_id",
                       "_settlement_imminent")
@@ -230,7 +240,13 @@ class Purchase03_Bought:
             background=True,
         )
         try:
-            run.wait_for_event("payment_approved", timeout=deal_driver.buy_timeout_seconds)
+            try:
+                run.wait_for_event("payment_approved", timeout=deal_driver.buy_timeout_seconds)
+            except AssertionError as error:
+                raise AssertionError(
+                    f"{deal_driver.buy_command} run {run.run_id} recorded no payment approved "
+                    f"by payer {deal_state.payer_account}: {error}"
+                ) from error
             run.wait_for_event(deal_driver.committed_event, timeout=deal_driver.buy_timeout_seconds)
         except BaseException:
             run.terminate()
@@ -419,6 +435,7 @@ class Purchase10_BuyerTeardown:
                       "deal_lease", "lease_id", "reserved_resource_id")
         # The release is Stage11b's own lease cycle, not the timer's.
         assert_lease_watchdog_held(provisioning_client)
+        deal_state._buyer_teardown_requested = True
         run = purchase_cli.run(deal_driver.teardown_arguments(deal_state.purchase_run.run_id))
         assert_market_run_succeeded(run, command=deal_driver.teardown_command)
 

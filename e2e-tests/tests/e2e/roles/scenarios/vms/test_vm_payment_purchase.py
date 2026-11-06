@@ -30,7 +30,7 @@ import pytest
 from market_arkhai_payments import ArkhaiPaymentsConfig
 
 from e2e_harness.settings import settings
-from tests.e2e.roles.buyer_cli import BuyerCli, _toml_quote, create_profiled_buyer_cli
+from tests.e2e.roles.buyer_cli import BuyerCli
 from tests.e2e.roles.helpers.buyer_purchase_stages import (
     Purchase01_PayerBalanceBefore,
     Purchase02_ListingDiscovered,
@@ -64,12 +64,7 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     Stage11b_TeardownCompletion,
 )
 from tests.e2e.roles.helpers.domain_deal import require_state
-from tests.e2e.roles.helpers.payments import (
-    buyer_payments_environment,
-    configured_payments,
-    payment_config_toml,
-    payment_setting,
-)
+from tests.e2e.roles.helpers.payments import configured_payments, payment_setting
 from tests.e2e.roles.scenarios.vms.conftest import (
     capacity_site_id,
     capacity_source_for,
@@ -79,7 +74,7 @@ from tests.e2e.roles.scenarios.vms.host_registry import (
     E2E_PAYMENT_PURCHASE_HOST,
     E2E_PAYMENT_PURCHASE_POOL_ID,
 )
-from tests.e2e.roles.scenarios.vms.purchase_driver import VmPurchaseDriver
+from tests.e2e.roles.scenarios.vms.purchase_driver import VmPurchaseDriver, vm_purchase_cli
 
 #: This purchase's own resource, and the GPU model only it declares, which
 #: ``market buy``'s discovery query names.
@@ -120,39 +115,8 @@ def payments_config() -> ArkhaiPaymentsConfig:
 @pytest.fixture(scope="module")
 def purchase_cli(payments_config, buyer_cli_binary, tmp_path_factory) -> BuyerCli:
     """The lane's buyer, profiled with no wallet, buying through Arkhai payments alone."""
-    registry_url = str(settings.REGISTRY.API_URL or "").rstrip("/")
-    assert registry_url, "REGISTRY.API_URL is required for the purchase's discovery"
-    scheme = str(settings.BUYER.get("marketplace_scheme", "eip191") or "eip191")
-    credential = str(settings.BUYER.get("marketplace_credential", "") or "")
-    assert credential, "BUYER.MARKETPLACE_CREDENTIAL is required for the purchase's buyer"
-    sections = (
-        "[vms]",
-        f"payer_account = {_toml_quote(str(payment_setting('BUYER_ACCOUNT')))}",
-        "",
-        # Only the configured, enabled mechanism is selectable, so the buyer
-        # can settle this purchase no other way.
-        "[Settlement]",
-        "schema_version = 1",
-        'priority = ["arkhai.payments.v1"]',
-        "",
-        *payment_config_toml(payments_config),
-    )
-    return create_profiled_buyer_cli(
-        binary=buyer_cli_binary,
-        base=tmp_path_factory.mktemp("vm_payment_purchase_buyer"),
-        domain_identity="vms.compute",
-        marketplace_scheme=scheme,
-        marketplace_credential=credential,
-        registries=(registry_url,),
-        registry_authorities={registry_url: {
-            "authority": str(settings.REGISTRY.get("authority_id", "") or ""),
-            "identities": [{
-                "scheme": str(settings.REGISTRY.get("authority_scheme", "eip191") or "eip191"),
-                "identifier": str(settings.REGISTRY.get("identifier", "") or ""),
-            }],
-        }},
-        credential_environment=buyer_payments_environment(payments_config),
-        toml_sections=sections,
+    return vm_purchase_cli(
+        payments_config, buyer_cli_binary, tmp_path_factory.mktemp("vm_payment_purchase_buyer"),
     )
 
 

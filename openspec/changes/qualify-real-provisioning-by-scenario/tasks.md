@@ -1286,6 +1286,9 @@ helper.
   implementation invocation: focused suites and packaging before each intermediate commit,
   one full `make test` for the round's frozen implementation. This section touched only
   `e2e-tests`, whose unit suite is the one above; section 8's note records the full run.
+  Amended by section 8: that run covered this section's tree as section 8 changed it;
+  every suite passed except two blocked by a full root filesystem, neither touching
+  `e2e-tests` (8.6).
   End-to-end scenarios, confirmed: none; section 8's modules, in no lane, are the first
   callers. None is owed in the pipeline.
   Owed by validation: `tests.yml`, job `test · test-e2e-unit` — passes with the target and
@@ -1329,7 +1332,7 @@ fixtures are reachable; their conftest fixtures; `e2e-tests/pyproject.toml` (mar
 section 3's `test_buyer_purchase_stages.py` (their rows) and a unit module for
 their wiring; `e2e-tests/README.md`'s marker list.
 
-- [ ] 8.1 Observation 2 (D1, D3, D5, D9). Two CPU-only VM purchases through the shared
+- [x] 8.1 Observation 2 (D1, D3, D5, D9). Two CPU-only VM purchases through the shared
   purchase stages on the target's host, the listing through section 5's helper. A
   heartbeat over SSH on the first guest runs across the second guest's create and
   teardown and shows no gap over five seconds; host diagnostics (section 6) are read before,
@@ -1339,20 +1342,100 @@ their wiring; `e2e-tests/README.md`'s marker list.
   runs), a changed invocation or a grown restart count failing the module naming the unit;
   both leases end through `10a`/`10b` back-dating and stepped watchdog cycles. Without
   `management_unit` the diagnostics' management reads skip naming it.
-- [ ] 8.2 Observations 4 and 5 (D1, D6, D10, D16's ending). The normal cycle through the
+  Done as `scenarios/vms/test_vm_qualification.py` (marker `e2e_vm_qualification`) over
+  `RealVmPurchaseDriver` (`scenarios/vms/real_purchase_driver.py`): the real VM driver
+  with `VmPurchaseParts`, the purchase parts now shared with the lane's
+  `VmPurchaseDriver` (moved out of it unchanged; its listing-specific checks stay).
+  - **The first purchase** declares each shared stage once, in the real expiry order
+    (`expected_order(mock=False, ending=EXPIRY)`); its own stages: 00e1, 00f2, 02b/03b
+    (`create_or_adopt_listing` with `ARKHAI_PAYMENTS_MECHANISM`), 03c, 08b3, 09a2,
+    09d–09f, 10b2, 11a3, 11c, 11d, 12a, 12b. `market buy` finds the listing by
+    `region="e2e-real-host"`, which only the real resource states.
+  - **The second purchase** runs the same definitions on its own state, driver and CLI
+    profile through `run_stage` (`helpers/qualification.py`) from stages 09g–09p, since
+    the purchase source check allows each shared stage once per module: `Purchase01`–`05`,
+    `09a`–`09c`, `Purchase09`, `10a`, `10b`, `11a`. Not `11b`: it requires the whole
+    resource free, and the first guest still holds its slice, so 09o completes the second
+    guest's teardown itself, re-reserving only one guest's shape, as the real Alkahest
+    module's second deal does.
+  - **The payments.** Each purchase's `Purchase05` checks its own transaction against its
+    own balance window; 09i then checks the payer's drop since before the first purchase
+    against both transactions' debits (D4), logging the dedicated-account precondition.
+  - **Diagnostics** are read five times (before, three while the first guest runs, after),
+    each beside a management connectivity check. 12a applies D5's libvirtd criterion and
+    12b the management unit's (`host_generations.py`); 12b skips naming
+    `REAL_PROVISIONING_TARGET.hosts.vm.management_unit` without it. Both skip, as a
+    missing prerequisite, when fewer than five reads were taken.
+  - Both guests' shapes are probed and an unrelated key is refused for each; both grants'
+    admission is checked (`check_admission`).
+  `listing_settlements`, `ALKAHEST_SETTLEMENT` and the real resource
+  (`real_target_resource`) moved from the real Alkahest module to `composed_listing.py`,
+  which both modules share; `vm_purchase_cli` moved from the lane purchase module to
+  `purchase_driver.py`.
+- [x] 8.2 Observations 4 and 5 (D1, D6, D10, D16's ending). The normal cycle through the
   purchase stages and the buyer-teardown ending, then the successor and refusal cycle in
   the same module, using the first cycle's consumed UID: the reclaim meets the planted
   foreign descendant, is queued for retry with its error recorded and a next retry time,
   its log names the descendant, the lease stays `releasing`, and after fixture-only repair
   the same job completes. The cycle reuses the cleanup-qualification fixtures
   (`working_data_qualification.py`, `working_data_probe.py`). No GPU is checked.
-- [ ] 8.3 Observation 6 (D5's consumed-UID read). It reapplies both hosts' canonical
+  Done as `scenarios/bare_metal/test_bare_metal_qualification.py` (marker
+  `e2e_bare_metal_qualification`) over `RealBareMetalPurchaseDriver`
+  (`scenarios/bare_metal/real_purchase_driver.py`), with `BareMetalPurchaseParts` now
+  shared with the lane's driver. The module runs once per `cleanup_cycle`, `normal` then
+  `refusal`, as the real Alkahest module does, so each shared stage is declared once
+  (`expected_order(mock=False, ending=BUYER_TEARDOWN)`) and each cycle has its own state,
+  key, CLI profile and compensation; the consumed-UID history carries across. Own
+  stages: 00e1, 00f2, 03a/03b (publication adopts the machine's one open listing), 08b3,
+  09a2, 09d (pinned relay endpoint, nonroot tenant), 09e, 09e2 (admission), 09f (seed
+  through the probe; the successor's fresh UID is `seed`'s check), 09g, 11a1 (refusal
+  cycle only: the queued retry, recorded error and next retry, the log naming the
+  descendant, the lease `releasing`, capacity unadvertised, fixture-only repair, logged
+  with the job's record as the operator notification D5 names), 11a3 (the same job
+  completes), 11c, 11d (absence and unchanged sentinels), 12 (the cycle's compensation,
+  8.4).
+  - **Without `cleanup_qualification`** the normal cycle runs with 09f and 11d skipped
+    naming the field, and the refusal cycle skips whole naming it. The refusal cycle also
+    skips, as a missing prerequisite, when the normal cycle's cleanup was not verified, so
+    observation 5 is never failed by inference from observation 4.
+  - **The real listing's terms are the deployment's.** `BareMetalPurchaseParts` checks
+    only what any backed whole-host payments listing states (backed, pinned publisher,
+    USD/6 by the hour); the lane driver adds the terms its own pool override writes. The
+    Agreement and payment are checked against whatever the listing states (`Purchase05`).
+  The purchase-profile helpers (`bare_metal_purchase_cli`, `purchase_signer`,
+  `purchase_fulfillment_transport`, `purchase_registry_client`, `seller_refund`) moved
+  from the lane purchase module to `purchase_driver.py`, unchanged.
+- [x] 8.3 Observation 6 (D5's consumed-UID read). It reapplies both hosts' canonical
   registrations and runs a publication cycle; existing listings are adopted with
   identities, states and pauses intact, no duplicate host, pool, resource, allocator or
   listing appears, unexpired relay quarantine is retained, and the consumed-UID history,
   read through the working-data operator route's `policy` operation before and after, is
   unchanged. It needs both hosts and reports a blocked skip naming the missing one.
-- [ ] 8.4 Common to the three (D1, D8, D9, D10). Each module is in no lane, reports a
+  Done as `scenarios/vms/test_real_provisioning_reapply.py` (marker
+  `e2e_real_provisioning_reapply`), under `vms/` with the bare-metal lane's distinctly
+  named fixtures imported from its conftest; a new `bare_metal_storefront_loops_held`
+  there holds the bare-metal storefront beside the VM one (and joins
+  `test_scenario_holds.py`'s hold fixtures). It skips blocked without either host, the
+  `BARE_METAL_LANE` settings or the payments target. Stages: 00 a publication cycle on
+  each storefront, so the state read next is settled rather than what the held loops had
+  yet to apply (a listing the earlier modules left closed is reopened here, not counted
+  as a change), 01 each host's registration before (skipping, naming the resource, where
+  no run has listed it yet), 02 the consumed-UID history
+  (`WorkingDataQualification.consumed_uids`: the `policy` operation asked for no unused
+  UID, which the probe now accepts, so a range the cycles exhausted does not fail the
+  read), 03 both real drivers' `seed_supply` reapplied, 04 another publication cycle, 05
+  nothing duplicated, dropped or changed, 06 the history unchanged.
+  The comparison is `registration_faults` over a `RegistrationSnapshot` per host: its host
+  rows, the site's capacity declarations bound to it, the listings on its resource (id,
+  status, pause), and its relay's quarantined ports and active ports. Read here:
+  "allocator" is the site's capacity declaration bound to the host, the record the site
+  allocates the host's capacity from; "pool" is the pool those rows and the host name;
+  "resource" is the site's declaration. The storefront's own resource rows and a pool
+  listing are not read: no typed read of either is used by the lanes. The bare-metal
+  site's convergence and lease watchdog are not held: it may be the VM site's service,
+  whose second hold would resume it early, and nothing they could change makes the
+  comparison wrong (the module docstring says why).
+- [x] 8.4 Common to the three (D1, D8, D9, D10). Each module is in no lane, reports a
   blocked skip and writes nothing to the stack without both targets, reads the runner's
   `PAYMENTS` section (D19), holds the loops for the whole module, and never waits out the
   wall clock for a state it can step to. Every relayed lease (observations 2, 4 and 5)
@@ -1370,13 +1453,87 @@ their wiring; `e2e-tests/README.md`'s marker list.
   This task writes the matching clause and scenario into the qualification requirement
   in the test-compatibility delta, and the design's rationale beside D8. Unit: a failure after approval refunds and releases; a refund that stays
   refused, or a guest that cannot be ended, is reported naming the purchase.
-- [ ] 8.5 Wiring checks. Unit: each module registered under its marker in no lane
+  Done.
+  - **Targets first.** Each module lists `payments_config`, its real-provisioning target
+    fixture(s) (`target_host`, a blocked skip naming the missing target or host) and its
+    services' executions before any hold.
+  - **Holds.** Each holds the storefront loops, convergence and lease watchdog for the
+    module (observation 6's exception in 8.3). Leases end by back-dating and stepped
+    cycles. Every wait is on an event, bounded: real jobs (`JobWatch`), the buyer's
+    command's run log, the settle wait, storefront stage events, the admission log's
+    copy, and compensation's refund retry and dispatch read.
+  - **Admission.** Every relayed lease's grant is checked (VM 09e2 and 09k, bare metal
+    09e2), skipping naming `admission_log` without it.
+  - **Outcomes.** Every stage requires its module's observation, or its cycle's
+    (`OBSERVATIONS`, `CYCLE_OBSERVATIONS`; 11a1 narrows to the refusal cycle).
+    `helpers/qualification.py` gained this module-default rule, since a shared stage's
+    empty body cannot declare its own, and the per-cycle mapping. Each stage logs the
+    identifiers it reads.
+  - **The payer.** `Purchase01` records the payer account, and `Purchase03` now fails
+    naming it when the buyer's run records no approval, for every purchase, the lanes'
+    included. No module funds the payer. The delivery-end filing is `Purchase10`'s,
+    unread.
+  - **Compensation.** `PurchaseCompensation` reports a delivery it cannot read or end as
+    `UnreleasedDelivery`, naming negotiation and transaction (its status read's failure
+    included, which it raised unwrapped before), and skips the refund once the module
+    began ending the purchase itself (`ending_begun`: the VM lease's expiry requested,
+    `_termination_requested`; the buyer's teardown asked for, a new
+    `_buyer_teardown_requested` that `Purchase10` writes before running the command); the
+    release still runs. The delta and D8 now say so. Each real driver supplies
+    `purchase_status` and `end_purchase`, which runs the real lane's own lease recovery
+    (`tear_down_after_failure`) with the job identifiers the stages recorded, so the
+    recovery tells the create job from a teardown job. The bare-metal module runs each
+    cycle's compensation as that cycle's last stage (12), the fixture only where 12 did
+    not run: pytest finalizes a cycle's fixtures in the next cycle's first setup, which
+    would count a normal-cycle cleanup failure against observation 5. That cleanup first
+    repairs a planted fixture still in place (`repair_planted_fixture`), so the reclaim
+    can complete. The real VM driver now takes a `refunded` settle status, like
+    `refunding`, as nothing dispatched.
+  - **Documents.** The delta's qualification requirement gains the compensation clause
+    and the scenario "A qualification stage fails after the payment is approved"; D8 gains
+    the stage-requirement rule and the compensation rationale.
+  Unit (`test_payment_compensation.py`): a delivery that cannot be ended, and a failed
+  status read, reported as `UnreleasedDelivery` naming negotiation and transaction; a
+  purchase whose ending began released, not refunded. (`test_qualification_modules.py`):
+  the VM guest found and ended by negotiation with its create job and guest, and nothing
+  dispatched read as no guest, over a subclass recording the recovery; a refund begun or
+  finished before delivery read as no guest, over the driver itself with a fake settle
+  status; the bare-metal tenancy ended with its grant job, over a recording subclass.
+  (`test_buyer_purchase_run.py`): a run with no approval names the payer. Not unit-tested:
+  the modules' cleanup wiring itself (which flags, the order, the repair step), which
+  only a run against a target exercises.
+- [x] 8.5 Wiring checks. Unit: each module registered under its marker in no lane
   (absent from every `E2E_*_MODULE`); the observation 2 and observations 4 and 5 modules
   as rows of the purchase source check, extending the purchase stages without replacing a
   body; a module with no target configured reporting a blocked skip before any stage
   (with injected settings). `e2e-tests/README.md` lists the three markers and how an
   operator runs them through `test-module`.
-- [ ] 8.6 **Verification checkpoint.** Unit: `make test-e2e-unit`. Run `make test` and
+  Done. Unit (source checks):
+  - `test_qualification_modules.py`: each marker registered, carried by its module, absent
+    from every `E2E_*_MODULE` in `e2e-tests/Makefile`, its `OBSERVATIONS` as planned, the
+    bare-metal module's cycles, the README's `test-module` line for each; `target_host`
+    with injected settings a blocked skip without a target and naming a missing domain's
+    host.
+  - `test_buyer_purchase_stages.py`: the observation 2 and observations 4 and 5 modules
+    are rows (`mock=False`, their endings) and pass.
+  - `test_compute_deal_stages.py`: both are `PURCHASE_LANES` rows and pass every stage-state
+    check, the handoff's included.
+  - `test_scenario_cleanup_order.py`: its `--setup-plan` run now collects the three
+    modules and resolves their fixtures. Each sets up its payments target, target(s) and
+    executions before any hold, in that order; the hold-release order holds; the VM ones
+    take their own cleanup and no fleet-wide release.
+  Differed from the plan: "a module with no target configured reporting a blocked skip
+  before any stage (with injected settings)" is two checks, not one run. The
+  real-provisioning target's skip is unit-tested with injected settings (`target_host`),
+  and the setup-plan order shows the target and payments fixtures are set up before any
+  hold or write. No module is run without settings: the payments target's absence is read
+  from the process's settings, which a unit run cannot inject. Pure checks, unit: D5's criterion (`host_generations.py`): unchanged
+  reads, each named management and libvirtd fault, libvirtd starting anew while no guest
+  runs. The listing's status after one and two guests. `registration_faults`: duplicates,
+  changes, a lost or reowned quarantine, an expired one allowed, the quarantine read.
+  `README.md` gains "Real-provisioning qualification" and the markers in its payments
+  list.
+- [x] 8.6 **Verification checkpoint.** Unit: `make test-e2e-unit`. Run `make test` and
   `make check-comment-hygiene`.
   End-to-end: `e2e_vm_qualification`, `e2e_bare_metal_qualification` and
   `e2e_real_provisioning_reapply` are in no lane; the deployment's operator runs them on
@@ -1386,6 +1543,69 @@ their wiring; `e2e-tests/README.md`'s marker list.
   the shared stages these modules extend.
   Owed by validation: `tests.yml`, job `test · test-e2e-unit` — passes with the wiring
   checks.
+  Unit: `make test-e2e-unit`, 727 passed on the final tree, after both fresh-context
+  passes' fixes. `make check-change` passed all 12 checks, comment hygiene among them.
+  `make check-packaging` passed every check; no dependency or lock changed in this
+  section. `make test`, the round's one full run under the owner's direction for it, was
+  started before the fresh-context passes, whose fixes touched only `e2e-tests` and this
+  change's documents, and stopped at `test-apicredits`: every suite before it passed, and
+  its `test_distribution_install.py` failed installing wheels under `/tmp`
+  with "No space left on device", the machine's root filesystem being full (about 200 MB
+  free); this section touches no API-credit package. The suites it did not reach were run
+  after the second pass's fixes: `test-e2e-unit` passed (727), `test-frp-grant-admission`
+  (203 passed, 15 skipped) and `test-payments-lane-double` (50 passed) passed, and
+  `test-deployment-packaging` errored at setup creating its temporary directories under
+  `/tmp`, for the same cause. Neither of the two disk-blocked suites has passed in this
+  session; both cover code this round does not change. Re-run them once the root
+  filesystem has space.
+  End-to-end scenarios, corrected: `e2e_vm_qualification`, `e2e_bare_metal_qualification`
+  and `e2e_real_provisioning_reapply` are in no lane, so the pipeline deselects them by
+  marker rather than collecting and skipping them; the unit checks show their markers in
+  no lane expression and their fixtures resolving under `--setup-plan`. The deployment's
+  operator runs them on the post-merge candidate (D7). The lanes' `e2e_vm_payment_purchase`
+  and `e2e_bare_metal_payment_deal` run the shared stages these modules extend, with this
+  section's changes to them: `Purchase01` recording the payer, `Purchase03` naming it,
+  `Purchase10` recording the teardown asked for, the drivers' parts moved into mixins and
+  the purchase-profile helpers into `purchase_driver.py`.
+  Owed by validation: `tests.yml`, job `test · test-e2e-unit` — passes with the wiring
+  checks (confirmed).
+
+Handoff from section 8:
+
+- **Not proven.** Every module needs a real-provisioning target and a payments target, so
+  none has run. What is read from the code rather than run: `market buy` finding the real
+  listing by `region`; a payments option on the real VM listing beside Alkahest; the
+  bare-metal storefront publishing a payments option on the real machine; the second VM
+  purchase's ending through `10a`/`10b`/`11a` and 09o's own completion; the module-scoped
+  cycle parametrization finalizing a cycle's fixtures between cycles. Their sanitized
+  findings are the owner's notes on the post-merge candidate's round (D7).
+- **For closeout.** 9.9's `TESTING.md` "The real-provisioning lane" entry should state
+  the three markers, the module-default observation rule and the per-cycle compensation
+  stage; the delta's compensation clause merges with the archive.
+- **Environment.** The machine's root filesystem was full at the round's end, so
+  `test-apicredits` and `test-deployment-packaging` have not passed in this session (8.6).
+- **Fresh-context check.** First pass, fixed: compensation now carries the stages' job
+  identifiers into the real recovery (it found two jobs once a teardown job existed); no
+  refund once the module began ending a purchase, with the delta and D8 saying so; the real
+  bare-metal listing checked against what any listing states, not the lane's own terms;
+  the refusal cycle skipping, not failing, without a verified normal cycle; a planted
+  fixture repaired before compensation; identifier logs in every stage, the refusal's job
+  record among them; a `refunded` settle status read as nothing dispatched; the second
+  guest's unrelated key; a blocked skip without `BARE_METAL_LANE`; the README's
+  `cleanup_qualification` wording; `ALKAHEST_SETTLEMENT` imported from its new home.
+  Second pass, fixed: each bare-metal cycle's compensation as its last stage (a normal-cycle
+  cleanup failure had counted against observation 5); observation 6 settling both
+  storefronts before its "before" read (a listing the earlier modules left closed would
+  have read as changed); the consumed-UID read asking for no unused UID; the teardown flag
+  written before the command; the compensation helper's docstring; overstated notes.
+  Declined: holding the bare-metal site's convergence and watchdog in observation 6 (a
+  second hold of one service resumes it early, and nothing they change spoils the
+  comparison; the module docstring says so); reading the storefront's resource rows and a
+  pool listing for observation 6 (no typed read the lanes use); making the bare-metal
+  conftest's `_pinned` and `_signer` public (the lane payment module already imports
+  them); constructing drivers without `object.__new__` in the unit cases; a VM flag
+  written before the back-date (`10a`'s checks failing after a successful back-date is the
+  only case it would change).
 
 ## 9. Closeout
 

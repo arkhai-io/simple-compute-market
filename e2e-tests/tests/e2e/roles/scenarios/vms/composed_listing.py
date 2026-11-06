@@ -15,18 +15,25 @@ naming the listing and its options, before any deal and changing nothing. On a
 stack composing one of them, the listing offers that one.
 
 The settlements a VM listing states for Arkhai payments are built here too
-(``payments_settlement``), for every VM module listing in that mechanism.
+(``payments_settlement``), for every VM module listing in that mechanism, and so
+are the real-provisioning target's resource and the settlements every module
+dealing on it states (``real_target_resource``, ``listing_settlements``).
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
+from decimal import Decimal
 from typing import Any
 
 from market_alkahest.plans import ALKAHEST_MECHANISM
 from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
 
+from e2e_harness.real_provisioning_target import VmHost
+from tests.e2e.roles.helpers.compute_deal_stages import DEAL_TOKEN, LISTED_HOURLY_RATE
+from tests.e2e.roles.helpers.payments import payment_setting
 from tests.e2e.roles.scenarios.vms.conftest import capacity_source_for
+from tests.e2e.roles.scenarios.vms.real_compute_deal_driver import REAL_REGION, REAL_RESOURCE_ID
 
 #: The mechanisms a buyer pays for a VM resource's capacity by, which a
 #: resource's listing offers wherever the storefront reports them ready. A
@@ -54,6 +61,51 @@ def payments_settlement(
             "delivery_deadline_seconds": DELIVERY_DEADLINE_SECONDS,
             "dispute_window_seconds": DISPUTE_WINDOW_SECONDS,
         },
+    }
+
+
+#: The canonical deal's asking rate on the dev chain's deal token, stated in
+#: whole tokens an hour, which the storefront's Alkahest composition publishes
+#: in the token's base units as ``LISTED_HOURLY_RATE``; a deal settles on the
+#: escrow the published option names.
+ALKAHEST_SETTLEMENT = {
+    "mechanism": ALKAHEST_MECHANISM,
+    "asset": DEAL_TOKEN["contract_address"],
+    "rate": str(Decimal(LISTED_HOURLY_RATE) / 10 ** DEAL_TOKEN["decimals"]),
+    "per": "hour",
+    "mechanism_input": {"chain": "anvil", "escrow_kind": "erc20_escrow_obligation_default"},
+}
+
+
+def listing_settlements() -> dict[str, dict]:
+    """The settlement every module on the real target's resource states for
+    each mechanism it can.
+
+    Alkahest always; Arkhai payments where the run names the seller's payments
+    account, so a stack composing it lists the resource with both, and a module
+    of either mechanism, whichever runs first, creates the listing the other
+    adopts.
+    """
+    settlements = {ALKAHEST_MECHANISM: ALKAHEST_SETTLEMENT}
+    seller_account = payment_setting("SELLER_ACCOUNT")
+    if seller_account:
+        settlements[ARKHAI_PAYMENTS_MECHANISM] = payments_settlement(
+            seller_account=str(seller_account),
+            dispute_window=str(payment_setting("DISPUTE_WINDOW", "P7D")),
+        )
+    return settlements
+
+
+def real_target_resource(target: VmHost) -> dict[str, Any]:
+    """The real-provisioning target's resource: its explicit guest listing
+    shape, and no GPU."""
+    return {
+        "offering_mode": "vm",
+        "interruptible": True,
+        "resource_id": REAL_RESOURCE_ID,
+        **target.listing_shape.model_dump(),
+        "sla": 90.0,
+        "region": REAL_REGION,
     }
 
 
@@ -100,7 +152,7 @@ def create_or_adopt_listing(
     created, since a listing created without it never offers it; so does the
     module's own mechanism not being ready.
     """
-    listings = _listings_on_resource(storefront_admin_client, resource["resource_id"])
+    listings = listings_on_resource(storefront_admin_client, resource["resource_id"])
     if listings:
         return _adopted(storefront_admin_client, listings, shape=shape, mechanism=mechanism), True
     ready = ready_mechanisms(storefront_admin_client)
@@ -169,7 +221,7 @@ def _adopted(
     return adopted
 
 
-def _listings_on_resource(storefront_admin_client: Any, resource_id: str) -> list[Any]:
+def listings_on_resource(storefront_admin_client: Any, resource_id: str) -> list[Any]:
     """Every storefront listing on the resource, read page by page."""
     found: list[Any] = []
     offset = 0

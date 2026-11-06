@@ -19,12 +19,13 @@ Two parts, neither tied to a domain:
   (``docs/development/VALIDATION_RUNBOOK.md#observations-the-qualification-owes``),
   and a pytest run that passes with a skipped stage has not run every check an
   observation requires. So a qualification module names its observations
-  (``OBSERVATIONS``), each of its stages declares the observations requiring
-  it (``observations`` on its class), and once the module's last stage has
-  reported, the outcome of each is logged: made when every requiring stage
-  passed, failed when one failed, and unproven when none failed and one
-  skipped, naming what the skip named. Nothing is written to a file: the
-  operator's sanitized account of the log is the evidence.
+  (``OBSERVATIONS``, or ``CYCLE_OBSERVATIONS`` for a module run once per
+  cycle), each of its stages requires them unless its class declares its own
+  (``stage_observations``), and once the module's last stage has reported, the
+  outcome of each is logged: made when every requiring stage passed, failed
+  when one failed, and unproven when none failed and one skipped, naming what
+  the skip named. Nothing is written to a file: the operator's sanitized
+  account of the log is the evidence.
 """
 
 from __future__ import annotations
@@ -34,14 +35,53 @@ import logging
 import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
 import pytest
 
-from e2e_harness.real_provisioning_target import SECTION, BareMetalHost, VmHost
+from e2e_harness.real_provisioning_target import (
+    SECTION,
+    BareMetalHost,
+    TargetNotConfigured,
+    VmHost,
+    load_real_provisioning_target,
+)
 
 log = logging.getLogger(__name__)
+
+# ===========================================================================
+# The target
+# ===========================================================================
+
+
+def target_host(settings: Any, domain: Literal["vm", "bare_metal"]) -> VmHost | BareMetalHost:
+    """The real-provisioning target's host of ``domain``, or a blocked skip.
+
+    A skip names what is missing: the target, or its host of that domain. A
+    target that is present and invalid fails, naming the field.
+    """
+    target = load_real_provisioning_target(settings)
+    if isinstance(target, TargetNotConfigured):
+        pytest.skip(f"blocked: {target.reason}")
+    host = target.host_for(domain)
+    if host is None:
+        pytest.skip(f"blocked: {SECTION}.hosts holds no {domain} host")
+    return host
+
+
+def run_stage(stage: type, **arguments: Any) -> None:
+    """Run a shared stage's body with ``arguments`` as its fixtures.
+
+    A module declares each shared stage once, so a second purchase in the
+    same module runs the same definitions on its own state and driver this
+    way, from a stage of the module's own, rather than redefining them.
+    """
+    (name,) = [name for name in dir(stage)
+               if name.startswith("test") and callable(getattr(stage, name))]
+    getattr(stage(), name)(**arguments)
+
 
 # ===========================================================================
 # Grant admission
@@ -181,6 +221,85 @@ def check_admission(
 
 
 # ===========================================================================
+# Registration reapplied
+# ===========================================================================
+
+
+@dataclass(frozen=True)
+class QuarantinedPort:
+    """A released relay port whose grants have not yet expired."""
+
+    lease_id: str
+    remote_port: int
+    owner_id: str
+    grant_expires_at: datetime
+
+
+@dataclass(frozen=True)
+class RegistrationSnapshot:
+    """What one target host's registration amounts to, read from its authorities.
+
+    Each tuple is sorted, so two snapshots compare as values.
+    """
+
+    #: The host rows registered under the target's id: (host, pool, enabled).
+    hosts: tuple[tuple[str, str | None, bool], ...]
+    #: The site's capacity declarations bound to the host, each the allocation
+    #: record the site sells the host's capacity from: (resource, pool).
+    declarations: tuple[tuple[str, str | None], ...]
+    #: The storefront's listings on the host's resource: (listing, status, paused).
+    listings: tuple[tuple[str, str, bool], ...]
+    #: The relay's quarantined ports, for a relayed target.
+    quarantined: tuple[QuarantinedPort, ...] = ()
+    #: The relay's ports with an unreleased owner.
+    active_ports: tuple[int, ...] = ()
+
+
+def quarantined_ports(leases: Iterable[Any], now: datetime) -> tuple[QuarantinedPort, ...]:
+    """The released relay leases whose grants are still unexpired at ``now``."""
+    return tuple(sorted(
+        (QuarantinedPort(str(lease.lease_id), int(lease.remote_port), str(lease.owner_id),
+                         lease.grant_expires_at)
+         for lease in leases
+         if lease.released_at is not None and lease.grant_expires_at is not None
+         and lease.grant_expires_at > now),
+        key=lambda port: (port.remote_port, port.lease_id),
+    ))
+
+
+def registration_faults(
+    name: str, before: RegistrationSnapshot, after: RegistrationSnapshot, *, now: datetime,
+) -> list[str]:
+    """How reapplying ``name``'s registration and a publication cycle changed it.
+
+    Nothing may be duplicated or dropped: one host row, one declaration, one
+    listing, each as it was, the listing's identity, state and pause intact.
+    Every port quarantined before stays quarantined until its grant expires,
+    with no new owner.
+    """
+    faults = []
+    for kind, rows in (("host", after.hosts), ("capacity declaration", after.declarations),
+                       ("listing", after.listings)):
+        if len(rows) != 1:
+            faults.append(f"{name}: {len(rows)} {kind}s after reapplying, where one was: {rows}")
+    for kind, was, now_is in (("hosts", before.hosts, after.hosts),
+                              ("capacity declarations", before.declarations, after.declarations),
+                              ("listings", before.listings, after.listings)):
+        if was != now_is:
+            faults.append(f"{name}: {kind} changed from {was} to {now_is}")
+    kept = {port.lease_id for port in after.quarantined}
+    for port in before.quarantined:
+        if port.grant_expires_at <= now:
+            continue
+        if port.lease_id not in kept:
+            faults.append(f"{name}: relay port {port.remote_port} (lease {port.lease_id}) left "
+                          f"quarantine before its grants expire at {port.grant_expires_at}")
+        if port.remote_port in after.active_ports:
+            faults.append(f"{name}: quarantined relay port {port.remote_port} has a new owner")
+    return faults
+
+
+# ===========================================================================
 # Per-observation outcome
 # ===========================================================================
 
@@ -271,18 +390,49 @@ def stage_result(stage: str, observations: Iterable[str], reports: Mapping[str, 
 REPORTS = pytest.StashKey[dict[str, Any]]()
 
 
-def declared_observations(item: Any) -> tuple[str, ...]:
-    cls = getattr(item, "cls", None)
-    return tuple(getattr(cls, OBSERVATIONS_ATTRIBUTE, ()) or ())
+def _qualification_module(item: Any) -> Any | None:
+    module = getattr(item, "module", None)
+    return module if getattr(module, "OBSERVATIONS", None) else None
+
+
+def _cycles(module: Any) -> list[Any]:
+    """The values of the module's cycle parameter, or one ``None`` for none."""
+    by_cycle = getattr(module, "CYCLE_OBSERVATIONS", None)
+    return list(by_cycle) if by_cycle else [None]
+
+
+def _cycle_of(module: Any, item: Any) -> Any:
+    param = getattr(module, "CYCLE_PARAM", None)
+    callspec = getattr(item, "callspec", None)
+    return callspec.params.get(param) if param and callspec is not None else None
+
+
+def stage_observations(module: Any, cls: Any, cycle: Any = None) -> tuple[str, ...]:
+    """The observations requiring a stage of a qualification module.
+
+    A stage class may declare its own (``observations``); otherwise every
+    stage requires the module's: ``CYCLE_OBSERVATIONS[cycle]`` in a module run
+    once per cycle (by its ``CYCLE_PARAM``), else ``OBSERVATIONS``. A shared
+    stage is declared with an empty body, so the module's default is how it
+    is required. Either form may map a cycle to its observations.
+    """
+    declared = getattr(cls, OBSERVATIONS_ATTRIBUTE, None)
+    if declared is None:
+        declared = getattr(module, "CYCLE_OBSERVATIONS", None) or module.OBSERVATIONS
+    if isinstance(declared, Mapping):
+        return tuple(declared.get(cycle, ()))
+    return tuple(declared)
+
+
+def item_observations(item: Any) -> tuple[str, ...]:
+    module = _qualification_module(item)
+    if module is None:
+        return ()
+    return stage_observations(module, getattr(item, "cls", None), _cycle_of(module, item))
 
 
 #: The modules whose outcomes a session has logged, so each is logged once.
 LOGGED = pytest.StashKey[set[str]]()
-
-
-def _qualification_module(item: Any) -> Any | None:
-    module = getattr(item, "module", None)
-    return module if getattr(module, "OBSERVATIONS", None) else None
 
 
 def record_report(item: Any, report: Any) -> None:
@@ -290,11 +440,11 @@ def record_report(item: Any, report: Any) -> None:
     the module's last item has reported its teardown.
 
     Called from the roles conftest's report hook for every item; only an item
-    whose class declares observations is kept. The last item's teardown is
-    where a module's fixtures are finalized, so a failure in the module's own
-    cleanup fails that item's stage when it is a declared one.
+    some observation requires is kept. The last item's teardown is where a
+    module's fixtures are finalized, so a failure in the module's own cleanup
+    fails that item's stage.
     """
-    if declared_observations(item):
+    if item_observations(item):
         item.stash.setdefault(REPORTS, {})[report.when] = report
     module = _qualification_module(item)
     if module is None or report.when != "teardown":
@@ -327,7 +477,7 @@ def log_unlogged_outcomes(session: Any) -> None:
 
 
 def declared_stages(module: Any) -> list[tuple[type, str]]:
-    """Every stage of ``module`` declaring observations: its class and test.
+    """Every stage of ``module``: its class and test.
 
     Read from the module's source, not from the run's items, so a stage the
     run deselected or never collected still counts, as one that did not run.
@@ -336,25 +486,33 @@ def declared_stages(module: Any) -> list[tuple[type, str]]:
         (cls, name)
         for cls in vars(module).values()
         if isinstance(cls, type) and cls.__name__.startswith("Test")
-        and getattr(cls, OBSERVATIONS_ATTRIBUTE, ())
         for name in dir(cls) if name.startswith("test") and callable(getattr(cls, name))
     ]
 
 
 def stage_results(module: Any, items: Iterable[Any]) -> list[StageResult]:
-    """Each declared stage of ``module``'s outcome over the run's ``items``."""
+    """Each stage of ``module``'s outcome over the run's ``items``, per cycle."""
     items = list(items)
     results = []
     for cls, name in declared_stages(module):
-        runs = [item for item in items
-                if getattr(item, "cls", None) is cls and getattr(item, "originalname", item.name) == name]
-        observations = getattr(cls, OBSERVATIONS_ATTRIBUTE)
-        if not runs:
-            results.append(stage_result(f"{cls.__name__}::{name}", observations, {}))
-        results.extend(
-            stage_result(f"{cls.__name__}::{item.name}", observations, item.stash.get(REPORTS, {}))
-            for item in runs
-        )
+        for cycle in _cycles(module):
+            observations = stage_observations(module, cls, cycle)
+            if not observations:
+                continue
+            label = f"{cls.__name__}::{name}" + ("" if cycle is None else f"[{cycle}]")
+            runs = [
+                item for item in items
+                if getattr(item, "cls", None) is cls
+                and getattr(item, "originalname", item.name) == name
+                and _cycle_of(module, item) == cycle
+            ]
+            if not runs:
+                results.append(stage_result(label, observations, {}))
+            results.extend(
+                stage_result(f"{cls.__name__}::{item.name}", observations,
+                             item.stash.get(REPORTS, {}))
+                for item in runs
+            )
     return results
 
 
@@ -377,19 +535,26 @@ def log_observation_outcomes(module: Any, items: Iterable[Any]) -> list[Observat
 __all__ = [
     "OBSERVATIONS_ATTRIBUTE",
     "ObservationOutcome",
+    "QuarantinedPort",
+    "RegistrationSnapshot",
     "StageResult",
     "admission_decisions",
     "admission_log_field",
     "check_admission",
-    "declared_observations",
     "declared_stages",
+    "item_observations",
     "log_module_outcomes",
     "log_observation_outcomes",
     "log_unlogged_outcomes",
     "observation_outcomes",
+    "quarantined_ports",
     "record_report",
+    "registration_faults",
     "relay_lease_record",
     "require_admitted",
+    "run_stage",
+    "stage_observations",
     "stage_result",
     "stage_results",
+    "target_host",
 ]

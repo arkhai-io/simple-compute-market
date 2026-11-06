@@ -107,6 +107,18 @@ PURCHASE_LANES = (
         ROLES / "scenarios" / "vms" / "test_vm_payment_purchase.py",
         "VmPurchaseState",
     ),
+    Lane(
+        "vms_qualification",
+        ROLES / "scenarios" / "vms" / "test_vm_qualification.py",
+        ROLES / "scenarios" / "vms" / "test_vm_qualification.py",
+        "VmQualificationState",
+    ),
+    Lane(
+        "bare_metal_qualification",
+        ROLES / "scenarios" / "bare_metal" / "test_bare_metal_qualification.py",
+        ROLES / "scenarios" / "bare_metal" / "test_bare_metal_qualification.py",
+        "BareMetalQualificationState",
+    ),
 )
 ALL_LANES = (*LANES, *REAL_LANES, *PURCHASE_LANES)
 BARE_METAL_STAGES = classes(tree(ROLES / "scenarios" / "bare_metal" / "publication_stages.py"))

@@ -58,6 +58,17 @@ def test_a_purchase_command_that_never_commits_is_stopped():
     assert state.purchase_run is None
 
 
+def test_a_payer_that_does_not_approve_is_named():
+    cli, driver, state = MagicMock(), _driver(), _bought_state()
+    state.payer_account = "acct_payer"
+    run = cli.run.return_value
+    run.run_id = "run-1"
+    run.wait_for_event.side_effect = AssertionError("no payment_approved within 12s")
+    with pytest.raises(AssertionError, match="run-1 recorded no payment approved by payer acct_payer"):
+        Purchase03_Bought().test_p03_the_buyer_buys_through_its_cli(cli, driver, state)
+    run.terminate.assert_called_once_with()
+
+
 def _delivered_state(run) -> PurchaseState:
     return PurchaseState(
         domain_identity="purchase", purchase_run=run, negotiation_id="negotiation", settlement_id="transaction",

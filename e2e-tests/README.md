@@ -60,7 +60,9 @@ ACTIVE_PROFILES=staging,staging-secrets
 ### Shared payment-scenario configuration
 
 The payment scenarios — `e2e_credits_payment_deal`, `e2e_bare_metal_payment_deal`,
-`e2e_vm_payment_deal` and `e2e_vm_payment_purchase` — read the `PAYMENTS` section (environment prefix
+`e2e_vm_payment_deal` and `e2e_vm_payment_purchase`, and the qualification modules
+`e2e_vm_qualification`, `e2e_bare_metal_qualification` and
+`e2e_real_provisioning_reapply` — read the `PAYMENTS` section (environment prefix
 `ARKHAI_PAYMENTS__`) through `tests/e2e/roles/helpers/payments.py`. SERVICE_URL
 names the payments target; leave it blank and the scenario reports `blocked` and
 skips. With it set, supply the other four: SERVICE_IDENTITY (public Ed25519
@@ -306,6 +308,42 @@ Use the [operator runbook](../docs/development/VALIDATION_RUNBOOK.md#28-prepare-
 to prove deployed grant admission before either real lane. Container admission
 proof and native installer component tests have different scopes; neither
 substitutes for a completed real purchase, SSH access and reclaim observation.
+
+### Real-provisioning qualification
+
+Three modules make the [runbook's owed observations](../docs/development/VALIDATION_RUNBOOK.md#observations-the-qualification-owes)
+2, 4, 5 and 6 as external-topology extensions of the lanes' buyer purchases.
+Each is in no lane and needs both the `real-provisioning-target` profile and a
+configured `PAYMENTS` target (with `LANE_OWNED` unset, so an unready target is a
+blocked skip); without either it is a blocked skip before any hold or write.
+The payer is funded by the deployment, never by a module, and is assumed
+dedicated to the run. Run each through `test-module`, observation 6 after the
+other two on the same stack:
+
+```bash
+make test-module MODULE=e2e_vm_qualification ACTIVE_PROFILES=local,real-provisioning-target
+make test-module MODULE=e2e_bare_metal_qualification ACTIVE_PROFILES=local,real-provisioning-target
+make test-module MODULE=e2e_real_provisioning_reapply ACTIVE_PROFILES=local,real-provisioning-target
+```
+
+- `e2e_vm_qualification` (observation 2): two CPU-only guests bought through
+  `market buy` on the target's VM host, the first guest's heartbeat across the
+  second's create and teardown, host diagnostics before, during and after, and
+  both leases ended by back-dating and a stepped watchdog cycle.
+- `e2e_bare_metal_qualification` (observations 4 and 5): the normal cycle,
+  then a successor whose reclaim refuses a planted foreign descendant until
+  fixture-only repair, each ended by `market bare-metal teardown`. Without the
+  bare-metal host's `cleanup_qualification` its working-data stages and the
+  refusal cycle skip, and both observations are unproven.
+- `e2e_real_provisioning_reapply` (observation 6): both hosts' registrations
+  reapplied and a publication cycle stepped, nothing duplicated or changed. It
+  needs the `BARE_METAL_LANE` settings beside the VM lane's.
+
+Each module logs every observation's outcome at its end: made, failed, or
+unproven naming what a skipped stage lacked, such as the target's
+`management_unit` or relay `admission_log`. A failure after the buyer approved a
+payment refunds it as the seller and ends the delivered guest or host through
+its lease, and names by negotiation and transaction whatever it cannot.
 
 The installed buyer scenario `e2e_bare_metal_deal` keeps its separate
 `BARE_METAL` configuration and operator-supplied buyer key and known-hosts file.
