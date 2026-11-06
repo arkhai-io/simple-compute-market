@@ -34,7 +34,7 @@ where one read suffices:
   in the run above, every such buy completed on a timer tick, about 40 seconds of
   waiting in all. This is the trap `TESTING.md` records as "A loop with no pause is
   not paused". Holds are uneven across the compute lanes generally: several modules
-  hold only the storefront's loops, and one holds nothing.
+  hold only the storefront's loops.
 - The bare-metal introduction scenario polls the held `introduction-retention` dry run
   until the retention window has passed in real time, duplicating the storefronts'
   integration tests of the held sweep.
@@ -58,10 +58,11 @@ the work it does.
 - **The compute family's native tests run concurrently,** one process per test,
   `os.cpu_count()` at a time, each test's output printed whole under its id, so the new
   job stays off the pipeline's critical path. The VM IaC gate keeps its serial runner.
-- **Every compute-lane scenario module holds its lane's timers:** the storefront's
-  lifecycle loops, fulfillment convergence, and the lease watchdog, and in the VM lane
-  Alice's storefront loops. A source check reads each module's resolved fixtures and
-  fails one missing a hold.
+- **Every scenario module a compute pipeline lane selects holds its lane's timers:** the
+  storefront's lifecycle loops, fulfillment convergence, and the lease watchdog, and in
+  the VM lane Alice's storefront loops. A source check reads the resolved fixtures of the
+  modules each lane's marker expression selects and fails one missing a hold; modules no
+  lane selects, such as the real-host ones, keep the holds they have.
 - **Buy scenarios step convergence.** `test_buy_oneshot_buyer_cli` and
   `test_listing_shapes` run `market buy` in the background and advance convergence once
   the job is submitted, through one shared helper.
@@ -82,8 +83,8 @@ None.
 ### Modified Capabilities
 
 - `test-compatibility`: "Scenarios hold shared services for the whole module" requires
-  every compute-lane module to hold its lane's timers, enforced from each module's
-  resolved fixtures; a new requirement states that pipeline scenarios advance only by
+  every module a compute pipeline lane selects to hold its lane's timers, enforced from
+  each such module's resolved fixtures; a new requirement states that pipeline scenarios advance only by
   their own steps and wait only on effects of their own requests.
 
 ## Non-Goals
@@ -150,11 +151,12 @@ deployment changes.
 - D5: the API-credit lane runs the gate with no verify cache, and the cache is proven by
   the conformance trace — `docs/development/TESTING.md` (the API-credit lane's
   description).
-- D6: every compute-lane module holds its lane's timers, checked from the setup plan —
+- D6: every module a compute pipeline lane selects holds its lane's timers, checked from
+  the setup plan of the lane's marker selection —
   `openspec/specs/test-compatibility/spec.md` ("Scenarios hold shared services for the
   whole module") and `docs/development/TESTING.md` (the hold rule).
 - D7: buy scenarios run `market buy` in the background and step convergence through one
-  helper — `docs/development/TESTING.md` (the hold rule's paragraph on stepping).
+  helper, which terminates and reaps each buy it started on any failure — `docs/development/TESTING.md` (the hold rule's paragraph on stepping).
 - D8: no permanent destination — a scenario's single read after a step is what the new
   `test-compatibility` requirement already states.
 - D9: no permanent destination — the Mailpit wait is unchanged, and the new

@@ -28,9 +28,15 @@ What the code shows, and what this design rests on:
 - **Holds are uneven across the compute lanes.** Five modules hold storefront loops,
   convergence, and the lease watchdog; `test_non_erc20_settlement` holds the first two;
   seven hold only storefront loops; `test_multi_registry` holds Bob's and Alice's
-  storefront loops; `test_pool_declared_offering_modes` holds nothing. The lease
-  watchdog's cycle drains the capacity-release outbox (`lease_lifecycle.py`), which can
-  add capacity events between a stage's two "same answer twice" dry runs.
+  storefront loops. The lease watchdog's cycle drains the capacity-release outbox
+  (`lease_lifecycle.py`), which can add capacity events between a stage's two "same
+  answer twice" dry runs.
+- **A lane is its marker expression, not its directory.** The lanes select modules by
+  `E2E_MODULE` and `E2E_BARE_METAL_MODULE` in `e2e-tests/Makefile`. Four modules in the
+  lane directories are in no lane: the two `test_real_provisioning_deal.py` modules and
+  `test_bare_metal_deal.py`, which run against real hosts an operator provides, and
+  `test_pool_declared_offering_modes.py`, which holds nothing. The existing setup-plan
+  check finds its modules by directory.
 - **The bare-metal payment status poll is redundant.** The bare-metal storefront's
   fulfillment status (`BareMetalFulfillmentService.status`) reads provisioning's status
   live on every call, so once `advance_fulfillment_to(..., "active")` returns, one read
@@ -63,8 +69,9 @@ message the stage's own request caused.
 ## Goals / Non-Goals
 
 **Goals.** The native Ansible gate leaves the VM lane's critical path; no pipeline
-scenario waits on a service timer or on time passing; every compute-lane module holds
-the timers of the services its stages message, enforced from the setup plan.
+scenario waits on a service timer or on time passing; every module a compute pipeline
+lane selects holds the timers of the services its stages message, enforced from the
+setup plan.
 
 **Non-goals.** Everything `proposal.md` lists, and: no `as-of` control on any lifecycle
 route; no change to the API-credit middleware's cache behaviour; no change to the
@@ -184,19 +191,29 @@ Rejected:
   change with open questions.
 - **Keeping the poll.**
 
-### D6 — Every compute-lane module holds its lane's timers
+### D6 — Every module a compute pipeline lane selects holds its lane's timers
 
-Every scenario module in a compute lane holds, for the whole module, its lane's
-storefront lifecycle loops, fulfillment convergence, and lease watchdog, through the
-lane's existing hold fixtures listed first. Every VM module also holds Alice's
-storefront loops (`alice_loops_held`), because her publication cycle writes to registries
-other modules list. Alice's provisioning authority's timers stay unheld: no module
-settles against it, and nothing reaches it except through her held storefront loops.
+Every scenario module a compute pipeline lane selects holds, for the whole module, its
+lane's storefront lifecycle loops, fulfillment convergence, and lease watchdog, through
+the lane's existing hold fixtures listed first. Every module the VM lane selects also
+holds Alice's storefront loops (`alice_loops_held`), because her publication cycle
+writes to registries other modules list. Alice's provisioning authority's timers stay
+unheld: no module settles against it, and nothing reaches it except through her held
+storefront loops.
 
-A source check reads each compute-lane module's resolved fixtures from
-`pytest --setup-plan`, as `e2e-tests/tests/unit/test_scenario_cleanup_order.py` already
-does, and fails a module whose plan lacks any of its lane's holds, naming the module and
-the hold. The existing check refusing a pause outside the hold fixtures stays.
+A source check reads the resolved fixtures from `pytest --setup-plan`, as
+`e2e-tests/tests/unit/test_scenario_cleanup_order.py` already does, of the modules each
+lane selects — its lane directory collected with the lane's marker expression, taken
+from `e2e-tests/Makefile`, the one place lane membership is written — and fails a module
+whose plan lacks any of its lane's holds, naming the module and the hold. A module
+joining a lane comes under the rule with no second list to update. The existing check
+refusing a pause outside the hold fixtures stays.
+
+A module no lane selects is outside the rule and keeps the holds it has: the two
+real-provisioning modules and `test_bare_metal_deal.py` run against real hosts an
+operator provides, by hand, where a hold on a storefront the run never uses (Alice's)
+would make qualification depend on it; `test_pool_declared_offering_modes.py` gains no
+hold. The real modules' hold order stays checked by the cleanup-order check.
 Implementation confirms that no module gaining a hold relies on a running convergence or
 watchdog; the lanes' cleanup is the storefront's fleet-wide admin release, which needs
 neither.
@@ -214,6 +231,12 @@ Rejected:
   two fixtures over timers nothing in the lane can reach, and likely a composite per-lane
   fixture changing the per-kind convention.
 - **No check.** Leaves the rule to review alone.
+- **Checking every module in the lane directories** (review 09 F1). Requires Alice's
+  hold in the real VM module and holds in `test_bare_metal_deal.py`, both outside every
+  lane.
+- **The lane directories minus a named list of out-of-lane modules.** Simpler and fails
+  closed, but the list duplicates the Makefile's lane membership, and a module promoted
+  into a lane while still listed would run unchecked.
 
 ### D7 — Buy scenarios step convergence through one helper
 
@@ -225,9 +248,16 @@ settle status, drain the mock job queue, advance convergence to `active`, and wa
 `run_ended` with status `ready`. The sequence is one shared helper in the e2e helpers,
 following `test_full_deal_buyer_cli`'s stages 08i, 08b, and 09a.
 
+The helper owns each buy's process: on any exit before `run_ended` — a missing event, a
+failed assertion, a timeout — it terminates the process with a bounded wait and reaps
+it, in a `finally` (`MarketRun.terminate`), so a failed stage leaves no buyer polling the
+stack.
+
 Rejected: a pausing create rule, which adds stages these scenarios do not observe;
 copying the sequence into each module; shortening convergence's interval in the lane,
-which is a non-goal and still races.
+which is a non-goal and still races; a module fixture tracking the buys' handles, as
+`reap_buyer_settle_subprocess` tracks `market settle`'s (review 09 F2), since a buy
+starts and ends within one helper call and never outlives it.
 
 ### D8 — The bare-metal payment scenario reads fulfillment status once
 

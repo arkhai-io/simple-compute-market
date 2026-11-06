@@ -2,16 +2,18 @@
 
 ### Requirement: Scenarios hold shared services for the whole module
 
-Every end-to-end scenario module in a compute lane MUST hold, for the whole module, its
-lane's storefront lifecycle loops, provisioning's fulfillment convergence, and its lease
-watchdog; a VM-lane module MUST also hold Alice's storefront loops. Each hold MUST be the
+Every end-to-end scenario module a compute pipeline lane selects MUST hold, for the whole
+module, its lane's storefront lifecycle loops, provisioning's fulfillment convergence,
+and its lease watchdog; a module the VM lane selects MUST also hold Alice's storefront
+loops. A lane's selection is its marker expression, not its directory; a module no lane
+selects is outside this rule. Each hold MUST be the
 lane's hold fixture, built on one shared helper per pause kind, taken before the module's
 first stage, waiting until each held loop reports itself paused at its gate, and released
 in a finaliser whatever the module's outcome, after the module's other cleanup. A stage
 MUST assert a hold and MUST NOT pause or resume a service itself. Source checks MUST refuse
-a scenario or stage that calls a pause route directly, and a compute-lane module whose
-resolved fixtures lack one of its lane's holds. Every lane that holds MUST use the same
-mechanism.
+a scenario or stage that calls a pause route directly, and a module a compute pipeline
+lane selects whose resolved fixtures lack one of its lane's holds. Every lane that holds
+MUST use the same mechanism.
 
 #### Scenario: A deal scenario fails part-way
 
@@ -32,10 +34,16 @@ mechanism.
 
 #### Scenario: A compute-lane module omits a hold
 
-- **WHEN** a compute-lane scenario module's resolved fixtures lack its lane's storefront,
-  fulfillment-convergence, or lease-watchdog hold, or a VM module lacks Alice's storefront
-  hold
+- **WHEN** the resolved fixtures of a scenario module a compute pipeline lane selects lack
+  its lane's storefront, fulfillment-convergence, or lease-watchdog hold, or a module the
+  VM lane selects lacks Alice's storefront hold
 - **THEN** the source check fails, naming the module and the missing hold
+
+#### Scenario: A module no lane selects
+
+- **WHEN** a scenario module in a compute lane's directory is selected by no pipeline
+  lane, such as one run by hand against a real host
+- **THEN** the hold check does not require its lane's holds of it
 
 ## ADDED Requirements
 
