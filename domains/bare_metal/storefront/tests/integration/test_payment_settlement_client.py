@@ -19,12 +19,19 @@ import asyncio
 import base64
 import hashlib
 import json
+import sqlite3
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import httpx
 import pytest
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 from buyer_commands import BuyerCommands
+from compute_provisioning_contracts import (
+    FulfillmentAcceptanceResponse,
+    FulfillmentScheduleResponse,
+    FulfillmentStatusResponse,
+)
 from held_loops import held_loop_controller
 from loopback import serving
 from market_arkhai_payments import PaymentSettlementData
@@ -35,6 +42,10 @@ from market_identity import Ed25519Signer, TrustedIdentitySet
 from source_sites import SourceSite, listing_source_projection, source_projections
 from storefront_client import StorefrontClient, StorefrontClientError
 
+from arkhai_bare_metal_storefront.delivery_ports import (
+    BareMetalDeliveryProgress,
+    BareMetalDeliveryRefused,
+)
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.fulfillment_service import BareMetalFulfillmentError
 from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
@@ -98,6 +109,17 @@ class Capacity:
             "site": request["site_id"],
         }
 
+    async def activate_lease(self, **request):
+        """Write-once, as the site's: the first activation's instant is kept."""
+        self.activated_at = getattr(self, "activated_at", None) or (
+            datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        )
+        return {
+            "capacity_reservation_id": request["capacity_reservation_id"],
+            "activated_at_utc": self.activated_at,
+            "site": request["site_id"],
+        }
+
 
 class Provisioning:
     def __init__(self) -> None:
@@ -108,7 +130,7 @@ class Provisioning:
         self.release: asyncio.Event | None = None
 
     async def schedule_resource(self, request):
-        return SimpleNamespace(
+        return FulfillmentScheduleResponse(
             settlement_resource_id=RESOURCE,
             pool_id=POOL,
             resource_kind="compute.bare-metal",
@@ -122,7 +144,7 @@ class Provisioning:
         if self.started is not None and self.release is not None:
             self.started.set()
             await self.release.wait()
-        return SimpleNamespace(
+        return FulfillmentAcceptanceResponse(
             fulfillment_id="fulfillment-pay",
             capacity_reservation_id="reservation-pay",
             state="dispatch_pending",
@@ -130,8 +152,10 @@ class Provisioning:
 
     async def get_fulfillment_status(self, fulfillment_id, *, capacity_reservation_id):
         """The dispatched create has not settled yet."""
-        return SimpleNamespace(
-            state="dispatch_pending", failure_reason=None, failure_message=None
+        return FulfillmentStatusResponse(
+            fulfillment_id=fulfillment_id,
+            capacity_reservation_id=capacity_reservation_id,
+            state="dispatch_pending",
         )
 
     async def terminate_lease(self, capacity_reservation_id, *, reason):
@@ -415,34 +439,27 @@ async def test_an_accepted_deal_settles_and_refunds_after_payments_is_disabled(h
 
 @pytest.mark.asyncio
 async def test_a_refund_recorded_before_delivery_start_stops_delivery(harness):
+    """Delivery starts by creating its lifecycle row in the transaction that
+    reads the settlement record, so refund intent committed first refuses the
+    start and leaves no row. Library integration of the progress port over the
+    storefront's database; the settle route's refusal of a refunded deal is
+    ``test_a_refund_before_delivery_blocks_fulfillment``."""
     db = harness.runtime.db
-    gate = asyncio.Event()
-    entered = asyncio.Event()
-    start = db.ensure_bare_metal_fulfillment_lifecycle
-
-    async def gated_start(**kwargs):
-        entered.set()
-        await gate.wait()
-        return await start(**kwargs)
-
-    db.ensure_bare_metal_fulfillment_lifecycle = gated_start
-    harness.serve()
-    settling = asyncio.create_task(harness.settle())
-    try:
-        await asyncio.wait_for(entered.wait(), timeout=10)
-        assert (await harness.refund()).status == "refunded"
-        gate.set()
-        with pytest.raises(StorefrontClientError):
-            await settling
-        assert harness.provisioning.begin_calls == []
-        assert await db.load_bare_metal_fulfillment_lifecycle(
-            negotiation_id=harness.negotiation_id
-        ) is None
-    finally:
-        gate.set()
-        if not settling.done():
-            settling.cancel()
-        await asyncio.gather(settling, return_exceptions=True)
+    record = await db.load_bare_metal_settlement_record(negotiation_id=harness.negotiation_id)
+    assert record["status"] == "accepted"
+    with sqlite3.connect(db.db_path) as conn:
+        conn.execute(
+            "UPDATE bare_metal_settlement_records SET status='refunding', settlement_ref=? "
+            "WHERE negotiation_id=?",
+            (harness.data.transaction_id, harness.negotiation_id),
+        )
+    with sqlite3.connect(db.db_path) as conn, pytest.raises(
+        BareMetalDeliveryRefused, match="refunded"
+    ):
+        BareMetalDeliveryProgress().create(conn, harness.negotiation_id)
+    assert await db.load_bare_metal_fulfillment_lifecycle(
+        negotiation_id=harness.negotiation_id
+    ) is None
 
 
 @pytest.mark.asyncio

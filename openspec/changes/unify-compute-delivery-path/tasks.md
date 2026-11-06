@@ -925,24 +925,111 @@ hook"; `marketplace-identity` for its routes). Files under
 `response_auth.py`, `api.py` route declarations, `migrations.py`;
 `domains/bare_metal/storefront/pyproject.toml` and its lock.
 
-- [ ] 7.1 Implement `DeliveryProgress` over `bare_metal_fulfillment_lifecycle` and
+- [x] 7.1 Implement `DeliveryProgress` over `bare_metal_fulfillment_lifecycle` and
       `ComputeDeliveryDomain` from the whole-machine claim, the materialization and the
       access result; declare `arkhai-compute-delivery`; compose the Alkahest adapter
       (D1, D10).
-- [ ] 7.2 Payment settle and the Alkahest continuation call `fulfill_domain` with the
+      Done in the new `delivery_ports.py`. `BareMetalDeliveryProgress` reads the step
+      from the row (activation instant, then fulfillment, then the state `dispatch`
+      recorded before `begin_fulfillment`, then a reservation); a row an earlier
+      storefront left between saving its materialization and recording its fulfillment
+      is marked `dispatch` by migration 0016 (7.3), so it is adopted, not released.
+      Each identity is written once, a repeat a no-op. `create` inserts the row only
+      while the settlement record is `settlement_verified`, in the admission's
+      transaction, which keeps the ordering against a seller refund that
+      `ensure_bare_metal_fulfillment_lifecycle` held (that method is deleted);
+      `release_claim` is a no-op, since bare metal serializes a deal by its lock, not a
+      claim. `BareMetalDeliveryDomain`:
+      `accepted_deal` reads the recorded settlement record (verified; refunding or
+      refunded once the row exists), its Agreement binding and delivery input, and the
+      listing's capacity binding, and returns the commitment the servicing record was
+      registered under — the mandate's transaction for a payment deal, the canonical
+      Agreement digest otherwise (`lifecycle_records.commitment_ref`, now shared with
+      `register_agreement`); `reserve_claim` is the whole-machine claim with
+      `deal_ref={"escrow_uid": …}`; `accepted_hold` is `None`; `fulfillment_request`
+      schedules (when the row records no settlement resource) and checks the scheduled
+      resource against the terms, records the resource
+      (`SQLiteClient.record_bare_metal_settlement_resource`, write-once, state left
+      alone), and builds the materialization over the Agreement window, saved once and
+      repeated exactly; `ready_evidence` is `bare_metal.ssh-access.v1`, a digest of the
+      SSH endpoint, tenant account, `ready_at` and the recorded identities;
+      `continuation` records the result and receipt once (moved from the old status
+      read) and reports an Alkahest deal acknowledged once settlement records the
+      obligation's fulfillment, a payment deal at once. The domain's and the progress
+      port's own refusals (a refund that won the start, a missing binding, a changed
+      identity, a claim with no attributes, a scheduled resource the terms did not
+      sell) are `BareMetalDeliveryRefused`, which the hook turns into the 409
+      `BareMetalFulfillmentError`. `BareMetalSiteFulfillment` adapts the
+      reservation-routed client (the site the path names is the reservation's durable
+      site). The Alkahest entry is in `BareMetalLifecycle`'s payment-adapter table
+      (`alkahest_adapter`, validator `alkahest_commitment_valid`: the settlement record
+      is the verified Alkahest settlement of the same Agreement bytes). It is not hoisted
+      into `kit/alkahest` beside VM's: the checks differ, since VM's commitment is the
+      escrow reference and bare metal's the Agreement digest. `arkhai-compute-delivery`
+      declared; `make lock` changed the bare-metal storefront, VM storefront and
+      `e2e-tests` locks only; `RELEASING.md`'s bare-metal storefront row names it.
+- [x] 7.2 Payment settle and the Alkahest continuation call `fulfill_domain` with the
       clients in `ports` and the lifecycle in `domain_input`; `fulfill_bare_metal`
       refuses without a lifecycle and runs `drive`; callers read state from the returned
       `StorefrontFulfillmentLifecycle`; `BareMetalLifecycle.cycle` drives waiting and
       pending deals; reserve passes `<negotiation_id>:settlement` beside `escrow_uid` and
       `_recover_reservation`'s full-list scan is removed (D3, D4, D6).
-- [ ] 7.3 Migration `bare-metal-storefront-0016`: add
+      Done. `BareMetalFulfillmentService.deliver` revalidates the settlement as
+      currently active through the accepted entry's gate on every drive, as
+      `physical-provisioning` "Bare-metal evidence is independent of escrow rows"
+      requires before protected recovery effects (the Alkahest chain is rechecked),
+      builds the `StorefrontFulfillmentContext` and calls `fulfill_domain`; `begin`, `_begin`, `_admit`, `_recover_reservation` and
+      `lease_window.py` are gone, with `BareMetalLifecycle.admit`, `lease_window` and
+      `available`. The hook drives under the deal's lock and drives the physical end
+      after releasing it, as `begin` did; it returns the row, the row again as
+      `domain_result`, and `public_result={"outcome", "disposition", "available"}`, the
+      disposition being the outcome's fulfilled, deferred or failed mapping. Payment
+      settle (`start_delivery`) answers from that projection, and refuses (409) a deal
+      whose end won before anything was dispatched (no fulfillment and no recorded
+      dispatch, the test `apply_end` uses), as admission's refusal did before; the
+      Alkahest ready step publishes once `available` is true, even with an end due since
+      (D11), and refuses a deal ended before it was available. `recover_delivery` (the
+      lifecycle's cycle) drives a started, unreleased deal that is not available or whose
+      result is unrecorded. Outside the plan, kept by a permanent requirement: the
+      status read still refuses a site-reported delivery other than the recorded result
+      (`storefront-publication` "A bare-metal delivery that conflicts with its recorded
+      result is refused"), now by comparison, since it no longer records the result; and
+      once the fulfillment is active and the deal not yet available, the status read
+      drives the deal before answering, as the old status read recorded availability —
+      the admin settle wait and the payment lane's buyer read both rely on it; a drive
+      the settlement gate refuses leaves the read answering as provisioning reports.
+      The access read does not drive (`status(drive=False)`), so it reaches no payment
+      authority (D5).
+      `apply_end` now releases rather than terminates when the row records neither a
+      dispatch nor a fulfillment, reading the path's dispatch record instead of the
+      materialization (which the path saves before dispatch is authorized).
+      `end_lease` always records through end service (the runtime always composes a
+      lifecycle).
+- [x] 7.3 Migration `bare-metal-storefront-0016`: add
       `bare_metal_fulfillment_lifecycle.activated_at_utc`, and clear `host`, `port` and
       `username` from every recorded body whose `method` is `ssh` in
       `auth_replay_reservations`, leaving status and completion (D2).
-- [ ] 7.4 Declare `access` and `status` credential-capable; `response_auth.py` records
+      Done: `bare-metal-storefront-0016-delivery-activation` (`_add_delivery_activation`),
+      the column `INTEGER` Unix seconds as VM's; idempotent; a database whose core
+      replay table does not exist yet is left to core. Beyond the plan, found by the
+      fresh-context check: a row with a reservation and a saved materialization but no
+      fulfillment (the old `_begin` saved the request before `begin_fulfillment`) is
+      set to state `dispatch`, so the path repeats the same request and an end
+      terminates rather than releases it.
+- [x] 7.4 Declare `access` and `status` credential-capable; `response_auth.py` records
       their outcomes without access material and resolves their exact retries by running
       the access check again (D5).
-- [ ] 7.5 Verify: application integration through the canonical typed clients in
+      Done: `response_auth.CREDENTIAL_CAPABLE_ROUTES` maps
+      `bare_metal_fulfillment_access` to `host`, `port`, `username` and
+      `bare_metal_fulfillment_status` to no member (its answer carries none, but reports
+      whether access is live); `without_access_material` strips the recorded outcome;
+      `bind_response_auth` replays only undeclared routes, and `api._principal` lets a
+      declared route's exact retry run. `access` reads the endpoint through the path's
+      `read_access`, which answers 410 when an end is admitted and 409 before
+      availability or the start; once the physical end has begun (the buyer's end route
+      drives it at once), the active-lease check refuses first with 409. Both are signed
+      refusals.
+- [x] 7.5 Verify: application integration through the canonical typed clients in
       `domains/bare_metal/storefront/tests/integration/test_payment_settlement_client.py`,
       `test_servicing_composition.py` and `test_site_reservation.py` for a payment deal
       and an Alkahest deal entering through `fulfill_domain` with activation, late
@@ -955,6 +1042,101 @@ hook"; `marketplace-identity` for its routes). Files under
       `make check-packaging` and `make test`. End-to-end: `e2e_bare_metal_mock_deal` and
       `e2e_bare_metal_payment_deal` exercise bare-metal delivery on the path once
       deployed.
+      New `tests/integration/test_delivery_path.py` (library integration over the real
+      storefront runtime: SQLite, end service, deal lifecycle, delivery path, entered
+      through `BareMetalFulfillmentService.deliver` and so `fulfill_domain`; the site
+      and provisioning doubled at the clients the storefront wraps, answering typed
+      contracts; no HTTP route but the last test's): an Alkahest deal activated before
+      it is available — claim and `deal_ref` with the `:settlement` key beside the
+      escrow, the commit at the Agreement start, one activation recorded in the row,
+      billing's `ActivatedDeliveryRef` naming the reservation and the site's instant,
+      available with no buyer read, publication pending, result and receipt recorded
+      without a host, a repeated drive changing nothing; settlement after the start
+      committing the Agreement window; a forward deal committed and waiting, dispatched
+      by the lifecycle's cycle at its start; an end recorded while it waits stopping it
+      there; a lost reserve acknowledgement leaving the deal pending and the replay under
+      the same placement key finding the reservation; the hook refusing without the
+      lifecycle before any call; a scheduled resource the terms did not sell (three
+      cases) beginning nothing; a failed begin repeated with the same materialization;
+      and an exact `access` retry (the same signed request sent again through the
+      storefront app) reading again (200) and refused 410 after an end journaled
+      without its physical end, its recorded outcome keeping its status and no host,
+      port or username. Raw requests there, as the comment says: the buyer's transport
+      mints a request identity per call, so it cannot repeat one (deferred, below).
+      `test_site_reservation.py` (library integration against `kit/site`'s real router
+      and ledger): the domain port's claim for a GPU-less machine reserved, committed and
+      leased at the site, and a replay under the placement key finding the same
+      reservation. `test_payment_settlement_client.py` (application integration through
+      the typed storefront client): its fakes answer typed contracts and its site
+      activates; the refund race is now library integration of `create` refusing a
+      refunding record (the route's refusal of a refunded deal is
+      `test_a_refund_before_delivery_blocks_fulfillment`). `test_http_settlement.py`: the
+      payment deal is activated and converges (`disposition` fulfilled); the Alkahest
+      recovery gate rechecks the chain on every drive (four verifier calls); the
+      delivery conflict, result redaction and teardown pass through the buyer's typed
+      transport. `test_lifecycle_dispatch.py` and `test_lifecycle_ends.py`: the
+      lifecycle's cycle adopts a fulfillment that became active, finishes a receipt
+      after availability, never adopts readiness after the buyer's end, and an end during
+      scheduling rejects the commit with nothing begun and the reservation released.
+      `test_alkahest_lifecycle.py`, `test_restart_recovery.py`, `test_deal_controls.py`
+      amended to typed site answers (state `dispatching` for a create not yet settled).
+      Unit (`test_migrations.py`): a fresh database recording 0016; a storefront started
+      on a database 0016 has not seen clearing only access-shaped bodies, keeping status
+      and completion, and a second start changing nothing; a delivery left with its
+      request saved marked dispatched. `test_fulfillment_service.py` (a fake-database
+      unit file of the deleted `begin`) is removed, its cases moved to
+      `test_delivery_path.py` except the guards its fakes reached: the kit's
+      `CapacityEffects` site and backing refusals (`kit/capacity-publication` tests) and
+      the claim refusal (`test_claims.py`); the two permanent citations of it in
+      `openspec/specs/storefront-publication/spec.md` now cite `test_delivery_path.py`
+      and `test_site_reservation.py`. The foundation's "A buyer tears down bare metal"
+      (`test_lifecycle_dispatch.py`, `test_lifecycle_ends.py`) passes.
+      `make test-bare-metal`: 593 passed (and the domain package's 126, the buyer's
+      224, the IaC 32 and 137). `make check-packaging` passes after `make lock`.
+      `make test` passed whole before the fresh-context check's fixes and again after
+      them. `make check-change` fails only on the closeout citation of
+      `openspec/specs/compute-delivery/architecture.md` (9.9).
+      End-to-end: `e2e_bare_metal_mock_deal` and `e2e_bare_metal_payment_deal` exercise
+      bare-metal delivery on the path once deployed, confirmed: the mock deal's admin
+      settle wait and the payment deal's buyer status read find the fulfillment active
+      and drive the deal to availability before `assert_delivery` reads the result and
+      access. Owed by validation: none.
+      Fresh-context check: no layering, comment-hygiene or lock defect. Fixed from it: a
+      refund that won the start, and the progress port's identity conflicts, now answer
+      409 rather than 500; rows an earlier storefront left mid-dispatch are marked
+      dispatched by 0016 instead of being read as undispatched and released; settle's
+      refusal and `apply_end` share one test of "dispatched"; `access` no longer drives
+      (no payment authority on a credential read); the gate rechecks the Alkahest chain
+      on every drive (a first cut relaxed it after dispatch, which the permanent
+      `physical-provisioning` requirement forbids); a repeated identity write is a
+      no-op; the commitment is read off the event loop; the hook reports its disposition;
+      the upgrade test is a real startup; the forward deal is woken by the cycle; an end
+      while waiting is tested; the broken spec citations are fixed; overstated notes are
+      corrected. Declined, with reasons: scheduling stays in `fulfillment_request`,
+      before the dispatch authorization — it assigns the reservation's resource,
+      idempotently, and is not provider execution, and bare metal's request names the
+      assigned resource, so assignment precedes the request (VM schedules in its
+      `begin_fulfillment` because its request names none); the hook keeps the row's
+      physical `state` as `StorefrontFulfillmentLifecycle.state`, which settle and the
+      Alkahest step read, carrying the disposition beside it; the drive's exception can
+      still be masked by the physical end in the hook's `finally`, as `begin`'s was; a
+      continuation failure is logged and left pending, as VM's is; the Alkahest
+      validator compares the Agreement bytes rather than a schema version, since bare
+      metal's evidence carries none and its commitment is the Agreement digest; no
+      version bump of `arkhai-bare-metal-storefront`, consistent with section 5 leaving
+      `arkhai-vms-storefront` at its `dev` version — the round's review may weigh both.
+      Deferred: a request-identity seam on the buyer's signed transport
+      (`core_buyer.signed_storefront_json`, `BareMetalFulfillmentTransport`), so an exact
+      retry can be tested through the typed client; it belongs to the buyer packages.
+      Handoff: bare metal's step after availability is recording its result and receipt,
+      then, for Alkahest, whether settlement recorded the obligation's fulfillment; the
+      publication itself stays the settlement worker's ready step, which needs the
+      worker's lease, so `continuation` only reports it. A bare-metal deal's row
+      `state` mirrors provisioning's state as the status read last saw it; the path does
+      not write it. Section 8's lanes: a bare-metal deal reaches availability through
+      the settlement worker's step, the lifecycle cycle, the admin settle wait, or a
+      buyer's status read once the fulfillment is active — a stage asserting activation
+      must step one of them after the create settles.
 
 ## 8. Cross-service qualification in the lanes
 

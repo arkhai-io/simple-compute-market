@@ -127,7 +127,11 @@ from .models import (
     BareMetalSettleStatusResponse,
 )
 from .negotiation_runtime import BareMetalNegotiationRefusal, exact_selection
-from .response_auth import bind_response_auth, bind_response_contract
+from .response_auth import (
+    CREDENTIAL_CAPABLE_ROUTES,
+    bind_response_auth,
+    bind_response_contract,
+)
 from .runtime import BareMetalStorefrontRuntime
 from .lifecycle_records import acceptance_envelope
 from .settlement_composition import ALKAHEST_MECHANISM
@@ -197,7 +201,9 @@ async def _principal(
         operation=operation,
         resource=resource,
     )
-    if not authenticated.dispatch_allowed:
+    if not authenticated.dispatch_allowed and not (
+        authenticated.exact_retry and operation in CREDENTIAL_CAPABLE_ROUTES
+    ):
         raise HTTPException(status_code=409, detail="request was already dispatched")
     return authenticated.principal
 

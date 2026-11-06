@@ -221,6 +221,7 @@ source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-bare-metal" },
     { name = "arkhai-compute" },
+    { name = "arkhai-compute-delivery" },
     { name = "arkhai-compute-provisioning-client" },
     { name = "arkhai-compute-provisioning-contracts" },
     { name = "arkhai-core" },

@@ -245,12 +245,10 @@ async def settle_payment(
         raise SettlementRequestError(
             "payments integration needs operator action", status_code=500
         ) from exc
-    lifecycle = await service.start_delivery(
+    delivered = await service.start_delivery(
         negotiation_id=negotiation_id, buyer_principal=buyer_principal
     )
-    settled = result(
-        200, str(lifecycle.get("state") or "fulfillment_started"), lifecycle=lifecycle
-    )
+    settled = result(200, delivered.state, lifecycle=delivered.domain_result)
     # The neutral fields are a cross-domain contract; refuse to emit a payload
     # that would not parse as one.
     AgreementSettleResponse.model_validate(settled.payload)

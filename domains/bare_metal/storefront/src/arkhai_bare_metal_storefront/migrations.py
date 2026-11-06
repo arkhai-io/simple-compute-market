@@ -480,6 +480,77 @@ def _add_opening_listings(conn: sqlite3.Connection) -> None:
     )
 
 
+#: The members of a recorded access response that say how to reach the host.
+_ACCESS_MATERIAL = ("host", "port", "username")
+
+
+def _add_delivery_activation(conn: sqlite3.Connection) -> None:
+    """Record the site's activation instant, and clear recorded access responses.
+
+    ``activated_at_utc`` is the instant, in Unix seconds, the site returned when
+    it activated the lease; a null records no activation, which is all it means
+    for a delivery that became available without one. Access is read live and
+    never replayed, and core's replay table records no route, so the host, port
+    and username are removed from every recorded body shaped as an access
+    response, one whose ``method`` is ``ssh``: no other route's body carries
+    those members. A stripped body is still a recorded body, so each record
+    keeps its status and remains a completed outcome.
+
+    A delivery whose materialization, the fulfillment request, was saved but
+    whose fulfillment identity was never recorded may have reached
+    provisioning, so it is marked dispatched (state ``dispatch``): delivery
+    then repeats the same request and adopts the fulfillment provisioning
+    accepted, and an end ends it through the lease rather than releasing its
+    capacity. A rerun changes nothing.
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(bare_metal_fulfillment_lifecycle)")}
+    if "activated_at_utc" not in columns:
+        conn.execute(
+            "ALTER TABLE bare_metal_fulfillment_lifecycle ADD COLUMN activated_at_utc INTEGER"
+        )
+    artifacts = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='storefront_domain_artifacts'"
+    ).fetchone()
+    if artifacts is not None:
+        conn.execute(
+            "UPDATE bare_metal_fulfillment_lifecycle SET state='dispatch' "
+            "WHERE fulfillment_id IS NULL AND capacity_reservation_id IS NOT NULL "
+            "AND state NOT IN ('dispatch', 'released', 'terminating') "
+            "AND EXISTS (SELECT 1 FROM storefront_domain_artifacts a "
+            "WHERE a.negotiation_id = bare_metal_fulfillment_lifecycle.negotiation_id "
+            "AND a.artifact_slot = 'materialization')"
+        )
+    replay = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='auth_replay_reservations'"
+    ).fetchone()
+    if replay is None:
+        return
+    rows = conn.execute(
+        "SELECT principal_scheme, principal_identifier, request_id, response_body "
+        "FROM auth_replay_reservations WHERE response_body IS NOT NULL"
+    ).fetchall()
+    for scheme, identifier, request_id, raw in rows:
+        try:
+            body = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        if (
+            not isinstance(body, dict)
+            or body.get("method") != "ssh"
+            or not any(member in body for member in _ACCESS_MATERIAL)
+        ):
+            continue
+        stripped = {key: value for key, value in body.items() if key not in _ACCESS_MATERIAL}
+        conn.execute(
+            "UPDATE auth_replay_reservations SET response_body = ? "
+            "WHERE principal_scheme = ? AND principal_identifier = ? AND request_id = ?",
+            (
+                json.dumps(stripped, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+                scheme, identifier, request_id,
+            ),
+        )
+
+
 BARE_METAL_STOREFRONT_MIGRATIONS = (
     # First, so a database written under the retired listing kind is refused
     # before any other pending migration touches a renamed column. On a fresh
@@ -546,5 +617,9 @@ BARE_METAL_STOREFRONT_MIGRATIONS = (
     Migration(
         id="bare-metal-storefront-0015-opening-listings",
         apply=_add_opening_listings,
+    ),
+    Migration(
+        id="bare-metal-storefront-0016-delivery-activation",
+        apply=_add_delivery_activation,
     ),
 )
