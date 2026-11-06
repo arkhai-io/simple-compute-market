@@ -208,12 +208,12 @@ class BareMetalStorefrontSettlementComposition:
         self,
     ) -> dict[str, Callable[[Mapping[str, Any]], Mapping[str, Any] | None]]:
         payment_stage = self.payments_stage
-        return {
-            mechanism: lambda agreement, entry=entry: entry.accepted_data(
-                agreement, payment_stage
-            )
-            for mechanism, entry in self.seller_stages.items()
-        }
+        def build(entry: Any) -> Callable[[Mapping[str, Any]], Mapping[str, Any] | None]:
+            def accepted(agreement: Mapping[str, Any]) -> Mapping[str, Any] | None:
+                return entry.accepted_data(agreement, payment_stage)
+            return accepted
+
+        return {mechanism: build(entry) for mechanism, entry in self.seller_stages.items()}
 
     def configures(self, mechanism_id: str) -> bool:
         """Whether the settlement root has a section for ``mechanism_id``.
