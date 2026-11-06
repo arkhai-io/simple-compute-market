@@ -4,8 +4,8 @@
 #
 # The vm-management role reaches each of its task files through include_tasks,
 # which `ansible-playbook --syntax-check` does not follow, so checking
-# vm-operations.yaml leaves the files a create, a remove, an undefine, and a
-# capacity check run unparsed. This play imports those files statically instead:
+# vm-operations.yaml leaves the files a create, a remove, an undefine, a
+# capacity check and host diagnostics run unparsed. This play imports those files statically instead:
 # a static import is parsed when the playbook is, so the syntax check reads every
 # task, keyword, and block in them. It imports through import_role, so each file
 # is parsed as part of the role, with the role's defaults, vars, and files, as it
@@ -72,3 +72,8 @@
       import_role:
         name: ../../roles/vm-management
         tasks_from: vm-check
+
+    - name: Parse the host diagnostics tasks
+      import_role:
+        name: ../../roles/vm-management
+        tasks_from: host-diagnostics

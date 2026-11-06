@@ -56,6 +56,7 @@ class TestVmClientEndpointCoverage:
             await client.vm.monitor_vm(HOST, VM_NAME),
             await client.vm.reset_password(HOST, VM_NAME),
             await client.vm.check_capacity(HOST),
+            await client.vm.diagnose_host(HOST, management_unit="operator-agent.service"),
         ]
 
         assert all(submit.status == "queued" for submit in submissions)

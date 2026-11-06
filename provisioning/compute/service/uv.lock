@@ -362,8 +362,8 @@ dev = [
     { name = "arkhai-kit-capacity-publication", specifier = "==0.11.0" },
     { name = "arkhai-kit-resource-pools-client", specifier = ">=0.1.0" },
     { name = "arkhai-kit-site-client", specifier = ">=0.12.0" },
-    { name = "arkhai-vms-provisioning-adapter", specifier = ">=0.17.0" },
-    { name = "arkhai-vms-provisioning-operator-client", specifier = ">=0.11.0" },
+    { name = "arkhai-vms-provisioning-adapter", specifier = ">=0.18.0" },
+    { name = "arkhai-vms-provisioning-operator-client", specifier = ">=0.12.0" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-asyncio", specifier = ">=0.23" },
 ]
@@ -639,7 +639,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-provisioning-adapter"
-version = "0.17.0"
+version = "0.18.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning" },
@@ -658,19 +658,19 @@ dependencies = [
     { name = "typing-inspect" },
 ]
 wheels = [
-    { path = "arkhai_vms_provisioning_adapter-0.17.0-py3-none-any.whl" },
+    { path = "arkhai_vms_provisioning_adapter-0.18.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-vms-provisioning-operator-client"
-version = "0.11.0"
+version = "0.12.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_vms_provisioning_operator_client-0.11.0-py3-none-any.whl" },
+    { path = "arkhai_vms_provisioning_operator_client-0.12.0-py3-none-any.whl" },
 ]
 
 [[package]]

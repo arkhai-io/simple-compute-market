@@ -13,7 +13,7 @@ from typing import Any
 from compute_provisioning import ComputeProvisioningRouterMount
 from vm_provisioning_operator.routes import VM_PROVISIONING_ROUTES
 
-from vm_provisioning_adapter.controllers.hosts_controller import make_host_capacity_router
+from vm_provisioning_adapter.controllers.hosts_controller import make_host_operations_router
 from vm_provisioning_adapter.controllers.test_controller import make_mock_router
 from vm_provisioning_adapter.controllers.vms_controller import make_vms_router
 
@@ -37,8 +37,8 @@ def vm_router_mounts(
     vm_operations: Callable[[], Any],
     host_operations: Callable[[], Any],
 ) -> tuple[ComputeProvisioningRouterMount, ...]:
-    """VM's operator routes: VM operations and the host capacity check."""
+    """VM's operator routes: VM operations and the host capacity check and diagnostics."""
     return (
-        ComputeProvisioningRouterMount(make_host_capacity_router(host_operations), "/api/v1"),
+        ComputeProvisioningRouterMount(make_host_operations_router(host_operations), "/api/v1"),
         ComputeProvisioningRouterMount(make_vms_router(vm_operations), "/api/v1"),
     )

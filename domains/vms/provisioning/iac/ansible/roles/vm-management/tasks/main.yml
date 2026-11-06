@@ -134,6 +134,16 @@
   tags:
     - vm_check
 
+- name: Include host diagnostics tasks
+  include_tasks:
+    file: host-diagnostics.yml
+    apply:
+      tags:
+        - host_diagnostics
+  when: vm_action == "diagnose"
+  tags:
+    - host_diagnostics
+
 # ============================================
 # JSON Output and Error Handling
 # ============================================

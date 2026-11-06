@@ -881,13 +881,62 @@ unit/test_provisioning_client_contract.py}` and the adapter's own tests;
 tasks; `domains/vms/provisioning/iac/README.md`; both packages' `pyproject.toml`; every
 lock `make lock` rewrites.
 
-- [ ] 6.1 The playbook task (D5). `host-diagnostics.yml` prints one fact for the action
+- [x] 6.1 The playbook task (D5). `host-diagnostics.yml` prints one fact for the action
   with boot ID, uptime, kernel, the count of running guests, and for
   `libvirtd.service`, `frpc-buyers.service` and the optional management unit: active
   state, invocation ID, main PID, restart count, active-enter time and result. The
   management unit arrives as a job parameter. The VM IaC README documents the action and
   its fact. Check: `make test-provisioning-iac` (syntax and the native gate's coverage).
-- [ ] 6.2 The action (D5). A host-scoped action (`diagnose`), registered in `codec.py`'s
+  Done. The host is read by a new script, `roles/vm-management/files/host_diagnostics.sh`,
+  which `host-diagnostics.yml` runs through Ansible's `script` module with the unit
+  quoted, then sets `host_diagnostics_data` from its JSON, adding `action: diagnose`,
+  `host` and `status`. `main.yml` includes it for `vm_action == "diagnose"`, and
+  `json-output.yml` prints the fact in the shipped `var:` and `msg:` forms. The fact's
+  fields: `timestamp`, `boot_id`, `uptime_seconds`, `kernel`, `running_guests`,
+  `management_unit` (or null), and `units` keyed by unit name. Each unit carries
+  `active_state`, `invocation_id`, `main_pid`, `restart_count` (`NRestarts`),
+  `active_enter_timestamp` and `result`. Differed from the plan, each needed for the read
+  to be right:
+  - **The prerequisites skip "Ensure libvirtd is running" for `diagnose`.** That task
+    starts libvirtd for every action. Started by the read, an idle socket-activated
+    daemon would show a new invocation ID.
+  - **The script reads the units before `virsh` counts guests,** for the same reason.
+    The count itself still starts an idle libvirtd, so a later read may see the
+    generation an earlier read started. D5's pass criterion compares libvirtd only
+    across reads taken while a guest runs, when the daemon is up anyway. The script,
+    the task and the README say so; none claims the read changes nothing.
+  - **A number systemd does not report is printed as text,** such as `NRestarts` on an
+    old systemd, so the typed parse refuses that field by name.
+  - **A failed `systemctl show` or `virsh` fails the job,** naming what failed. Neither
+    is reported as an empty value or zero guests. `unit_state` runs in a command
+    substitution, where `set -e` does not apply, so it returns its failure explicitly.
+  - **A management unit equal to one of the two host units is read once.**
+  The parse-only `vm-management-task-files.yaml` imports the new file, so the syntax
+  check reads it. `test_ansible_structure.py`'s list moved with it. The README gains
+  "6. Read Host Diagnostics": the command, `management_unit`, and the fact's fields.
+  Library integration (`tests/test_host_diagnostics.py`): the real script runs through
+  `shell_harness` against faked `systemctl`, `virsh`, `uname` and a temporary `/proc`.
+  It covers both unit sets, a duplicate unit, zero guests, and the read order. It
+  covers a missing number, and escaping of quotes, backslashes and a tab (not CR, LF or
+  other control characters). It covers a failed `systemctl` and a failed `virsh`.
+  Structure cases read the YAML for the include, the `quote` filter in the task, the two
+  `debug` tasks printing the fact, and the prerequisite's condition; none reads printed
+  output through the codec, which the adapter's mock-output cases do for the Python
+  renderer. Where ansible-core 2.17–2.19 is installed, the shipped task file also runs
+  through `ansible-playbook` against localhost with the same fakes. Those runs cover a
+  plain unit, a unit with a backslash (`dev-disk-by\x2dlabel-data.device`, which reaches
+  the script whole only quoted), no unit, and an explicit null. They check the fact
+  the task sets, exported through `to_json`. So the module joins the native gate's
+  `NATIVE` list (`domains/vms/provisioning/iac/scripts/native_ansible_gate.sh`), which
+  `test_ansible_structure.py` requires of any module with an `_ansible` guard.
+  `make test-provisioning-iac`: VM 182 passed, 6 skipped (the native cases, no local
+  Ansible). `make test-provisioning-iac-native` (after `make build-provisioning`) passed:
+  the six playbooks' syntax checks, `vm-management-task-files.yaml` among them, and 20
+  native VM tests, the three native host-diagnostics cases among them. Running
+  `domains/vms/provisioning/iac/scripts/validate_playbooks.sh` directly was denied in
+  this session; the native
+  target runs the same script in the image instead.
+- [x] 6.2 The action (D5). A host-scoped action (`diagnose`), registered in `codec.py`'s
   result-fact and fact-action maps and `bundle.py`'s actions, submitted by
   `host_operations_service.py` beside `check` and routed by the controller. A
   `management_unit` not matching systemd's unit-name syntax is refused at submission, no
@@ -896,19 +945,96 @@ lock `make lock` rewrites.
   validation (valid names, a path, a space, an empty name). Application integration
   (`test_hosts_api.py`, through the typed client): a submitted job succeeds in the mock
   profile with a fact the parse accepts; an invalid unit is refused with no job queued.
-- [ ] 6.3 The client (D5's interface). `diagnose_host(host_id, management_unit=None)` on
+  Done.
+  - **The route** is `GET /api/v1/hosts/{host}/diagnostics?management_unit=…`, signed as
+    `provisioning_host_diagnostics`, admin only, declared in the client's `routes.py`. It
+    is a GET like the capacity check's.
+  - **Where it lives.** The route is bound in `controllers/hosts_controller.py`, where the
+    capacity check is, not `vms_controller.py` as the file list said. The router factory
+    is renamed `make_host_operations_router` (one caller, `routers.py`).
+  - **Submission.** The refusal is the wire model's. `HostDiagnosticsRequest`
+    (`VmActionRequest` plus `management_unit`) validates the unit with
+    `check_unit_name`, as `ARCHITECTURE.md`'s order of checks puts a check the request
+    settles by itself. The route binds it as a query model (`Annotated[…, Query()]`), so
+    FastAPI answers the refusal as 422 before the route service runs, and the typed
+    client builds it, so it raises before sending. `HostOperationsService.diagnose`
+    then only submits. The unit travels as a new `VmJobParams.management_unit`, which
+    `vm_job_params` reads back and `variables` passes to the playbook only when set.
+  - **The result.** The codec copies `VM_DIAGNOSTICS_FIELDS` from the fact into the
+    result, whenever the fact has them, so a zero guest count and a null unit survive.
+    Its kind is `vm_diagnose`, the client's `HOST_DIAGNOSTICS_RESULT_KIND`.
+  - **Mock default output.** A host with no guest whose units are each active, with
+    restart count 0. The boot ID is fixed, and each invocation ID is a UUIDv5 of host and
+    unit, so repeated reads agree. The management unit is included when the job names
+    one.
+
+  Unit (`provisioning/compute/service/tests/unit/services/test_host_operations_service.py`,
+  the service against a mocked job engine): the job carries the unit, or none; an
+  unregistered host is refused with nothing submitted.
+  Unit (`provisioning/compute/service/tests/unit/models/test_host_diagnostics.py`):
+  `check_unit_name` accepts templates, escapes, `-.mount` and 255 characters. It refuses
+  the empty name, no type, a path, `../agent.service` (for its `/`), a space, `;`, a
+  newline, an unknown type, an empty prefix, and 256 characters. `a..b.service`, with
+  `..` but no `/`, is accepted (a case): systemd's own syntax allows it, and the name
+  only reaches `systemctl` as one quoted argument. `HostDiagnosticsRequest` refuses four
+  malformed names (`../agent.service`, a space, the empty name, `agent`), naming
+  `management_unit`.
+  Unit (adapter, `test_vm_codec.py`, `test_vm_mock_output.py`): the fact map and the
+  stored, rendered and reported fields; the mocked output read back through the real
+  codec and `HostDiagnostics.from_job_result`, with and without a unit; two renders
+  agreeing.
+  Application integration (`test_hosts_api.py::TestHostDiagnostics`, the in-process app
+  through the typed clients, the VM runner the `MockAnsibleRunner` with
+  `vm_mock_output`): a job naming a unit succeeds, and the parse reads its result with
+  the unit; a job naming none reports the two host units. Both wait on the job queue's
+  `wait_until_idle`, not a poll. For `../agent.service`, the typed client raises before
+  sending. A rejection-path test writes the request by hand, signs it through the
+  family transport's `authenticated_request` with the route's declaration, and sees
+  422; per `TESTING.md`'s rule it asserts the status and the stored jobs, not the body.
+  An unknown host is refused with 404. The job count is unchanged in all three.
+  `make test-provisioning-adapter`: 292 passed. `make test-provisioning`: 703 unit and
+  584 integration passed.
+- [x] 6.3 The client (D5's interface). `diagnose_host(host_id, management_unit=None)` on
   `VmOperatorClient` and `SyncVmOperatorClient` returns the `JobSubmitResponse`, and the
   client gains no polling. `HostDiagnostics.from_job_result(result)` in
   `vm_provisioning_operator` returns the typed facts or raises a named error naming the
   missing or malformed field, returning no partial result. Unit: a well-formed result
   parsed; each missing field and a wrong-typed field refused naming it. The endpoint
   coverage and client contract tests include the new route.
-- [ ] 6.4 Versions and locks (`docs/development/RELEASING.md`, "Versioning policy";
+  Done. `diagnose_host` builds the request model, so an invalid unit raises
+  `pydantic.ValidationError` before anything is sent. `from_job_result` takes the job's `ResultEnvelope` (`JobStatusResponse.result`) and
+  raises `HostDiagnosticsError` (a `ValueError`) whose `field` names what is wrong. That
+  is `result` for none; `result_kind` for another action's; the dotted path of the first
+  missing or wrong-typed field (`units.libvirtd.service.restart_count`); and
+  `units.<name>` for a unit the result names but does not report. Fields are strict.
+  The tested cases: integer fields refuse `"1"`, `True`, `""` and `812.0`; string fields
+  refuse `7` and `None`; the uptime refuses `"3600.5"` and takes an int or a float. The
+  dotted `field` cannot be split back into unit and field by a program, since unit names
+  contain dots; it is for a reader. `HostDiagnostics` exposes `libvirtd`, `relay_client`, `management` (or
+  `None`) and `reported_units()`. All of these, `check_unit_name`, `HostDiagnosticsRequest`,
+  `UnitDiagnostics`, `LIBVIRTD_UNIT` and `RELAY_CLIENT_UNIT` are in `models.py` and the
+  package's `__all__`.
+  Unit (`test_host_diagnostics.py`, as in 6.2): a well-formed result read whole; each of
+  the eight top-level and six unit fields refused by name when missing; seven wrong types
+  refused by name; each asked-for unit missing refused by name; no result; another kind.
+  The client package has no suite of its own; the service suite owns VM's client
+  contract, as `test_provisioning_client_contract.py` says. That contract test (async and
+  sync signatures equal) passes with the new method. The endpoint coverage test submits
+  `diagnose_host`. Both are in `make test-provisioning`'s counts above.
+- [x] 6.4 Versions and locks (`docs/development/RELEASING.md`, "Versioning policy";
   `AGENTS.md`, "Package and dependency discipline"). Bump the adapter's and the client's
   versions once each against `dev`, raise any exact pin that moves, run
   `make check-uv-version` and `make lock`, and commit every lock it rewrites. A package
   section 2 already bumped is bumped again only if this section needs a larger bump.
-- [ ] 6.5 **Verification checkpoint.** Unit and application integration:
+  Done. Neither was bumped on the branch before. Client 0.11.0 → 0.12.0 and adapter
+  0.17.0 → 0.18.0, minor each for new public API. The adapter's bound on the client rises
+  to `>=0.12.0`, since it imports the new models. No exact pin names either package.
+  `compute-provisioning-service`'s dev group raises its bounds to adapter `>=0.18.0` and
+  client `>=0.12.0`, which its tests need. The service is not bumped: a dependency group
+  is not in its wheel's metadata. `make check-uv-version` passed. `make lock` rewrote four
+  locks, only moving these two versions: the adapter's, the client's, the service's and
+  `e2e-tests`'.
+- [x] 6.5 **Verification checkpoint.** Unit and application integration:
   `make test-provisioning`, `make test-provisioning-adapter`, `make test-provisioning-iac`.
   Run `make test`, `make check-packaging` (6.4 changes versions and locks) and
   `make check-comment-hygiene`.
@@ -917,6 +1043,95 @@ lock `make lock` rewrites.
   Owed by validation: `tests.yml`, jobs `test · test-provisioning`,
   `test · test-provisioning-adapter` and `test · test-provisioning-iac` — pass with the
   new action, client and playbook task.
+  On the final tree, after both fresh-context passes' fixes:
+  - `make test-provisioning`: 703 unit and 584 application-integration passed.
+  - `make test-provisioning-adapter`: 292 passed.
+  - `make test-provisioning-iac`: VM 182 passed, 6 native cases skipped.
+  - `make test-provisioning-iac-native`: passed in a freshly built provisioning image,
+    before the second pass, whose IaC edits touched only comments and a docstring.
+  - `make test`: passed before the second pass, whose edits touched only comments, one
+    test's assertion and one added unit case; the suites covering them were run again.
+  - `make check-packaging`: every check OK.
+  - `make check-change`: all 12 checks passed, comment hygiene, version bumps and local
+    imports among them.
+
+  End-to-end scenarios, corrected: no pytest marker runs the job, as planned. The
+  pipeline (`e2e.yml`) does run the task file natively: job `e2e-vm`, step "VM IaC native
+  Ansible gate", runs `make test-provisioning-iac-native` in the provisioning image that
+  lane built, and `test_host_diagnostics.py` is now in that gate's `NATIVE` list.
+  Validation's pipeline run is therefore evidence for 6.1's task file and script against
+  fakes, run in a test play with the script beside it, not for the role's include and
+  dispatch (read only structurally) and not for a real host.
+  Owed by validation: `tests.yml`, jobs `test · test-provisioning`,
+  `test · test-provisioning-adapter` and `test · test-provisioning-iac` — pass with the
+  new action, client and playbook task (confirmed).
+
+Handoff from section 6:
+
+- **For section 8 (observation 2).** Submit with
+  `client.vm.diagnose_host(host_id, management_unit=…)`, with the unit from section 7's
+  `VmHost.management_unit`. Wait with `JobWatch.until_succeeded`, then read
+  `HostDiagnostics.from_job_result(job.result)`. `management` is `None` when no unit is
+  named, and the stage skips naming `management_unit` (D5). Compare `invocation_id`,
+  `restart_count`, `active_state` and `result` across reads. A read can itself start an
+  idle libvirtd, so compare libvirtd only across reads taken while the first guest runs,
+  as D5's criterion already says. A unit invalid for systemd raises
+  `pydantic.ValidationError` in the client before any request.
+- **Seams.** `client.vm` is `VmOperatorClient` over the family transport. In the service's
+  integration suite, a class-level `fake_ansible` fixture returning
+  `MockAnsibleRunner(default_output=vm_mock_output)` runs VM jobs through the mock
+  profile's output, and `queue.wait_until_idle()` waits for them. A request the typed
+  client refuses reaches the route through `client.family.authenticated_request(…,
+  route=vm_route(…))`.
+- **The IaC wheelhouse trap.** The provisioning image's builder stage caches `.dist`.
+  The native gate reads the IaC tree, which is copied fresh, so it needs only
+  `make build-provisioning`. The service and adapter suites read the client from
+  `.dist`, so a client change needs `make dist` (or `make check-packaging`) before they
+  see it.
+- **Outside the plan.** The router factory rename (`make_host_capacity_router` →
+  `make_host_operations_router`). The prerequisites' libvirtd start skipped for
+  `diagnose`. The native gate's `NATIVE` list. A 9.9 item for `TESTING.md`'s native-test
+  paragraph.
+- **Denied in this session.** Running `domains/vms/provisioning/iac/scripts/validate_playbooks.sh`
+  directly; `make test-provisioning-iac-native` ran it in the image instead. A chained
+  Python one-liner probing pydantic's strict mode; the unit tests settled it instead. A
+  `make test` with its output redirected to a file; it ran in the background instead.
+- **Fresh-context check.** Fixed:
+  - the unit-name check moved from the route service to the wire model, per
+    `ARCHITECTURE.md`'s order of checks;
+  - wording claiming the read changes nothing;
+  - a failed `systemctl show` being swallowed;
+  - overstated task notes (the `..` case, the strict-type cases, the structure cases,
+    the escaping);
+  - polling waits replaced by `wait_until_idle`;
+  - a test docstring naming a scenario not yet on the branch;
+  - an explicit null unit breaking the task's Jinja;
+  - a duplicate unit read twice;
+  - a test-name typo.
+
+  Declined:
+  - escaping control characters other than tab, CR and LF: systemd's properties here
+    are words, IDs, numbers and timestamps;
+  - a machine-splittable error path: `field` is for a reader, and the note says so;
+  - renaming `diagnose_host`'s `host_id`: D5 names the signature;
+  - the endpoint-coverage module's "not exercised elsewhere" docstring, which already
+    described its existing VM list loosely.
+
+  A second pass, after those fixes, found and fixed: a rejection-path test asserting on
+  the response body; a note claiming an untested `..` case, now a case; "writes nothing"
+  (the `script` module copies the script to the host), reworded; the client's
+  `pyproject.toml` comment, now naming the result the parse reads. Declined, for triage:
+  - **A missing unit reads as stopped.** A mistyped or absent `management_unit` reads
+    back `inactive` with an empty invocation ID, since `systemctl show` answers for a
+    unit not loaded. D5's "stays active" check then fails naming the unit, not the
+    name. Reporting `LoadState` would tell them apart, but it is a field beyond D5's
+    list and the delta's. Section 8's stage can say a not-started unit may be a wrong
+    name.
+  - **The service's published `adapters` extra keeps `>=0.17.0`.** The deployed image
+    installs from the service's lock, which has 0.18.0. Raising the extra changes the
+    service's published metadata and would bump it.
+  - **Smaller points.** The query model's parameter is named `body`, as the capacity
+    check's is. `HostDiagnosticsError` does not pickle.
 
 ## 7. Target fields and the admission-log reader
 
@@ -1099,6 +1314,11 @@ and the `settlement-servicing` delta.
     stale);
   - `docs/development/TESTING.md`, "#### The real-provisioning lane": the shared listing,
     `management_unit`, `admission_log` and the qualification markers (D2, D5, D9);
+  - `docs/development/TESTING.md`, the paragraph on tests that run shipped tasks through
+    real `ansible-playbook`, under "## Ansible Syntax and Native Checks": the
+    VM suite also runs the host diagnostics task file against faked `systemctl` and
+    `virsh` (D5) (added by section 6, whose fresh-context check found the paragraph
+    incomplete);
   - `docs/development/ARCHITECTURE.md`, "Testing strategy": the repository-wide rule that
     an external-topology scenario minimally extends a locally verifiable one (D1);
   - `openspec/specs/test-compatibility/architecture.md`, "Ordinary Arkhai purchase

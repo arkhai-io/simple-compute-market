@@ -13,9 +13,11 @@ from compute_provisioning.jobs import JobRun
 from compute_provisioning_ansible import MockPlaybook, read_fact
 from compute_provisioning_ansible.runner import AnsibleResult, extract_fact, inventory_target
 from compute_provisioning_contracts import CreateJobResult
+from vm_provisioning_operator.models import HostDiagnostics
 
 from vm_provisioning_adapter.codec import VmAnsibleCodec
 from vm_provisioning_adapter.services.mock_output import (
+    MOCK_BOOT_ID,
     MOCK_FORWARDED_PORT,
     tenant_account,
     vm_mock_output,
@@ -126,3 +128,46 @@ def test_a_remove_reports_the_guest_present_as_the_role_does_after_its_cleanup_s
 
     assert fact["cleanup_record"] is True
     assert fact["guest_present"] is True
+
+
+def _diagnose(**extra) -> dict:
+    return {
+        "host_id": "kvm1",
+        "vm_action": "diagnose",
+        "executor_action": "diagnose",
+        "executor_target": "kvm1",
+        "offering_mode": "vm",
+        **extra,
+    }
+
+
+def test_a_diagnosis_naming_a_management_unit_reads_back_through_the_typed_parse() -> None:
+    interpretation = _interpreted(_diagnose(management_unit="operator-agent.service"), "diagnose")
+
+    diagnostics = HostDiagnostics.from_job_result(interpretation.result)
+    assert diagnostics.host == "kvm1"
+    assert diagnostics.boot_id == MOCK_BOOT_ID
+    assert diagnostics.running_guests == 0
+    assert diagnostics.management_unit == "operator-agent.service"
+    assert set(diagnostics.units) == {
+        "libvirtd.service", "frpc-buyers.service", "operator-agent.service",
+    }
+    assert diagnostics.management.active_state == "active"
+    assert diagnostics.libvirtd.restart_count == 0
+
+
+def test_a_diagnosis_without_a_management_unit_reports_the_host_units_alone() -> None:
+    diagnostics = HostDiagnostics.from_job_result(_interpreted(_diagnose(), "diagnose").result)
+
+    assert diagnostics.management_unit is None and diagnostics.management is None
+    assert set(diagnostics.units) == {"libvirtd.service", "frpc-buyers.service"}
+
+
+def test_two_mocked_diagnoses_of_one_host_report_the_same_generations() -> None:
+    first, second = (
+        HostDiagnostics.from_job_result(_interpreted(_diagnose(), "diagnose").result)
+        for _ in range(2)
+    )
+
+    assert first.units == second.units
+    assert first.libvirtd.invocation_id != first.relay_client.invocation_id

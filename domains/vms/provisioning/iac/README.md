@@ -270,7 +270,9 @@ nothing.
 
 `tests/test_vm_relay_roles.py` renders both create-fact variants and exercises the
 VM-to-family proxy call through real `ansible-playbook`, with a controlled family
-role at that boundary. The shared family's IaC suite tests its authenticated proxy
+role at that boundary. `tests/test_host_diagnostics.py` runs the host diagnostics
+task file the same way, with its script reading faked `systemctl` and `virsh`. The
+shared family's IaC suite tests its authenticated proxy
 wait against a loopback HTTP peer. These are library integration tests; the default
 `make test` skips native cases without supported Ansible (and the family's HTTP
 cases need the `ansible.posix.json` callback).
@@ -484,6 +486,49 @@ ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
 - `host_id`: The host where the VM operation will be performed (from your inventory)
 - `vm_target`: Name of the VM to operate on
 - `vm_action`: Action to perform (shutdown, reboot, destroy, undefine)
+
+### 6. Read Host Diagnostics
+
+The `diagnose` action reads a KVM host and changes no service or configuration on
+it; Ansible's `script` module copies the reading script to a temporary file to
+run it. Unlike every
+other action, its prerequisites do not start libvirtd, and it reads the units
+before counting guests. libvirtd is socket-activated, so the count's `virsh`
+call starts the daemon if it had exited while idle: the read reports libvirtd as
+it found it, and a later read may see the generation this one started. A failed
+`systemctl` or `virsh` call fails the job. The provisioning service submits it
+as `GET /api/v1/hosts/{host}/diagnostics`, the operator client as
+`diagnose_host`.
+
+```bash
+ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
+    -e host_id=kvm1 \
+    -e vm_action=diagnose \
+    -e management_unit=operator-agent.service \
+    --limit kvm1
+```
+
+- `management_unit` (optional): one more systemd unit to report, such as the
+  operator's own management client. The service and the operator client refuse
+  a value that is not a systemd unit name before any job is queued.
+
+The action prints one fact, `host_diagnostics_data` (`files/host_diagnostics.sh`
+reads the host):
+
+| Field | Meaning |
+|---|---|
+| `action`, `host`, `status`, `timestamp` | `diagnose`, the host, `success`, and when it was read (UTC) |
+| `boot_id` | The kernel's boot ID; it changes when the host reboots |
+| `uptime_seconds` | Seconds since boot, from `/proc/uptime` |
+| `kernel` | `uname -r` |
+| `running_guests` | The number of running libvirt domains |
+| `management_unit` | The unit the job named, or `null` |
+| `units` | For `libvirtd.service`, `frpc-buyers.service` and the management unit, by name: `active_state`, `invocation_id`, `main_pid`, `restart_count` (systemd's `NRestarts`), `active_enter_timestamp` and `result`, as `systemctl show` reports them |
+
+A unit's `invocation_id` changes each time it starts, so two reads with the same
+one saw the same run. A number systemd does not report, such as `NRestarts` on a
+systemd too old to count restarts, is printed as text, and the operator client's
+`HostDiagnostics.from_job_result` refuses it by name.
 
 **Note**: This Quick Start guide provides the essential steps to get you up and running quickly. It covers setting up an FRP server for secure remote access, configuring your Host Kit infrastructure, creating and monitoring Guest VMs within the Host Kit. For complete documentation of all available features and advanced configurations, refer to the Usage Examples and Infrastructure Architecture sections below.
 
