@@ -72,6 +72,17 @@ the VM codec decodes the payload as a family-grouped capability shape validated
 by `VM_CAPABILITY_SCHEMA`. Round 0 keeps `compute_resource`; whether it adopts
 the family form is another change's question.
 
+The wire child is `proposal.provision_terms`; its envelope payload is the whole
+family-grouped shape, not a patch. The VM decoder preserves the opening's duration,
+start and delivery credentials and replaces only `compute_resource` in the effective
+terms used by the existing VM codecs. Those full effective terms are recorded beside
+each scalar message. Continuation resumes the latest seller-quoted terms, not the
+immutable opening's shape or an unquoted buyer proposal. The round adapter may
+supply its agreed terms separately from the proposed revision. Domains that do not
+compose a revision decoder refuse a revised envelope. Revisit this boundary if
+non-shape delivery terms become negotiable; they need explicit domain validation,
+not arbitrary replacement of the opening's payload.
+
 The payload is limited to what seller policy can price. A nested field that
 passes through unexamined is an unpriced giveaway surface: a buyer could claim
 disk or RAM the seller never agreed to give away because nothing checked it.
@@ -288,7 +299,7 @@ drain.
 | Accepted decision | Permanent location |
 |---|---|
 | A buyer-requested round-0 VM shape differing from the listing is rejected outright until a round can carry a shape | Temporary; lifted by Section 2. Never promoted |
-| Revised terms are a child of `proposal`; core reuses `ProvisionTerms` rather than adding vocabulary | `openspec/specs/negotiation-protocol/spec.md` — "A round may revise the capacity shape" |
+| Revised terms are a child of `proposal`; core reuses `ProvisionTerms` rather than adding vocabulary; durable seller-quoted terms survive continuation and acceptance | `openspec/specs/negotiation-protocol/spec.md` — "A round may revise the capacity shape" |
 | The negotiated quantity is a multiplier in basis points; amounts stay exact | `openspec/specs/negotiation-protocol/spec.md` — "Rate-multiplier negotiation" |
 | A requested shape's feasibility, quantitative and categorical, is evaluated before pricing | `openspec/specs/negotiation-protocol/spec.md` — "Seller feasibility precedes pricing" |
 | The agreed shape is what the claim reserves | `openspec/specs/vm-storefront-fulfillment/spec.md` — "The agreed shape is reserved" |

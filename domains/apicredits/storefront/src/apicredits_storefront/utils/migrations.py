@@ -128,6 +128,7 @@ CHAIN: Chain[sqlite3.Connection] = Chain(
         settlement_migrations.BASELINE,
         BASELINE,
     ),
+    migrations=core_migrations.MIGRATIONS,
 )
 
 

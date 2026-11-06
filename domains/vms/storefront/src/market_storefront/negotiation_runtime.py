@@ -12,6 +12,8 @@ from datetime import datetime
 from typing import Any
 
 from arkhai_vms import DIMENSION_KEYS as _DIMENSION_COMPUTE_KEYS
+from arkhai_vms.capability_shapes import canonical_vm_shape, flatten_vm_shape
+from arkhai_vms.provision_terms import VM_PROVISION_KIND, VM_PROVISION_VERSION
 from core_storefront import (
     StorefrontDomainBinding,
     StorefrontDomainRegistry,
@@ -40,6 +42,7 @@ from market_core import MarketDomainContract
 from market_storefront.settlement_stages import resolve_proposal_stage
 from market_core.schemas import (
     Agreement,
+    ProvisionTerms,
     SettlementObligation,
     SettlementOption,
     SettlementPlan,
@@ -174,6 +177,25 @@ def _decode_vm_terms(domain: MarketDomainContract, raw_terms: Any) -> Negotiatio
         requested_duration_seconds=getattr(decoded, "duration_seconds", None),
         requested_start_utc=getattr(decoded, "start_utc", None),
     )
+
+
+def _decode_vm_revised_terms(
+    domain: MarketDomainContract, previous: NegotiationTerms, raw_terms: Any
+) -> NegotiationTerms:
+    """Replace only the shape; lease timing and delivery credentials stay pinned."""
+    envelope = ProvisionTerms.model_validate(raw_terms)
+    if envelope.kind != VM_PROVISION_KIND or envelope.version != VM_PROVISION_VERSION:
+        raise ValueError("unsupported VM revised-terms envelope")
+    shape = canonical_vm_shape(envelope.payload)
+    flat = flatten_vm_shape(shape)
+    wire = dict(previous.wire or {})
+    payload = dict(wire.get("payload", wire))
+    payload["compute_resource"] = {**flat.quantities, **flat.attributes}
+    if "payload" in wire:
+        wire["payload"] = payload
+    else:
+        wire = payload
+    return _decode_vm_terms(domain, wire)
 
 
 def _validate_vm_opening(
@@ -1004,6 +1026,7 @@ def build_vm_negotiation_runtime(
                 else None
             ),
             domain_state=state,
+            agreed_terms=request.terms,
         )
 
     async def listing_is_paused(repository: Any, listing_id: str) -> bool:
@@ -1015,6 +1038,7 @@ def build_vm_negotiation_runtime(
         listing_record: Mapping[str, Any],
         terms: NegotiationTerms,
         thread: Mapping[str, Any],
+        revised_terms: NegotiationTerms | None,
     ) -> None:
         pin = await repository.load_domain_artifact(
             negotiation_id=thread["negotiation_id"],
@@ -1027,7 +1051,7 @@ def build_vm_negotiation_runtime(
                 "rate_structure_changed_reopen",
                 listing_id=str(listing_record["listing_id"]),
             )
-        _validate_vm_opening(listing, listing_record, terms)
+        _validate_vm_opening(listing, listing_record, revised_terms or terms)
 
     async def persist_opening(
         repository: Any,
@@ -1086,6 +1110,7 @@ def build_vm_negotiation_runtime(
 
     hooks = NegotiationDomainHooks(
         decode_terms=lambda raw: _decode_vm_terms(domain, raw),
+        decode_revised_terms=lambda previous, raw: _decode_vm_revised_terms(domain, previous, raw),
         validate_opening=_validate_vm_opening,
         validate_continuation=validate_continuation,
         evaluate_round=evaluate,
