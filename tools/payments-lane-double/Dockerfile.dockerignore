@@ -1,7 +1,8 @@
 # The image's own ignore file, which replaces the root .dockerignore for it. Deny
 # everything, then admit what the build reads: the wheelhouse, the shared uv entry
-# point, and the double's project, source, fixtures and TLS files. No environment,
-# cache or build output of the project enters the context.
+# point, and the double's project, source, fixtures, certificates and TLS generator.
+# No environment, cache or build output of the project enters the context, nor a
+# leaf key `make tls` wrote locally: the build generates its own.
 
 *
 
@@ -21,7 +22,7 @@ tools/payments-lane-double/*
 !tools/payments-lane-double/src/
 !tools/payments-lane-double/fixtures/
 !tools/payments-lane-double/tls/
-tools/payments-lane-double/tls/*.py
+tools/payments-lane-double/tls/double.key.pem
 
 **/__pycache__
 **/*.pyc

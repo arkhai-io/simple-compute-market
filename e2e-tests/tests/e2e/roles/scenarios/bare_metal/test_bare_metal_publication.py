@@ -1,8 +1,9 @@
 """Bare-metal publication from pool declarations, on the bare-metal lane.
 
 Against a running site in the provisioning mock profile, a bare-metal
-storefront, and a registry: the site's operator declares pools and whole-host
-capacity, the storefront's administrator steps publication, and a buyer
+storefront, and a registry: the site's operator registers each machine's host
+and declares pools and whole-host capacity on it, the storefront's
+administrator steps publication, and a buyer
 discovers what it published. A buyer finds the listing by
 the hardware its declaration states, through the registry's own filter
 vocabulary. The scenario then withdraws the pool's advertisement and restores
@@ -12,8 +13,10 @@ replaces it and its lease bound, and deleting the override restores the pool's.
 Each change refreshes the same listing in place, and a buyer finds it by rate
 through the registry's filter vocabulary. It then declares a machine without
 GPUs in the same pool, which publishes no GPU key and which a buyer finds by
-vCPUs and not by GPUs. Finally it declares a pool that states no region and
-observes it held.
+vCPUs and not by GPUs. It then disables the first machine's host, which closes
+its listing as a withdrawn source, and enables it again, which reopens the
+same listing. Finally it declares a pool that states no region and observes it
+held.
 
 The storefront's loops are held for the module, so every transition here is
 invoked by the scenario: wherever the site changes, the scenario steps the
@@ -38,6 +41,7 @@ from market_resource_pools_contracts import PoolCreate, PoolUpdate
 
 from tests.e2e.roles.helpers.compute_deal import assert_storefront_loops_held
 from tests.e2e.roles.helpers.domain_deal import require_state
+from tests.e2e.roles.helpers.hosts import register_e2e_host
 from tests.e2e.roles.scenarios.bare_metal.conftest import lane_setting
 
 pytestmark = [
@@ -75,6 +79,7 @@ class PublicationState:
     priced: bool = False
     overridden: bool = False
     cpu_listing_id: str = ""
+    host_disabled: bool = False
     regionless_pool: str = ""
 
 
@@ -134,18 +139,31 @@ def _whole_host(resource_id: str, *, gpu_model: str | None = GPU_MODEL) -> dict[
     return attributes
 
 
+def _machine(resource_id: str) -> str:
+    """The host a whole-host declaration is delivered through."""
+    return f"machine-{resource_id}"
+
+
 async def _declare_whole_host(
     capacity_client,
+    provisioning_client,
     resource_id: str,
     pool_id: str,
     *,
     capacity: dict[str, Any] = WHOLE_HOST_CAPACITY,
     gpu_model: str | None = GPU_MODEL,
 ) -> None:
+    """Register the machine's host in its pool, then declare the machine.
+
+    A backed declaration whose provider needs a host is offered only while that
+    host is registered and enabled. Under the mock profile nothing connects to
+    the host, so it is registered with a placeholder connection.
+    """
+    register_e2e_host(provisioning_client, name=_machine(resource_id), pool_id=pool_id)
     await capacity_client.register_resource(
         resource_id,
         pool_id=pool_id,
-        host_id=f"machine-{resource_id}",
+        host_id=_machine(resource_id),
         capacity=dict(capacity),
         attributes=_whole_host(resource_id, gpu_model=gpu_model),
     )
@@ -187,10 +205,12 @@ class TestStage01_DeclareSupply:
         self,
         bare_metal_site_operator,
         bare_metal_site_capacity,
+        provisioning_client,
         state: PublicationState,
     ):
         """One pool advertises bare metal; another delivers it and advertises
-        nothing. Each gets one whole-host declaration carrying a bare-metal view."""
+        nothing. Each gets one whole-host declaration carrying a bare-metal view,
+        on a host registered in its pool."""
         state.advertised_pool = f"bm-advertised-{state.run}"
         state.dark_pool = f"bm-dark-{state.run}"
         state.advertised_resource = f"bm-advertised-host-{state.run}"
@@ -214,7 +234,9 @@ class TestStage01_DeclareSupply:
                 (state.advertised_resource, state.advertised_pool),
                 (state.dark_resource, state.dark_pool),
             ):
-                await _declare_whole_host(bare_metal_site_capacity, resource_id, pool_id)
+                await _declare_whole_host(
+                    bare_metal_site_capacity, provisioning_client, resource_id, pool_id
+                )
 
         asyncio.run(declare())
 
@@ -256,7 +278,7 @@ class TestStage03_Discover:
         resource = listing.listing_resource
         assert resource["offering_mode"] == BARE_METAL
         assert resource["capacity_backing"] == "backed"
-        assert resource["host_id"] == f"machine-{state.advertised_resource}"
+        assert resource["host_id"] == _machine(state.advertised_resource)
         assert resource["physical_host_id"] == f"physical-{state.advertised_resource}"
         assert (resource["gpu_count"], resource["gpu_model"], resource["ram_gb"]) == (
             8, GPU_MODEL, 2048,
@@ -419,6 +441,7 @@ class TestStage05e_MachineWithoutGpus:
     def test_05e_a_machine_without_gpus_publishes_and_only_a_cpu_query_finds_it(
         self,
         bare_metal_site_capacity,
+        provisioning_client,
         bare_metal_storefront_admin,
         bare_metal_registry,
         state: PublicationState,
@@ -432,6 +455,7 @@ class TestStage05e_MachineWithoutGpus:
         asyncio.run(
             _declare_whole_host(
                 bare_metal_site_capacity,
+                provisioning_client,
                 resource_id,
                 state.advertised_pool,
                 capacity=CPU_HOST_CAPACITY,
@@ -455,11 +479,72 @@ class TestStage05e_MachineWithoutGpus:
         assert state.cpu_listing_id not in _found(bare_metal_registry, "gpu_count>=1")
 
 
+class TestStage05f_DisableTheHost:
+    def test_05f_disabling_the_machines_host_closes_its_listing(
+        self,
+        provisioning_client,
+        bare_metal_site_capacity,
+        bare_metal_storefront_admin,
+        bare_metal_registry,
+        state: PublicationState,
+    ):
+        """A disabled host takes no new delivery, so the site projects its
+        machine not enabled and the storefront closes the listing as a
+        withdrawn source, after one site-projection and one publication cycle.
+        The declaration itself is untouched: the operator's listing still
+        reports it enabled."""
+        require_state(state, "reinstated")
+        provisioning_client.disable_host(_machine(state.advertised_resource))
+
+        report = _step_after_the_site_changed(bare_metal_storefront_admin)
+
+        assert _with_listing(report, state.listing_id) == [
+            {"action": "close", "listing_id": state.listing_id, "reason": "source_gone"}
+        ], report
+        assert bare_metal_registry.get_listing(state.listing_id).status == "closed"
+        declared = {
+            row["resource_id"]: row
+            for row in asyncio.run(bare_metal_site_capacity.list_resources())
+        }
+        assert declared[state.advertised_resource]["enabled"] is True
+        state.host_disabled = True
+
+
+class TestStage05g_EnableTheHost:
+    def test_05g_enabling_the_host_reopens_the_same_listing(
+        self,
+        provisioning_client,
+        bare_metal_storefront_admin,
+        bare_metal_registry,
+        bare_metal_storefront_public,
+        state: PublicationState,
+    ):
+        require_state(state, "host_disabled")
+        provisioning_client.enable_host(_machine(state.advertised_resource))
+
+        report = _step_after_the_site_changed(bare_metal_storefront_admin)
+
+        reopened = [
+            item
+            for item in _with_listing(report, state.listing_id)
+            if item["action"] == "reopen"
+        ]
+        assert reopened, report
+        assert not [
+            item
+            for item in _actions(report, "publish")
+            if item["source"]["physical_resource_id"] == state.advertised_resource
+        ], "the reopened resource must not publish a second listing"
+        assert bare_metal_registry.get_listing(state.listing_id).status == "open"
+        assert bare_metal_storefront_public.get_listing(state.listing_id).status == "open"
+
+
 class TestStage06_RegionlessPool:
     def test_06_a_pool_stating_no_region_is_held_and_publishes_nothing(
         self,
         bare_metal_site_operator,
         bare_metal_site_capacity,
+        provisioning_client,
         bare_metal_storefront_admin,
         state: PublicationState,
     ):
@@ -476,7 +561,12 @@ class TestStage06_RegionlessPool:
             )
         )
         asyncio.run(
-            _declare_whole_host(bare_metal_site_capacity, resource_id, state.regionless_pool)
+            _declare_whole_host(
+                bare_metal_site_capacity,
+                provisioning_client,
+                resource_id,
+                state.regionless_pool,
+            )
         )
 
         report = _step_after_the_site_changed(bare_metal_storefront_admin)

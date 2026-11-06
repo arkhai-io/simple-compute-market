@@ -16,6 +16,7 @@
 | [Deployment topology](#deployment-topology) | Local and deployed structure, and who operates it |
 | [Build, packaging, and initialization](#build-packaging-and-initialization) | Internal wheels, images, migrations, and reinit rules |
 | [Recovery workers](#recovery-workers) | Timer-driven durable recovery: capacity, fulfillment convergence, lease expiry |
+| [Implementation rules](#implementation-rules) | No speculative guard code; prefer an existing library |
 | [Testing strategy](#testing-strategy) | Test levels; see `TESTING.md` for methodology |
 | [Capability documentation index](#capability-documentation-index) | Permanent detailed contracts and rationale |
 
@@ -569,7 +570,7 @@ A domain that contributes routes to a service it does not compose declares their
 | Listing, negotiation, deal, and seller policy state | Storefront | Market-facing state, not physical inventory |
 | Capacity admission and reservation | Site authority | Serialization point for competing reservations |
 | Sellable capacity: each Physical Resource's declared shape, quantity, pool, and match attributes | Site authority | Declared only by registration, a capacity-definitions document, or capacity import; no host write declares capacity, and host records are connection identity only |
-| Host connection identity and membership changes | Compute provisioning host registry | A host record supplies the execution connection; the host authority composes checks, including the compute-family relay-binding rule |
+| Host connection identity, enabled state, and membership changes | Compute provisioning host registry | A host record supplies the execution connection; the registry reports to admission, scheduling, and projection only which hosts take new delivery; the host authority composes checks, including the compute-family relay-binding rule |
 | VM listing shapes a storefront publishes | Storefront, within what the site declares | A storefront pool override, else the pool's `listing_shapes` hint, else the VM domain's default generator; constraints a stated shape carries, merged with the storefront's configured `[admissibility.defaults.vm]`, decide which shapes it would sell, and a site's constraints are advisory input to that policy; feasibility is judged against the site's declarations, and admission remains the site's |
 | A bare-metal listing's shape | Site authority, through the Physical Resource's declaration | Derived from the declared capacity and attributes; the storefront chooses nothing |
 | Resource-pool metadata and provider configuration | Resource-pool service | Provisioning routing metadata; the provider is fixed at creation, and disabled pools remain resolvable |
@@ -793,14 +794,24 @@ does not replace physical accounting: a pool may authorize both VM slices and
 whole-host delivery while the exclusive/shareable conflict rule still prevents
 them from overlapping on one physical host.
 
-A pool's provider also decides whether declarations in the pool must name a host.
-Each provider declares it, and the provisioning composition supplies the
-per-provider requirement as plain data. Site admission and settlement scheduling
-each refuse a declaration naming no host where the pool's provider needs one: the
-same layer-by-layer recheck, so no layer relies on another having refused.
-Dispatch is the last check. It renders execution inventory only from the
-registered host record and refuses a host with none. A composition that delivers
-nothing through hosts supplies no requirement, and its admission is host-agnostic.
+A pool's provider also decides whether declarations in the pool need a host to
+deliver through. Each provider declares it, and the provisioning composition
+supplies the per-provider requirement as plain data. Where the pool is backed and
+its provider needs a host, a declaration has a usable host only when it names one
+that is registered and enabled; the composition that owns hosts tells the lower
+layers which hosts those are through a `DeliverableHosts` report, the identifiers
+of registered, enabled hosts, which each layer reads in the transaction that
+decides, so the site owns no host record. Site admission, the site's rebind
+recheck, and settlement scheduling each refuse a declaration with no usable host,
+and the site's offered read, from which every projection is built, projects it not
+enabled: the same layer-by-layer recheck, so no layer relies on another having
+refused. Both the requirement and the report live in `kit/resource-pools` beside
+the predicate that applies them. Dispatch is the last check. It renders execution
+inventory only from the registered host record and refuses a host with none, and a
+create a disabled one. A composition that delivers nothing through hosts supplies
+no requirement, and its admission is host-agnostic; one that supplies a requirement
+but no report treats every named host as usable. See the
+[site-capacity architecture](../../openspec/specs/site-capacity/architecture.md#declared-capacity-and-connection-identity).
 
 ## Shared vocabulary and identities
 
@@ -1182,6 +1193,16 @@ Each storefront process holds its timer loops with one loop controller from `kit
 
 Beside the loop controller, `kit/storefront` owns the trading pause, which refuses new negotiations and leaves the loops running. The negotiation runtime reads it, and system status reports it. Each storefront binds the pause's framework-free route service at its admin pause and resume routes. The two pauses are separate, and both are process-local: a restarted storefront trades and runs its loops again, which suits an operator who is actively correcting an issue. See [market composition](../../openspec/specs/market-composition/spec.md).
 
+## Implementation rules
+
+### No speculative guard code
+
+Production code adds no refusal, warning, probe, or hardening for a case nobody can describe, or that no integration or end-to-end test could deliberately trigger: such a guard is code no test defends.
+
+### Prefer an existing library
+
+Use an existing open-source library wherever one meets the requirements, and build our own only when none does. The relay's grant-admission plugin ([`frp-grant-admission`](../../openspec/specs/frp-grant-admission/spec.md)) is the repository's own because no library met its requirements; the secret scan uses gitleaks rather than a scanner of our own.
+
 ## Testing strategy
 
 Tests belong at the lowest level that can prove the behavior: unit, integration, smoke, and end-to-end, each defending the narrowest observable contract appropriate to its level — no level should rely on end-to-end tests alone for behavior it could prove itself. See [`docs/development/TESTING.md`](TESTING.md) for the level definitions, coverage jurisdiction between them, the client-contract "no raw calls" rule, contract fixtures, boundary-change validation, cross-language conformance, and offline review validation, and [the testing and compatibility specification](../../openspec/specs/test-compatibility/spec.md) for the normative requirements.
@@ -1206,8 +1227,11 @@ A schema cutover that transfers ownership of active workloads between persistenc
 
 ### Public repository content checks
 
-`make check-public-content` checks the staged index using
-`scripts/check_public_content.py`. The guarded branch push checks every outgoing
+Two checks read content about to be published: `scripts/check_public_content.py`,
+the repository's own rules below, and `scripts/check_secrets.py`, which runs the
+gitleaks secret scanner for private keys and provider credentials. They run
+together. `make check-public-content` runs both over the staged index, and `make
+check-secrets` the second alone. The guarded branch push checks every outgoing
 commit, including intermediate additions and commit messages. The Public content
 CI workflow checks commits against the event base, using `origin/dev` for a
 new branch without a previous tip. This retains inspection of every commit outside
@@ -1220,8 +1244,8 @@ planning/session paths. `example-user` is the synthetic fixture username;
 `appuser` and `ubuntu` are documented runtime-image accounts, and `you` is an
 example placeholder. These names do not authorize publishing actual operator
 paths. Machine-specific names, addresses and other operational identifiers require
-a private local literal denylist; arbitrary identifiers and secrets are not
-automatically recognizable. Binary additions are refused because this text
+a private local literal denylist; arbitrary identifiers, and secrets in no format
+the secret scan below recognizes, are not automatically recognizable. Binary additions are refused because this text
 scanner cannot inspect them. Review remains required. Diagnostics report location
 and rule without echoing matched content.
 
@@ -1229,7 +1253,9 @@ Enable the repository-owned hooks in each checkout with
 `git config --local core.hooksPath scripts/hooks` after inspecting any existing
 hooks configuration; preserve or chain existing hooks instead of overwriting them.
 The pre-commit hook checks staged additions. The pre-push hook checks the actual
-refs being sent, including ref names and annotated tag content. Hooks require Python 3.10 or newer and may be bypassed by direct
+refs being sent, including ref names and annotated tag content. Each hook runs both
+checks and refuses when either does. Hooks and the guarded push require Python 3.11
+or newer and the pinned gitleaks; hooks may be bypassed by direct
 Git options; they are local safeguards, not server enforcement. Use the guarded
 `make push-branch` path for agent pushes.
 
@@ -1242,3 +1268,14 @@ be read fails the check. A CI runner without that private file runs the generic
 rules only. Fetch the target remote before checking outgoing commits. Use
 `python3 scripts/check_public_content.py --base <commit>` to inspect a known
 committed range; this is not a complete historical secret audit.
+
+Private keys and provider credentials are recognized by
+[gitleaks](https://github.com/gitleaks/gitleaks) at the release
+`scripts/gitleaks-pins.toml` pins; `make install-gitleaks` installs it, refusing an
+archive whose sha256 is not the pinned one, and a check that finds no gitleaks, or
+another release, refuses and names that command. The gate, `.gitleaks.toml`, runs
+wherever `check_public_content.py` runs and reports locations, never content.
+`make audit-secrets` runs the gate's rules and the three default rules it turns off
+over the tracked tree, gates nothing, and is run before a release ships ([`RELEASING.md`, "Cutting a release"](RELEASING.md#cutting-a-release)).
+The gate's rules, the audit, and what both leave to review:
+[`openspec/specs/market-change-workflow/README.md`, "Secret scanning"](../../openspec/specs/market-change-workflow/README.md#secret-scanning).

@@ -1,4 +1,9 @@
 #!/bin/sh
-set -eu
-cd "$(git rev-parse --show-toplevel)"
-exec python3 scripts/check_public_content.py --staged
+# Both public-content checks run over the staged additions, and either refuses the
+# commit; each reports what it found even when the other has already refused.
+set -u
+cd "$(git rev-parse --show-toplevel)" || exit 1
+status=0
+python3 scripts/check_public_content.py --staged || status=1
+python3 scripts/check_secrets.py --staged || status=1
+exit "$status"

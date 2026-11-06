@@ -51,11 +51,15 @@ from typing import Any, Mapping, Optional, Protocol, Sequence
 
 from sqlalchemy.orm import Session, sessionmaker
 from market_resource_pools import (
+    DeliverableHosts,
     HostRequirement,
     ResourcePool,
-    pool_needs_host,
+    declaration_has_usable_host,
 )
-from market_resource_pools_contracts import pool_delivers_offering_mode
+from market_resource_pools_contracts import (
+    declared_deliverable_modes,
+    pool_delivers_offering_mode,
+)
 
 from .declarations import CapacityDeclaration
 from .db import (
@@ -75,6 +79,30 @@ ALLOCATION_MODE_EXCLUSIVE = "exclusive"
 ALLOCATION_MODE_SHAREABLE = "shareable"
 PHYSICAL_HOST_ID_ATTR = "physical_host_id"
 OFFERING_MODE_CLAIM_KEY = "offering_mode"
+
+
+def _begin_decision_transaction(db: Session) -> None:
+    """Reserve SQLite's writer slot before reading what a decision rests on.
+
+    The SQLite driver begins a transaction only at the first write, so the
+    reads a decision makes before it would otherwise each stand alone, and a
+    write through another session can commit between them and the decision:
+    a host disabled after admission judged it usable, say. The ledger's lock
+    serializes only the ledger's own callers; ``BEGIN IMMEDIATE`` holds every
+    other writer off until this session ends. Where the driver's connection is
+    already in a transaction — another session sharing an in-memory
+    database's one connection, or a write already made — that transaction has
+    written and so holds the writer slot, and a second ``BEGIN`` would be
+    refused, so it is kept. Run it after
+    :meth:`CapacityLedgerService._expire_stale_holds`, which commits what it
+    lapses and so ends any transaction begun before it.
+    """
+    connection = db.connection()
+    if connection.dialect.name != "sqlite":
+        return
+    if connection.connection.driver_connection.in_transaction:
+        return
+    connection.exec_driver_sql("BEGIN IMMEDIATE")
 
 
 def _executor_ref_for_resource(resource: CapacityBucket) -> dict[str, Any] | None:
@@ -638,6 +666,7 @@ class CapacityLedgerService:
         site_id: str = "local-site",
         lease_end_effect: Callable[[Session, dict[str, Any]], None] | None = None,
         host_requirement: HostRequirement | None = None,
+        deliverable_hosts: DeliverableHosts | None = None,
     ) -> None:
         """``required_attributes`` is an optional coarse local eligibility
         invariant: a resource matches only when its attributes give each
@@ -679,15 +708,24 @@ class CapacityLedgerService:
         rolls back the transition. Intended-end evidence does not free capacity.
 
         ``host_requirement`` maps each fulfillment provider identity to whether
-        its delivery needs a host. When supplied, a declaration that names no
+        its delivery needs a host. When supplied, a declaration with no usable
         host is not an admission candidate in a pool whose provider needs one,
-        or whose provider the requirement does not name; see
-        ``market_resource_pools.pool_needs_host``. A composition that executes
-        nothing against hosts supplies none, and admission is then
-        host-agnostic.
+        or whose provider the requirement does not name, and is not offered by
+        :meth:`list_offered_resources`; see
+        ``market_resource_pools.declaration_has_usable_host``. A composition
+        that executes nothing against hosts supplies none, and admission is
+        then host-agnostic.
+
+        ``deliverable_hosts`` reports the hosts taking new delivery, the
+        registered and enabled ones, and is read in the session each decision
+        is made in, so a declaration naming a host absent
+        from it has no usable host. The ledger learns only host identifiers
+        from it and owns no host record. With a requirement but no report,
+        every named host is usable.
         """
         self._session_factory = session_factory
         self._host_requirement = host_requirement
+        self._deliverable_hosts = deliverable_hosts
         self._required_attributes = tuple(required_attributes)
         self._unit_claim_keys = tuple(unit_claim_keys)
         self._mirror_dimension = mirror_dimension
@@ -1029,6 +1067,12 @@ class CapacityLedgerService:
             )
 
     def list_resources(self) -> list[dict[str, Any]]:
+        """Every declaration with availability and its own stored ``enabled``.
+
+        The operator's view: it reports what was declared, so a declaration
+        that is not offered for want of a usable host still reads as enabled
+        here. Projections are built from :meth:`list_offered_resources`.
+        """
         with self.serialized(), self._session_factory() as db:
             self._expire_stale_holds(db)
             rows = (
@@ -1036,13 +1080,62 @@ class CapacityLedgerService:
             )
             return [self._resource_payload(db, row) for row in rows]
 
+    def list_offered_resources(self) -> list[dict[str, Any]]:
+        """Every declaration as :meth:`list_resources` gives it, with ``enabled``
+        replaced by whether the site offers it.
+
+        A declaration is offered when it is itself enabled and has a usable
+        host, judged with its pool's provider and deliverable offering modes
+        against the host requirement and the hosts taking new delivery, all
+        read in this one transaction. Every projection and the snapshot are
+        built from this read, so a storefront is never shown as sellable what
+        admission refuses. Nothing here records a capacity event or advances
+        the capacity version: a change of host state reaches storefronts when
+        they next read a projection.
+        """
+        with self.serialized(), self._session_factory() as db:
+            self._expire_stale_holds(db)
+            _begin_decision_transaction(db)
+            rows = (
+                db.query(CapacityBucket).order_by(CapacityBucket.updated_at.asc()).all()
+            )
+            payloads = [self._resource_payload(db, row) for row in rows]
+            if self._host_requirement is None:
+                return payloads
+            deliverable = self._deliverable_host_ids(db)
+            pools: dict[str, tuple[str | None, bool]] = {}
+            for row, payload in zip(rows, payloads):
+                if not payload["enabled"]:
+                    continue
+                pool_id = row.pool_id or ""
+                if pool_id not in pools:
+                    pools[pool_id] = (
+                        self._pool_provider(db, pool_id),
+                        self._pool_delivers(db, pool_id),
+                    )
+                provider, delivers = pools[pool_id]
+                # The host rule bounds only supply an admission authority
+                # stands behind. The site reads no pool's backing: an unbacked
+                # pool must deliver nothing, as its declarations' resolution
+                # enforces, so a pool delivering no offering mode is judged
+                # unbacked, as admission judges it, and its declarations keep
+                # their own ``enabled`` whatever host they name.
+                payload["enabled"] = declaration_has_usable_host(
+                    row.host_id,
+                    provider,
+                    delivers,
+                    self._host_requirement,
+                    deliverable,
+                )
+            return payloads
+
     # ------------------------------------------------------------------
     # SiteCapacityAuthority verbs
     # ------------------------------------------------------------------
 
     def snapshot(self) -> list[dict[str, Any]]:
-        """Advisory availability view (enabled resources only)."""
-        return [r for r in self.list_resources() if r.get("enabled")]
+        """Advisory availability view: the declarations the site offers."""
+        return [r for r in self.list_offered_resources() if r.get("enabled")]
 
     def probe(
         self,
@@ -1064,6 +1157,7 @@ class CapacityLedgerService:
         )
         with self.serialized(), self._session_factory() as db:
             self._expire_stale_holds(db)
+            _begin_decision_transaction(db)
             match = self._find_candidate(db, claim, requested, window_start, window_end)
             if match is None:
                 return None
@@ -1121,6 +1215,7 @@ class CapacityLedgerService:
         )
         with self.serialized(), self._session_factory() as db:
             self._expire_stale_holds(db)
+            _begin_decision_transaction(db)
             if escrow_uid:
                 existing = self._find_reservation(db, escrow_uid=escrow_uid)
                 if existing is not None:
@@ -1196,6 +1291,7 @@ class CapacityLedgerService:
         """
         with self.serialized(), self._session_factory() as db:
             self._expire_stale_holds(db)
+            _begin_decision_transaction(db)
             result = self.assign_settlement_resource_in_session(
                 db,
                 capacity_reservation_id=capacity_reservation_id,
@@ -1251,10 +1347,27 @@ class CapacityLedgerService:
                 f"offering mode {requested_mode!r} is not declared by pool "
                 f"{destination.pool_id!r}"
             )
-        if not destination.host_id and self._pool_needs_host(db, destination.pool_id):
+        # The destination has passed the deliverable-mode check above, which an
+        # unbacked pool, delivering nothing, never passes; so it is judged as
+        # backed. The recheck refuses a destination with no usable host
+        # whatever its caller checked first.
+        if not declaration_has_usable_host(
+            destination.host_id,
+            self._pool_provider(db, destination.pool_id),
+            True,
+            self._host_requirement,
+            self._deliverable_host_ids(db),
+        ):
+            if not destination.host_id:
+                reason = "names no host"
+            else:
+                reason = (
+                    f"names host {destination.host_id!r}, which is not taking "
+                    "new delivery"
+                )
             raise CapacityConflictError(
-                f"settlement resource {settlement_resource_id!r} names no host, "
-                f"and pool {destination.pool_id!r} delivers through one"
+                f"settlement resource {settlement_resource_id!r} {reason}, "
+                f"and pool {destination.pool_id!r} delivers through a host"
             )
         if (
             self._backing_resource_id(db, reservation.capacity_reservation_id)
@@ -1653,6 +1766,7 @@ class CapacityLedgerService:
         )
         with self.serialized(), self._session_factory() as db:
             self._expire_stale_holds(db)
+            _begin_decision_transaction(db)
             old_reservation = db.get(
                 CapacityReservation, old_capacity_reservation_id, with_for_update=True
             )
@@ -2282,12 +2396,37 @@ class CapacityLedgerService:
         )
 
 
-    def _pool_needs_host(self, db: Session, pool_id: str) -> bool:
-        pool = db.get(ResourcePool, pool_id)
-        return pool_needs_host(
-            pool.provider if pool is not None else None,
-            self._host_requirement,
-        )
+    @staticmethod
+    def _pool_provider(db: Session, pool_id: str | None) -> str | None:
+        """A pool's provider; ``None`` for a missing pool.
+
+        A supplied host requirement reads a missing provider as needing a host.
+        """
+        pool = db.get(ResourcePool, pool_id) if pool_id else None
+        return pool.provider if pool is not None else None
+
+    @staticmethod
+    def _pool_delivers(db: Session, pool_id: str | None) -> bool:
+        """Whether a pool declares an offering mode it delivers.
+
+        A missing pool, or one whose deliverable modes do not parse (which
+        startup and every write refuse), is judged to deliver, so the host
+        rule fails closed for it rather than offering what admission would
+        refuse.
+        """
+        pool = db.get(ResourcePool, pool_id) if pool_id else None
+        if pool is None:
+            return True
+        try:
+            return bool(declared_deliverable_modes(pool.policy_tags or {}))
+        except ValueError:
+            return True
+
+    def _deliverable_host_ids(self, db: Session) -> frozenset[str] | None:
+        """The hosts taking new delivery, read in ``db``; ``None`` with no report."""
+        if self._deliverable_hosts is None:
+            return None
+        return self._deliverable_hosts.deliverable_host_ids(db)
 
     def _find_candidate(
         self,
@@ -2309,7 +2448,8 @@ class CapacityLedgerService:
         requested_mode = _requested_offering_mode(claim, required=False)
         undeclared_pools: set[str] = set()
         pool_mode_decisions: dict[str, bool] = {}
-        pool_host_decisions: dict[str, bool] = {}
+        pool_providers: dict[str, str | None] = {}
+        deliverable = self._deliverable_host_ids(db)
         for resource in rows:
             pool_id = resource.pool_id
             if not pool_id:
@@ -2341,17 +2481,24 @@ class CapacityLedgerService:
                 if not pool_mode_decisions[pool_id]:
                     undeclared_pools.add(pool_id)
                     continue
-            # A declaration naming no host can be neither placed nor executed
-            # in a pool whose provider delivers through one, so it is not a
-            # candidate at all: the claim falls through to another declaration
-            # or to the ordinary no-capacity answer, never to a hold that
-            # scheduling would then have to refuse. Whether the named host is
-            # registered is checked at dispatch, where the connection is used.
-            if not resource.host_id:
-                if pool_id not in pool_host_decisions:
-                    pool_host_decisions[pool_id] = self._pool_needs_host(db, pool_id)
-                if pool_host_decisions[pool_id]:
-                    continue
+            # A declaration with no usable host — naming none, or naming one
+            # that is disabled or unregistered — cannot be delivered in a pool
+            # whose provider delivers through a host, so it is not a candidate
+            # at all: the claim falls through to another declaration or to the
+            # ordinary no-capacity answer, never to a hold that scheduling and
+            # dispatch would then have to refuse. A candidate is judged as
+            # backed: an unbacked pool delivers nothing, so its declarations
+            # never pass the deliverable-mode check above.
+            if pool_id not in pool_providers:
+                pool_providers[pool_id] = self._pool_provider(db, pool_id)
+            if not declaration_has_usable_host(
+                resource.host_id,
+                pool_providers[pool_id],
+                True,
+                self._host_requirement,
+                deliverable,
+            ):
+                continue
             held = self._held_dimensions(
                 db, resource.backing_resource_id, lease_start, lease_end
             )

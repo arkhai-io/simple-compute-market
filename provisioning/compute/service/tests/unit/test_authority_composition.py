@@ -191,6 +191,25 @@ def test_release_is_composed_once_for_every_offering_mode():
     assert executor._teardown_port is container.fulfillment_teardown_port()
 
 
+def test_the_ledger_and_the_scheduler_read_the_host_authoritys_report():
+    """Admission, the site's offered read, and scheduling all judge a
+    declaration's host by one report of the hosts taking new delivery: the
+    host authority, with the same host requirement beside it. A ledger or
+    unit of work built without it would accept any named host."""
+    container = _container()
+    host_authority = container.host_authority()
+
+    ledger = container.capacity_ledger_service()
+    unit_of_work = container.scheduling_unit_of_work()
+    scheduler = container.physical_settlement_scheduler()
+
+    assert ledger._deliverable_hosts is host_authority
+    assert unit_of_work.deliverable_hosts is host_authority
+    assert scheduler._unit_of_work is unit_of_work
+    assert ledger._host_requirement is scheduler._host_requirement
+    assert ledger._host_requirement == container.host_requirement()
+
+
 def test_the_release_effect_registry_is_the_ledgers_and_composition_fills_it():
     """The ledger runs the registry composition fills; a second registry would
     never be frozen, or would miss the bundles' effects."""

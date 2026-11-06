@@ -396,6 +396,41 @@ def test_listing_filters_disabled_hosts_and_searches_by_id(authority) -> None:
         authority.disable_host("missing")
 
 
+def test_the_hosts_taking_new_delivery_are_the_registered_enabled_ones(
+    authority, session_factory
+) -> None:
+    for host_id in ("kvm1", "kvm2"):
+        authority.register_host(HostCreate(host_id=host_id, connection=_connection()))
+
+    def deliverable() -> frozenset[str]:
+        with session_factory() as db:
+            return authority.deliverable_host_ids(db)
+
+    assert deliverable() == {"kvm1", "kvm2"}
+
+    authority.disable_host("kvm2")
+    assert deliverable() == {"kvm1"}
+
+    authority.enable_host("kvm2")
+    assert deliverable() == {"kvm1", "kvm2"}
+    # An id with no record is never reported, whatever names it.
+    assert "never-registered" not in deliverable()
+
+
+def test_the_report_reads_the_callers_session(file_session_factory) -> None:
+    """A disable the caller's own transaction has written but not committed is
+    already what its decision sees; another session sees it only on commit."""
+    authority = HostAuthority(file_session_factory, codecs=ConnectionCodecs([_Codec()]))
+    authority.register_host(HostCreate(host_id="kvm1", connection=_connection()))
+
+    with file_session_factory() as caller:
+        caller.query(Host).filter(Host.host_id == "kvm1").update({"enabled": False})
+        assert authority.deliverable_host_ids(caller) == frozenset()
+        with file_session_factory() as other:
+            assert authority.deliverable_host_ids(other) == {"kvm1"}
+        caller.rollback()
+
+
 def test_an_inventory_upserts_its_hosts_and_leaves_the_rest(authority) -> None:
     authority.register_host(HostCreate(host_id="untouched", connection=_connection()))
     entries = [

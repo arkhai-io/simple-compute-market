@@ -1,12 +1,19 @@
 """Fail if the installed uv is older than the repository's minimum.
 
 uv releases write `uv.lock` differently, and `uv lock --check` asks only whether a
-lock satisfies its project, not whether this uv would write the same bytes: locks
-written by an older uv pass `check-locks`, and the next `uv sync` on a newer one
-rewrites them. So `make lock` runs this first, and validation runs it before it
-builds anything, refusing an older uv rather than letting it write or judge the
-locks. The tests and pipeline workflows install a uv at least the minimum; the
-release workflows build and publish without relocking.
+lock satisfies its project, not whether this uv would write the same bytes. The
+drift runs both ways: whenever a uv release rewrites a lock it writes its own lock
+revision, so a newer uv raises an older one's lock and an older uv lowers a newer
+one's back. The minimum is the first release that writes the revision every
+committed lock carries, which `check_locks.py` holds them to. The repository's
+relock and environment refresh — `make lock`, `make review-locks`, and each
+package's `make reinit` and `make init`, all through `scripts/uv_project.py` —
+and validation, before it builds anything, run this first, refusing an older uv
+rather than letting it write or judge the locks. A plain `uv run` that relocks
+is not guarded; the revision check catches what it writes. The tests and
+pipeline workflows install the minimum; the release workflows build and publish
+without relocking. It stays a minimum, not an exact pin: a newer release writing
+another revision is caught by the revision check too.
 
 Conventions: docs/development/BUILD_AND_PACKAGING.md.
 """
@@ -18,7 +25,7 @@ import subprocess
 import sys
 from typing import Callable
 
-MINIMUM = (0, 12)
+MINIMUM = (0, 12, 22)
 _VERSION = re.compile(r"^uv (\d+)\.(\d+)(?:\.(\d+))?\b")
 
 

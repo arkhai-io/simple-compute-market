@@ -55,6 +55,11 @@ Buyer settlement progress MUST retain its recorded opaque settlement reference, 
 - **WHEN** the buyer retrieves a grant after settlement has completed
 - **THEN** buyer recovery retains the accepted settlement reference while the bearer credential uses the private result boundary and stays out of the run log
 
+#### Scenario: Private delivery accompanies a settlement status
+
+- **WHEN** an authenticated settlement response carries status and private delivery fields
+- **THEN** progress observers receive only public status, the private result remains available to its authenticated caller and no private delivery field enters the run log
+
 ### Requirement: Domain-owned negotiation surface
 Domain buyer adapters MUST own settlement compatibility checks and CLI parameters, negotiation policies MUST own opening and per-round decisions, and the core MUST deliver policy inputs without interpreting schema-specific fields.
 
@@ -530,3 +535,20 @@ with that reason, so no approval follows and the run is not left open.
 
 - **WHEN** a buyer buys 60 seconds of an option charging 1 base unit an hour
 - **THEN** the command refuses before any negotiation request
+
+### Requirement: Public signer evidence remains loggable
+
+Buyer run logs MUST preserve protocol evidence whose `signer` is exactly a
+validated canonical public `{scheme, identifier}` identity. They MUST continue
+rejecting private signer material, signer objects, noncanonical or extended
+signer mappings and other secret/provider carriers at every nesting level.
+
+#### Scenario: Delivery end returns a signed claim
+
+- **WHEN** the accepted seller's signed acknowledgement includes a claim with its canonical public signer identity
+- **THEN** the buyer logs the evidence unchanged and does not fail after the surrender was accepted
+
+#### Scenario: A public-looking carrier contains a private field
+
+- **WHEN** a signer mapping adds private material or a nested secret/provider carrier
+- **THEN** the run log rejects it before writing the event

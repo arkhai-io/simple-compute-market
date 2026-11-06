@@ -13,7 +13,7 @@ from market_deal_lifecycle.terms import DisputeAuthority
 from pydantic import BaseModel, SecretStr, ValidationError
 
 from .contract import validate, wire
-from .models import Append, AppendAnswer, CaseAnswer, Filing, FilingAnswer, ReadAfter, RecordPage, RespondentAfter, RespondentPage, SignedRecordEntry
+from .models import Append, AppendAnswer, Filing, FilingAnswer, ReadAfter, RecordPage, RespondentAfter, RespondentPage, SignedRecordEntry
 from .records import verify_record
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
@@ -119,14 +119,18 @@ class MediationClient:
                 raise MediationProtocolError("append acknowledgement differs from the submitted items")
         return answer
 
-    async def case(self, case_ref: str, *, agreement: str, transaction: str) -> CaseAnswer:
+    async def case(self, case_ref: str, *, agreement: str, transaction: str) -> FilingAnswer:
         validate("CaseRef", case_ref)
         # Opaque case references are a path segment, never a path supplied by a caller.
         from_path = httpx.URL("/cases/").copy_with(raw_path=b"/cases/" + _segment(case_ref))
-        answer = await self._request(CaseAnswer, "CaseAnswer", "GET", str(from_path))
+        answer = await self._request(FilingAnswer, "FilingAnswer", "GET", str(from_path))
         raw = wire(answer)
-        if (raw["case_ref"], raw["agreement"], raw["transaction"]) != (case_ref, agreement, transaction):
-            raise MediationProtocolError("case answer names another deal")
+        if raw["status"] == "accepted":
+            case = raw["case"]
+            if (case["case_ref"], case["agreement"], case["transaction"]) != (case_ref, agreement, transaction):
+                raise MediationProtocolError("case answer names another case or deal")
+        elif raw["status"] == "pending" and raw["case_ref"] != case_ref:
+            raise MediationProtocolError("pending case answer names another case")
         return answer
 
     async def read_record(self, request: ReadAfter, *, transaction: str) -> RecordPage:

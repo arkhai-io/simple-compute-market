@@ -731,6 +731,7 @@ source = { editable = "." }
 dependencies = [
     { name = "arkhai-kit-arkhai-payments" },
     { name = "arkhai-kit-identity" },
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "pydantic" },
     { name = "starlette" },
@@ -740,7 +741,6 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "arkhai-kit-deal-lifecycle" },
-    { name = "cryptography" },
     { name = "httpx" },
     { name = "pytest" },
     { name = "pyyaml" },
@@ -750,6 +750,7 @@ dev = [
 requires-dist = [
     { name = "arkhai-kit-arkhai-payments", specifier = ">=0.6.0" },
     { name = "arkhai-kit-identity", specifier = ">=0.4.0" },
+    { name = "cryptography", specifier = ">=43" },
     { name = "fastapi", specifier = "~=0.115.8" },
     { name = "pydantic", specifier = ">=2" },
     { name = "starlette", specifier = ">=0.40,<0.47" },
@@ -759,7 +760,6 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "arkhai-kit-deal-lifecycle", specifier = ">=0.1.0" },
-    { name = "cryptography", specifier = ">=43" },
     { name = "httpx", specifier = ">=0.27,<1" },
     { name = "pytest", specifier = ">=8.3.4,<9" },
     { name = "pyyaml", specifier = ">=6" },

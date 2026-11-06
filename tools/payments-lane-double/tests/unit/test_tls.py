@@ -8,7 +8,9 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+from conftest import TLS
 from cryptography import x509
+from cryptography.hazmat.primitives import serialization
 
 
 @pytest.fixture
@@ -18,6 +20,16 @@ def generated(tls_generator: ModuleType) -> dict[str, bytes]:
 
 def test_the_generator_is_deterministic(tls_generator: ModuleType) -> None:
     assert tls_generator.generate() == tls_generator.generate()
+
+
+def test_the_generated_key_is_the_committed_leaf_certificates(
+        generated: dict[str, bytes]) -> None:
+    # The image pairs the committed certificate with the key its build generates.
+    committed = x509.load_pem_x509_certificate((TLS / "double.pem").read_bytes())
+    key = serialization.load_pem_private_key(generated["double.key.pem"], password=None)
+
+    raw = (serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    assert key.public_key().public_bytes(*raw) == committed.public_key().public_bytes(*raw)
 
 
 def test_the_leaf_is_issued_by_the_ca_for_exactly_the_service_names(

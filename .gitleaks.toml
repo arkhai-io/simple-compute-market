@@ -1,0 +1,26 @@
+# The gitleaks configuration of the secret gate the public-content checks run
+# (scripts/check_secrets.py) — the pre-commit and pre-push hooks, the guarded push,
+# and the Public content workflow — at the release scripts/gitleaks-pins.toml pins.
+# It extends the audit's configuration, scripts/gitleaks-audit.toml, which holds
+# gitleaks' default rules and the repository's key rule, and turns three more default
+# rules off here; the audit keeps them. gitleaks resolves the extended path from its
+# working directory, so the check runs it from the repository root.
+#
+# Each rule turned off here matches the repository's own development fixtures and
+# code as readily as a secret, so a refusal would say nothing:
+# - `generic-api-key`, a keyword-and-entropy heuristic, matches identifiers and
+#   type annotations such as `private_key: Ed25519PrivateKey`, public contract and
+#   token addresses, and Anvil's published development keys;
+# - `jwt` matches the frp grant test vector's tokens, signed with RFC 8032's
+#   published test keys;
+# - `curl-auth-header` matches documented placeholder headers in curl examples.
+# The provider-specific rules stay: they match fixed token formats that almost never
+# misfire. A random credential in no provider's format is what `generic-api-key`
+# would have found; the audit (`make audit-secrets`) reports it over the whole tree,
+# and review remains the safeguard for each change. A later fixture that trips a
+# provider rule is another entry in this list, never a marker beside the fixture.
+# See openspec/specs/market-change-workflow/README.md, "Secret scanning".
+
+[extend]
+path = "scripts/gitleaks-audit.toml"
+disabledRules = ["generic-api-key", "jwt", "curl-auth-header"]

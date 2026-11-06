@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 
 import pytest
+from market_core.schemas import derive_settlement_option_id
 
 from market_arkhai_payments import (
     MandatePolicyError,
@@ -44,6 +45,20 @@ def test_approval_expiry_rounds_acceptance_down():
     terms, mandate = _derived()
     accepted = datetime.fromisoformat(terms["accepted_at"].replace("Z", "+00:00")).timestamp()
     assert _wire(mandate)["expires"] == int(accepted) + 7 * 86_400
+
+
+def test_short_authority_policy_preserves_the_full_accepted_hold():
+    terms = agreement()
+    option = terms["settlement"]
+    lifecycle = option["lifecycle"]
+    lifecycle["adjudication"]["dispute_window_seconds"] = 660
+    lifecycle["delivery_deadline_seconds"] = 600
+    option["option_id"] = derive_settlement_option_id(
+        price=option["price"], settlement=option["settlement"], lifecycle=lifecycle,
+    )
+    _, mandate = _derived(terms)
+    assert _wire(mandate)["parts"][0]["hold"] == {"afterStop": "PT11M"}
+    assert _wire(mandate)["deal"] == agreement_hash(terms)
 
 
 def test_authorities_nonce_and_fee_follow_policy():

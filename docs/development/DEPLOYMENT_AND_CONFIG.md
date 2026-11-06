@@ -1021,10 +1021,11 @@ explicit `enabled: false`, in the document or through the API.
 A host absent from the document is **retained**, its enabled state included, and
 each apply reports it as registered and not named: in the startup log, and in
 the import response's `not_named`. Hosts registered through the API, as every
-end-to-end lane registers them, coexist with the document; and disabling a host
-does not stop its capacity declarations selling, so a removed line would
-otherwise become capacity that cannot be delivered. Disabling a host is an
-explicit `enabled: false`, in the document or through the API.
+end-to-end lane registers them, coexist with the document, and disabling every
+host a document stopped naming would take them out of service. Disabling a host
+is an explicit `enabled: false`, in the document or through the API; it keeps
+new deliveries off the host while work already placed there runs, as the
+operator handbook's "Host definitions" describes.
 
 ### Host definitions
 

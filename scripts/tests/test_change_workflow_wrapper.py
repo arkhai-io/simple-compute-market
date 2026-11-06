@@ -6,7 +6,11 @@ from __future__ import annotations
 import json
 import os
 import signal
+import subprocess
+import sys
 import uuid
+from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -15,9 +19,9 @@ from change_workflow.common import StepError
 from change_workflow.harness import anchored
 from change_workflow.log import log_path, note_orchestrator, read_log, record_outcome
 from change_workflow.outcome import harness_schema, load_schema, outcome_problems
-from change_workflow.running import Run, live_runs, recorded_run, runs_directory
+from change_workflow.running import Run, Terminated, live_runs, recorded_run, runs_directory
 from change_workflow.steps import Model, load_steps
-from change_workflow.wrapper import Terminated, Wrapper
+from change_workflow.wrapper import Wrapper
 from change_workflow_fixtures import (CHANGE, COMMIT, LIMIT, NETWORK, OPUS, SESSION, VALID,
                                       FakeClaude, clock, event_lines, failed_run, make_wrapper,
                                       not_installed, option, option_rules,
@@ -437,6 +441,53 @@ def test_a_run_whose_wrapper_is_terminated_is_logged_stopped_naming_the_signal(
     assert signal.getsignal(signal.SIGTERM) is previous
 
 
+def test_a_stop_after_the_agent_has_exited_ends_nothing_and_the_outcome_is_logged(
+    tmp_path: Path,
+) -> None:
+    """The record is held until the line is written, so a stop can reach a run
+    as it ends; killed there, it would leave no line for work already done."""
+    def signalling_head(_root: Path) -> str:
+        # Read as the line is written, after the agent's process has ended.
+        os.kill(os.getpid(), signal.SIGTERM)
+        return COMMIT
+
+    previous = signal.getsignal(signal.SIGTERM)
+    runs = tmp_path / "git" / "change-runs"
+    wrapper = replace(make_wrapper(tmp_path, FakeClaude((event_lines(VALID["finished"]), 0))),
+                      head=signalling_head, runs=lambda _: runs)
+    line = wrapper.run("implement", CHANGE)
+
+    assert (line["outcome"], line["commit"]) == ("finished", COMMIT)
+    assert read_log(log_path(tmp_path, CHANGE)) == [line]
+    assert list(runs.iterdir()) == []
+    assert signal.getsignal(signal.SIGTERM) is previous
+
+
+def test_a_stop_before_the_agent_starts_ends_the_run_as_it_would_start(
+    tmp_path: Path,
+) -> None:
+    signalled: list[bool] = []
+
+    def signalling_clock() -> datetime:
+        # First read as the run's record is written, before the agent starts.
+        if not signalled:
+            signalled.append(True)
+            os.kill(os.getpid(), signal.SIGTERM)
+        return clock()
+
+    claude = FakeClaude((event_lines(VALID["finished"]), 0))
+    runs = tmp_path / "git" / "change-runs"
+    wrapper = replace(make_wrapper(tmp_path, claude), clock=signalling_clock,
+                      runs=lambda _: runs)
+    with pytest.raises(Terminated):
+        wrapper.run("implement", CHANGE)
+
+    assert claude.commands == []
+    (line,) = read_log(log_path(tmp_path, CHANGE))
+    assert (line["outcome"], line["reason"]) == (
+        "stopped", "the run did not finish: Terminated: received SIGTERM")
+
+
 def test_a_file_the_run_cannot_find_is_no_unavailability(tmp_path: Path) -> None:
     # Only the program failing to launch says the harness cannot serve its model.
     def lost(command, cwd, feed) -> int:
@@ -731,14 +782,151 @@ def test_an_interrupted_run_forgets_its_record_after_its_line(tmp_path: Path) ->
     assert list(runs.iterdir()) == []
 
 
-def test_a_record_whose_process_is_gone_counts_as_no_run(tmp_path: Path) -> None:
+def _stale_record(runs: Path, pid: int, step: str = "triage") -> Path:
+    """A record as a run killed before it could remove it leaves it: written, and
+    its lock released as the run's descriptor closed."""
+    runs.mkdir(parents=True, exist_ok=True)
+    record = runs / f"{pid}-{uuid.uuid4().hex}.json"
+    record.write_text(json.dumps({"pid": pid, "step": step, "change": CHANGE,
+                                  "started": "2026-10-21T09:15:40Z"}), "utf-8")
+    return record
+
+
+def test_a_record_is_a_run_only_while_its_lock_is_held(tmp_path: Path) -> None:
     runs = tmp_path / "change-runs"
-    with recorded_run(runs, "triage", CHANGE, clock=clock, pid=4242):
-        (live,) = live_runs(runs, alive=lambda pid: pid == 4242)
+    with recorded_run(runs, "triage", CHANGE, clock=clock):
+        (live,) = live_runs(runs)
         assert live.describe() == (
-            f"triage of {CHANGE} (process 4242, started 2026-10-21T09:15:40Z)")
-        assert live_runs(runs, alive=lambda pid: False) == []
-    assert live_runs(runs, alive=lambda pid: True) == []
+            f"triage of {CHANGE} (process {os.getpid()}, started 2026-10-21T09:15:40Z)")
+    # A record whose lock is free reads as no run, though its process (this one)
+    # is alive: neither a reused process id nor a survivor passes for the run.
+    stale = _stale_record(runs, os.getpid())
+    assert stale.is_file() and live_runs(runs) == []
+
+
+_HOLDER = """
+import subprocess, sys, time
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from change_workflow.running import recorded_run
+with recorded_run(Path(sys.argv[2]), "validate", "shape-bounds"):
+    # close_fds=False: the record's descriptor is still not passed on.
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"],
+                             close_fds=False)
+    print(child.pid, flush=True)
+    time.sleep(60)
+"""
+
+
+def test_a_killed_runs_record_is_stale_though_its_child_survives(tmp_path: Path) -> None:
+    """Library integration: real processes and the kernel's own lock release."""
+    runs = tmp_path / "change-runs"
+    scripts = Path(__file__).resolve().parents[1]
+    holder = subprocess.Popen([sys.executable, "-c", _HOLDER, str(scripts), str(runs)],
+                              stdout=subprocess.PIPE, text=True)
+    assert holder.stdout is not None
+    child = int(holder.stdout.readline())
+    try:
+        (live,) = live_runs(runs)
+        assert (live.pid, live.step) == (holder.pid, "validate")
+
+        holder.kill()
+        holder.wait()
+
+        os.kill(child, 0)  # The run's child is still alive,
+        assert len(list(runs.glob("*.json"))) == 1  # its record is left behind,
+        assert live_runs(runs) == []  # and nothing holds it.
+    finally:
+        holder.kill()
+        try:
+            os.kill(child, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+# A finished triage is resumed only on the owner's direction to revisit it.
+
+def _finished_triage(tmp_path: Path) -> tuple[Wrapper, FakeClaude, dict]:
+    _triaged_records(tmp_path, "04-implementation")
+    outcome = {"outcome": "finished", "message": "Advance.", "triaged": ["04-implementation"],
+               "next": {"step": "round"}}
+    claude = FakeClaude((event_lines(outcome, session="t-1"), 0),
+                        (event_lines(outcome, session="t-1"), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    triage = record_outcome(log_path(tmp_path, CHANGE), "triage", outcome, session="t-1",
+                            commit=COMMIT)
+    return wrapper, claude, triage
+
+
+def test_a_finished_triage_is_resumed_under_the_owners_revisit(tmp_path: Path) -> None:
+    wrapper, claude, triage = _finished_triage(tmp_path)
+    # A step started after the triage, stopped and resolved before the revisit.
+    stopped = record_outcome(log_path(tmp_path, CHANGE), "validate", VALID["stopped"],
+                             session="v-1", commit=COMMIT)
+    note_orchestrator(log_path(tmp_path, CHANGE), "revisits 04 F5", "the owner's words",
+                      by="owner", resumes=triage["seq"])
+    note_orchestrator(log_path(tmp_path, CHANGE), "the revisit supersedes it", "r",
+                      by="owner", resolves=stopped["seq"])
+
+    line = wrapper.resume(CHANGE, triage["seq"], "Cite the stable row.")
+
+    assert option(claude.commands[0], "--resume") == "t-1"
+    assert (line["step"], line["outcome"], line["resumes"]) == ("triage", "finished",
+                                                                triage["seq"])
+
+
+def test_a_finished_triage_resumed_without_a_direction_is_refused(tmp_path: Path) -> None:
+    """A finished run is resumed without a direction."""
+    wrapper, claude, triage = _finished_triage(tmp_path)
+
+    with pytest.raises(StepError, match="ended finished, not with a question or a stop, so "
+                                        "it is not waiting"):
+        wrapper.resume(CHANGE, triage["seq"], "Cite the stable row.")
+    assert claude.commands == []
+
+
+def test_a_revisit_direction_resumes_the_triage_once(tmp_path: Path) -> None:
+    wrapper, claude, triage = _finished_triage(tmp_path)
+    note_orchestrator(log_path(tmp_path, CHANGE), "revisits 04 F5", "r", by="owner",
+                      resumes=triage["seq"])
+    resumed = wrapper.resume(CHANGE, triage["seq"], "Cite the stable row.")
+
+    # The direction is spent, and the resumed run is now the triage's latest.
+    assert resumed["resumes"] == triage["seq"]
+    with pytest.raises(StepError, match=f"seq {triage['seq']} is not triage's latest run, so "
+                                        "it no longer waits"):
+        wrapper.resume(CHANGE, triage["seq"], "Again.")
+    assert len(claude.commands) == 1
+
+
+def test_a_revisit_a_later_triage_superseded_is_refused_at_the_resume(tmp_path: Path) -> None:
+    """The direction was given while the triage was the latest of its review; a
+    triage of that review since supersedes it."""
+    wrapper, claude, triage = _finished_triage(tmp_path)
+    note_orchestrator(log_path(tmp_path, CHANGE), "revisits", "r", by="owner",
+                      resumes=triage["seq"])
+    later = record_outcome(log_path(tmp_path, CHANGE), "triage",
+                           {"outcome": "finished", "message": "x",
+                            "triaged": ["04-implementation"], "next": {"step": "round"}},
+                           session="t-2", commit=COMMIT)
+
+    with pytest.raises(StepError, match=f"the revisit is refused: the triage at seq "
+                                        f"{later['seq']} came after"):
+        wrapper.resume(CHANGE, triage["seq"], "Words.")
+    assert claude.commands == []
+
+
+def test_a_direction_naming_another_triage_resumes_nothing(tmp_path: Path) -> None:
+    wrapper, claude, triage = _finished_triage(tmp_path)
+    other = record_outcome(log_path(tmp_path, CHANGE), "triage",
+                           {"outcome": "finished", "message": "x", "triaged": ["04-implementation"],
+                            "next": {"step": "round"}}, session="t-2", commit=COMMIT)
+    note_orchestrator(log_path(tmp_path, CHANGE), "revisits", "r", by="owner",
+                      resumes=other["seq"])
+
+    with pytest.raises(StepError, match=f"seq {triage['seq']} is not triage's latest run"):
+        wrapper.resume(CHANGE, triage["seq"], "Words.")
+    assert claude.commands == []
 
 
 # A triage names the records it triaged, which the computation routes on.

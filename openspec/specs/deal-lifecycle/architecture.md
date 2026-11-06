@@ -40,6 +40,13 @@ from entitlements; notice and partial-period treatment cannot be waived locally.
 The codec maps started_period/last_boundary/stop to charged/returned/prorated.
 Rate execution is not supplied by the once-only adapter.
 
+The dispute authority advertises its minimum window as a nonnegative safe integer;
+the consumer does not substitute a fixed duration for that policy. Compute terms
+cover the delivery deadline plus the advertised minimum, and the payment hold
+uses that complete accepted window. A shorter advertised minimum does not shorten
+the delivery allowance, relax the buyer's timing checks or change the authority
+and terms pinned by an existing Agreement.
+
 Premature-stop penalty is a canonical nonnegative decimal string in the option's
 asset minor units, absent/zero meaning none. A bond is reserved seller stake
 beyond reversible held payment, not another name for that penalty. Hosted
@@ -125,6 +132,22 @@ intent/key/evidence belongs to end service; delivery retains its reference. The
 neutral phase/evidence protocol exists, but once billing start is a validated
 no-op, and activation/rate/funding-timer consumers remain separate work.
 
+## Background readiness adoption
+
+Seller servicing owns progress after a compute commitment, even when the buyer
+disconnects. It observes an already dispatched fulfillment through the domain's
+validated delivery path, preserving selected-site/resource identity, evidence,
+deadlines and end-service admission. Site activation alone is not proof that the
+buyer received delivery. Repeated servicing keeps the same fulfillment and the
+original availability instant; it can complete missing result or receipt writes
+without dispatching another create.
+
+Readiness observation, site-end recovery and physical teardown are independent
+attempts. A failed observation waits for a later servicing cycle without blocking
+cleanup. A selected end or expired delivery admission prevents late readiness
+from exposing access or reopening delivery. Buyer status and access reads may
+observe progress, but they are not required to drive it.
+
 ## Buyer surrender and cases
 
 `market end --from <run>` and `market bare-metal teardown` use the same lifecycle
@@ -157,6 +180,12 @@ signed filed record. Unresolved ownership is pending. Ambiguous originals and
 unsupported linked revisions require repair, not a fresh key or append-as-amendment.
 Initial missing history permits the original filing only, not a verified empty
 ordinary read or an acknowledgement without a signed filed entry.
+
+An existing case read preserves the authority's protection outcome envelope.
+Accepted protection must name the requested case, Agreement and transaction;
+pending protection must name the requested case and stays pending. Neither
+answer is signed filing evidence: adoption still verifies the original signed
+record, and a pending or mismatched answer never authorizes another filing.
 
 Either party appends evidence while a case is open; only the payee appends
 concurrence. The window matters because triage has no response bound and the

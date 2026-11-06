@@ -1,4 +1,5 @@
-"""Resource-pool projection inventory, built from capacity declarations alone.
+"""Resource-pool projection inventory, built from the capacity declarations it
+is handed, which in the service are the ledger's offered read.
 
 The fixtures below are frozen declaration sets covering a fungible pool and a
 specific-resource bare-metal pool, projected with the inventory views
@@ -254,12 +255,27 @@ def test_no_entry_carries_host_connection_identity():
         assert "public_host" not in projected["attributes"]
 
 
-def test_enablement_comes_from_the_declaration_alone():
+def test_enablement_comes_from_the_declaration_handed_in():
     (enabled,) = _project([_declaration(enabled=True)])
     (disabled,) = _project([_declaration(enabled=False)])
 
     assert enabled["enabled"] is True
     assert disabled["enabled"] is False
+
+
+def test_a_declaration_handed_in_not_enabled_projects_and_views_as_unavailable():
+    """The builder is handed the ledger's offered read, in which a declaration
+    with no usable host arrives not enabled though its own ``enabled`` is
+    true. The entry follows it, and so does every view built from it: the
+    bare-metal view reports itself unavailable, as a storefront needs to close
+    the listing."""
+    (offered,) = _project([_bare_metal_declaration(enabled=True)])
+    (not_offered,) = _project([_bare_metal_declaration(enabled=False)])
+
+    assert offered["enabled"] is True
+    assert offered["publication_views"]["bare_metal.v2"]["available"] is True
+    assert not_offered["enabled"] is False
+    assert not_offered["publication_views"]["bare_metal.v2"]["available"] is False
 
 
 def test_an_undeclared_attribute_is_absent_rather_than_null():

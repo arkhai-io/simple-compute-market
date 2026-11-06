@@ -18,12 +18,15 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from compute_provisioning_ansible import ssh_connection
+from compute_provisioning_contracts import HostCreate
 from compute_provisioning_service.container import Container
 from compute_provisioning_service.db.models import Base
 from market_fulfillment import FulfillmentBase, PhysicalSettlementRequest
 from market_resource_pools_contracts import PoolCreate
 from market_resource_pools.db import Base as PoolsBase
 from vm_provisioning_adapter.db import Base as VmBase
+from compute_provisioning.hosts.db import Base as HostsBase
 from compute_provisioning.relays.db import Base as RelaysBase
 from market_site.db import Base as SiteBase
 
@@ -44,6 +47,7 @@ def _build_container():
     )
     Base.metadata.create_all(bind=engine)
     PoolsBase.metadata.create_all(bind=engine)
+    HostsBase.metadata.create_all(bind=engine)
     RelaysBase.metadata.create_all(bind=engine)
     VmBase.metadata.create_all(bind=engine)
     SiteBase.metadata.create_all(bind=engine)
@@ -60,6 +64,19 @@ def _build_container():
         storefront_site_id="fixture-site",
     ))
     return container, session_factory
+
+
+def _register_hosts(container, *host_ids: str) -> None:
+    """Register the hosts the declarations name: the real container's ledger
+    and scheduler offer a declaration only when its host takes new delivery.
+    The address is a documentation-range placeholder nothing connects to."""
+    for host_id in host_ids:
+        container.host_authority().register_host(HostCreate(
+            host_id=host_id,
+            connection=ssh_connection(
+                ssh_host="192.0.2.1", ssh_user="ubuntu", key_path="/keys/id"
+            ),
+        ))
 
 
 def test_real_container_resolves_scheduling_dependencies_to_one_boundary():
@@ -85,7 +102,9 @@ def test_real_container_resolves_scheduling_dependencies_to_one_boundary():
         )
     )
     # The real container supplies the providers' host requirement, and the
-    # Ansible provider delivers through a host, so the declaration names one.
+    # Ansible provider delivers through a host, so the declaration names a
+    # registered one.
+    _register_hosts(container, "kvm1")
     ledger.register_resource(
         resource_id="r1", resource_type="compute.gpu",
         total_units=10, enabled=True, pool_id="pool-a", host_id="kvm1",
@@ -139,6 +158,7 @@ def test_real_container_composed_schedule_rolls_back_all_participating_tables():
             provider_config={"playbook_path": "p.yaml"},
         )
     )
+    _register_hosts(container, "kvm1", "kvm2")
     ledger.register_resource(
         resource_id="r1", resource_type="compute.gpu",
         total_units=10, enabled=True, pool_id="pool-a", host_id="kvm1",

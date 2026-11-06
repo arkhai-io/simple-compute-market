@@ -343,7 +343,7 @@ def wait_for_settlement(
     sleep: Callable[[float], None] = time.sleep,
     resolve_seller_principals: Callable[[], TrustedIdentitySet],
 ) -> dict[str, Any]:
-    """Poll an EVM settlement until it reaches a terminal public status."""
+    """Poll settlement, observing public status and returning private delivery."""
 
     deadline = time.monotonic() + total_timeout
     attempts = 0
@@ -357,7 +357,9 @@ def wait_for_settlement(
             resolve_seller_principals=resolve_seller_principals,
         )
         if on_poll:
-            on_poll(attempts, status_body)
+            # Authenticated delivery may contain credentials or future private
+            # fields; progress observers persist public status only.
+            on_poll(attempts, {"status": status_body.get("status")})
         if status_body.get("status") in ("ready", "failed"):
             return status_body
         if time.monotonic() >= deadline:

@@ -108,12 +108,34 @@ drifted to a package index returns to the wheelhouse. It relocks unconditionally
 changes nothing. Run it after editing a project's dependencies or bumping an
 internal version, instead of reaching for `make test` to do it.
 
-Locks are written by uv 0.12 or newer. uv releases write `uv.lock` differently, and
-`uv lock --check` asks only whether a lock satisfies its project, so a lock an older uv
-wrote passes `check-locks` and the next `uv sync` on a newer uv rewrites it. `make lock`
-therefore runs `make check-uv-version` first, which refuses an older uv, naming both
-versions; change validation runs it before building anything, and CI's `tests.yml` and
-`e2e.yml` install uv 0.12.19. The minimum is `MINIMUM` in `scripts/check_uv_version.py`.
+Locks are written by uv 0.12.22 or newer, the first release that writes lock revision 5,
+the revision every committed lock carries. uv releases write `uv.lock` differently, and
+whenever one rewrites a lock it writes its own revision: a newer uv raises an older one's
+lock, and an older uv lowers a newer one's back, as surely. `uv lock --check` asks only
+whether a lock satisfies its project, so it passes a lock at any revision. Two checks
+hold the locks steady between uv releases:
+
+- `scripts/uv_project.py` refuses a uv older than the minimum, naming both versions,
+  before its `lock` and `reinit` commands run uv, so the repository's relock and
+  environment refresh — `make lock`, `make review-locks`, and each package's `make
+  reinit` and `make init` — refuse before writing. `make lock` also runs `make
+  check-uv-version` first, so it refuses before building the wheelhouse; change
+  validation runs it before building anything. A plain `uv run` that relocks a changed
+  project is not guarded.
+- `check-locks` fails on a lock carrying any revision but 5, naming the lock and both
+  revisions, so a rewrite by any other release and any command, newer releases included,
+  is seen before it lands.
+
+The minimum is `MINIMUM` in `scripts/check_uv_version.py`, and the revision
+`LOCK_REVISION` in `scripts/check_locks.py`; CI's `tests.yml` and `e2e.yml` install the
+minimum, uv 0.12.22. It is a minimum, not an exact pin. uv rewrites a lock only when
+something in it changes, so relocking a current project leaves its revision as it was,
+and `make lock` upgrades nothing in a lock that names no internal package. To bring such
+a lock to the running uv's revision, relock it in its project with `uv lock
+--upgrade-package <its own distribution>`, after `make check-uv-version`; this moves no
+dependency's version, though the rewrite may restate a marker as the running uv writes
+it. A lock that names internal packages takes `make lock PROJECTS=<its project>`, which
+rewrites it.
 
 Relocking needs the indexes each lock resolves from. `domains/vms/buyer` and
 `domains/vms/storefront` declare the PyTorch CPU index, so relocking them needs
@@ -169,7 +191,7 @@ closeout ([plan-closeout requirements](../../openspec/README.md#plan-closeout-re
 | Target | Fails on |
 |---|---|
 | `check-uv-setup` | a literal `--upgrade-package`, `--reinstall-package`, or `--refresh-package` in a Makefile or Dockerfile; a Makefile recipe running `uv sync` itself; a `reinit` recipe other than the script call by a path that resolves; a project with tests and wheelhouse packages but no `reinit`; a Dockerfile that rewrites a lock, spells a repository distribution's version, installs from the wheelhouse without the script, calls the script where its stage did not copy it, or copies the wheelhouse into the runtime stage |
-| `check-locks` | a lock `uv lock --check --offline` rejects; a lock pinning an internal version the tree does not build; a lock whose record of an internal package disagrees with that wheel's metadata (a requirement added or removed, unconditionally or under an extra in use, or a locked version its specifier no longer admits); a version check it cannot evaluate; a repository distribution resolved from an index or from a local registry other than `.dist` |
+| `check-locks` | a lock `uv lock --check --offline` rejects; a lock pinning an internal version the tree does not build; a lock whose record of an internal package disagrees with that wheel's metadata (a requirement added or removed, unconditionally or under an extra in use, or a locked version its specifier no longer admits); a version check it cannot evaluate; a repository distribution resolved from an index or from a local registry other than `.dist`; a lock carrying a lock revision other than 5, the one the repository's minimum uv writes |
 | `check-uv-version` | an installed uv older than the minimum that writes the repository's locks, or one whose version cannot be read; `make lock` runs it, and `check-packaging` does not, since it reads the locks without writing them |
 | `check-project-layout` | a distribution whose wheel target is not exactly `packages = ["src/<package>"]` with that package present, or that builds with another backend or other build settings; a `[tool.uv]` `find-links` or `cache-keys`; a `[tool.uv.sources]` entry naming a path; `UV_NO_EDITABLE`, `--no-editable`, or `no_editable` in a Makefile, shell script, or workflow |
 | `check-architecture` | any of the four parts below failing; it reads only the tree, so it needs no wheelhouse, and it also runs on every push in CI |

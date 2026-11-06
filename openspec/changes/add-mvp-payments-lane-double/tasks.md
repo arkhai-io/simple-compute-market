@@ -500,6 +500,24 @@ in `test`, `build-payments-lane-double`, and its place in `build-dev` and the th
     `uv run --project tools/payments-lane-double python -c *`. Sections 4 and 5
     should read the fixtures with tools the step allows, or ask for the same.
 
+- [x] 2.8 The leaf key is generated at image build, not committed (D3; the merge of the
+  branch the change lands on, whose secret gate refuses a committed private key block and
+  admits no fixture by path; the owner chose this over an allowlist entry).
+  `tools/payments-lane-double/`: the Dockerfile's builder stage runs `tls/generate.py`
+  and the runtime stage copies its `double.key.pem`; `Dockerfile.dockerignore` admits the
+  generator and keeps out a locally written key; `cryptography` moves from the dev group
+  to the runtime dependencies, since the image's `--no-dev` environment runs the
+  generator; `check-tls` compares the two committed certificates; `tls/double.key.pem`
+  is removed from Git and ignored, and `make tls` still writes it for running the double
+  outside its image; the README and the generator's docstring say so. A unit test holds
+  the generated key to the committed leaf certificate's public key.
+  Verified: `make test-payments-lane-double` (`check-tls` and 50 passed), `make
+  check-packaging`, and `scripts/tests/test_check_secrets.py`'s tree test once committed.
+  Not run here: the image build (the merge step has no build target); the validation of
+  the merged `HEAD` builds it. The key stays in this branch's earlier commits, so the
+  Public content workflow's commit-range scan of a pull request to `dev` still finds it;
+  how the change lands is the owner's decision at archive cleanup.
+
 ## 3. Storefront `check-payments` and the VM storefront's unreachable authority
 
 Delivers the `check-payments` subcommand on the three storefront CLIs (D12;

@@ -94,10 +94,13 @@ def test_case_hold_minimum(cap, minimum, accepted):
             validate_terms(data, ctx)
 
 
-def test_window_includes_the_delivery_deadline_and_authority_minimum():
+@pytest.mark.parametrize("deadline,window", [(60, 120), (600, 660)])
+def test_window_includes_the_delivery_deadline_and_authority_minimum(deadline, window):
+    data = change(terms(), "delivery_deadline_seconds", deadline)
+    data["adjudication"]["dispute_window_seconds"] = window
     with pytest.raises(ValueError, match="dispute window"):
-        validate_terms(change(terms(), "adjudication.dispute_window_seconds", 119), context())
-    assert validate_terms(terms(), context())
+        validate_terms(change(deepcopy(data), "adjudication.dispute_window_seconds", window - 1), context())
+    assert validate_terms(data, context())
     data = terms()
     del data["delivery_deadline_seconds"]
     data["adjudication"]["dispute_window_seconds"] = 59

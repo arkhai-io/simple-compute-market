@@ -49,6 +49,8 @@ from market_storefront.middleware.seller_auth import listing_lifecycle_middlewar
 from market_storefront.payment_settlement import VmPaymentsCoordinator
 from market_storefront.deal_lifecycle import VmDealLifecycle
 from market_deal_servicing import create_lifecycle_router, PhysicalResult
+from market_deal_lifecycle_client import LifecycleClient
+from market_deal_lifecycle_contracts.models import CommitMessage
 from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
 from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_storefront.utils.sqlite_client import SQLiteClient
@@ -752,4 +754,22 @@ async def test_a_malformed_agreement_never_stops_reconciliation(make):
 
     assert (done.attempted, done.failed) == (1, 0)
     await h.delivered()
+    assert h.delivery.starts == [NEGOTIATION]
+
+
+@pytest.mark.asyncio
+async def test_commit_reaches_available_without_buyer_settlement_status_poll(make):
+    h = await make()
+    h.serve()
+    async with LifecycleClient(
+        "http://test", BUYER, TrustedIdentitySet(identities=(SELLER.identity,)),
+        transport=h.transport,
+    ) as buyer:
+        committed = await buyer.commit(CommitMessage(
+            negotiation_id=NEGOTIATION, commitment_ref=h.data.transaction_id,
+            operation_key="commit",
+        ))
+        assert committed.outcome.status == "accepted"
+        await h.delivered()
+        assert (await buyer.read(NEGOTIATION)).delivery.progress == "active"
     assert h.delivery.starts == [NEGOTIATION]

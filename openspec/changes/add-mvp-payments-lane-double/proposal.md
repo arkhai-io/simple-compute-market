@@ -197,3 +197,62 @@ None. The double is a test collaborator, not a production authority.
   new gaps record payment scenarios not served on the local Helm release, the registry's
   move onto Dynaconf, and the signing credential's delivery under the secret-profile rule:
   `docs/development/ROADMAP.md`.
+
+Each decision's destination, as `tasks.md`'s design promotion record holds it:
+
+- D1: `tools/README.md`; `tools/payments-lane-double/README.md`.
+- D2: `openspec/specs/test-compatibility/spec.md` (delta);
+  `openspec/specs/test-compatibility/architecture.md`, "Payment evidence ownership";
+  `e2e-tests/README.md`.
+- D3: `tools/payments-lane-double/README.md`; `openspec/specs/deployment-state/spec.md`
+  (delta); `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Kubernetes: ConfigMap and Secret
+  mounting".
+- D4: `openspec/specs/test-compatibility/spec.md` (delta); `docs/development/TESTING.md`,
+  "Private Service Dependencies"; `docs/development/ROADMAP.md`.
+- D5: `openspec/specs/market-composition/spec.md` (delta); `kit/arkhai-payments/README.md`.
+- D6: `openspec/specs/test-compatibility/spec.md` (delta); `docs/development/TESTING.md`,
+  "Private Service Dependencies".
+- D7: `docs/development/TESTING.md`, "Private Service Dependencies"; `e2e-tests/README.md`.
+- D8: `openspec/specs/test-compatibility/spec.md` (delta); `docs/development/TESTING.md`;
+  `docs/development/ARCHITECTURE.md`, "Testing strategy".
+- D9: `openspec/specs/deployment-state/spec.md` (delta);
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Per-domain stack composition";
+  `docs/development/ARCHITECTURE.md`, "Deployment topology".
+- D10: no permanent destination — an implementation cadence, recorded in the change's
+  history.
+- D11: `openspec/specs/deployment-state/spec.md` (delta);
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Release topology";
+  `docs/operator-handbook.md`, "Payments access"; `docs/development/ROADMAP.md`.
+- D12: `openspec/specs/deployment-state/spec.md` (delta);
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Settlement consumer configuration and
+  cutover"; `docs/operator-handbook.md`, "Payments access".
+- D13: `docs/development/ROADMAP.md`, the registry's Dynaconf gap; the scope decision itself
+  is change history.
+- D14: `openspec/specs/test-compatibility/spec.md` (delta); `docs/development/TESTING.md`,
+  "Private Service Dependencies"; `e2e-tests/README.md`, "Shared payment-scenario
+  configuration".
+- D15: `openspec/specs/deployment-state/spec.md` (delta);
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Per-domain stack composition";
+  `dev-env/identities/README.md`.
+- D16: `openspec/specs/deployment-state/spec.md` (delta);
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Registry descriptor configuration";
+  `docs/operator-handbook.md`, "Registry secret profile"; `core/registry/README.md`.
+- D17: `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Per-domain stack composition";
+  `dev-env/identities/README.md`.
+- D18: `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Per-domain stack composition";
+  `docs/development/VALIDATION_RUNBOOK.md`, "Bring Up Local Stack"; `docker-compose.yml`'s
+  header; `e2e-tests/README.md`.
+- D19: `openspec/specs/settlement-configuration/spec.md` (delta);
+  `openspec/specs/deployment-state/spec.md` (delta);
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Profile-based configuration" and
+  "Kubernetes: ConfigMap and Secret mounting"; `docs/development/ARCHITECTURE.md`,
+  "Deployment topology"; `kit/arkhai-payments/README.md`; `kit/arkhai-mediation/README.md`;
+  `docs/development/ROADMAP.md`.
+- D20: `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Per-domain stack composition";
+  `docs/development/TESTING.md`'s lane paragraph.
+- D21: no permanent destination — the tests holding each restated value to its source are
+  their own record.
+- D22: no permanent destination — an implementation cadence, recorded in the change's
+  history.
+- D23: `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Per-domain stack composition";
+  `dev-env/identities/README.md`.

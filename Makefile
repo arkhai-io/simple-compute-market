@@ -18,11 +18,11 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: test-frp-grant-admission test-frp-grant-admission-frp test-frp-grant-admission-floor build-frp-grant-admission
 .PHONY: test-payments-lane-double build-payments-lane-double
 .PHONY: dist-arkhai-core-registry
-.PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits test-provisioning-iac-native
+.PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits test-provisioning-iac-native test-bare-metal-iac test-bare-metal-iac-native
 .PHONY: dist-bare-metal-buyer
 .PHONY: run-e2e run-ci fetch-e2e-logs
 .PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
-.PHONY: design-review validate-local validate-ci validate-helm validate-parallel check-change record-capacity review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
+.PHONY: design-review validate-local validate-ci validate-helm validate-parallel check-change install-gitleaks check-public-content check-secrets audit-secrets check-decision-destinations check-history-wording check-version-bumps check-local-imports check-capability-index record-capacity review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -434,8 +434,10 @@ build-payments-lane-double: ## Build the payments double's image
 # separately for Docker images.
 init: init-prerequisites init-submodules init-buyer init-storefront init-bare-metal-storefront init-arkhai-core-registry
 
+# The uv installed here is the repository's minimum (scripts/check_uv_version.py):
+# init's reinit refuses an older one.
 init-prerequisites:
-	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Installing uv..."; curl -LsSf https://astral.sh/uv/0.8.13/install.sh | sh; source $HOME/.local/bin/env; }
+	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Installing uv..."; curl -LsSf https://astral.sh/uv/0.12.22/install.sh | sh; source $HOME/.local/bin/env; }
 
 init-submodules:
 	GIT_TRACE=1 GIT_CURL_TRACE=1 git submodule update --init
@@ -702,8 +704,8 @@ helm-values-schema: ## Regenerate each storefront's config definition in its Hel
 	cd domains/vms/storefront && uv run --frozen --no-sync python -m market_storefront.values_schema write --root ../../..
 	cd domains/bare_metal/storefront && uv run --frozen --no-sync python -m arkhai_bare_metal_storefront.values_schema write --root ../../..
 
-# An older uv writes locks differently, and check-locks would pass them; the
-# check runs before the wheelhouse is built, even under -j.
+# An older uv writes locks at an older revision; uv_project.py refuses it too, but
+# this prerequisite refuses before the wheelhouse is built, even under -j.
 lock: check-uv-version ## Relock projects against current wheels without installing anything (PROJECTS="dir ..." narrows it)
 	@$(MAKE) --no-print-directory dist
 	python3 scripts/uv_project.py lock $(PROJECTS)
@@ -838,8 +840,23 @@ CHANGE_WORKFLOW_REVIEW_BASE := dev
 include scripts/change_workflow/workflow.mk
 validate: ARGUMENTS += $(if $(filter 1,$(HELM_ALL_SCENARIOS)),with HELM_ALL_SCENARIOS=1)
 
-check-change: ## Run a change's closing checks — comment hygiene, agent skills, its citations and task list, the change index, the indexed capabilities' specifications, and the pinned strict OpenSpec validation — printing only failures and one pass line (CHANGE=<change>)
-	@python3 scripts/check_change.py "$(CHANGE)"
+check-change: ## Run a change's closing checks — comment hygiene, agent skills, its citations and task list, the change index, the indexed capabilities' specifications, the pinned strict OpenSpec validation, decision destinations, history wording, version bumps, local imports, and the capability index — printing only failures and one pass line (CHANGE=<change> [CHANGE_BASE=<the branch it lands on; dev>])
+	@python3 scripts/check_change.py "$(CHANGE)"$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")
+
+check-decision-destinations: ## Fail if a `### D<n>` decision of a change's design has no bullet starting `D<n>` in its proposal's "Knowledge to promote" (CHANGE=<change>)
+	@python3 scripts/check_decision_destinations.py "$(CHANGE)"
+
+check-history-wording: ## Fail if a comment or docstring line added since the merge-base with the branch the change lands on describes history ([CHANGE_BASE=dev])
+	@python3 scripts/check_history_wording.py$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")
+
+check-version-bumps: ## Fail if a package version differs from its version at the merge-base with the branch the change lands on by more than one SemVer step ([CHANGE_BASE=dev])
+	@python3 scripts/check_version_bumps.py$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")
+
+check-local-imports: ## Fail if an import added inside a function since the merge-base with the branch the change lands on has no comment giving its reason ([CHANGE_BASE=dev])
+	@python3 scripts/check_local_imports.py$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")
+
+check-capability-index: ## Fail if a capability with a spec.md has no row in openspec/specs/README.md, or a row links nothing
+	@python3 scripts/check_capability_index.py
 
 record-capacity: ## Record in helm/validation-capacity.toml the memory a change's latest validation measured, with when and from which change; when it measured none, leave the file as it is and say so; run by archive cleanup (CHANGE=<change>)
 	@python3 scripts/validate_slice.py capacity --change "$(CHANGE)"
@@ -893,11 +910,9 @@ fetch-e2e-logs: ## Wait for an E2E run, fetch its logs, and zip the resulting di
 prune-tombstones: ## Delete every file whose contents are a tombstone comment
 	@python3 scripts/prune_tombstones.py
 
-.PHONY: test-bare-metal-iac
 test-bare-metal-iac:
 	$(MAKE) -C domains test-bare-metal-iac
 
-.PHONY: test-bare-metal-iac-native
 test-bare-metal-iac-native: ## Native helper account/IPC/mount checks in a disposable private container
 	@docker image inspect $(PROVISIONING_IMAGE) >/dev/null 2>&1 || { \
 		echo "no $(PROVISIONING_IMAGE) image: build it first, with make build-provisioning" >&2; exit 1; }
@@ -909,6 +924,17 @@ test-bare-metal-iac-native: ## Native helper account/IPC/mount checks in a dispo
 		-e PYTHON=/home/appuser/ansible-venv/bin/python \
 		$(PROVISIONING_IMAGE) bash scripts/native_cleanup_gate.sh
 
-.PHONY: check-public-content
-check-public-content: ## Scan staged changes for recognizable private content
-	@python3 scripts/check_public_content.py --staged
+install-gitleaks: ## Install the gitleaks release scripts/gitleaks-pins.toml pins, verified against its sha256; needs no root and does nothing when it is already on PATH ([GITLEAKS_INSTALL_DIR=~/.local/bin])
+	@python3 scripts/install_gitleaks.py$(if $(strip $(GITLEAKS_INSTALL_DIR)), --dir "$(GITLEAKS_INSTALL_DIR)")
+
+check-public-content: ## Scan staged changes for recognizable private content, and for private keys and provider credentials through the pinned gitleaks
+	@status=0; \
+	python3 scripts/check_public_content.py --staged || status=1; \
+	python3 scripts/check_secrets.py --staged || status=1; \
+	exit $$status
+
+check-secrets: ## Scan staged changes for private keys and provider credentials through the pinned gitleaks (.gitleaks.toml)
+	@python3 scripts/check_secrets.py --staged
+
+audit-secrets: ## Report what every gitleaks rule finds in HEAD's tracked tree, refusing nothing; read it before an official build ships (scripts/gitleaks-audit.toml)
+	@python3 scripts/check_secrets.py --audit

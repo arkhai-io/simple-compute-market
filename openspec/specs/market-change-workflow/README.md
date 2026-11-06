@@ -3,8 +3,8 @@
 The change workflow ([`change-workflow`](../change-workflow/README.md)) asks each
 repository that adopts it to fill a set of roles. This document says how this
 repository fills them, and why its own part of the workflow — validation's parts, the
-isolation of each change's Helm validation, and its workflow values — is shaped as it
-is. The [specification](spec.md) states this repository's requirements, and its
+isolation of each change's Helm validation, its workflow values, and its checks — is
+shaped as it is. The [specification](spec.md) states this repository's requirements, and its
 [index](index.md) organizes them by id.
 
 ## This repository is the workflow's first adopter
@@ -144,7 +144,9 @@ itself: the pipeline runs on dispatch and nightly, and `tests.yml` on `dev`,
 the same public-content scan this repository's Git hook runs, refusing recognizable
 private content in the branch's name and in every outgoing commit, intermediate ones
 included, without printing what it matched (MCW-q8vd): this repository is public, and
-what a push publishes stays readable after a later commit removes it.
+what a push publishes stays readable after a later commit removes it. Beside it the
+push runs the hook's second check, the pinned gitleaks over the same commits, which
+refuses private keys and provider credentials, likewise without printing them.
 
 Changes are branched from `dev` and land on it, so the merge before closeout brings
 in `dev` unless the owner names another branch (MCW-ca51), and reviews read a change
@@ -156,6 +158,98 @@ chooses them.
 A clone's bootstrap is `make init` (MCW-uqlq), run in the clone as it is made. Its
 failing is almost always the environment, which is why the workflow brings a failed
 bootstrap to the owner rather than retrying it.
+
+## This repository's checks
+
+Some written rules of this repository were breached often enough that reviews kept
+finding them, a written rule nothing checks being a finding waiting to be raised. A
+check moves each from a review's finding to the change's own work, where the agent
+that breaks it finds it before anyone reads the change.
+
+### The closing checks
+
+`make check-change`, which every step that commits runs, holds five of them beside
+its own checks (MCW-c4ek): each decision a design records under a `### D<n>` heading
+names its permanent destination in the proposal; a comment or docstring the change
+adds does not describe history; a package's version moves at most one SemVer step
+from the merge-base, which admits a larger bump replacing a smaller one; an import
+the change adds inside a function gives its reason; and every capability has a row
+in the capability index. Three of them read the change's diff from its merge-base
+with the branch it lands on, `dev` unless the step names another, since against the
+wrong branch a prerequisite's commits read as the change's own. None keeps an
+exception marker: a false positive is reworded, or the rule amended. Whether an
+import's reason is sound, and whether a test sits at the level that can prove its
+behaviour, stay with review, which a pattern cannot judge. Each check and its target
+are listed in the workflow's guide,
+[`docs/agents/change-workflow.md`, "Skills"](../../../docs/agents/change-workflow.md#skills).
+
+### One lock revision
+
+Every committed `uv.lock` carries the lock revision the repository's minimum uv
+writes, and `make check-packaging` fails on one that carries another (MCW-l5rv).
+Agents running different uv releases rewrote each other's locks back and forth, and
+nothing caught it: the minimum admitted both releases, an environment refresh checked
+no version, and the lock check asked only whether a lock satisfied its project. The
+minimum is therefore the first release that writes the repository's revision, and the
+repository's relock and environment refresh commands refuse an older uv before
+running it; a plain `uv run` that relocks a changed project is not guarded, and the
+revision check fails on what it writes before it lands. Making every `uv run` pass
+`--locked` was rejected: it would touch most Makefiles and need a check of its own,
+and still leave a hand-typed `uv run` unguarded. The check is a minimum, not an exact
+pin, so a newer uv still runs; the revision check stops its rewrite landing unseen.
+The minimum, and how to bring a lock to the running uv's revision, are in
+[`BUILD_AND_PACKAGING.md`, "Locks"](../../../docs/development/BUILD_AND_PACKAGING.md#locks).
+
+### Secret scanning
+
+The public-content checks — the hooks, the guarded push, and the Public content
+workflow ([`ARCHITECTURE.md`, "Public repository content checks"](../../../docs/development/ARCHITECTURE.md#public-repository-content-checks))
+— refuse private keys and provider credentials (MCW-s8gk) through gitleaks rather than rules
+of the repository's own: a maintained scanner knows far more credential formats
+than the repository could keep current. Every check runs one release, pinned with
+each platform's sha256 in `scripts/gitleaks-pins.toml`, so a finding means the same
+on every machine and in CI. Findings are redacted to rule, file, line and commit.
+`gitleaks:allow` comments are ignored, since the repository keeps no exception
+markers. Commit ranges are read with merges compared with each parent
+(`--diff-merges=separate`): gitleaks reads commits through `git log -p`, which
+otherwise prints no patch for a merge, so a key written only in a merge resolution
+would go unseen.
+
+The gate, `.gitleaks.toml`, is gitleaks' default rules but four. Gitleaks'
+`private-key` rule accepts any 64 or more characters between a `BEGIN … PRIVATE
+KEY-----` header and the next `KEY-----`, so a short test fixture's own END marker
+comes too soon to end a match, which runs on into the next block and reads two
+fixtures in one file as one key. The repository replaces it with
+`private-key-block`, which keeps the 64-character minimum body but admits no run of
+five dashes in it, so a match ends at its own block's END marker: a real key's body,
+wrapped at any length or written as one string of `\n` escapes, is refused, and a
+fixture whose body is a word passes however many share a file. The three other
+rules turned off — `generic-api-key`, `jwt`, `curl-auth-header` — match the
+repository's own fixtures and code as readily as secrets; `.gitleaks.toml` gives
+the reason for each beside the list. The provider-specific rules stay, because
+they match fixed formats that almost never misfire. A later fixture that trips one
+is another entry in the gate's list, never a marker beside the fixture.
+
+`scripts/tests/test_check_secrets.py` scans the whole tracked tree under the gate
+and asserts it finds nothing, under any rule. A gitleaks release whose new rule the
+tree trips therefore fails that test when the pin moves, rather than at someone's
+commit, and a release is changed only with it passing.
+
+The audit, `make audit-secrets`, runs the configuration the gate extends (MCW-u2dt),
+`scripts/gitleaks-audit.toml`: every default rule but `private-key`, and the
+repository's key rule. It scans `HEAD`'s tracked tree, read as one parentless
+commit of `HEAD^{tree}` in a temporary clone, so nothing untracked or ignored is
+read. It refuses nothing and keeps no baseline: most of what it lists is the
+development fixtures the gate passes, and a baseline would have to be kept in step
+with them. It is run by hand before an official build ships
+([`RELEASING.md`, "Cutting a release"](../../../docs/development/RELEASING.md#cutting-a-release)).
+
+The gate cannot see two things, and review remains the safeguard for both. A key
+body edited beneath an unchanged header is invisible to a scanner reading the
+change's patch, which holds no header. A random credential in no provider's format
+— a generated password, say — has the character class of the identifiers
+`generic-api-key` matched, so the gate does not look for it; the audit reports that
+class across the whole tree.
 
 ## Every resource is per change, shared, or checked
 
@@ -194,7 +288,7 @@ documents' roles differ.
 | The guidance documents every step reads | `AGENTS.md`, `docs/development/ARCHITECTURE.md`, `docs/development/TESTING.md`, `docs/development/DEPLOYMENT_AND_CONFIG.md`, `openspec/README.md`, `docs/development/ROADMAP.md`, `openspec/config.yaml`, and the workflow's guide `docs/agents/change-workflow.md` |
 | Where specifications and documentation live | `openspec/` (`openspec/**`): the capabilities under `openspec/specs/`, indexed by `openspec/specs/README.md`, each `openspec/specs/<capability>/spec.md`; and `docs/` (`docs/**`), its development documents under `docs/development/` |
 | Protected branches the guarded push refuses | `main` and `dev` |
-| A pre-push check the guarded push runs over what it would send, where the repository provides one | `scripts/check_public_content.py --pre-push`, the public-content scan of the branch's name and every outgoing commit (MCW-q8vd), its local denylist named by Git's `scm.publicContentDenyFile`; the same check `scripts/hooks/pre-push` runs |
+| A pre-push check the guarded push runs over what it would send, where the repository provides one | `scripts/check_public_content.py --pre-push`, the public-content scan of the branch's name and every outgoing commit (MCW-q8vd), its local denylist named by Git's `scm.publicContentDenyFile`; then `scripts/check_secrets.py --pre-push`, the pinned gitleaks over the same commits; the same pair `scripts/hooks/pre-push` runs. A step runs the gate over its staged additions with `make check-secrets`, and the audit of every rule with `make audit-secrets` |
 | The `origin` remote the guarded push and the pipeline use | `origin`, this repository on GitHub |
 | The branch a change lands on, merged before closeout and reviewed against | `dev`, set before the fragment's include by `Makefile` as `CHANGE_WORKFLOW_MERGE_FROM` and `CHANGE_WORKFLOW_REVIEW_BASE` |
 | The clone's bootstrap: one command that readies a fresh clone | `make init` |
@@ -209,7 +303,7 @@ review.
 | Assumption | Here |
 |---|---|
 | The protected branches the guarded push refuses, and the remote it pushes to | `main` and `dev`; `origin` |
-| The pre-push check's path, a Python script run as a command with the engine's interpreter, never imported | `scripts/check_public_content.py` |
+| The pre-push checks' paths, each a Python script run as a command with the engine's interpreter, never imported | `scripts/check_public_content.py`, then `scripts/check_secrets.py` |
 | The branch a review reads the change against | `dev` |
 | The change index's path | `openspec/changes/README.md` |
 | The guidance documents a session re-reads after its context is compacted | `docs/development/ARCHITECTURE.md`, `docs/development/TESTING.md`, `docs/development/DEPLOYMENT_AND_CONFIG.md`, `openspec/README.md` |
@@ -220,7 +314,7 @@ review.
 | The outcome schema, at a fixed path | `.agents/change-outcome.schema.json` |
 | The skills' one source, linked into each harness's directory | `.agents/skills`, under `.agents/`, linked from `.claude/` and `.codex/` |
 | The harness's local settings, which a clone links to the workspace's | `.claude/settings.local.json` |
-| The changes' directory, its archive, and each change's records under `reviews/` | `openspec/changes/`, each change at `openspec/changes/<change>/`, archived under `openspec/changes/archive/` as `openspec/changes/archive/<date>-<change>/`; the step table names `openspec/changes/**/reviews/*-validation.md`, `openspec/changes/archive/*/interventions.jsonl`, and `openspec/changes/archive/*/reviews/pull-request.md` |
+| The changes' directory, its archive, and each change's records under `reviews/` | `openspec/changes/`, each change at `openspec/changes/<change>/`, archived under `openspec/changes/archive/` as `openspec/changes/archive/<date>-<change>/`, beside the guidance reviews' untracked period ledger `openspec/changes/archive/guidance-reviews.jsonl`, which no reader of the archive takes for a change; the step table names `openspec/changes/**/reviews/*-validation.md`, `openspec/changes/archive/*/interventions.jsonl`, and `openspec/changes/archive/*/reviews/pull-request.md` |
 | The graph diagram's place in this capability | `openspec/specs/change-workflow/diagrams/`, the workflow's own specification being `openspec/specs/change-workflow/spec.md` |
 | The branch a new change's clone starts from, and the merge's default | `dev` |
 | The clone's bootstrap command, run as the clone is made | `make init` |

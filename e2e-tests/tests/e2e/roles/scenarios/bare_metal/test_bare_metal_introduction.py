@@ -34,6 +34,7 @@ from market_resource_pools_contracts import PoolCreate
 
 from tests.e2e.roles.helpers.compute_deal import assert_storefront_loops_held
 from tests.e2e.roles.helpers.domain_deal import require_state
+from tests.e2e.roles.helpers.hosts import register_e2e_host
 from tests.e2e.roles.scenarios.bare_metal.conftest import lane_setting
 
 pytestmark = [
@@ -140,7 +141,7 @@ def _introduction_option(listing: Any) -> dict[str, Any]:
     options = [
         dict(option)
         for option in listing.settlement_options
-        if dict(option).get("mechanism") == CONTACT_MECHANISM
+        if dict(option)["settlement"].get("schema") == CONTACT_MECHANISM
     ]
     assert len(options) == 1, listing.settlement_options
     return options[0]
@@ -165,6 +166,7 @@ class TestStage01_OfferIntroduction:
         self,
         bare_metal_site_operator,
         bare_metal_site_capacity,
+        provisioning_client,
         bare_metal_storefront_admin,
         state: IntroductionState,
     ):
@@ -187,6 +189,14 @@ class TestStage01_OfferIntroduction:
 
         async def declare() -> None:
             for resource_id in state.resources:
+                # The pool is backed and its provider delivers through a host,
+                # so each machine is offered only while its host is registered
+                # and enabled. Nothing connects to it under the mock profile.
+                register_e2e_host(
+                    provisioning_client,
+                    name=f"machine-{resource_id}",
+                    pool_id=state.pool_id,
+                )
                 await bare_metal_site_capacity.register_resource(
                     resource_id,
                     pool_id=state.pool_id,
