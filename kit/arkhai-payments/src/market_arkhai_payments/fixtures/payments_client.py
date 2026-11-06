@@ -24,6 +24,7 @@ from market_arkhai_payments.fixtures.receipts import build_signed_receipt
 from market_arkhai_payments.fixtures.authority import PaymentsAuthority, sign_snapshot
 from market_arkhai_payments.mandates import PaymentsOptionParams
 from market_arkhai_payments.models import (
+    Balance,
     Mandate,
     SignedReceipt,
     SignedTransactionSnapshot,
@@ -126,6 +127,11 @@ class FakePaymentsClient:
         if self.receipt is None:
             raise PaymentsAPIError(404, "transaction_not_found")
         return self._snapshot(transaction)
+
+    def get_balance(self, account: str) -> Balance:
+        self.calls.append(("get_balance", account))
+        self._require_available()
+        return self.engine.balance(account)
 
     def poll(
         self, transaction: str, *, timeout: float = 300.0, interval: float = 1.0

@@ -12,6 +12,7 @@ from market_arkhai_mediation.models import Filing, RespondentAfter
 from market_deal_lifecycle.adapters import DisputeBinding, PaymentSelector
 from market_deal_lifecycle.terms import DisputeAuthority
 from market_identity import Ed25519Signer
+from pydantic import SecretStr
 
 from market_deal_servicing import (
     Classification, DeliveryRecord, EndSession, FinalRequest, RespondentPoller,
@@ -32,11 +33,11 @@ async def main():
     binding = DisputeBinding("example", fixture["transaction"], authority)
     # Public deterministic fixture credentials; never use on a public network.
     async with MediationClient(
-        authority, MediationCredential(authority.identity, "DEMO_PAYER"),
-        environ={"DEMO_PAYER": "fixture-payer"}, transport=peer.transport(),
+        authority, MediationCredential(authority.identity, token=SecretStr("fixture-payer")),
+        transport=peer.transport(),
     ) as payer, MediationClient(
-        authority, MediationCredential(authority.identity, "DEMO_PAYEE"),
-        environ={"DEMO_PAYEE": "fixture-payee"}, transport=peer.transport(),
+        authority, MediationCredential(authority.identity, token=SecretStr("fixture-payee")),
+        transport=peer.transport(),
     ) as payee:
         adapter = MediationAdapter(binding, agreement, payee, clock=lambda: now)
         claim = {"kind": "delivery_end", "ended_at": now, "delivered": True, "cause": "payer"}

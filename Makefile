@@ -12,10 +12,11 @@ FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 
-.PHONY: helm-values-schema e2e-dev-identities e2e-dev-identities-env e2e-vms-dev-env e2e-apicredits-dev-env e2e-apicredits-stack-env e2e-bare-metal-dev-env review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-bare-metal-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-uv-version check-python-version check-project-layout lock
+.PHONY: helm-values-schema review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-bare-metal-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-uv-version check-python-version check-project-layout lock
 .PHONY: check-architecture check-architecture-layers check-architecture-scope check-architecture-dependencies check-architecture-kinds check-architecture-change architecture-report
 .PHONY: test-release-tooling test-deployment-packaging test-registry-client test-provisioning-adapter test-e2e-unit
 .PHONY: test-frp-grant-admission test-frp-grant-admission-frp test-frp-grant-admission-floor build-frp-grant-admission
+.PHONY: test-payments-lane-double build-payments-lane-double
 .PHONY: dist-arkhai-core-registry
 .PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits test-provisioning-iac-native test-bare-metal-iac test-bare-metal-iac-native
 .PHONY: dist-bare-metal-buyer
@@ -187,7 +188,7 @@ dist-helm: ## Package helm chart so it's ready for pushing into .dist/
 
 test-release-tooling: dist-identity ## Run release verifier and portable wheelhouse contract tests.
 	uv run --no-project --with pytest --with 'eth-account>=0.13,<0.14' \
-		--with 'arkhai-kit-identity' --find-links "$(DIST_DIR)" \
+		--with 'arkhai-kit-identity' --with pyyaml --find-links "$(DIST_DIR)" \
 		pytest -q scripts/tests
 
 test-deployment-packaging: test-release-tooling ## Run release tooling plus Helm schema/render contracts.
@@ -196,7 +197,7 @@ test-deployment-packaging: test-release-tooling ## Run release tooling plus Helm
 dist-clean: ## Remove .dist/ directory
 	rm -rf $(DIST_DIR)
 
-test: test-core test-kits test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-registry-client test-storefront test-provisioning-adapter test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-e2e-unit test-deployment-packaging test-frp-grant-admission ## Run every unit and integration suite; the docker-compose e2e scenarios and cluster `helm test` are separate
+test: test-core test-kits test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-registry-client test-storefront test-provisioning-adapter test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-e2e-unit test-deployment-packaging test-frp-grant-admission test-payments-lane-double ## Run every unit and integration suite; the docker-compose e2e scenarios and cluster `helm test` are separate
 
 test-core:
 	cd core && make test
@@ -239,6 +240,11 @@ test-frp-grant-admission-frp: ## Run the frps admission plugin against the real 
 
 test-frp-grant-admission-floor: ## Run the frps admission plugin's unit tests with its runtime dependencies at their declared floors
 	$(MAKE) -C tools/frp-grant-admission test-floor
+
+# The lanes' payments double under tools/: its committed TLS files, then its unit
+# and in-process library integration suite.
+test-payments-lane-double:
+	$(MAKE) -C tools/payments-lane-double test
 
 # The e2e project's unit tests; its scenarios need the docker-compose stack.
 test-e2e-unit:
@@ -296,167 +302,11 @@ build: ## Build the wheels, the buyer CLI binary, and every runtime image
 	$(MAKE) -j4 build-registry build-storefront build-bare-metal-storefront build-provisioning
 	$(MAKE) -j4 build-apicredits-service build-apicredits-storefront build-apicredits-sample-app build-frp-grant-admission
 
-# ---------------------------------------------------------------------------
-# e2e-*-dev-env — each stack's signer, wallet, and buyer paths from the
-# committed development values in dev-env/identities, as bare `VAR=value`
-# lines for `docker compose --env-file`.
-#
-# The compose files guard every one of these with `${VAR:?...}`, so
-# `docker compose up` refuses to start until all are set. Exporting them from
-# committed fixtures is what lets a contributor, a fork, or a CI job holding no
-# repository secrets run a stack. Every value is a well-known deterministic
-# development value; see dev-env/identities/README.md, which lists the files
-# each target satisfies.
-#
-#   e2e-vms-dev-env         the VM lane (compose.vms.yml, compose.vms-local.yml)
-#   e2e-apicredits-dev-env  the API-credit lane (compose.apicredits.yml,
-#                           compose.apicredits-local.yml, compose.apicredits-lane.yml)
-#   e2e-bare-metal-dev-env  the bare-metal lane, below
-#   e2e-dev-identities-env  the full local stack (docker-compose.yml and both
-#                           market overlays): the VM and API-credit values except
-#                           the API-credit lane's own compute registry
-#
-# The e2e targets write a file rather than eval'ing captured output: compose
-# reads the file itself, so nothing has to survive a shell round-trip, and a
-# recursive make implies `-w` and would print `Entering directory` into a
-# capture. Recursion here passes `--no-print-directory` for the same reason.
-# `e2e-dev-identities` prints the full stack's values as `export` lines for a
-# human to eval:
-#
-#     eval "$(make -s --no-print-directory e2e-dev-identities)"
-# ---------------------------------------------------------------------------
-E2E_IDENTITY_DIR := $(CURDIR)/dev-env/identities
-E2E_BUYER_RUNTIME_DIR ?= $(CURDIR)/.e2e-buyer
-# Development bearer tokens for registry-b, which gates read and write.
-# Not secret; the same values are committed in the storefront secret
-# overlay and the buyer config, and all three must agree.
-E2E_REGISTRY_ADMIN_KEY ?= development-registry-admin-key
-E2E_REGISTRY_BOOTSTRAP_KEY ?= development-registry-bootstrap-key
-
-# Mock provisioning is the provisioning service's `mock` profile, chosen per
-# run: the services run their playbooks through the mock runner and mount the
-# `/test` controls. It is a separate choice from running locally — a local
-# stack can provision real hosts, and a cluster runs mock through the
-# provisioning chart's `mockMode`. The lane scenarios hold jobs through the
-# `/test` controls, so the lanes default to mock; `real` selects each stack's
-# container profile. The compose files default to real when no environment
-# file says otherwise, as the chart does. No storefront reads this: whether
-# delivery is mocked is the provisioning service's concern alone.
-PROVISIONING_MODE ?= mock
-E2E_PROVISIONING_PROFILES_mock := mock
-E2E_PROVISIONING_PROFILES_real := docker
-E2E_PROVISIONING_PROFILES = $(E2E_PROVISIONING_PROFILES_$(PROVISIONING_MODE))
-E2E_REQUIRE_PROVISIONING_MODE = $(if $(E2E_PROVISIONING_PROFILES),,$(error PROVISIONING_MODE must be mock or real, not '$(PROVISIONING_MODE)'))
-
-e2e-dev-identities: ## Print shell exports pointing the full local stack at committed development identities
-	@$(MAKE) -s --no-print-directory e2e-dev-identities-env \
-		| sed 's/^/export /; s/=\(.*\)$$/="\1"/'
-
-e2e-dev-identities-env: ## Print the full local stack's VAR=value lines for `docker compose --env-file`
-	@$(E2E_REQUIRE_PROVISIONING_MODE)
-	@$(MAKE) -s --no-print-directory e2e-vms-dev-env
-	@$(MAKE) -s --no-print-directory e2e-apicredits-stack-env
-
-e2e-vms-dev-env: ## Print the VM lane's VAR=value lines for `docker compose --env-file`
-	@$(E2E_REQUIRE_PROVISIONING_MODE)
-	@mkdir -p "$(E2E_BUYER_RUNTIME_DIR)/profile" "$(E2E_BUYER_RUNTIME_DIR)/state"
-	@echo 'VMS_PROVISIONING_ACTIVE_PROFILES=$(E2E_PROVISIONING_PROFILES)'
-	@echo 'VMS_REGISTRY_IDENTITY_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/registry-a.eip191'
-	@echo 'VMS_REGISTRY_B_IDENTITY_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/registry-b.eip191'
-	@echo 'VMS_PROVISIONING_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/provisioning.identity.env'
-	@echo 'VMS_ALICE_PROVISIONING_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/provisioning-alice.identity.env'
-	@echo 'VMS_BOB_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/bob.identity.env'
-	@echo 'VMS_ALICE_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/alice.identity.env'
-	@echo 'VMS_BOB_EVM_WALLET_ENV_FILE=$(CURDIR)/domains/vms/storefront/.env.bob.docker'
-	@echo 'VMS_ALICE_EVM_WALLET_ENV_FILE=$(CURDIR)/domains/vms/storefront/.env.alice.docker'
-	@echo 'VMS_BUYER_CONFIG_PATH=$(E2E_IDENTITY_DIR)/buyer.config.toml'
-	@echo 'VMS_BUYER_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/buyer.eip191'
-	@echo 'VMS_BUYER_PROFILE_DIR=$(E2E_BUYER_RUNTIME_DIR)/profile'
-	@echo 'VMS_BUYER_STATE_DIR=$(E2E_BUYER_RUNTIME_DIR)/state'
-	@echo 'VMS_BOB_STOREFRONT_SECRETS_FILE=$(E2E_IDENTITY_DIR)/bob.storefront.secrets.toml'
-	@# registry-b gates read and write behind bearer tokens. The bootstrap
-	@# value must stay byte-equal to the [registry.auth] entries in
-	@# bob.storefront.secrets.toml and buyer.config.toml, so all three come
-	@# from this one constant.
-	@echo 'VMS_REGISTRY_ADMIN_API_KEY=$(E2E_REGISTRY_ADMIN_KEY)'
-	@echo 'VMS_REGISTRY_BOOTSTRAP_API_KEY=$(E2E_REGISTRY_BOOTSTRAP_KEY)'
-
-# The API-credit stack's values, shared by its lane and the full local stack.
-e2e-apicredits-stack-env:
-	@mkdir -p "$(E2E_BUYER_RUNTIME_DIR)/apicredits/profile" "$(E2E_BUYER_RUNTIME_DIR)/apicredits/state"
-	@echo 'APICREDITS_REGISTRY_IDENTITY_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/api-credits-registry.ed25519'
-	@echo 'APICREDITS_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/api-credits.identity.env'
-	@echo 'APICREDITS_EVM_WALLET_ENV_FILE=$(E2E_IDENTITY_DIR)/api-credits.wallet.env'
-	@echo 'APICREDITS_ADMIN_KEY_FILE=$(E2E_IDENTITY_DIR)/api-credits-admin-key'
-	@echo 'APICREDITS_SERVICE_IDENTITY_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/api-credits-service.ed25519'
-	@echo 'APICREDITS_GATED_APP_IDENTITY_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/api-credits-gated-app.ed25519'
-	@echo 'APICREDITS_BUYER_CONFIG_PATH=$(E2E_IDENTITY_DIR)/api-credits-buyer.config.toml'
-	@echo 'APICREDITS_BUYER_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/buyer.eip191'
-	@echo 'APICREDITS_BUYER_PROFILE_DIR=$(E2E_BUYER_RUNTIME_DIR)/apicredits/profile'
-	@echo 'APICREDITS_BUYER_STATE_DIR=$(E2E_BUYER_RUNTIME_DIR)/apicredits/state'
-
-e2e-apicredits-dev-env: ## Print the API-credit lane's VAR=value lines for `docker compose --env-file`
-	@$(MAKE) -s --no-print-directory e2e-apicredits-stack-env
-	@# The compute-schema registry the credits scenario routes discovery
-	@# across; only the lane runs it, since the full stack has VM's.
-	@echo 'APICREDITS_COMPUTE_REGISTRY_IDENTITY_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/registry-a.eip191'
-
-# ---------------------------------------------------------------------------
-# e2e-bare-metal-dev-env — the bare-metal end-to-end lane's `--env-file`
-# values: compose.bare-metal.yml, compose.dev.yml, and
-# compose.bare-metal-local.yml guard every one with `${VAR:?...}`.
-#
-# The lane is a separate stack on its own dev chain, so it reuses the committed
-# Anvil development credentials under the assignments recorded in
-# dev-env/identities/README.md ("The bare-metal lane"). The storefront's own
-# settings are not here: they are its development storefront.toml and secrets
-# overlay, which this target names as files for the stack to mount. Only the
-# bare-metal stack's own files and the variables its Compose files read are
-# printed.
-# ---------------------------------------------------------------------------
-E2E_BARE_METAL_DIR := $(CURDIR)/dev-env/bare-metal
-E2E_BARE_METAL_REGISTRY_ID := 0x90f79bf6eb2c4f870365e785982e1f101e93b906
-E2E_BARE_METAL_SITE_AUTHORITY_ID := 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
-E2E_BARE_METAL_STOREFRONT_ID := 0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc
-E2E_BARE_METAL_SITE_ADMIN_ID := 0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc
-E2E_BARE_METAL_SITE_ID := bare-metal-e2e
-
-e2e-bare-metal-dev-env: ## Print VAR=value lines for the bare-metal lane's `docker compose --env-file`
-	@$(E2E_REQUIRE_PROVISIONING_MODE)
-	@echo 'BARE_METAL_PROVISIONING_ACTIVE_PROFILES=$(E2E_PROVISIONING_PROFILES)'
-	@echo 'BARE_METAL_REGISTRY_AUTHORITY_ID=bare-metal-registry'
-	@echo 'BARE_METAL_REGISTRY_AUTHORITY_SCHEME=eip191'
-	@echo 'BARE_METAL_REGISTRY_AUTHORITY_IDENTIFIER=$(E2E_BARE_METAL_REGISTRY_ID)'
-	@echo 'BARE_METAL_REGISTRY_PUBLIC_URL=http://bare-metal-registry:8080'
-	@echo 'BARE_METAL_REGISTRY_DISPLAY_NAME=Local Bare Metal Compute Registry'
-	@echo 'BARE_METAL_OPERATOR_IDENTITY=Arkhai local development'
-	@echo 'BARE_METAL_REGISTRY_IDENTITY_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/registry-a.eip191'
-	@echo 'BARE_METAL_PROVISIONING_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/provisioning.identity.env'
-	@echo 'BARE_METAL_PROVISIONING_IDENTITY_SCHEME=eip191'
-	@echo 'BARE_METAL_PROVISIONING_IDENTITY_IDENTIFIER=$(E2E_BARE_METAL_SITE_AUTHORITY_ID)'
-	@echo 'BARE_METAL_PROVISIONING_ADMIN_IDENTITY_SCHEME=eip191'
-	@echo 'BARE_METAL_PROVISIONING_ADMIN_IDENTITY_IDENTIFIER=$(E2E_BARE_METAL_SITE_ADMIN_ID)'
-	@echo 'BARE_METAL_PROVISIONING_HOST_DEFINITIONS_FILE=$(E2E_BARE_METAL_DIR)/hosts.yaml'
-	@echo 'BARE_METAL_POOL_DEFINITIONS_FILE=$(E2E_BARE_METAL_DIR)/resource-pools.yaml'
-	@echo 'BARE_METAL_PROVISIONING_SSH_PRIVATE_KEY_FILE=$(E2E_BARE_METAL_DIR)/ssh-key-placeholder'
-	@echo 'BARE_METAL_SITE_ID=$(E2E_BARE_METAL_SITE_ID)'
-	@# The site binds its seller role to the storefront's principal, which the
-	@# storefront's development storefront.toml states as [Identity.principal].
-	@echo 'BARE_METAL_STOREFRONT_IDENTITY_SCHEME=eip191'
-	@echo 'BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER=$(E2E_BARE_METAL_STOREFRONT_ID)'
-	@echo 'BARE_METAL_STOREFRONT_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/bob.identity.env'
-	@echo 'BARE_METAL_STOREFRONT_CONFIG_FILE=$(CURDIR)/domains/bare_metal/storefront/storefront.dev.toml'
-	@echo 'BARE_METAL_STOREFRONT_SECRETS_FILE=$(E2E_IDENTITY_DIR)/bare-metal.storefront.secrets.toml'
-	@# The buyer service is in the `buyer` profile and the lane never starts it,
-	@# but compose still requires its variables.
-	@echo 'BARE_METAL_BUYER_IMAGE=arkhai:e2e-tests'
-	@echo 'BARE_METAL_BUYER_IDENTITY_ENV_FILE=$(E2E_BARE_METAL_DIR)/buyer.identity.env'
-	@echo 'BARE_METAL_BUYER_CONFIG_FILE=$(E2E_BARE_METAL_DIR)/buyer.toml'
-
-build-dev: ## Build everything `build` does, the dev chain image, and the test image
+build-dev: ## Build everything `build` does, the dev chain image, the test image, and the payments double
 	$(MAKE) build
 	$(MAKE) build-dev-env
 	$(MAKE) build-test-image
+	$(MAKE) build-payments-lane-double
 
 # One end-to-end lane's images: the wheels, the dev chain with its baked state,
 # the test image (which installs `market` from the wheels, so no lane needs
@@ -471,13 +321,13 @@ build-e2e-base:
 	$(MAKE) build-test-image
 
 build-e2e-vm: build-e2e-base ## Build the VM end-to-end lane's images
-	$(MAKE) -j3 build-registry build-storefront build-provisioning
+	$(MAKE) -j4 build-registry build-storefront build-provisioning build-payments-lane-double
 
 build-e2e-bare-metal: build-e2e-base ## Build the bare-metal end-to-end lane's images
-	$(MAKE) -j3 build-registry build-provisioning build-bare-metal-storefront
+	$(MAKE) -j4 build-registry build-provisioning build-bare-metal-storefront build-payments-lane-double
 
 build-e2e-apicredits: build-e2e-base ## Build the API-credit end-to-end lane's images
-	$(MAKE) -j4 build-registry build-apicredits-service build-apicredits-storefront build-apicredits-sample-app
+	$(MAKE) -j5 build-registry build-apicredits-service build-apicredits-storefront build-apicredits-sample-app build-payments-lane-double
 
 # Seller-only build: the two runtime images a seller actually needs
 # (`arkhai:storefront`, `arkhai:compute-provisioning`) and just the wheels they
@@ -567,6 +417,14 @@ build-frp-grant-admission: ## Build the frps admission plugin's image
 
 build-test-image:
 	cd e2e-tests && make build IMAGE_SUFFIX=$(IMAGE_SUFFIX)
+
+# The lanes' payments double, built from the repository root so its Dockerfile can
+# copy the wheelhouse its lock resolves from. Lanes and the local release run it;
+# it is never pushed.
+build-payments-lane-double: ## Build the payments double's image
+	docker build --ulimit nofile=65536:65536 \
+		-f tools/payments-lane-double/Dockerfile \
+		-t arkhai:payments-lane-double$(IMAGE_SUFFIX) .
 
 #Init should complete all deployment times set up steps required prior to your standalone run statements
 #The less of these the better but sometimes you get things like helm repo add or terraform init that can't be avoided.

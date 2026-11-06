@@ -1,0 +1,27 @@
+# The image's own ignore file, which replaces the root .dockerignore for it. Deny
+# everything, then admit what the build reads: the wheelhouse, the shared uv entry
+# point, and the double's project, source, fixtures and TLS files. No environment,
+# cache or build output of the project enters the context.
+
+*
+
+!.dist/
+
+!scripts/
+scripts/*
+!scripts/uv_project.py
+
+!tools/
+tools/*
+!tools/payments-lane-double/
+tools/payments-lane-double/*
+!tools/payments-lane-double/pyproject.toml
+!tools/payments-lane-double/uv.lock
+!tools/payments-lane-double/README.md
+!tools/payments-lane-double/src/
+!tools/payments-lane-double/fixtures/
+!tools/payments-lane-double/tls/
+tools/payments-lane-double/tls/*.py
+
+**/__pycache__
+**/*.pyc

@@ -13,6 +13,9 @@ Subcommands:
     pool-override
                  Set, show, list, or delete the storefront's own terms and
                  listing shapes for one site's pool.
+    check-payments
+                 Read one account's balance from the payments service with the
+                 storefront's own configuration, credential and trust.
     network      Join the operator's ZeroTier network and list peers.
     config       Inspect or edit the user config.toml.
 """
@@ -21,8 +24,11 @@ from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from typing import Any
 
+import httpx
 import typer
+from market_arkhai_payments import check_configured_payments_access
 
 from .cli_logs import logs_app
 from .cli_publish import register as register_publish_command
@@ -104,6 +110,57 @@ def serve_cmd(
     from market_storefront.server import run_serve
 
     run_serve(host=host, port=port)
+
+
+# ---------------------------------------------------------------------------
+# check-payments — prove the storefront's payments access from its own process
+# ---------------------------------------------------------------------------
+
+
+def payments_section() -> Any:
+    """The storefront's ``[Settlement.arkhai_payments]`` section, read from the
+    configuration ``serve`` reads, or ``None`` when it configures none.
+
+    A configuration that cannot be read raises ``ValueError``.
+    """
+    # Imported when the command runs, after the root `--config` option: the
+    # storefront's settings resolve when its config module is first imported.
+    from market_storefront.utils.config import settlement_config_mapping
+
+    return settlement_config_mapping().get("arkhai_payments")
+
+
+def payments_transport() -> httpx.BaseTransport | None:
+    """The transport the check reaches the payments service through; ``None``
+    gives the payments client its own."""
+    return None
+
+
+@app.command("check-payments")
+def check_payments_cmd(
+    account: str = typer.Option(
+        ...,
+        "--account",
+        help="The payments account whose balance is read, normally the seller's "
+        "payee account: the service answers only for the credential's own account.",
+    ),
+) -> None:
+    """Read one account's balance with the storefront's payments configuration.
+
+    Prints one JSON outcome, which never carries the credential, and exits 1
+    naming the failing step: configuration, credential, transport, or the
+    service's refusal. Starts no server, opens no database, and contacts
+    nothing but the payments service.
+    """
+    try:
+        outcome = check_configured_payments_access(
+            payments_section, account, transport=payments_transport()
+        )
+    except ValueError as exc:
+        raise typer.BadParameter("not a payments account id", param_hint="--account") from exc
+    typer.echo(outcome.json_line())
+    if not outcome.ok:
+        raise typer.Exit(code=1)
 
 
 # ---------------------------------------------------------------------------

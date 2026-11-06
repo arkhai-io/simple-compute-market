@@ -59,30 +59,64 @@ ACTIVE_PROFILES=staging,staging-secrets
 
 ### Shared payment-scenario configuration
 
-The API-credit payment scenario reads the `PAYMENTS` section (environment
-prefix `ARKHAI_PAYMENTS__`) through `tests/e2e/roles/helpers/payments.py`, which
-other payment scenarios may reuse. SERVICE_URL names the payments target; leave
-it blank and the scenario reports `blocked` and skips. With it set, supply the
-other four: SERVICE_IDENTITY (public Ed25519 receipt signer), BUYER_ACCOUNT,
-BUYER_MARKETPLACE_CREDENTIAL and SELLER_MARKETPLACE_CREDENTIAL;
-a missing one fails the scenario, naming it. Marketplace credentials are
-independent of payment account IDs. Dispute authorities are role preferences
-or signed registry recommendations, not a payments-helper setting; configure the
-seller and the buyer's registry accordingly. The shared buyer profile writer
-explicitly opts into registry recommendations.
+The payment scenarios — `e2e_credits_payment_deal`, `e2e_bare_metal_payment_deal`
+and `e2e_vm_payment_deal` — read the `PAYMENTS` section (environment prefix
+`ARKHAI_PAYMENTS__`) through `tests/e2e/roles/helpers/payments.py`. SERVICE_URL
+names the payments target; leave it blank and the scenario reports `blocked` and
+skips. With it set, supply the other four: SERVICE_IDENTITY (public Ed25519
+receipt signer), BUYER_ACCOUNT, BUYER_MARKETPLACE_CREDENTIAL and
+SELLER_MARKETPLACE_CREDENTIAL (the storefront's own key, in its scheme, which the
+refund stages sign with); a missing one fails the scenario, naming it.
+Marketplace credentials are independent of payment account IDs. Dispute
+authorities are role preferences or signed registry recommendations, not a
+payments-helper setting; configure the seller and the buyer's registry
+accordingly. The shared buyer profile writer explicitly opts into registry
+recommendations.
 
-FEE_BPS defaults to 250. LIVEMODE and DEVELOPMENT_AUTH default to false and
-must be `true` or `false`; generated buyer tables explicitly pin the receipt
-mode. Choose either DEVELOPMENT_AUTH=true (literal loopback service URL only) or
-API_KEY_ENV naming the buyer's bearer-key environment variable, never both.
-Forward the named variable into the test runner yourself; host environment
-variables are not inherited by the buyer-machine container.
+Each end-to-end lane configures its own target, the payments lane double
+([`tools/payments-lane-double`](../tools/payments-lane-double/README.md)), which
+the lane runs beside its storefronts at `https://payments-double:8443`, and
+states its settings in committed runner profiles. A lane target runs the runner with
+`RUNNER_PROFILES=docker,payments-lane,<lane>-lane`: `config/config-payments-lane.yml`
+holds what every lane shares — the target and its identity, the fee, LANE_OWNED,
+CA_BUNDLE_PATH, API_KEY_ENV and BUYER_API_KEY, both accounts and the buyer's
+marketplace seed — and `config/config-<lane>-lane.yml` only what differs, the
+seller's marketplace credential and, for bare metal, its whole-host fixture's
+COMPUTE_HOURLY_GROSS and DISPUTE_WINDOW. Dynaconf merges the section key by key.
+`test-buyer-machine` mounts the lane CA where CA_BUNDLE_PATH names it, and passes
+the runner nothing else; rerunning markers against a lane's stack passes the
+lane's RUNNER_PROFILES. The lane's settings mark the target LANE_OWNED, so an
+unready one fails the scenario naming it rather than skipping; LANE_OWNED with no
+SERVICE_URL fails too. `config-docker.yml` carries no `PAYMENTS` section, so a run
+selecting the `docker` profile alone has no payments target.
 
-An unreachable or unready `/health` also reports `blocked` and skips; invalid
-policy fails rather than selecting another settlement mechanism. The shared
-serializer writes only a named payments table — `Settlement.arkhai_payments`,
-or `bare_metal.arkhai_payments`, which it supports for a bare-metal buyer — and
-the scenario supplies domain settings and payer.
+FEE_BPS defaults to 250. LIVEMODE, DEVELOPMENT_AUTH and LANE_OWNED default to
+false and must be `true` or `false`; generated buyer tables explicitly pin the
+receipt mode. Choose either DEVELOPMENT_AUTH=true (literal loopback service URL
+only) or API_KEY_ENV naming the variable the buyer reads its bearer key from,
+never both. The key is the setting BUYER_API_KEY, never a variable of the
+runner's environment: the harness hands it to each buyer it runs under the name
+API_KEY_ENV gives, to a `market` process in its environment and to an in-process
+payments client as the environment it resolves the key from. An external run
+states BUYER_API_KEY in a secret profile.
+
+An unreachable or unready external `/health` also reports `blocked` and skips.
+The readiness probe disables environment proxies and trusts the CA_BUNDLE_PATH
+bundle alone when one is configured, as the payments client does; a bundle it
+cannot load leaves the target unready. Invalid policy fails
+rather than selecting another settlement mechanism. The shared serializer writes
+only a named payments table — `Settlement.arkhai_payments`, or
+`bare_metal.arkhai_payments`, which it supports for a bare-metal buyer — with the
+configured CA bundle as its `ca_bundle_path`, and the scenario supplies domain
+settings and payer.
+
+Before any scenario runs, each lane target runs its payment storefront's
+`check-payments --account <the seller's account>` in the storefront's own
+container (`docker compose exec`), an authenticated read of the seller's balance
+at the double through the storefront's configuration, its `ca_bundle_path` and
+CA mount, and the key in its secret overlay, and
+fails the lane on a nonzero exit; the command's one JSON line names the step that
+failed.
 See [Private Service Dependencies](../docs/development/TESTING.md#private-service-dependencies)
 for the public testing boundary.
 
@@ -188,15 +222,32 @@ services run the mock profile unless `PROVISIONING_MODE=real`.
 
 ### Hosted VM servicing
 
-`e2e_vm_payment_deal` runs in the VM lane, gated by the shared `PAYMENTS`
-configuration. It publishes a hosted-only one-hour VM option, approves the exact
-accepted mandate, commits through `LifecycleClient`, replays commitment and
-steps servicing. An administrator then ends delivery without payee stop rights;
-the seller files one mediation case while teardown is gated. Finally, a seller
-refund reverses the held payment, separately from callback-proven capacity return.
-The mock executor proves the service wiring, not a real guest or SSH access.
+`e2e_vm_payment_deal` runs in the VM lane. It publishes a hosted-only one-hour VM
+option, approves the exact accepted mandate, commits through `LifecycleClient`,
+replays commitment and steps servicing. An administrator then ends delivery
+without payee stop rights; the seller files one mediation case while teardown is
+gated. Finally, a seller refund reverses the held payment, separately from
+callback-proven capacity return. The mock executor proves the service wiring, not
+a real guest or SSH access.
 
-Supply healthy payment and mediation authorities, exact signed-registry
+The commit and servicing stages (1–2) run against the VM lane's payments double.
+The lane's two registries recommend a dispute authority under `.invalid` that can
+never answer, and Bob's lane configuration
+(`domains/vms/storefront/storefront.bob.lane.toml`) holds an identity-bound
+`[[DisputeCredential]]` for it, whose variable `compose.vms-lane.yml` sets to a
+public development value. With a usable credential the servicing stage reads the
+deal's authority view `running`; without one it reads `repair_required`. Bob's
+storefront logs "VM respondent discovery awaits recovery" at ERROR on every
+servicing cycle while that authority cannot be reached, which is expected in the
+lane. The operator-end and refund stages (3–4) need a dispute authority that
+accepts a filed case, MEDIATION.SERVICE_URL, blank by default, and report a
+blocked skip naming it; no lane runs one. The held payment stays in the double
+until the lane ends, and the module's resource release frees the capacity.
+
+Against an external deployment, supply healthy payment and mediation
+authorities, set MEDIATION.SERVICE_URL to the mediation authority's URL — the
+stages reach the authority the registries recommend, and the setting states that
+one accepting cases is there — configure exact signed-registry
 recommendations, seller recommendation consent and an identity-bound
 `[[DisputeCredential]]` for the accepted mediation authority. Its `api_key_env`
 names the seller bearer credential variable; forward that variable into the
@@ -207,7 +258,9 @@ mediation health and an authenticated publication using
 `option["settlement"]["schema"]`, not the retired option-level mechanism key.
 The [VM readiness gate](../docs/attachments/vm-end-classification/readiness.py)
 and [hosted qualification packet](../docs/attachments/aeet-vm-hosted/index.md)
-provide the direct entry point and observed stages. Without a configured payment
+provide the direct entry point and observed stages; the gate reads the mediation
+origin it checks as `PAYMENTS.MEDIATION_URL`, apart from the scenario's
+MEDIATION.SERVICE_URL, so an external run sets both. Without a configured payment
 target all four stages report blocked skips; no Alkahest fallback is used.
 
 ### Real bare-metal provisioning
@@ -330,25 +383,31 @@ prove tunnel coexistence and require no GPU.
 
 ### Bare-metal payment deal
 
-The bare-metal lane includes marker `e2e_bare_metal_payment_deal`.
-With payments configured, run its three ordered calls against the ready lane:
+The bare-metal lane includes marker `e2e_bare_metal_payment_deal`, which runs
+against the lane's payments double: `make test-e2e-bare-metal` runs it with the
+rest of the lane. To rerun its three ordered calls against the lane's running
+stack, select the lane's runner profiles:
 
 ```sh
 make test-buyer-machine \
   NETWORK=simple-market-bare-metal_default \
-  BUYER_MODULE=e2e_bare_metal_payment_deal
+  BUYER_MODULE=e2e_bare_metal_payment_deal \
+  RUNNER_PROFILES=docker,payments-lane,bare-metal-lane
 ```
 
-Supply the shared PAYMENTS settings in the runner's config directory, plus
-SELLER_ACCOUNT, COMPUTE_HOURLY_GROSS=1000000 and DISPUTE_WINDOW=P7D. The seller
-must enable the same payments policy and trust its service identity.
-SELLER_MARKETPLACE_CREDENTIAL must resolve to the lane's pinned seller scheme;
-the purchase buyer is a separate wallet-free Ed25519 profile. An unconfigured
-public CI run reports a named blocked payments prerequisite, not success.
+The lane's profiles supply the shared PAYMENTS settings, SELLER_ACCOUNT among
+them, plus COMPUTE_HOURLY_GROSS=1000000 and DISPUTE_WINDOW=P7D; another target
+supplies them in the runner's config directory. The seller — the lane's
+`domains/bare_metal/storefront/storefront.dev.toml` — enables the same payments
+policy and trusts the double's service identity. SELLER_MARKETPLACE_CREDENTIAL
+must resolve to the lane's pinned seller scheme; the purchase buyer is a separate
+wallet-free Ed25519 profile. A run with no payments target configured reports a
+named blocked payments prerequisite, not success.
 
 The fixture declares a distinct backed whole host and publishes only a USD
-1.00/hour option for a one-hour term. The registry must recommend the ready
-mediation authority; the option includes a 300-second delivery deadline,
+1.00/hour option for a one-hour term. The registry recommends the lane's pinned
+dispute authority, which the option names but which never answers, since no
+stage files a case; the option includes a 300-second delivery deadline,
 a 15-day dispute window and an unbounded case hold. The dispute window covers
 the delivery deadline plus the authority's minimum filing window; the payment
 `window=P7D` is a separate input.

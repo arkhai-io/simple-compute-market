@@ -50,7 +50,7 @@ class _MediationPort:
                 raise MediationTransportError("the Agreement authority has no configured buyer credential")
             try:
                 self.client = MediationClient(self.authority, MediationCredential(
-                    self.authority.identity, self.credential.api_key_env,
+                    self.authority.identity, token=self.credential.resolve(),
                 ))
             except ValueError as exc:
                 raise MediationTransportError("the Agreement authority credential is unavailable") from exc

@@ -5,10 +5,12 @@
 
 The buyer is a wallet-free Ed25519 identity with only Arkhai payments enabled,
 so selection cannot fall back to Alkahest. The scenario needs a reachable
-payments service and the credits storefront configured for the same service;
-An absent payments target reports blocked; invalid lane settings fail.
-The refund stage uses the seller's typed client and reads the transaction back
-from the payments service as the payer.
+payments service and the credits storefront configured for the same service,
+which the API-credit lane runs as its payments double, its seeded listing
+offering a payment option. An absent external payments target reports blocked;
+an unready lane-owned one and invalid lane settings fail. The refund stage signs
+as the storefront's own principal through the seller's typed client and reads
+the transaction back from the payments service as the payer.
 """
 
 from __future__ import annotations
@@ -18,8 +20,8 @@ from typing import Any
 
 import httpx
 import pytest
-from market_arkhai_payments import ArkhaiPaymentsConfig, payments_client_for_owner
-from market_identity import Ed25519Signer, IdentityScheme, TrustedIdentitySet
+from market_arkhai_payments import ArkhaiPaymentsConfig
+from market_identity import Identity, IdentityScheme, TrustedIdentitySet, create_signer
 from storefront_client import SyncStorefrontClient
 
 from tests.e2e.roles.buyer_cli import BuyerCli, _toml_quote, create_profiled_buyer_cli
@@ -31,6 +33,8 @@ from tests.e2e.roles.helpers.domain_deal import (
     require_state,
 )
 from tests.e2e.roles.helpers.payments import (
+    buyer_payments_client,
+    buyer_payments_environment,
     configured_payments,
     payment_config_toml,
     payment_setting,
@@ -92,6 +96,7 @@ def payment_buyer_cli(payments_config, buyer_cli_binary, tmp_path_factory) -> Bu
         registries=(compute_registry, credits_registry),
         registry_authorities={compute_registry: compute_pin, credits_registry: credits_pin},
         credential_variable="ARKHAI_E2E_PAYMENT_BUYER_MARKETPLACE_CREDENTIAL",
+        credential_environment=buyer_payments_environment(payments_config),
         toml_sections=tuple(section),
     )
 
@@ -181,18 +186,27 @@ def test_the_seller_refund_reverses_the_held_payment(
     payments_config: ArkhaiPaymentsConfig,
 ) -> None:
     require_state(payment_deal_state, "negotiation_id", "settlement_id")
-    seller = Ed25519Signer(bytes.fromhex(str(payment_setting("SELLER_MARKETPLACE_CREDENTIAL"))))
+    # The seller is the storefront's own principal, so its key is in the scheme
+    # the lane pins the storefront under, and the storefront signs as it.
+    storefront_principal = Identity(
+        scheme=IdentityScheme(lane_setting("API_CREDITS.STOREFRONT_SCHEME")),
+        identifier=lane_setting("API_CREDITS.STOREFRONT_IDENTIFIER"),
+    )
+    seller = create_signer(
+        storefront_principal.scheme.value, str(payment_setting("SELLER_MARKETPLACE_CREDENTIAL")),
+    )
+    assert seller.identity == storefront_principal
     with SyncStorefrontClient(
         lane_setting("API_CREDITS.STOREFRONT_URL"),
         signer=seller,
         caller_role="seller",
-        expected_publishers=TrustedIdentitySet(identities=(seller.identity,)),
+        expected_publishers=TrustedIdentitySet(identities=(storefront_principal,)),
     ) as storefront:
         refunded = storefront.refund_settlement(payment_deal_state.negotiation_id)
     assert refunded.status == "refunded"
     assert refunded.settlement_ref == payment_deal_state.settlement_id
 
-    with payments_client_for_owner(payments_config, str(payment_setting("BUYER_ACCOUNT"))) as client:
+    with buyer_payments_client(payments_config, str(payment_setting("BUYER_ACCOUNT"))) as client:
         snapshot = client.get_transaction(payment_deal_state.settlement_id).snapshot
     assert {part.status.value for part in snapshot.parts} == {"reversed"}
     payment_deal_state.complete(

@@ -27,7 +27,7 @@ identities = [
 
 [wallet]
 address     = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
-private_key = "" # APICREDITS_STOREFRONT_WALLET__PRIVATE_KEY secret environment input
+private_key = "" # stated in the secret overlay, storefront.secrets.toml
 
 # Which settlement mechanisms this seller will actually service. Without
 # this section `mechanism_config("alkahest")` is None, `alkahest_enabled`
@@ -55,12 +55,12 @@ trusted_oracle_addresses = []
 
 [settlement.arkhai_payments]
 enabled = false
-api_key_env = "ARKHAI_PAYMENTS_API_KEY"
 # Enabling payments also requires service_url, Ed25519 service_identity,
 # fee_bps, root [[Dispute]] preferences (or registry recommendations), the
 # mechanism in `priority`, and an explicit
-# payment publication clause containing payee_account and asset. Never store
-# the WorkOS key here.
+# payment publication clause containing payee_account and asset. The key is
+# `api_key` in the secret overlay, which already states the payments double's
+# development token; with payments off it is unused. Never store a key here.
 
 [chains.anvil]
 rpc_url  = "ws://anvil:8545"

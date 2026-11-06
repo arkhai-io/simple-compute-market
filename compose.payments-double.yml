@@ -1,0 +1,27 @@
+# The payments lane double, for the VM, bare-metal and API-credit end-to-end lanes.
+#
+# Layered with `-f` into each lane's compose list in e2e-tests/Makefile; each
+# lane's own overlay mounts its payment storefront's lane configuration, which
+# points at it, and the lane CA that configuration trusts, and makes the
+# storefront wait for it. The full local stack never layers this file.
+#
+# The image carries the double's committed fixtures and TLS files, public
+# development values never to be used on a public network
+# (tools/payments-lane-double/README.md), so the service needs no mounts and no
+# configuration. It publishes no host port: its callers reach it on the lane's
+# network at https://payments-double:8443, the name its certificate is issued for.
+services:
+  payments-double:
+    image: arkhai:payments-lane-double
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+    healthcheck:
+      # Trusting the lane CA alone, as every caller of the double does.
+      test: ["CMD", "curl", "--fail", "--silent", "--cacert", "/opt/payments-lane-double/tls/lane-ca.pem", "https://localhost:8443/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s

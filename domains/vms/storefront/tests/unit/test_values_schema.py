@@ -386,3 +386,14 @@ def test_public_delivery_settings_are_accepted() -> None:
 def test_an_instance_of_an_unshipped_sink_stays_open_when_spelled_correctly() -> None:
     assert _accepts({"enabled": ["pager"], "pager": {"sink": "pager", "anything": 1}})
 
+
+
+def test_dispute_credentials_accept_public_metadata_and_refuse_secret_keys(definition) -> None:
+    # Public synthetic authority metadata and token; never for a public network.
+    public = {"interface": "example.dispute.v1", "origin": "https://dispute.invalid",
+              "account": "fixture-account", "record_key": "fixture-public-key"}
+    for section in ("DisputeCredential", "disputecredential", "DISPUTECREDENTIAL"):
+        assert not _refusals(definition, {section: [public]})
+        for key in ("api_key", "API_KEY", "Api_Key"):
+            for value in ("public-test-token", None):
+                assert _refusals(definition, {section: [{**public, key: value}]}), (section, key)

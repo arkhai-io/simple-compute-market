@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-kit-arkhai-mediation"
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
 description = "Stateless Arkhai mediation client and lifecycle dispute adapter"
 requires-python = ">=3.12"

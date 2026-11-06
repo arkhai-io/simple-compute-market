@@ -1,7 +1,11 @@
-# Bare-metal marketplace wrapper. All values below are public identity/trust
-# pins or references to role-scoped credential files. No secret has a fallback.
-# Extend individual services so role bindings merge with their topology.
-# An include imports complete resources and cannot redefine them here.
+# Bare-metal marketplace wrapper. Extend individual services so a deployment's
+# bindings merge with their topology; an include imports complete resources and
+# cannot redefine them here.
+#
+# Like the domain file, it holds topology only. A deployment's overlay supplies
+# every identity, configuration file, secret overlay, registry and site profile
+# and definition document, and nothing here gives one a fallback;
+# compose.bare-metal-local.yml is the end-to-end lane's.
 
 services:
   bare-metal-registry:
@@ -9,16 +13,8 @@ services:
       file: domains/bare_metal/compose.yml
       service: bare-metal-registry
     environment:
+      # The registry's database, on the named volume the domain file mounts.
       - DATABASE_URL=sqlite:////app/data/indexer.db
-      - REGISTRY_AUTHORITY_ID=${BARE_METAL_REGISTRY_AUTHORITY_ID:?set registry authority id}
-      - REGISTRY_AUTHORITY_SCHEME=${BARE_METAL_REGISTRY_AUTHORITY_SCHEME:?set registry authority scheme}
-      - REGISTRY_AUTHORITY_IDENTIFIER=${BARE_METAL_REGISTRY_AUTHORITY_IDENTIFIER:?set canonical registry principal}
-      - REGISTRY_AUTHORITY_CREDENTIAL_FILE=/run/secrets/arkhai/registry-identity/credential
-      - REGISTRY_DESCRIPTOR_BASE_URL=${BARE_METAL_REGISTRY_PUBLIC_URL:?set externally reachable registry URL}
-      - REGISTRY_DESCRIPTOR_DISPLAY_NAME=${BARE_METAL_REGISTRY_DISPLAY_NAME:-Bare Metal Compute Registry}
-      - REGISTRY_DESCRIPTOR_OPERATOR_IDENTITY=${BARE_METAL_OPERATOR_IDENTITY:?set public operator identity}
-    volumes:
-      - ${BARE_METAL_REGISTRY_IDENTITY_CREDENTIAL_FILE:?set registry signer credential file}:/run/secrets/arkhai/registry-identity/credential:ro
 
   bare-metal-redis:
     extends:
@@ -29,49 +25,14 @@ services:
     extends:
       file: domains/bare_metal/compose.yml
       service: bare-metal-provisioning
-    # The provisioning service reads these through its settings loader, which
-    # would parse a hex identifier as a number; `@str` keeps each one a string.
-    env_file:
-      - ${BARE_METAL_PROVISIONING_IDENTITY_ENV_FILE:?set provisioning signer credential environment file}
-    environment:
-      - PROVISIONING_IDENTITY__SCHEME=${BARE_METAL_PROVISIONING_IDENTITY_SCHEME:?set provisioning identity scheme}
-      - PROVISIONING_IDENTITY__IDENTIFIER=@str ${BARE_METAL_PROVISIONING_IDENTITY_IDENTIFIER:?set canonical provisioning principal}
-      - PROVISIONING_STOREFRONT_IDENTITY__SCHEME=${BARE_METAL_STOREFRONT_IDENTITY_SCHEME:?set storefront identity scheme}
-      - PROVISIONING_STOREFRONT_IDENTITY__IDENTIFIER=@str ${BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER:?set canonical storefront principal}
-      - PROVISIONING_STOREFRONT_SITE_ID=${BARE_METAL_SITE_ID:?set exact selected site id}
-      - PROVISIONING_ADMIN_IDENTITY__SCHEME=${BARE_METAL_PROVISIONING_ADMIN_IDENTITY_SCHEME:?set provisioning admin scheme}
-      - PROVISIONING_ADMIN_IDENTITY__IDENTIFIER=@str ${BARE_METAL_PROVISIONING_ADMIN_IDENTITY_IDENTIFIER:?set canonical provisioning admin principal}
 
   bare-metal-storefront:
     extends:
       file: domains/bare_metal/compose.yml
       service: bare-metal-storefront
-    # The signer credential, ARKHAI_IDENTITY_CREDENTIAL, is the only value the
-    # storefront reads from its environment; every setting is in its files.
-    env_file:
-      - ${BARE_METAL_STOREFRONT_IDENTITY_ENV_FILE:?set storefront signer credential environment file}
-    volumes:
-      # The Secret overlay: the seller wallet's key, and any other secret
-      # setting, kept apart from the public storefront.toml.
-      - ${BARE_METAL_STOREFRONT_SECRETS_FILE:?set storefront secret overlay file}:/etc/arkhai/storefront.secrets.toml:ro
-
-  bare-metal-buyer:
-    image: ${BARE_METAL_BUYER_IMAGE:?set image containing arkhai-bare-metal-buyer}
-    profiles: [buyer]
-    command: ["market", "bare-metal", "list", "--config", "/run/config/buyer.toml"]
-    env_file:
-      - ${BARE_METAL_BUYER_IDENTITY_ENV_FILE:?set buyer credential-provider environment file}
-    environment:
-      - BARE_METAL_BUYER_CONFIG=/run/config/buyer.toml
-      - XDG_CONFIG_HOME=/var/lib/arkhai/config
-      - XDG_STATE_HOME=/var/lib/arkhai/state
-    volumes:
-      - ${BARE_METAL_BUYER_CONFIG_FILE:?set secret-free buyer config file}:/run/config/buyer.toml:ro
-      - bare-metal-buyer-state:/var/lib/arkhai
 
 volumes:
   bare-metal-registry-data:
   bare-metal-redis-data:
   bare-metal-provisioning-data:
   bare-metal-storefront-data:
-  bare-metal-buyer-state:

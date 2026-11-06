@@ -212,6 +212,147 @@ alkahestAddressBook does not state it.
 {{- end }}
 
 {{/*
+The agent's CA bundle, as JSON for fromJson: `configMapName` or `secretName`,
+whichever names the source ("" for the other), and its `key`. Both empty is no
+bundle. The chart names no CA of its own: a deployment supplies the ConfigMap or
+Secret, and the storefront's payments client trusts its payments service under
+it, through the `[Settlement.arkhai_payments].ca_bundle_path` the chart derives
+from the mount (`storefront.deriveCaBundlePath`). Naming both sources is
+refused, as is a source without its key.
+Argument: one agent, with its name.
+*/}}
+{{- define "storefront.agentCaBundle" -}}
+{{- $bundle := .caBundle | default dict -}}
+{{- $configMap := $bundle.configMapName | default "" -}}
+{{- $secret := $bundle.secretName | default "" -}}
+{{- if and $configMap $secret -}}
+  {{- fail (printf "storefront agent %s caBundle names both configMapName %q and secretName %q; name one" .name $configMap $secret) -}}
+{{- end -}}
+{{- $key := "" -}}
+{{- if or $configMap $secret -}}
+  {{- $key = required (printf "storefront agent %s caBundle.key is required with its source" .name) $bundle.key -}}
+{{- end -}}
+{{- toJson (dict "configMapName" $configMap "secretName" $secret "key" $key) -}}
+{{- end }}
+
+{{/*
+Where the CA bundle mounts, the file the derived ca_bundle_path names.
+*/}}
+{{- define "storefront.caBundleDirectory" -}}/etc/arkhai/ca{{- end }}
+{{- define "storefront.caBundleFile" -}}/etc/arkhai/ca/ca-bundle.pem{{- end }}
+
+{{/*
+The agent's `[Settlement.arkhai_payments]` section, matched in any spelling at
+each level, as JSON for fromJson, or {} when the configuration has none.
+Argument: one agent.
+*/}}
+{{- define "storefront.agentPaymentsSection" -}}
+{{- $settlement := include "storefront.foldedMap" (dict "doc" (.config | default dict) "name" "settlement") | fromJson -}}
+{{- include "storefront.foldedMap" (dict "doc" $settlement "name" "arkhai_payments") -}}
+{{- end }}
+
+{{/*
+What decides how an agent's storefront process loads its configuration and
+reaches its payments service, rendered once for its Deployment and once for its
+payments check test pod, so the two cannot drift: the container's environment,
+the configuration, overlay, address-book, and CA-bundle mounts, and their
+volumes. Each takes a dict with `root` (the chart root) and `agent` (one agent,
+with its name and a `secret` map), and renders list items at column zero.
+
+`storefront.agentEnv`: XDG_CONFIG_HOME and the signing credential, neither a
+storefront setting: XDG_CONFIG_HOME selects the configuration loaded, and the
+credential must be kept from the loader. Every other value, the payments key and
+the CA bundle's path among them, is in a mounted file.
+*/}}
+{{- define "storefront.agentEnv" -}}
+{{- $agent := .agent -}}
+- name: XDG_CONFIG_HOME
+  value: /etc
+- name: ARKHAI_IDENTITY_CREDENTIAL
+  valueFrom:
+    secretKeyRef:
+      name: {{ required "storefront agent identity.credentialSecret.name is required" $agent.identity.credentialSecret.name | quote }}
+      key: {{ required "storefront agent identity.credentialSecret.key is required" $agent.identity.credentialSecret.key | quote }}
+{{- end }}
+
+{{/*
+`storefront.agentConfigMounts`: storefront.json, the Secret overlay when the agent
+names one, its Alkahest address book when it names one, and its CA bundle when it
+names one, each read-only.
+*/}}
+{{- define "storefront.agentConfigMounts" -}}
+{{- $agent := .agent -}}
+{{- $addressBook := include "storefront.agentAddressBook" $agent | fromJson -}}
+{{- $bundle := include "storefront.agentCaBundle" $agent | fromJson -}}
+- name: arkhai-config
+  mountPath: /etc/arkhai/storefront.json
+  subPath: storefront.json
+  readOnly: true
+{{- if $agent.secret.secretName }}
+- name: arkhai-secrets
+  mountPath: /etc/arkhai/storefront.secrets.toml
+  subPath: {{ $agent.secret.configKey | default "storefront.secrets.toml" }}
+  readOnly: true
+{{- end }}
+{{- if $addressBook.configMapName }}
+- name: alkahest-address-book
+  mountPath: {{ $addressBook.mountPath | quote }}
+  readOnly: true
+{{- end }}
+{{- if or $bundle.configMapName $bundle.secretName }}
+- name: ca-bundle
+  mountPath: {{ include "storefront.caBundleDirectory" . | quote }}
+  readOnly: true
+{{- end }}
+{{- end }}
+
+{{/*
+`storefront.agentConfigVolumes`: the volumes `storefront.agentConfigMounts` mounts.
+*/}}
+{{- define "storefront.agentConfigVolumes" -}}
+{{- $agent := .agent -}}
+{{- $addressBook := include "storefront.agentAddressBook" $agent | fromJson -}}
+{{- $bundle := include "storefront.agentCaBundle" $agent | fromJson -}}
+- name: arkhai-config
+  configMap:
+    name: {{ include "storefront.agentConfigMapName" . }}
+    items:
+      - key: storefront.json
+        path: storefront.json
+{{- if $agent.secret.secretName }}
+- name: arkhai-secrets
+  secret:
+    secretName: {{ $agent.secret.secretName | quote }}
+    items:
+      - key: {{ $agent.secret.configKey | default "storefront.secrets.toml" }}
+        path: storefront.secrets.toml
+{{- end }}
+{{- if $addressBook.configMapName }}
+- name: alkahest-address-book
+  configMap:
+    name: {{ $addressBook.configMapName | quote }}
+    items:
+      - key: {{ $addressBook.key | quote }}
+        path: {{ $addressBook.key | quote }}
+{{- end }}
+{{- if $bundle.configMapName }}
+- name: ca-bundle
+  configMap:
+    name: {{ $bundle.configMapName | quote }}
+    items:
+      - key: {{ $bundle.key | quote }}
+        path: ca-bundle.pem
+{{- else if $bundle.secretName }}
+- name: ca-bundle
+  secret:
+    secretName: {{ $bundle.secretName | quote }}
+    items:
+      - key: {{ $bundle.key | quote }}
+        path: ca-bundle.pem
+{{- end }}
+{{- end }}
+
+{{/*
 Key lookup as the storefront's loader does it. Dynaconf matches configuration
 keys case-insensitively at every level, so every key the chart reads or writes
 is matched the same way; otherwise `Port` or `registry.URLS` would slip past a
@@ -431,11 +572,48 @@ which must include the release's provisioning principal. */ -}}
     {{- end -}}
   {{- end -}}
 {{- end -}}
+{{- include "storefront.deriveCaBundlePath" (dict "agent" $agent "cfg" $cfg) -}}
 {{- /* JSON, not YAML: Helm's YAML encoder leaves a string bare unless it
 would read back as a 64-bit number, so a 160-bit EVM address such as
 0x3c44...93bc is emitted unquoted and a YAML loader reads it as an integer.
 JSON quotes every string. */ -}}
 {{- toPrettyJson $cfg -}}
+{{- end }}
+
+{{/*
+`storefront.deriveCaBundlePath`: where the agent names a CA bundle, set
+`[Settlement.arkhai_payments].ca_bundle_path` in `cfg`, in place, to the file the
+chart mounts it as; where `cfg` states another path, refuse it naming both. The
+path is derived from the mount's presence rather than configured beside it, so
+the two cannot disagree: a path naming no mounted file would leave the payments
+client with no bundle to load. Only the payments client reads the bundle, so one
+named while `cfg` has no `[Settlement.arkhai_payments]` section is refused rather
+than given a section of its own. Keys are matched in any spelling, as the loader
+matches them. With no bundle named, `cfg` is left as it is.
+Argument: dict with `agent` (one agent, with its name) and `cfg` (its
+configuration, nulls removed).
+*/}}
+{{- define "storefront.deriveCaBundlePath" -}}
+{{- $bundle := include "storefront.agentCaBundle" .agent | fromJson -}}
+{{- if or $bundle.configMapName $bundle.secretName -}}
+  {{- $file := include "storefront.caBundleFile" . -}}
+  {{- $settlement := index .cfg (include "storefront.foldedKey" (dict "doc" .cfg "name" "settlement")) | default dict -}}
+  {{- $sectionKey := include "storefront.foldedKey" (dict "doc" $settlement "name" "arkhai_payments") -}}
+  {{- $payments := dict -}}
+  {{- if $sectionKey -}}{{- $payments = index $settlement $sectionKey | default dict -}}{{- end -}}
+  {{- if not $payments -}}
+    {{- fail (printf "storefront agent %s names caBundle, which only its payments client reads, but its config states no Settlement.arkhai_payments section" .agent.name) -}}
+  {{- end -}}
+  {{- $pathKey := include "storefront.foldedKey" (dict "doc" $payments "name" "ca_bundle_path") -}}
+  {{- if $pathKey -}}
+    {{- $stated := toString (index $payments $pathKey) -}}
+    {{- if ne $stated $file -}}
+      {{- fail (printf "storefront agent %s config Settlement.%s.%s %q differs from %q, where the chart mounts its caBundle; state that path or none" .agent.name $sectionKey $pathKey $stated $file) -}}
+    {{- end -}}
+  {{- else -}}
+    {{- $_ := set $payments "ca_bundle_path" $file -}}
+  {{- end -}}
+{{- end -}}
 {{- end }}
 
 {{/*

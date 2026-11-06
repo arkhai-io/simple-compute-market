@@ -165,3 +165,15 @@ def test_the_definition_carries_no_defaults_references_or_markers() -> None:
     for node in _walk(values_schema.storefront_config_definition()):
         if isinstance(node, dict):
             assert not {"default", "$ref", "$defs", "secret", "required"} & set(node), node
+
+
+def test_dispute_credentials_accept_public_metadata_and_refuse_secret_keys() -> None:
+    definition = values_schema.storefront_config_definition()
+    # Public synthetic authority metadata and token; never for a public network.
+    public = {"interface": "example.dispute.v1", "origin": "https://dispute.invalid",
+              "account": "fixture-account", "record_key": "fixture-public-key"}
+    for section in ("DisputeCredential", "disputecredential", "DISPUTECREDENTIAL"):
+        assert not _refusals({section: [public]})
+        for key in ("api_key", "API_KEY", "Api_Key"):
+            for value in ("public-test-token", None):
+                assert _refusals({section: [{**public, key: value}]}), (section, key)

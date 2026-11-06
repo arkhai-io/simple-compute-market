@@ -1,9 +1,8 @@
 """Authenticated, stateless HTTP operations at an Agreement-pinned authority."""
 
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 import ipaddress
-import os
 import re
 from typing import Any, TypeVar
 from urllib.parse import quote, urlsplit
@@ -11,7 +10,7 @@ from urllib.parse import quote, urlsplit
 import httpx
 from jsonschema.exceptions import ValidationError as SchemaValidationError
 from market_deal_lifecycle.terms import DisputeAuthority
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, SecretStr, ValidationError
 
 from .contract import validate, wire
 from .models import Append, AppendAnswer, Filing, FilingAnswer, ReadAfter, RecordPage, RespondentAfter, RespondentPage, SignedRecordEntry
@@ -42,16 +41,31 @@ class MediationAPIError(MediationError):
 
 @dataclass(frozen=True)
 class MediationCredential:
-    """A credential reference bound to the authority's entire pinned identity."""
+    """A resolved bearer token bound to the authority's entire pinned identity.
+
+    The caller resolves the token from its own configuration and passes it in;
+    nothing here reads the environment. The token is checked where it arrives,
+    so a value that is not a secret, or could not be sent as one bearer header,
+    fails at construction rather than authenticating as something else.
+    """
 
     identity: tuple[str, str, str, str]
-    api_key_env: str
+    token: SecretStr = field(kw_only=True)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.token, SecretStr):
+            raise TypeError("mediation credential token must be a SecretStr")
+        # The messages never quote the token.
+        value = self.token.get_secret_value()
+        if not value or value != value.strip() or "\r" in value or "\n" in value:
+            raise ValueError(
+                "mediation credential token must be nonempty, unpadded and on one line"
+            )
 
 
 class MediationClient:
     def __init__(
         self, authority: DisputeAuthority, credential: MediationCredential, *,
-        environ: Mapping[str, str] | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
         capture: Callable[[bytes], None] | None = None,
         timeout: float = 10,
@@ -59,9 +73,7 @@ class MediationClient:
         validate("DisputeAuthority", authority.model_dump(mode="json"))
         if authority.identity != credential.identity:
             raise ValueError("mediation credential is bound to another authority")
-        token = (os.environ if environ is None else environ).get(credential.api_key_env)
-        if not token or token != token.strip() or "\r" in token or "\n" in token:
-            raise ValueError("mediation credential environment reference is unavailable")
+        token = credential.token.get_secret_value()
         url = urlsplit(authority.origin)
         if url.scheme != "https" and not _loopback(url.hostname or ""):
             raise ValueError("mediation requires HTTPS outside loopback")

@@ -32,6 +32,7 @@ from market_config.values_schema import (
     settlement_fragment,
     sink_typed_section,
 )
+from market_deal_lifecycle.configuration import DisputeCredential
 from market_delivery import SINK_KEY, discover_sink_settings_models
 
 from .config import BareMetalStorefrontSettings
@@ -67,6 +68,9 @@ def storefront_config_definition(role: str = ROLE) -> dict[str, Any]:
     definition = model_fragment(BareMetalStorefrontSettings, role=role)
     sinks, _warnings = discover_sink_settings_models()
     fields = definition["patternProperties"]
+    fields[any_case("DisputeCredential")] = {
+        "type": "array", "items": model_fragment(DisputeCredential, role=role)
+    }
     fields[any_case("settlement")] = settlement_fragment(
         build_bare_metal_settlement_registry().registrations, role=role
     )

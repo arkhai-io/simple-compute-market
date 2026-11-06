@@ -23,6 +23,7 @@ from market_deal_lifecycle_contracts.models import Accepted, AuthorityView, Paym
 from market_deal_servicing import EndSession
 from market_deal_servicing.evidence import transaction
 from market_identity import TrustedIdentitySet, canonical_json
+from pydantic import SecretStr
 from storefront_client import StorefrontClientError
 
 import market_storefront.server  # noqa: F401 - controller composition order
@@ -98,8 +99,8 @@ async def test_admin_interrupt_obeys_entitlement_and_retries_filing_independentl
         h.lifecycle.end.physical = type("Physical", (), {"apply_end": staticmethod(physical)})()
         # Public deterministic fixture credential, never a live account token.
         client = MediationClient(
-            authority, MediationCredential(authority.identity, "DEMO_MEDIATION_TOKEN"),
-            environ={"DEMO_MEDIATION_TOKEN": "fixture-payee"}, transport=httpx.MockTransport(handle),
+            authority, MediationCredential(authority.identity, token=SecretStr("fixture-payee")),
+            transport=httpx.MockTransport(handle),
         )
         h.lifecycle.clients[canonical_json(authority)] = client
         h.lifecycle.credential_available = lambda candidate: candidate == authority

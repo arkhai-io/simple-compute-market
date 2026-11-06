@@ -5,6 +5,7 @@ from copy import deepcopy
 
 import httpx
 import pytest
+from pydantic import SecretStr
 
 from market_deal_lifecycle.adapters import (
     DeliveryEndIntent, DisputeAdapterTable, DisputeBinding, InterfaceRequest, submit_dispute,
@@ -36,8 +37,8 @@ class Scenario:
         self.binding = DisputeBinding("negotiation-fixture", filing["transaction"], self.authority)
         self.captured = []
         self.client = MediationClient(
-            self.authority, MediationCredential(self.authority.identity, "MEDIATION_TEST_CREDENTIAL"),
-            environ={"MEDIATION_TEST_CREDENTIAL": "fixture-payee"},
+            self.authority,
+            MediationCredential(self.authority.identity, token=SecretStr("fixture-payee")),
             transport=transport or self.peer.transport(), capture=self.captured.append,
         )
         self.adapter = MediationAdapter(
@@ -64,6 +65,58 @@ class Scenario:
 
 def run(scenario):
     asyncio.run(scenario())
+
+
+def test_an_unmigrated_positional_credential_fails_at_construction():
+    authority = DisputeAuthority.model_validate(MediationContractFake().authority)
+    with pytest.raises(TypeError):
+        MediationCredential(authority.identity, "DEMO_PAYEE")  # type: ignore[misc]
+
+
+@pytest.mark.parametrize("token", ["fixture-payee", b"fixture-payee"], ids=["str", "bytes"])
+def test_a_token_that_is_not_a_secret_value_is_refused(token):
+    authority = DisputeAuthority.model_validate(MediationContractFake().authority)
+    with pytest.raises(TypeError, match="SecretStr"):
+        MediationCredential(authority.identity, token=token)
+
+
+@pytest.mark.parametrize(
+    "token", ["", " fixture-payee", "fixture-payee ", "fixture\r\npayee", "fixture\npayee"],
+    ids=["empty", "leading-space", "trailing-space", "crlf", "lf"],
+)
+def test_an_unusable_token_is_refused_without_quoting_it(token):
+    authority = DisputeAuthority.model_validate(MediationContractFake().authority)
+    with pytest.raises(ValueError) as refused:
+        MediationCredential(authority.identity, token=SecretStr(token))
+    if token.strip():
+        assert token.strip() not in str(refused.value)
+
+
+def test_a_credential_bound_to_another_authority_is_refused():
+    authority = DisputeAuthority.model_validate(MediationContractFake().authority)
+    other = (*authority.identity[:3], "another-record-key")
+    with pytest.raises(ValueError, match="another authority"):
+        MediationClient(authority, MediationCredential(other, token=SecretStr("fixture-payee")))
+
+
+def test_the_client_authenticates_with_exactly_the_credentials_token():
+    peer = MediationContractFake()
+    seen: list[str] = []
+    inner = peer.transport()
+
+    class Recording(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request):
+            seen.append(request.headers["Authorization"])
+            return await inner.handle_async_request(request)
+
+    async def scenario():
+        s = Scenario(peer=peer, transport=Recording())
+        try:
+            assert (await s.file()).status == "accepted"
+        finally:
+            await s.client.close()
+    run(scenario)
+    assert seen and set(seen) == {"Bearer fixture-payee"}
 
 
 @pytest.mark.parametrize("scheme", ["ed25519", "eip191"])

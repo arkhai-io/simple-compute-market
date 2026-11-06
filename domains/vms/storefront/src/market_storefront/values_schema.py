@@ -29,6 +29,7 @@ from market_config.values_schema import (
     settlement_fragment,
     sink_typed_section,
 )
+from market_deal_lifecycle.configuration import DisputeCredential
 from market_delivery import SINK_KEY, discover_sink_settings_models
 
 from market_storefront.settlement_composition import (
@@ -75,6 +76,9 @@ def storefront_config_definition(role: str = ROLE) -> dict[str, Any]:
     """
     sinks, _warnings = discover_sink_settings_models()
     sections: dict[str, Any] = {
+        "DisputeCredential": {
+            "type": "array", "items": model_fragment(DisputeCredential, role=role)
+        },
         "delivery": sink_typed_section(
             sinks, sink_key=SINK_KEY, section_fields=_DELIVERY_SETTINGS, role=role
         ),

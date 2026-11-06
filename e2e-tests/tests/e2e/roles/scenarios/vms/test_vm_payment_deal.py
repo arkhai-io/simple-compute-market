@@ -1,18 +1,24 @@
 """Hosted VM commit, servicing, operator end/case and separate physical release.
 
-Requires the shared PAYMENTS profile and the exact mediation authority's seller
-credential. The public lane reports blocked without those external services.
-Provisioning uses the VM lane's mock executor, not a real guest or SSH proof.
+The commit and servicing stages need a payments target, which the VM lane runs
+as its payments double (PAYMENTS). The operator-end and refund stages also need
+a dispute authority that accepts a filed case, MEDIATION.SERVICE_URL, and report
+a blocked skip naming it where none is configured, as in the lane, whose
+registries recommend an authority that can never answer. Servicing still reads
+the deal running then, because the storefront holds a dispute credential for that
+authority. Provisioning uses the VM lane's mock executor, not a real guest or SSH
+proof.
 """
 
 from __future__ import annotations
 
 import asyncio
 import base64
+import dataclasses
 import time
 
 import pytest
-from market_arkhai_payments import PaymentApproval, PaymentSettlementData, payments_client_for_owner
+from market_arkhai_payments import PaymentApproval, PaymentSettlementData
 from market_deal_lifecycle_client import LifecycleClient
 from market_deal_lifecycle_contracts.models import CommitMessage
 
@@ -20,14 +26,28 @@ from e2e_harness.settings import settings
 from tests.e2e.roles.helpers.compute_deal import (
     DealLease, advance_fulfillment_to, advance_storefront, wait_for_stage_event,
 )
-from tests.e2e.roles.helpers.payments import configured_payments, payment_setting
+from tests.e2e.roles.helpers.mediation import configured_mediation
+from tests.e2e.roles.helpers.payments import (
+    buyer_payments_client,
+    configured_payments,
+    payment_setting,
+)
 from tests.e2e.roles.scenarios.vms.conftest import (
     _publisher_trust, _signer, capacity_source_for,
+)
+from tests.e2e.roles.scenarios.vms.host_registry import (
+    E2E_PAYMENT_DEAL_HOST, E2E_PAYMENT_DEAL_POOL_ID,
 )
 from tests.e2e.roles.scenarios.vms.lifecycle_deal import (
     LifecyclePurchase, Stage12c_CapacityReleasedOnce, TypedLifecycleBuyer,
 )
-from tests.e2e.roles.scenarios.vms.test_full_deal import OFFER_RESOURCE
+from tests.e2e.roles.scenarios.vms.test_full_deal import OFFER_RESOURCE as _DEAL_RESOURCE
+
+#: This scenario's own resource, the canonical deal's shape under another id. A
+#: listing's binding to its resource outlives the listing, so whichever scenario on a
+#: shared stack lists a resource second is refused.
+PAYMENT_RESOURCE_ID = "compute-e2e-payment-deal-001"
+OFFER_RESOURCE = {**_DEAL_RESOURCE, "resource_id": PAYMENT_RESOURCE_ID}
 
 
 pytestmark = [
@@ -42,6 +62,21 @@ pytestmark = [
 @pytest.fixture(scope="module")
 def payments_config():
     return configured_payments()
+
+
+@pytest.fixture(scope="module")
+def mediation_target():
+    """The case stages' dispute authority; a blocked skip when none is configured."""
+    return configured_mediation()
+
+
+@pytest.fixture(scope="module")
+def deal_driver(deal_driver):
+    """The VM deal driver over this scenario's own executor, pool, and resource."""
+    return dataclasses.replace(
+        deal_driver, reserved_resource_id=PAYMENT_RESOURCE_ID,
+        host=E2E_PAYMENT_DEAL_HOST, pool_id=E2E_PAYMENT_DEAL_POOL_ID,
+    )
 
 
 @pytest.fixture(scope="module")
@@ -82,7 +117,7 @@ def _commit(negotiation_id, transaction):
 
 
 def _snapshot(config, transaction):
-    with payments_client_for_owner(config, str(payment_setting("BUYER_ACCOUNT"))) as client:
+    with buyer_payments_client(config, str(payment_setting("BUYER_ACCOUNT"))) as client:
         return client.get_transaction(transaction).snapshot
 
 
@@ -125,7 +160,10 @@ def test_hosted_commit_delivers_after_a_verified_receipt(
     assert accepted["action"] == "accept", accepted
     raw = base64.b64decode(accepted["agreement_bytes"], validate=True)
     data = PaymentSettlementData.parse(accepted["settlement_data"])
-    approval = PaymentApproval(payments_config, str(payment_setting("BUYER_ACCOUNT")))
+    approval = PaymentApproval(
+        payments_config, str(payment_setting("BUYER_ACCOUNT")),
+        client_for_owner=lambda owner: buyer_payments_client(payments_config, owner),
+    )
     assert storefront_client.settle_agreement(negotiation_id).status == "pending"
     assert approval.approve(raw, data.to_wire()) == data.transaction_id
     deal_driver.arm_create_gate()
@@ -169,7 +207,7 @@ def test_commit_replay_and_servicing_keep_the_same_hosted_deal(
 
 
 def test_operator_end_files_one_case_without_a_local_payment_remedy(
-    hosted, payments_config, storefront_admin_client, deal_driver,
+    mediation_target, hosted, payments_config, storefront_admin_client, deal_driver,
 ):
     assert hosted.get("transaction"), "hosted commit did not complete"
     deal_driver.arm_teardown_gate()
@@ -200,7 +238,7 @@ def test_operator_end_files_one_case_without_a_local_payment_remedy(
 
 
 def test_seller_refund_is_financial_and_release_waits_for_the_callback(
-    hosted, payments_config, storefront_seller_client, provisioning_client,
+    mediation_target, hosted, payments_config, storefront_seller_client, provisioning_client,
     provisioning_test_client, storefront_admin_client, vm_lifecycle_buyer, deal_state,
 ):
     assert hosted.get("case_ref"), "operator end did not produce its authority case"
