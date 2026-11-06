@@ -481,11 +481,25 @@ and, if no test covers `apply_ansible_config`, a unit test in
       `docs/development/TESTING.md`, "Integration Tests")
       *Done in section 4's commit,* for the same reason; the harness's codecs
       hold `TEST_CONNECTION_KEY`.
-- [ ] 5.3 Add a unit test of `app_runtime.apply_ansible_config` if none exists.
+- [x] 5.3 Add a unit test of `app_runtime.apply_ansible_config` if none exists.
       It exports the profile's `ansible_cfg` verbatim when set and
       `DEFAULT_ANSIBLE_CONFIG` otherwise, and sets no `ANSIBLE_LOG_PATH`. (D2;
       the scenario "An operator configures a log file")
-- [ ] 5.4 Add application integration tests in
+      *Done:* none existed. *Outside the plan's file list:*
+      `apply_ansible_config` gained optional `config` and `environ`
+      parameters, the service's settings and `os.environ` when omitted (the
+      startup step passes neither), so the test injects both rather than
+      replacing the module's imported `settings` or touching the process
+      environment (`TESTING.md`, "Unit Tests", mocking convention).
+      `tests/unit/test_apply_ansible_config.py` (unit): an operator
+      configuration stating a `log_path` is exported verbatim; empty, blank,
+      null and absent `ansible_cfg` export the packaged configuration; in
+      every case `ANSIBLE_CONFIG` is the only variable written, so no
+      `ANSIBLE_LOG_PATH`. With section 2's connectivity test this proves the
+      scenario for the exported configuration and the check's subprocess;
+      that the playbook subprocess inherits it rests on the runner passing no
+      `env`.
+- [x] 5.4 Add application integration tests in
       `test_unreadable_host_key_api.py`, through the canonical client.
       **Setup:**
       - Seed an enabled host whose protected key was encrypted under a
@@ -513,7 +527,27 @@ and, if no test covers `apply_ansible_config`, a unit test in
         value. The route returns it redacted.
 
       (D2, D4, D5)
-- [ ] 5.5 **Verification checkpoint.** Application integration: the
+      *Done (application integration, through the canonical clients):* five
+      tests. The unreadable host is seeded directly in each test that needs
+      it (the API protects every key under the configured key, so cannot
+      store one protected under another); the second host is registered
+      through `client.family.register_host` in the status test, the one that
+      reads it. The job test asserts the whole message is in the job's error
+      (the engine prefixes `Internal error: `), `retry_count` 0 and no
+      `next_retry_at`, and no playbook started. The connectivity test asserts
+      the detail equals the message and that the ping was never called. The
+      status test asserts the host's reason, both keys' `exists`, no reason
+      naming the second host, and that neither ciphertext nor the PEM text is
+      in the status JSON. The harness's playbook path does not exist, so the
+      component is not ready in every harness test; the tests assert the
+      host's own reason, not readiness alone. The redaction test hands both
+      `write_inventory` and `check_connectivity_with_inventory` to a real
+      runner over a `/bin/sh` stand-in `ansible`, as the task prescribes. The
+      fresh-context check noted that this reaches below the point
+      `TESTING.md` says to mock at (the runner, which wraps the subprocess
+      boundary) and repeats section 2's unit proof; it is kept as planned and
+      left for the round's review.
+- [x] 5.5 **Verification checkpoint.** Application integration: the
       provisioning service's suite, `make test-provisioning`, including the
       existing `test_system_api.py`, `test_hosts_api.py` and
       `test_vms_api.py`. Then `make test`.
@@ -528,6 +562,35 @@ and, if no test covers `apply_ansible_config`, a unit test in
       application integration proves it.
       Owed by validation: `tests.yml`, job `test · test-provisioning`. The
       service suite passes, including `test_unreadable_host_key_api.py`.
+      *Evidence:* `make dist`, then `make test`, exit 0. After the
+      fresh-context fixes (the `apply_ansible_config` seam and its unit test,
+      service code only): `make test-provisioning`, 649 unit passed, 584
+      application integration passed; `make check-packaging`, exit 0;
+      `make check-change`, every check passed. *End-to-end, confirmed with
+      qualifications:* both smoke tests exist under `provisioning_readonly`,
+      unrun until validation. `test_status_reports_execution_and_the_ansible_component`
+      checks only that the `ansible` component is present, so it shows the
+      readiness wiring (in place since section 4's commit) composes and
+      answers on a deployed release, not what it reports; under the lanes'
+      mocked executors host reasons do not count.
+      `test_connectivity_check_on_first_host_if_available` skips when no host
+      is registered, so it reaches the probe only on a release with a host.
+
+*Handoff (section 5):* sections 1 to 5 are implemented; closeout (6) remains.
+For closeout's comment check (6.1), the change also added or revised
+comments outside the files 6.1 names: `hosts/connection.py`'s module
+docstring, `compute_provisioning_ansible/connection.py`'s module docstring,
+`runner.py`'s `write_inventory` and `check_connectivity_with_inventory`
+docstrings, and `app_runtime.py`'s `apply_ansible_config`. For 6.3, the
+readiness detail's `exists` and its omission of a refused host are the
+behaviour to check "Execution readiness is reported in system status"
+against. Three items are left for the round's review, recorded in their
+sections: the stand-in-subprocess tests' test level (section 2's and 5.4's),
+the departures from D4's wording and the distribution's runtime `cryptography`
+dependency (3.1), and the readiness detail keeping schema version 1 against
+`RELEASING.md`'s rule on versioned envelopes (section 4's handoff). To prove
+anything about the service after changing a package it installs, run
+`make dist` before `make test` (section 4's handoff).
 
 ## 6. Closeout
 
