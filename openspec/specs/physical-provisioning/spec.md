@@ -1840,10 +1840,10 @@ versioned projection.
 
 No caller writes a lease. Commit MUST record a lease's window; provisioning MUST record its
 executor target when the reservation's fulfillment becomes active, in the transaction that
-makes it active, as the target that fulfillment recorded; and the lease lifecycle records
-release. A recorded target MUST NOT be replaced. A target the data prevents recording
-(metadata naming no job-backed target, or a reservation the site refuses) MUST NOT fail
-the activation; any other failure to record it MUST leave the fulfillment unactivated, for
+makes it active, as the target that fulfillment recorded; the site's capacity API records
+the lease's activation; and the lease lifecycle records release. A recorded target MUST NOT
+be replaced. A target the data prevents recording (metadata naming no job-backed target, or
+a reservation the site refuses) MUST NOT fail the fulfillment's activation; any other failure to record it MUST leave the fulfillment unactivated, for
 convergence to retry. Convergence MUST keep recording the target of every active
 job-backed fulfillment whose reservation records none, and MUST report each it cannot
 record and each reservation that records a different target. No route MAY change a lease's executor identity, its start, or its create or

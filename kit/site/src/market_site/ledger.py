@@ -1901,6 +1901,45 @@ class CapacityLedgerService:
             db.commit()
             return self._reservation_payload(reservation)
 
+    def activate_lease(self, capacity_reservation_id: str) -> dict[str, Any] | None:
+        """Record, once, that a lease began running against a provisioned resource.
+
+        Admissible only on a lease: a ``leased`` reservation with a lease end.
+        The first activation writes ``activated_at_utc`` from the site's clock;
+        a retry returns the reservation unchanged, with the instant first
+        recorded. Activation is a fact of the lease's lifecycle, not evidence of
+        delivery, and it changes nothing else: not the state, not the window an
+        earlier truncation may have shortened, not the debit admission
+        accounts, and it records no capacity event, since availability does not
+        move.
+
+        Returns ``None`` for an unknown reservation. Any other state, and a
+        ``leased`` reservation committed with no end -- an open-ended hold,
+        which has no lease tail -- is refused with
+        :class:`CapacityConflictError`; nothing is written, so activation can
+        neither commit a hold nor undo a release that claimed the lease first.
+        """
+        with self.serialized(), self._session_factory() as db:
+            reservation = self._find_reservation(
+                db, capacity_reservation_id=capacity_reservation_id
+            )
+            if reservation is None:
+                return None
+            if reservation.state != ReservationState.leased.value:
+                raise CapacityConflictError(
+                    f"reservation {reservation.capacity_reservation_id} is "
+                    f"{reservation.state}; cannot activate"
+                )
+            if reservation.lease_end_utc is None:
+                raise CapacityConflictError(
+                    f"reservation {reservation.capacity_reservation_id} has no "
+                    "lease tail; cannot activate"
+                )
+            if reservation.activated_at_utc is None:
+                reservation.activated_at_utc = datetime.now(timezone.utc).isoformat()
+                db.commit()
+            return self._reservation_payload(reservation)
+
     # ------------------------------------------------------------------
     # Lease tail (the merged vm_leases half of the reservation row)
     # ------------------------------------------------------------------
@@ -2770,6 +2809,7 @@ class CapacityLedgerService:
             "failure_message": reservation.failure_message,
             "released_at": reservation.released_at,
             "release_requested_at": reservation.release_requested_at,
+            "activated_at_utc": reservation.activated_at_utc,
         }
 
     def _reservation_payload_for_reserve(

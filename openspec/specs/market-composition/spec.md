@@ -474,12 +474,12 @@ Every publication candidate MUST carry one exact durable
 backing delegate its pool's declared label selects. Every domain MUST build it from
 the durable listing binding through the kit's one constructor, never from a
 published payload. The public offer's mode MUST equal the binding's mode.
-Reservation, commit, release, lease truncation, close, reopen, and restart recovery
-MUST reload and compare the same binding and MUST NOT infer a home site, default an
-offering mode, choose an authority from response data, or fan out after a binding
-is recorded. Every storefront capacity effect MUST go through the kit's capacity
-effects, whose guard is the binding's backing delegate, whether a domain composes the
-kit's capacity runtime or its own aggregate capacity client.
+Reservation, commit, lease activation, release, lease truncation, close, reopen, and
+restart recovery MUST reload and compare the same binding and MUST NOT infer a home
+site, default an offering mode, choose an authority from response data, or fan out
+after a binding is recorded. Every storefront capacity effect MUST go through the
+kit's capacity effects, whose guard is the binding's backing delegate, whether a
+domain composes the kit's capacity runtime or its own aggregate capacity client.
 
 #### Scenario: A domain publishes a capacity-backed candidate
 
@@ -516,6 +516,14 @@ kit's capacity runtime or its own aggregate capacity client.
 
 - **WHEN** commit, release, or fulfillment resumes after restart
 - **THEN** the effect is sent only to the site in the persisted binding, through
+  the kit's capacity effects, and a missing or unconfigured binding fails closed
+  without authority fan-out
+
+#### Scenario: A lease is activated
+
+- **WHEN** a storefront activates a lease, on its first attempt or on a retry after
+  restart
+- **THEN** the activation is sent only to the site in the persisted binding, through
   the kit's capacity effects, and a missing or unconfigured binding fails closed
   without authority fan-out
 

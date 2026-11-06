@@ -72,6 +72,26 @@ def test_the_host_definitions_routes_are_composed_once_each() -> None:
     )
 
 
+def test_the_lease_routes_read_and_end_leases_and_none_activates_one() -> None:
+    """Activation is written only through the site's capacity API, so the lease
+    routes every contribution serves are exactly the reads and the release
+    controls."""
+    lease_routes = {
+        (contract.method, contract.operation)
+        for contract in provisioning_route_table.contracts
+        if contract.pattern.pattern.startswith(("/api/v1/contract/leases", "/api/v1/leases"))
+    }
+
+    assert lease_routes == {
+        ("GET", "provisioning_lease_list"),
+        ("GET", "provisioning_lease_get"),
+        ("POST", "provisioning_lease_release_oversight"),
+        ("POST", "provisioning_lease_terminate"),
+        ("POST", "provisioning_lease_retry_release"),
+        ("POST", "provisioning_lease_force_release"),
+    }
+
+
 @pytest.mark.parametrize(
     ("method", "path"),
     [

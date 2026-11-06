@@ -3,8 +3,9 @@
 One surface serves every offering mode's leases as the neutral ``LeaseView``:
 get, list, terminate, release-oversight, retry-release, and force-release. A
 lease is the tail of a capacity reservation and is addressed by its reservation
-id. No route writes one: commit records its window and the deal's escrow, and
-provisioning records its target when the fulfillment becomes active. A
+id. No route writes one: commit records its window and the deal's escrow,
+provisioning records its target when the fulfillment becomes active, and the
+site's capacity API records its activation. A
 storefront reads and terminates its own leases as the seller; the list and the
 release controls are the administrator's.
 
@@ -146,16 +147,17 @@ async def seller(client_and_queue):
 class TestWrites:
     def test_no_route_writes_a_lease(self):
         """A lease's window is its commit's, moved only by the site's
-        truncation, and its target is recorded at activation."""
+        truncation, and its target is recorded when its fulfillment becomes
+        active."""
         for method in ("POST", "PATCH"):
             for path in ("/api/v1/contract/leases", "/api/v1/contract/leases/r-1"):
                 with pytest.raises(ValueError):
                     provisioning_route_table.resolve(method, path, {})
 
-    async def test_a_lease_reports_the_target_its_activation_recorded(
+    async def test_a_lease_reports_the_target_its_active_fulfillment_recorded(
         self, client_and_queue, seller
     ):
-        reservation_id = _committed("0xactivated")
+        reservation_id = _committed("0xtarget-recorded")
         ledger = _container_module.resolved_capacity_ledger_service
         with _container_module.resolved_session_factory() as db:
             ledger.record_executor_target_in_session(db, reservation_id, "tenant-guest-1")
@@ -232,6 +234,46 @@ class TestReads:
         assert all(lease.status == LeaseState.ACTIVE for lease in active.leases)
         with pytest.raises(ComputeProvisioningAuthenticationError):
             await seller.list_leases()
+
+    @pytest.mark.parametrize("offering_mode", ["vm", "bare_metal"])
+    async def test_a_lease_shows_the_instant_the_site_s_activation_recorded(
+        self, client_and_queue, seller, offering_mode
+    ):
+        """Committed and activated through the site client, a lease reads with
+        the site's instant through both the seller's get and the operator's
+        list, whatever its mode; a lease not activated reads with none."""
+        clients, _ = client_and_queue
+        _seeded()
+
+        async def committed(escrow_uid: str) -> str:
+            reserved = await clients.site.reserve(
+                claim={"offering_mode": offering_mode, "gpu_count": 1, "host_id": "kvm1"},
+                deal_ref={"escrow_uid": escrow_uid},
+            )
+            await clients.site.commit(
+                capacity_reservation_id=reserved["capacity_reservation_id"],
+                lease_start_utc=_START.isoformat(),
+                lease_end_utc=_END.isoformat(),
+            )
+            return reserved["capacity_reservation_id"]
+
+        activated_lease = await committed(f"0xactivated-{offering_mode}")
+        unactivated = await committed(f"0xunactivated-{offering_mode}")
+
+        activated = await clients.site.activate_lease(
+            capacity_reservation_id=activated_lease
+        )
+        recorded = datetime.fromisoformat(activated["activated_at_utc"])
+
+        assert (await seller.get_lease(activated_lease)).activated_at_utc == recorded
+        listed = {
+            lease.capacity_reservation_id: lease
+            for lease in (await clients.family.list_leases()).leases
+        }
+        assert listed[activated_lease].offering_mode == offering_mode
+        assert listed[activated_lease].activated_at_utc == recorded
+        assert (await seller.get_lease(unactivated)).activated_at_utc is None
+        assert listed[unactivated].activated_at_utc is None
 
 
 class TestRelease:

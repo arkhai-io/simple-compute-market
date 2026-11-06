@@ -214,6 +214,37 @@ def test_no_contract_registers_a_lease():
     assert not hasattr(contracts, "LeaseRegistration")
 
 
+def _lease_view(**overrides):
+    fields = {
+        "capacity_reservation_id": "res-7f3c",
+        "deal_ref": {},
+        "offering_mode": "vm",
+        "executor_target": "tenant-1",
+        "lease_start_utc": "2026-11-10T12:00:00Z",
+        "lease_end_utc": "2026-12-10T12:00:00Z",
+        "status": contracts.LeaseState.ACTIVE,
+        **overrides,
+    }
+    return contracts.LeaseView(**fields)
+
+
+def test_a_lease_view_carries_its_activation_instant_across_the_wire():
+    view = _lease_view(activated_at_utc="2026-11-10T12:07:41.204118Z")
+
+    wire = view.model_dump(mode="json")
+
+    assert wire["contract_version"] == "3.0"
+    assert wire["activated_at_utc"] == "2026-11-10T12:07:41.204118Z"
+    assert contracts.LeaseView.model_validate(wire) == view
+
+
+def test_a_lease_view_without_the_field_reads_as_no_activation_recorded():
+    wire = _lease_view().model_dump(mode="json")
+    del wire["activated_at_utc"]
+
+    assert contracts.LeaseView.model_validate(wire).activated_at_utc is None
+
+
 _GPU_FIELDS = {"gpu_count": 8, "gpu_model": "H200"}
 _CONNECTION = {"kind": "ssh", "public": {"ssh_host": "192.0.2.1"}}
 

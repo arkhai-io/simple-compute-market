@@ -3607,6 +3607,20 @@ def _migrate_lease_end_reports(engine: Engine) -> None:
     LeaseEndReportOutbox.__table__.create(engine, checkfirst=True)
 
 
+def _migrate_reservation_activated_at(engine: Engine) -> None:
+    """Add ``capacity_reservations.activated_at_utc``, null on every existing row.
+
+    Only the site's activation writes the instant. Nothing is backfilled: no
+    other value in the row records when a lease began running against a
+    provisioned resource, so a reservation stored before the column records no
+    activation. Null means only that; it is never evidence that a lease was not
+    delivered.
+    """
+    _add_column_if_missing(
+        engine, "capacity_reservations", "activated_at_utc", "VARCHAR"
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
@@ -3743,4 +3757,8 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("20261101_002_relay_grant_keys", _migrate_relay_grant_keys),
     Migration("20261101_003_relay_lease_grants", _migrate_relay_lease_grants),
     Migration("20261102_001_lease_end_reports", _migrate_lease_end_reports),
+    Migration(
+        "20261106_001_reservation_activated_at",
+        _migrate_reservation_activated_at,
+    ),
 )

@@ -3,8 +3,9 @@
 A lease records and releases; it never delivers. Its routes read and list
 leases and drive release: terminate, release-oversight, retry-release, and
 force-release. No route writes a lease: commit records its window, provisioning
-records its executor target when the fulfillment becomes active, and the lease
-lifecycle records release. Every route
+records its executor target when the fulfillment becomes active, the site's
+capacity API records its activation, and the lease lifecycle records release.
+Every route
 addresses a lease by its capacity reservation id, and every route reports the
 neutral ``LeaseView``, whatever the reservation's offering mode. A domain extends
 what a lease reports only by contributing a versioned projection, never by
@@ -67,6 +68,7 @@ def lease_view(reservation: dict[str, Any]) -> LeaseView:
         executor_target=str(reservation.get("executor_target") or ""),
         lease_start_utc=_parsed(reservation.get("lease_start_utc")),
         lease_end_utc=_parsed(reservation.get("lease_end_utc")),
+        activated_at_utc=_parsed(reservation.get("activated_at_utc")),
         create_job_id=reservation.get("create_job_id"),
         status=lease_state_for_reservation_state(str(reservation.get("state"))),
         release_job_id=reservation.get("release_job_id"),

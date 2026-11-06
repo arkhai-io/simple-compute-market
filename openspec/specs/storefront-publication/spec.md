@@ -745,13 +745,13 @@ than classified by a default.
 
 Publication provenance MUST separate common listing identity — origin site,
 offering mode, and source declaration identity — from admission provenance. Every
-storefront operation that reserves, commits, releases, or truncates capacity, or
-schedules or dispatches against it, MUST pass through the listing's binding and be
-refused by the binding's backing delegate before any site call unless an admission
-authority stands behind the listing; no such operation MAY reach a site without that
-guard. A refused admission MUST be reported as a conflict, distinct from an identity
-fault such as an unknown site or a changed binding. Operations that compare, copy, or
-carry listing identity MUST accept a binding of either backing.
+storefront operation that reserves, commits, activates, releases, or truncates
+capacity, or schedules or dispatches against it, MUST pass through the listing's
+binding and be refused by the binding's backing delegate before any site call unless
+an admission authority stands behind the listing; no such operation MAY reach a site
+without that guard. A refused admission MUST be reported as a conflict, distinct from
+an identity fault such as an unknown site or a changed binding. Operations that
+compare, copy, or carry listing identity MUST accept a binding of either backing.
 
 #### Scenario: An unbacked listing binds
 
@@ -777,7 +777,7 @@ carry listing identity MUST accept a binding of either backing.
 
 #### Scenario: A capacity operation receives an unbacked listing
 
-- **WHEN** a reservation, commit, release, scheduling, or dispatch operation is attempted for an unbacked listing
+- **WHEN** a reservation, commit, lease activation, release, scheduling, or dispatch operation is attempted for an unbacked listing
 - **THEN** the operation is refused before any effect, so no reservation record is created with no authority behind it
 
 #### Scenario: Recovery reserves for an accepted deal
