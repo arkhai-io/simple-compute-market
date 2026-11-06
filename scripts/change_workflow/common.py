@@ -25,6 +25,11 @@ FORMAT = 2
 # non-empty value marks a run unattended. The marker is internal: no repository or
 # runner reads it.
 UNATTENDED_RUN = "CHANGE_WORKFLOW_UNATTENDED"
+# Where Claude Code gives every command it starts the id of its session. The
+# variable is not documented, so a run where it is unset is refused rather than
+# recorded without a session, and `record --session` gives the id instead; what a
+# command invoked outside any session is kept for no line.
+SESSION_ID = "CLAUDE_CODE_SESSION_ID"
 
 Clock = Callable[[], datetime]
 Entry = dict[str, Any]

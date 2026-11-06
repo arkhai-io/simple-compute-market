@@ -48,6 +48,7 @@ def _checked(text: str) -> config.Configuration:
      "it declares run, start, collect"),
     ("[validation.parts.pipeline]\nstart = 'b'\n", "it declares start"),
     ("[validation.parts.local]\nrun = []\n", "validation.parts.local.run must name a command"),
+    ("[validation.parts.preflight]\nrun = 'a'\n", "no part takes the name"),
     ("[validation.parts.local]\nrun = 'a'\nretries = 2\n",
      "validation.parts.local.retries is no field"),
     ("[validation.parts.local]\nrun = 'a'\nowed = 'yes'\n",

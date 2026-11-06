@@ -10,7 +10,7 @@ with its exit status. An optional hook the configuration does not declare is
 skipped, the closing line and the record saying so.
 
 Which steps may run each hook is the engine's hook table (`graph.HOOK_STEPS`). An
-unattended run's marker names its step (`harness.UNATTENDED_RUN`), and `run`
+unattended run's marker names its step (`common.UNATTENDED_RUN`), and `run`
 refuses a hook its step is not listed for, naming both, before anything runs; with
 no marker, as in a session the owner holds, nothing is restricted. A forged marker
 is a step breaking its skill, which its deny rules and skill govern.
@@ -28,15 +28,32 @@ skipped only when `defaults.disable` names it; `check change <change>` runs them
 alone. A `pre-commit`, its defaults included, only reports, so a review may run it
 and the worktree is as it was.
 
-`openspec <arguments>` runs the configured OpenSpec command, or `openspec` on the
-path, with the arguments shell-quoted after it.
+`run validation <change> preflight` runs the preflight, and `run validation <change>
+<part> run|start|collect` a part's command, an owed part's with `--owed <workflow>`,
+the workflow its run is for, which any other part refuses. A `start` is a dispatch
+that returns at once, promising its last line of standard output is the marker its
+`collect` waits past: the engine keeps that marker in the checkout's Git directory,
+for the commit, the part, and the owed workflow, so owed runs dispatched side by
+side never share one, and a retried `start` replaces it, so a collect always waits
+past the newest dispatch. It fills the collect's `{after}` from it; with none kept
+the collect refuses, naming the start to run. Each part ends with the closing line,
+which also names the part's evidence directory. `run cleanup <change>` runs every
+part's cleanup in declaration order, as one list.
+
+Whatever ran is kept, naming its change, for the line of the session it ran in
+(`keep`), the session named by `CLAUDE_CODE_SESSION_ID`: the wrapper adds it to an
+unattended run's line as `invoked`, the review to a Claude review's, and `record`
+to an interactive run's. Outside a session nothing is kept.
 
 Contract: openspec/specs/change-workflow/spec.md, CW-b2xr, CW-k9vd, CW-u4pc, CW-y6mj,
-CW-e1sg, CW-c8lw, CW-v2dq, CW-i2we, and CW-t5hz.
+CW-e1sg, CW-c8lw, CW-v2dq, CW-i2we, CW-t5hz, CW-g4oz, CW-x9bt, CW-zkhs, CW-ikmm, and
+CW-q5fy.
 """
 
 from __future__ import annotations
 
+import fcntl
+import json
 import shlex
 import subprocess
 import sys
@@ -46,22 +63,33 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from . import index, skills, tasks
-from .common import UNATTENDED_RUN, Clock, Entry, StepError, utc_now
+from .common import SESSION_ID, UNATTENDED_RUN, Clock, Entry, StepError, utc_now
 from .config import (DEFAULT_CHECKS, PLACEHOLDER, PRE_COMMIT_FUNCTIONAL, Configuration,
                      ConfigError, inert, placeholders, require)
 from .find import ChangeNotFound, change_directory, is_archived
 from .graph import HOOK_STEPS, STEPS
 from .records import git_head
+from .running import git_state, invocations_directory, keep_invocations
 
 # The hooks `run` runs by name.
-NAMED =("after-functional-change", "pre-commit", "pre-commit-functional", "pre-archive")
+NAMED = ("after-functional-change", "pre-commit", "pre-commit-functional", "pre-archive")
+# Validation's preflight and parts, `run validation <change> …`, and every part's
+# cleanup, `run cleanup <change>`.
+VALIDATION, CLEANUP, PREFLIGHT = "validation", "cleanup", "preflight"
+PHASES = ("run", "start", "collect")
 # The prefix of every line the engine writes about a hook, so a reader tells it from
 # the commands' own output.
 PREFIX = "[change-workflow]"
+# Where a checkout keeps each change's started parts' markers, under its Git
+# directory.
+MARKERS = "change-validation"
 
 # Runs a shell command from the repository's root, its output passed through, and
 # returns its exit status.
 Shell = Callable[[str, Path], int]
+# Runs a shell command as `Shell` does, and also returns the last non-empty line of
+# its standard output: a `start`'s marker.
+Capture = Callable[[str, Path], tuple[int, str | None]]
 # Runs a default check that the engine holds in process, by name, for a change, and
 # returns its exit status.
 InProcess = Callable[[str, str, Path], int]
@@ -74,6 +102,21 @@ class HookError(StepError):
 
 def shell(command: str, root: Path) -> int:
     return subprocess.run(["sh", "-c", command], cwd=root).returncode
+
+
+def capture(command: str, root: Path) -> tuple[int, str | None]:
+    """Run `command` as `shell` does, passing each line of its standard output
+    through as it arrives, and return its status and its last non-empty line."""
+    process = subprocess.Popen(["sh", "-c", command], cwd=root, stdout=subprocess.PIPE,
+                               text=True, encoding="utf-8", errors="replace")
+    assert process.stdout is not None
+    last = None
+    for line in process.stdout:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+        if line.strip():
+            last = line.strip()
+    return process.wait(), last
 
 
 def fill(command: str, values: Mapping[str, str]) -> str:
@@ -135,17 +178,23 @@ class Invoked:
         return self.command or f"the {self.check} check"
 
 
-def closing_line(name: str, invoked: Sequence[Invoked], commit: str | None) -> str:
-    """The line the engine ends a hook with: `<prefix> <name> at <commit>: passed`,
-    or `failed:` and each failed command with its exit status; a hook with nothing
-    to run says it was skipped, and why."""
+def closing_line(name: str, invoked: Sequence[Invoked], commit: str | None,
+                 evidence: str | None = None, part: bool = False) -> str:
+    """The line the engine ends a hook or a part with, whatever its commands
+    printed: `<prefix> <name> at <commit>: passed, exit 0`, or `failed, exit <n>:`
+    and each failed command with its exit status, `<n>` the first's; a hook with
+    nothing to run says it was skipped, and why. A part's line ends `; evidence
+    <directory>`, or `none`."""
     where = f"{PREFIX} {name} at {commit or 'no commit'}"
-    if invoked and all(i.skipped for i in invoked):
-        return f"{where}: skipped, {invoked[0].skipped}"
     failed = [i for i in invoked if i.failed]
-    if not failed:
-        return f"{where}: passed"
-    return f"{where}: failed: " + "; ".join(f"{i.shown} (exit {i.exit_status})" for i in failed)
+    if invoked and all(i.skipped for i in invoked):
+        result = f"skipped, {invoked[0].skipped}"
+    elif not failed:
+        result = "passed, exit 0"
+    else:
+        result = f"failed, exit {failed[0].exit_status}: " + "; ".join(
+            f"{i.shown} (exit {i.exit_status})" for i in failed)
+    return f"{where}: {result}" + (f"; evidence {evidence or 'none'}" if part else "")
 
 
 @dataclass
@@ -161,6 +210,11 @@ class Hooks:
     timer: Callable[[], float] = time.monotonic
     head: Callable[[Path], str | None] = git_head
     echo: Callable[[str], None] = lambda shown: print(shown, flush=True)
+    capture: Capture = capture
+    # Where the change's started parts' markers are kept, and where a session's
+    # invocations wait for its line; None outside a Git checkout.
+    markers: Callable[[Path], Path | None] = lambda root: git_state(root, MARKERS)
+    invocations: Callable[[Path], Path | None] = invocations_directory
     # Every command, check, and skipped hook this invocation ran, in order.
     invoked: list[Invoked] = field(default_factory=list)
 
@@ -309,6 +363,149 @@ class Hooks:
         """The default checks alone, as `check change` runs them."""
         return self.finish("default checks", self.defaults(change))
 
+    # Validation's preflight and parts, and their cleanup.
+
+    def validation(self, change: str, base: str | None, part_name: str,
+                   phase: str | None = None, owed: str | None = None) -> bool:
+        """`run validation <change> preflight`, or a part's `run`, `start`, or
+        `collect`, held to the hook table. An owed part takes the workflow it is
+        owed for, and any other refuses one. A `start`'s last line of standard
+        output is kept as its marker, for the commit, the part, and the workflow,
+        replacing any kept before; the matching `collect` fills `{after}` with it,
+        and refuses with none kept."""
+        self.allow(VALIDATION)
+        commit = self.head(self.root)
+        if commit is None:
+            raise HookError("validation reads the commit at HEAD, and none could be read")
+        if part_name == PREFLIGHT:
+            if phase is not None or owed is not None:
+                raise HookError("the preflight takes no phase and no --owed")
+            name = f"{VALIDATION} {PREFLIGHT}"
+            commands = self.configuration.preflight
+            values = self.values(change, base)
+            if commands is None:
+                return self.finish(name, self.skip(VALIDATION, "not declared",
+                                                   phase=PREFLIGHT))
+            self.needs(commands, values, "validation.preflight")
+            return self.finish(name, self.run_commands(VALIDATION, commands, values,
+                                                       phase=PREFLIGHT))
+        part = self.configuration.part(part_name)
+        if phase not in PHASES:
+            raise HookError(f"a part is run with one of {', '.join(PHASES)}; got {phase!r}")
+        if (phase == "run") != (part.run is not None):
+            raise HookError(f"validation.parts.{part.name} declares {part.shape}, so it is "
+                            f"run with {' or '.join(part.shape.split(', '))}, not {phase}")
+        if part.owed and owed is None:
+            raise HookError(f"validation.parts.{part.name} is owed: give the workflow its run "
+                            "is for with --owed <workflow>")
+        if owed is not None and not part.owed:
+            raise HookError(f"validation.parts.{part.name} is not owed, so it takes no --owed")
+        values = self.values(change, base, **({"owed": owed} if owed is not None else {}))
+        key = _marker_key(commit, part.name, owed)
+        if phase == "collect":
+            after = self._kept(change).get(key)
+            if after is None:
+                raise HookError(f"no start of {part.name}{f' for {owed}' if owed else ''} at "
+                                f"{commit} has kept a marker; run `scripts/change-workflow "
+                                f"run validation {change} {part.name} start"
+                                f"{f' --owed {owed}' if owed else ''}` first")
+            values["after"] = after
+        commands = getattr(part, phase)
+        self.needs(commands, values, f"validation.parts.{part.name}.{phase}")
+        labels = {"part": part.name, "owed": owed, "phase": phase}
+        if phase == "start":
+            ran, marker = self._start(commands, values, labels)
+            self._keep_marker(change, key, marker if not any(i.failed for i in ran) else None)
+        else:
+            ran = self.run_commands(VALIDATION, commands, values, **labels)
+        name = " ".join([VALIDATION, part.name, *([owed] if owed else []), phase])
+        self.echo(closing_line(name, ran, commit, part.evidence, part=True))
+        return not any(i.failed for i in ran)
+
+    def _start(self, commands: Sequence[str], values: Mapping[str, str],
+               labels: Mapping[str, str | None]) -> tuple[list[Invoked], str | None]:
+        """Run a `start`'s commands, and return them and the last line its last
+        command printed."""
+        ran, marker = [], None
+        for command in commands:
+            resolved = fill(command, values)
+            self.echo(f"+ {resolved}")
+            printed: list[str | None] = []
+
+            def call(resolved: str = resolved) -> int:
+                status, last = self.capture(resolved, self.root)
+                printed.append(last)
+                return status
+
+            ran.append(self._timed(call, hook=VALIDATION, command=resolved, **labels))
+            marker = printed[0]
+        return ran, marker
+
+    def _markers_file(self, change: str) -> Path:
+        directory = self.markers(self.root)
+        if directory is None:
+            raise HookError(f"{self.root} is no Git checkout, so no start's marker can be kept")
+        return directory / f"{change}.json"
+
+    def _kept(self, change: str) -> dict[str, str]:
+        path = self._markers_file(change)
+        try:
+            with path.open("r", encoding="utf-8") as kept:
+                fcntl.flock(kept, fcntl.LOCK_SH)
+                return json.loads(kept.read() or "{}")
+        except FileNotFoundError:
+            return {}
+
+    def _keep_marker(self, change: str, key: str, marker: str | None) -> None:
+        """Keep `marker` for `key`, replacing any kept before; a start that failed,
+        or printed nothing, keeps none, so its collect refuses."""
+        path = self._markers_file(change)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Owed runs are started side by side, so the file is locked from reading it
+        # to writing it back.
+        with path.open("a+", encoding="utf-8") as kept:
+            fcntl.flock(kept, fcntl.LOCK_EX)
+            kept.seek(0)
+            markers = json.loads(kept.read() or "{}")
+            if marker is None:
+                markers.pop(key, None)
+            else:
+                markers[key] = marker
+            kept.seek(0)
+            kept.truncate()
+            kept.write(json.dumps(markers, ensure_ascii=False, indent=1, sort_keys=True))
+
+    def cleanup(self, change: str, base: str | None) -> bool:
+        """`run cleanup <change>`: every part's cleanup, in declaration order, as one
+        list, each command run whatever an earlier one reported."""
+        self.allow(CLEANUP)
+        parts = [part for part in self.configuration.parts or () if part.cleanup]
+        values = self.values(change, base)
+        for part in parts:
+            self.needs(part.cleanup or (), values, f"validation.parts.{part.name}.cleanup")
+        if not parts:
+            return self.finish(CLEANUP, self.skip(CLEANUP, "no part declares a cleanup"))
+        ran = [invoked for part in parts
+               for invoked in self.run_commands(CLEANUP, part.cleanup or (), values,
+                                                part=part.name, phase=CLEANUP)]
+        return self.finish(CLEANUP, ran)
+
+    def keep(self, change: str) -> None:
+        """Keep what this invocation ran for `change`, for the line of the session
+        it is part of. Keeping it is the record's, never the hook's: a failure to
+        keep it is said, and changes neither the hook's result nor its exit."""
+        try:
+            keep_invocations(self.invocations(self.root), self.environ.get(SESSION_ID),
+                             [{"change": change, **invoked.entry()}
+                              for invoked in self.invoked])
+        except (OSError, StepError) as exc:
+            print(f"WARNING: what this run invoked could not be kept for its session's "
+                  f"line: {exc}", file=sys.stderr)
+
+
+def _marker_key(commit: str, part: str, owed: str | None) -> str:
+    return " ".join([commit, part, *([owed] if owed else [])])
+
 
 def worktree_changes(root: Path) -> list[str]:
     """Every path the worktree changes against `HEAD`: staged, unstaged, and
@@ -346,15 +543,25 @@ def run_openspec(configuration: Configuration, arguments: Sequence[str], root: P
 
 
 def main(hook: str, change: str, *, root: Path, configuration: Configuration,
-         environ: Mapping[str, str], base: str | None = None,
+         environ: Mapping[str, str], base: str | None = None, part: str | None = None,
+         phase: str | None = None, owed: str | None = None,
          hooks: Hooks | None = None) -> int:
-    """`run <hook> <change>`: 0 when the hook passed, 1 when it failed or was refused,
-    its reason on standard error."""
+    """`run <hook> <change>`, `run validation <change> preflight|<part> <phase>`, or
+    `run cleanup <change>`: 0 when it passed, 1 when it failed or was refused, its
+    reason on standard error. What ran is kept for the session's line, however it
+    ended."""
     runner = hooks or Hooks(root, configuration, environ)
     try:
         change_directory(root, change)
-        passed = runner.named(hook, change, base, lambda: worktree_changes(root))
+        if hook == VALIDATION:
+            passed = runner.validation(change, base, part or "", phase, owed)
+        elif hook == CLEANUP:
+            passed = runner.cleanup(change, base)
+        else:
+            passed = runner.named(hook, change, base, lambda: worktree_changes(root))
     except (ChangeNotFound, ConfigError, HookError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
+    finally:
+        runner.keep(change)
     return 0 if passed else 1

@@ -241,7 +241,8 @@ table beside the graph), `scripts/change_workflow/harness.py` (the marker),
   (CW-y6mj), and a design step's functional change refused by the table.
   - Done: `hooks.worktree_changes` (`git status --porcelain=v1 -z
     --untracked-files=all`, both sides of a rename) and `config.inert`, which
-    matches an entry whole (`docs/` covers `docs/a.md`, not `docsite/a.md`); 4.2
+    matches an entry whole (an entry `docs/` covers a file under it, not one under
+    a sibling `docsite/` directory); 4.2
     should use `config.inert` for the next-step computation too, so the two never
     disagree. The four scenarios pass, plus staged, untracked, and renamed changes,
     a functional commit with no `pre-commit-functional` refused, one with it
@@ -288,24 +289,48 @@ invocations, `scripts/change_workflow/wrapper.py`, `scripts/change_workflow/log.
 (the optional `invoked` field), `scripts/change_workflow/cli.py` (`record`), and
 `scripts/change_workflow/push.py`.
 
-- [ ] 3.1 Add `run validation <change> preflight`, `run validation <change> <part>
+- [x] 3.1 Add `run validation <change> preflight`, `run validation <change> <part>
   run`, and `run validation <change> <part> start|collect [--owed <workflow>]` (D3,
   D8, CW-g4oz, CW-zkhs): `--owed` required by an owed part and refused by any other,
   filling `{owed}`. Each ends with the engine's closing line — the part, its owed
   workflow, the commit, `passed` or `failed`, the exit status, and the evidence
   directory — whatever the command printed (D10). Verify: unit tests for each shape,
   `--owed` required and refused, and the closing line's form.
-- [ ] 3.2 Keep a `start`'s marker, its last line of standard output, keyed by the
+  - Done: `Hooks.validation`. The closing line is section 2's, with the part's
+    evidence: `[change-workflow] validation <part>[ <owed>] <phase> at <commit>:
+    passed, exit 0; evidence <dir>`, or `failed, exit <n>: <command> (exit <n>);
+    …`. Outside the plan: every hook's line now carries the exit status too
+    (`passed, exit 0`, `failed, exit <n>:`), which D10 asks of every closing
+    line; section 2's tests were updated. Unit tests pass for each shape, the
+    preflight absent (skipped, saying so), `--owed` required and refused, a part
+    run in another shape or not declared, the table refusing another step, the
+    closing lines, and each malformed `run` form a usage error; an owed start and
+    collect through `cli.main` with a real `sh` (library integration). A part may
+    not be named `preflight`, which names the preflight (`config`).
+- [x] 3.2 Keep a `start`'s marker, its last line of standard output, keyed by the
   commit, the part, and the owed workflow, a later `start` of the same key replacing
   it, and fill `{after}` from it in the matching `collect`; a `collect` with no kept
   marker refuses, naming the `start` to run (D10, CW-x9bt). Verify: unit tests for
   "Two owed runs are collected side by side" and "The pipeline is collected"
   (CW-x9bt), and a retried `start` replacing the marker.
-- [ ] 3.3 Add `run cleanup <change>`, running every declared part's `cleanup` in
+  - Done: kept in `<git-dir>/change-validation/<change>.json`, locked from read to
+    write, since owed runs start side by side; a start that failed or printed
+    nothing removes its key's marker, so its collect refuses rather than wait past
+    an older dispatch; a collect at another commit finds none. `hooks.capture`
+    passes the start's output through as it arrives and keeps its last non-empty
+    line (library integration, a real `sh`). The scenarios and the replacement
+    pass (unit, the commands and the marker's directory faked). Markers are never
+    pruned; one entry per commit and part is small. A `start` that leaves a
+    background process holding its output keeps `capture` reading until it exits:
+    a dispatch must return at once, as D10's contract says.
+- [x] 3.3 Add `run cleanup <change>`, running every declared part's `cleanup` in
   declaration order as one list (D3, CW-ikmm). Verify: unit tests for "A change's
   validation left resources" and "A part's cleanup finds nothing" (CW-ikmm) with the
   commands faked.
-- [ ] 3.4 Record every invocation (D10, CW-q5fy): `run` and the guarded push keep, by
+  - Done: `Hooks.cleanup`, held to the table (archive cleanup only); with no part
+    declaring one it is skipped, saying so. Both scenarios pass (unit); one
+    through `cli.main` with a real `sh` (library integration).
+- [x] 3.4 Record every invocation (D10, CW-q5fy): `run` and the guarded push keep, by
   the session's id (`CLAUDE_CODE_SESSION_ID`), each hook, part, and command with its
   owed workflow and phase, the resolved command, its exit status, when it started,
   and how long it took; the wrapper adds them as `invoked` to the run's log line and
@@ -314,13 +339,46 @@ invocations, `scripts/change_workflow/wrapper.py`, `scripts/change_workflow/log.
   step's push is refused by the pre-push hook" and "Validation's Helm part fails"
   (CW-q5fy), with the push's hook faked; a line without `invoked` read unchanged by
   the next-step computation's tests in `scripts/tests/test_change_next_step.py`.
-- [ ] 3.5 Verification: `pytest -q scripts/tests/test_change_workflow_hooks.py
+  - Done: `running.keep_invocations`, `kept_invocations`, `drop_invocations`, in
+    `<git-dir>/change-invocations/<session>.jsonl`; `SESSION_ID` moved to
+    `common`. Each entry `run` keeps names its change, and a line takes its own
+    change's and the push's (which name none); entries are forgotten only once the
+    line is written, by exact match, the file emptied, never removed. Taking or
+    forgetting never stops a line; failing to keep warns and changes no hook's or
+    push's result. The push records each of its current pre-push scripts as
+    `pre-push` (4.1 moves it onto the hook runner). Beyond the task: the wrapper
+    takes every attempt's session (a retried or passed-over attempt has its own);
+    a review on Claude records its session's invocations on its own line; Codex is
+    given no `CLAUDE_CODE_SESSION_ID`, so a review started from a Claude session
+    never lands on that session's line. Evidence: both scenarios pass through the
+    wrapper (library integration, a real Git repository; the push's check a
+    script exiting 1; the Helm part a real `sh` exiting 2); `record` taking a
+    session's invocations, a refused record keeping them, nothing kept outside a
+    session (library integration); a resumed turn taking only what came since, a
+    retried attempt's taken, a review's taken and forgotten, an unreadable file
+    never stopping a line, and the store itself (unit). A line with `invoked`
+    routes as one without (`test_change_next_step.py`, unit); every existing
+    next-step test reads lines without it.
+  - Known limit: a review on Claude retried after a network error takes only its
+    last attempt's session; an earlier attempt's invocations stay kept. Reviews
+    run on Codex first, and the review rarely runs a hook.
+- [x] 3.5 Verification: `pytest -q scripts/tests/test_change_workflow_hooks.py
   scripts/tests/test_change_workflow_wrapper.py scripts/tests/test_change_workflow_log.py
   scripts/tests/test_change_workflow_cli_steps.py scripts/tests/test_check_push_ready.py
   scripts/tests/test_change_next_step.py` (unit, and library integration where a real
   Git repository or process is used) passes; `make test` passes. End-to-end: none in
   `e2e-tests/`; the round's validation, run through these commands once section 7
   moves the skill, is their evidence.
+  - Done: the six suites and the review suite pass, 677 tests; `make
+    test-release-tooling` (2510) and `make test` pass. End-to-end: confirmed none
+    in `e2e-tests/`. `make check-change` fails only on the specification index
+    (10.9).
+  - Handoff: section 6's `.agents/workflow.toml` comment for `ci` and task 3.1 use
+    `run validation <change> ci start --owed <workflow>`; `design.md`'s listing
+    still shows `run ci start <change> --owed <workflow>`, the form before 3.1.
+    Closeout's promotion (10.9) should also bring the change-workflow README's
+    "Its parts" to the `config` and `hooks` modules and `running`'s session
+    invocations.
 
 ## 4. The engine's held values come from the configuration (D5, D6, D7, D10)
 

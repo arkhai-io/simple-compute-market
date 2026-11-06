@@ -22,7 +22,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Protocol, Sequence
 
-from .common import UNATTENDED_RUN, repository_root
+from .common import SESSION_ID, UNATTENDED_RUN, repository_root
 from .outcome import harness_schema
 from .steps import Model, StepRules
 
@@ -273,13 +273,16 @@ class Progress:
 
 def run_codex(command: Sequence[str], log: Path) -> int:
     """Run a review in Codex, every command it starts seeing in its environment that
-    it is the unattended run of the review (`UNATTENDED_RUN`)."""
+    it is the unattended run of the review (`UNATTENDED_RUN`). Codex names no
+    session in its commands' environment, so the session of whatever started the
+    review is withheld: what the reviewer runs is no part of that session's line."""
     progress = Progress()
+    environment = {key: value for key, value in os.environ.items() if key != SESSION_ID}
     # Appended: a review's attempts on each of its models share one transcript.
     with log.open("a", encoding="utf-8") as stream:
         process = subprocess.Popen(list(command), cwd=repository_root(), stdin=subprocess.DEVNULL,
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                   env={**os.environ, UNATTENDED_RUN: "review"},
+                                   env={**environment, UNATTENDED_RUN: "review"},
                                    text=True, encoding="utf-8", errors="replace")
         assert process.stdout is not None
         try:

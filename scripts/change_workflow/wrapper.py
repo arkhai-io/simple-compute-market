@@ -13,7 +13,9 @@ for that one run, passed on its command line and recorded as `granted` on its li
 never added to the step table.
 
 Either way the run's event stream is kept as its transcript, and its outcome is
-appended to the workflow log. A run that crashes, ends without an outcome, or ends
+appended to the workflow log, with what the run invoked as `invoked`: what each of
+its attempts' sessions invoked for the change through `run`, and through the
+guarded push, that no line has taken yet. A run that crashes, ends without an outcome, or ends
 with one the schema rejects is logged `stopped` by the wrapper itself, and so is
 a triage whose outcome does not name the records it triaged. A step
 denied a tool ends `stopped` only when it cannot go on without it; one that went
@@ -23,7 +25,7 @@ turns after an outcome is logged with its last, the earlier ones kept beside it 
 `earlier`.
 
 Contract: openspec/specs/change-workflow/spec.md, CW-js86, CW-4vma, CW-1a4d,
-CW-k5mk, CW-xgq3, CW-0ia3, CW-ebmo, CW-1dld, CW-tl5v, and CW-yzer.
+CW-k5mk, CW-xgq3, CW-0ia3, CW-ebmo, CW-1dld, CW-tl5v, CW-yzer, and CW-q5fy.
 """
 
 from __future__ import annotations
@@ -40,7 +42,8 @@ from .harness import (NETWORK_RETRIES, Runner, claude_command, missing_program, 
 from .log import last_run, log_path, read_log, record_outcome, revisit_direction, revisit_refusal
 from .outcome import load_schema, outcome_problems, triage_outcome_problems
 from .records import git_head, next_transcript
-from .running import recorded_run, runs_directory, termination_deferred, termination_ends_the_run
+from .running import (drop_invocations, invocations_directory, kept_invocations, recorded_run,
+                      runs_directory, termination_deferred, termination_ends_the_run)
 from .steps import Model, StepRules, load_steps
 from .stream import Stream
 from .subagents import subagent_denials
@@ -154,6 +157,9 @@ class Wrapper:
     conversation: Callable[[Path, str], Path] = conversation_file
     # Where a run in progress is recorded, so no round view moves its checkout.
     runs: Callable[[Path], Path | None] = runs_directory
+    # Where a session's invocations through `run` and the guarded push wait for its
+    # line.
+    invocations: Callable[[Path], Path | None] = invocations_directory
 
     def run(self, step: str, change: str, *, arguments: str = "",
             sections: Sequence[int | str] | None = None, fresh: bool = False,
@@ -316,6 +322,15 @@ class Wrapper:
         if earlier := earlier_outcomes([r for a in attempts for r in a.results], logged):
             extra["earlier"] = earlier
         extra.update(self._cost(attempts or [stream], session, before))
+        ran = stream.session or session
+        directory = self.invocations(self.root)
+        # Every attempt's session: a retried or passed-over attempt ran under a
+        # session of its own, and what it invoked is this run's too.
+        sessions = list(dict.fromkeys(s for s in (session, *(a.session for a in attempts), ran)
+                                      if s))
+        taken = {s: kept_invocations(directory, s, change) for s in sessions}
+        if invoked := [entry for s in sessions for entry in taken[s]]:
+            extra["invoked"] = invoked
         try:
             log = log_path(self.root, change)
         except StepError:
@@ -324,9 +339,13 @@ class Wrapper:
             pass
         if step == "triage":
             outcome = triage_outcome(outcome, log.parent)
-        line = record_outcome(log, step, outcome, session=stream.session or session,
+        line = record_outcome(log, step, outcome, session=ran,
                               commit=self.head(self.root), extra=extra, schema=schema,
                               clock=self.clock)
+        # Forgotten only once the line holds them; a resumed turn's line takes only
+        # what the session invoked since.
+        for s in sessions:
+            drop_invocations(directory, s, taken[s])
         if failure is not None and not isinstance(failure, Exception):
             raise failure
         return line

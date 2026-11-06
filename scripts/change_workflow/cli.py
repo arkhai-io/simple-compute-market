@@ -60,7 +60,7 @@ from . import clone as clones
 from . import (config, cost_report, diagram, find, graph, history, hook, hooks, index,
                next_step, push, round_view, skills, tasks)
 from .clone import clone_of
-from .common import ORCHESTRATOR, UNATTENDED_RUN, StepError, repository_root
+from .common import ORCHESTRATOR, SESSION_ID, UNATTENDED_RUN, StepError, repository_root
 from .convert import convert_change
 from .find import ChangeNotFound, change_directory, is_archived
 from .graph import KINDS, STEPS
@@ -68,16 +68,12 @@ from .log import (branch_decisions, direction, history_log_path, last_entries, l
                   note_orchestrator, note_round, open_log, read_log, record_interactive)
 from .records import git_head
 from .review import DEFAULT_BASE, review_and_log
-from .running import stop
+from .running import drop_invocations, invocations_directory, kept_invocations, stop
 from .steps import STEP_TABLE, load_orchestrator
 from .watch import denial_report, watch
 from .wrapper import Wrapper
 
 DESCRIPTION = "Run the steps of an OpenSpec change, and keep its workflow log."
-# Where Claude Code gives every command it starts the id of its session. The
-# variable is not documented, so a run where it is unset is refused rather than
-# recorded without a session, and `--session` gives the id instead.
-SESSION_ID = "CLAUDE_CODE_SESSION_ID"
 ORCHESTRATE = "orchestrate"
 # The steps `start` starts: every step the graph runs but the review, which has a
 # subcommand of its own, and the orchestrating session.
@@ -116,13 +112,17 @@ ARCHIVED_ONLY = _taking(graph.ARCHIVED)
 
 def interactive_outcome(change: str, step: str, outcome_text: str, session: str | None,
                         environ: Mapping[str, str], root: Path,
-                        head: Callable[[Path], str | None] = git_head) -> dict:
+                        head: Callable[[Path], str | None] = git_head,
+                        invocations: Callable[[Path], Path | None] = invocations_directory
+                        ) -> dict:
     """Record the outcome of `step`, run interactively on `change`, and return its line.
 
     Refused, writing nothing, inside a run the wrapper started, whose outcome the
     wrapper records, so it is never written twice; without a session id, naming the
     variable; and for an outcome that is not JSON, or that the log's writer
-    refuses.
+    refuses. What the session invoked for this change through `run`, and through
+    the guarded push, that no line has taken yet is recorded as `invoked`, and
+    forgotten once the line is written, so a refused record keeps it for the next.
     """
     if environ.get(UNATTENDED_RUN):
         raise StepError(f"this run is the wrapper's ({UNATTENDED_RUN} is set), and the "
@@ -135,8 +135,12 @@ def interactive_outcome(change: str, step: str, outcome_text: str, session: str 
         outcome = json.loads(outcome_text)
     except json.JSONDecodeError as exc:
         raise StepError(f"--outcome is not JSON: {exc}") from exc
-    return record_interactive(log_path(root, change), step, outcome, session=session,
-                              commit=head(root))
+    directory = invocations(root)
+    invoked = kept_invocations(directory, session, change)
+    line = record_interactive(log_path(root, change), step, outcome, session=session,
+                              commit=head(root), invoked=invoked)
+    drop_invocations(directory, session, invoked)
+    return line
 
 
 def expand_sections(text: str) -> list[int | str]:
@@ -363,8 +367,14 @@ def _parser() -> argparse.ArgumentParser:
     run_ = commands.add_parser(
         "run", help="run one of the repository's hooks for a change, as the engine's hook "
                     "table allows the step")
-    run_.add_argument("hook", choices=hooks.NAMED)
+    run_.add_argument("hook", choices=(*hooks.NAMED, hooks.VALIDATION, hooks.CLEANUP))
     run_.add_argument("change")
+    run_.add_argument("part", nargs="?", default=None,
+                      help="validation only: `preflight`, or the part to run")
+    run_.add_argument("phase", nargs="?", default=None, choices=hooks.PHASES,
+                      help="validation's part only: run, start, or collect")
+    run_.add_argument("--owed", default=None,
+                      help="an owed part only: the workflow its run is for")
     run_.add_argument("--base", default=None,
                       help="the branch the change lands on, for a command naming {base}")
     commands.add_parser(
@@ -617,8 +627,14 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
     if args.command == "config" and args.action == "parts":
         return _config_parts(args, root)
     if args.command == "run":
+        if args.hook == hooks.VALIDATION:
+            if args.part is None or (args.part == hooks.PREFLIGHT) != (args.phase is None):
+                raise _Usage("run validation takes `preflight`, or a part and its phase")
+        elif (args.part, args.phase, args.owed) != (None, None, None):
+            raise _Usage(f"run {args.hook} takes the change alone")
         return hooks.main(args.hook, args.change, root=root, configuration=config.load(root),
-                          environ=environ, base=args.base)
+                          environ=environ, base=args.base, part=args.part, phase=args.phase,
+                          owed=args.owed)
     if args.command == "check" and args.check == "change":
         configuration = config.load(root)
         try:
@@ -630,6 +646,7 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
         main_, arguments = reached
         if args.command == "push":
             _round_view_closed(root)
+            return push.main(arguments, root=root, environ=environ)
         return main_(root) if arguments is None else main_(arguments, root=root)
     if args.command == "watch":
         # A change worked in its own clone writes its progress files there, and the
@@ -653,7 +670,7 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
     path = (history_log_path if args.command == "log" else log_path)(wrapper.root, args.change)
     if args.command == "record":
         line = interactive_outcome(args.change, args.step, args.outcome, args.session,
-                                   environ, wrapper.root, wrapper.head)
+                                   environ, wrapper.root, wrapper.head, wrapper.invocations)
         print(json.dumps(line, ensure_ascii=False))
         return 0
     if args.command == "convert":

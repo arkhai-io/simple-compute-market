@@ -33,6 +33,13 @@ guards it.
 
 The records live in the Git directory, as the round view's own state does, so
 they belong to the checkout the run is in and no branch carries them.
+
+Beside them, `<git-dir>/change-invocations/` keeps, by session id, each hook, part,
+and command a session invoked through `run` or the guarded push, until the
+session's line takes them: the wrapper's for an unattended run, the review's for a
+review on Claude, `record`'s for one the owner holds. Each entry names its change,
+and a line takes only its own change's and the guarded push's, which names none.
+Each session leaves its own file, emptied as its lines take what it holds.
 """
 
 from __future__ import annotations
@@ -42,6 +49,7 @@ import json
 import os
 import signal
 import subprocess
+import sys
 import threading
 import uuid
 from contextlib import contextmanager
@@ -53,6 +61,7 @@ from typing import Any, Callable, Iterator
 from .common import Clock, StepError, utc_now
 
 RUNS = "change-runs"
+INVOCATIONS = "change-invocations"
 
 
 @dataclass(frozen=True)
@@ -139,15 +148,109 @@ def termination_ends_the_run() -> Iterator[None]:
         signal.signal(signal.SIGTERM, previous)
 
 
-def runs_directory(root: Path) -> Path | None:
-    """Where a checkout's runs are recorded; None outside a Git checkout, which no
-    round view can move."""
-    result = subprocess.run(["git", "rev-parse", "--git-path", RUNS], cwd=root,
+def git_state(root: Path, name: str) -> Path | None:
+    """The directory `name` under the checkout's Git directory, which belongs to
+    the checkout and no branch; None outside a Git checkout."""
+    result = subprocess.run(["git", "rev-parse", "--git-path", name], cwd=root,
                             capture_output=True, text=True)
     if result.returncode != 0:
         return None
     path = Path(result.stdout.strip())
     return path if path.is_absolute() else root / path
+
+
+def runs_directory(root: Path) -> Path | None:
+    """Where a checkout's runs are recorded; None outside a Git checkout, which no
+    round view can move."""
+    return git_state(root, RUNS)
+
+
+def invocations_directory(root: Path) -> Path | None:
+    """Where a checkout keeps what each session invoked through `run` and the
+    guarded push until the session's line is written; None outside a Git checkout."""
+    return git_state(root, INVOCATIONS)
+
+
+def _session_file(directory: Path, session: str) -> Path:
+    # A session id names a file; one holding a separator could name another place.
+    if not session or "/" in session or session in (".", ".."):
+        raise StepError(f"{session!r} is no session id a file can be named for")
+    return directory / f"{session}.jsonl"
+
+
+def keep_invocations(directory: Path | None, session: str | None,
+                     entries: list[dict[str, Any]]) -> None:
+    """Keep `entries`, what one command invoked, for `session`'s line. Nothing is
+    kept outside a session or a Git checkout: no line would ever take it."""
+    if directory is None or not session or not entries:
+        return
+    directory.mkdir(parents=True, exist_ok=True)
+    with _session_file(directory, session).open("a", encoding="utf-8") as kept:
+        # Locked, so two commands of one session appending at once never interleave.
+        fcntl.flock(kept, fcntl.LOCK_EX)
+        kept.write("".join(json.dumps(entry, ensure_ascii=False) + "\n" for entry in entries))
+
+
+def _entries(text: str) -> list[str]:
+    # Split on newlines alone: an entry's command may hold a character `splitlines`
+    # also breaks on, which `json.dumps` leaves unescaped.
+    return [line for line in text.split("\n") if line.strip()]
+
+
+def kept_invocations(directory: Path | None, session: str | None,
+                     change: str | None = None) -> list[dict[str, Any]]:
+    """What `session` invoked and no line has taken yet, in order: of `change`, and
+    the guarded push's, which names none, when a change is given. Taking them never
+    stops a line being written: a file that cannot be read gives none, and a line
+    of it that is not an entry is passed over."""
+    if directory is None or not session:
+        return []
+    try:
+        path = _session_file(directory, session)
+        with path.open("r", encoding="utf-8") as kept:
+            fcntl.flock(kept, fcntl.LOCK_SH)
+            text = kept.read()
+    except (OSError, StepError):
+        return []
+    entries = []
+    for line in _entries(text):
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(entry, dict) and (change is None or entry.get("change") in (None, change)):
+            entries.append(entry)
+    return entries
+
+
+def drop_invocations(directory: Path | None, session: str | None,
+                     taken: list[dict[str, Any]]) -> None:
+    """Forget the invocations a line took, once it holds them; any the session kept
+    since, or for another change, are left for its next line. The file is emptied,
+    never removed: a command waiting on its lock to append would otherwise write to
+    a file no name holds. The line is written before this, so a failure here leaves
+    the entries kept, said on standard error, rather than failing what wrote it."""
+    if directory is None or not session or not taken:
+        return
+    try:
+        path = _session_file(directory, session)
+        with path.open("r+", encoding="utf-8") as kept:
+            fcntl.flock(kept, fcntl.LOCK_EX)
+            forget = [json.dumps(entry, ensure_ascii=False) for entry in taken]
+            rest = []
+            for line in _entries(kept.read()):
+                if line in forget:
+                    forget.remove(line)
+                else:
+                    rest.append(line)
+            kept.seek(0)
+            kept.truncate()
+            kept.write("".join(line + "\n" for line in rest))
+    except FileNotFoundError:
+        return
+    except (OSError, StepError) as exc:
+        print(f"WARNING: the invocations a line took could not be forgotten, so the "
+              f"session's next line may hold them again: {exc}", file=sys.stderr)
 
 
 @contextmanager

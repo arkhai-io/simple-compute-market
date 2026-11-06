@@ -195,6 +195,18 @@ def test_a_finished_design_goes_to_the_exit_it_named(tmp_path: Path) -> None:
     assert f"the design run at seq {run['seq']} chose review:design" in result["reason"]
 
 
+def test_a_line_recording_what_it_invoked_routes_as_one_without(tmp_path: Path) -> None:
+    """`invoked` is an optional field of a run's line: nothing routes on it."""
+    plain, recorded = tmp_path / "plain", tmp_path / "recorded"
+    _log(_repository(plain, "in design"), "design", _done(_to("review", "design")))
+    _log(_repository(recorded, "in design"), "design", _done(_to("review", "design")),
+         invoked=[{"hook": "pre-commit", "command": "make check-repository",
+                   "exit_status": 0, "started": "2026-11-06T09:00:00Z", "seconds": 1.5}])
+
+    assert ({k: v for k, v in _next(recorded).items() if k != "reason"}
+            == {k: v for k, v in _next(plain).items() if k != "reason"})
+
+
 def test_a_published_design_review_is_triaged(tmp_path: Path) -> None:
     root = _repository(tmp_path, "in design")
     _log(root, "design", _done(_to("review", "design")))

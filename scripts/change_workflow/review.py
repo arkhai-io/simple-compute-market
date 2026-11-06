@@ -47,7 +47,8 @@ from .harness import (NETWORK_RETRIES, CodexRunner, Reached, Runner, claude_comm
 from .log import LOG, log_path, read_log, record_outcome, unused_direction
 from .records import (TRANSCRIPTS, ChangedSince, changed_since, is_documentation, is_record,
                       next_number, validation_problem)
-from .running import recorded_run, runs_directory, termination_deferred, termination_ends_the_run
+from .running import (drop_invocations, invocations_directory, kept_invocations, recorded_run,
+                      runs_directory, termination_deferred, termination_ends_the_run)
 from .steps import HARNESSES, STEP_TABLE, Model, StepRules, load_steps
 from .stream import Stream, transcript_denials
 
@@ -557,12 +558,26 @@ def review_and_log(change: str, kind: str, *, root: Path | None = None,
 
 
 def _review_and_log(change: str, kind: str, *, root: Path, clock: Clock,
+                    invocations: Callable[[Path], Path | None] = invocations_directory,
                     **options: Any) -> Entry:
     log = log_path(root, change)
     head = options.get("head", _reviewed_head)
     started = clock()
     # The owner's choice of reviewer marks every line of the run, however it ends.
     override: Entry = {"override": True} if options.get("model") or options.get("effort") else {}
+
+    def logged(outcome: Entry, session: str | None, commit: str | None, extra: Entry) -> Entry:
+        """The line, with what a reviewer on Claude invoked through `run`: a Codex
+        reviewer's commands see no session of their own, so keep nothing."""
+        ran = session.removeprefix("claude:") if session and session.startswith(
+            "claude:") else None
+        directory = invocations(root)
+        invoked = kept_invocations(directory, ran, change)
+        line = record_outcome(log, "review", outcome, session=session, commit=commit,
+                              extra={**extra, **({"invoked": invoked} if invoked else {})},
+                              clock=clock)
+        drop_invocations(directory, ran, invoked)
+        return line
 
     def stopped(reason: str, record: Entry | None = None) -> Entry:
         try:
@@ -572,10 +587,8 @@ def _review_and_log(change: str, kind: str, *, root: Path, clock: Clock,
         record = {**(record or {}), **override}
         denials = record.pop("denials", [])
         session = record.pop("session", None)
-        return record_outcome(log, "review", {"outcome": "stopped", "message": reason,
-                                              "reason": reason, "denials": denials},
-                              session=session, commit=commit, extra={"kind": kind, **record},
-                              clock=clock)
+        return logged({"outcome": "stopped", "message": reason, "reason": reason,
+                       "denials": denials}, session, commit, {"kind": kind, **record})
 
     interrupted: list[Entry] = []
     try:
@@ -596,5 +609,4 @@ def _review_and_log(change: str, kind: str, *, root: Path, clock: Clock,
     outcome, session, commit, reviewer = review_outcome(path, kind)
     reviewer.update(review_cost(path.parent / TRANSCRIPTS / path.with_suffix(".log").name,
                                 log, session, reviewer.get("harness"), started))
-    return record_outcome(log, "review", outcome, session=session, commit=commit,
-                          extra={"kind": kind, "record": path.name, **reviewer}, clock=clock)
+    return logged(outcome, session, commit, {"kind": kind, "record": path.name, **reviewer})

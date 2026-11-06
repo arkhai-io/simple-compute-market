@@ -20,21 +20,28 @@ in a repository that provides none. Each is run as Git runs a pre-push hook: the
 remote as its argument, and one line on standard input naming the branch, `HEAD`,
 and an all-zero remote object, so it reads every commit the remote's refs lack.
 Every check runs whatever another reports, so one refusal names every reason.
+Each check run is kept, as `pre-push`, for the line of the session pushing, with
+the command it ran and its exit status.
 
-Contract: openspec/specs/change-workflow/spec.md, CW-59c7, CW-p7kq;
+Contract: openspec/specs/change-workflow/spec.md, CW-59c7, CW-p7kq, CW-q5fy;
 openspec/specs/market-change-workflow/spec.md, MCW-farr, MCW-q8vd.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
+import shlex
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Mapping, Sequence
 
-from .common import StepError, repository_root
+from .common import SESSION_ID, Clock, StepError, repository_root, utc_now
+from .hooks import Invoked
+from .running import invocations_directory, keep_invocations
 
 PROTECTED = ("main", "dev")
 DEFAULT_REMOTE = "origin"
@@ -93,18 +100,25 @@ def check(root: Path) -> tuple[PushTarget | None, list[str]]:
     return (None if problems else target), problems
 
 
-def pre_push_findings(root: Path, target: PushTarget) -> list[str]:
+def pre_push_findings(root: Path, target: PushTarget,
+                      invoked: list[Invoked] | None = None,
+                      clock: Clock = utc_now) -> list[str]:
     """Every reason the repository's pre-push checks refuse the push, of those it
-    provides."""
+    provides; each check run is added to `invoked`."""
     head = _git(root, "rev-parse", "--verify", "HEAD").stdout.strip()
     ref = f"refs/heads/{target.branch}"
     findings: list[str] = []
     for script, *arguments in PRE_PUSH_CHECKS:
         if not (root / script).is_file():
             continue
-        result = subprocess.run(
-            [sys.executable, str(root / script), *arguments, target.remote], cwd=root,
-            input=f"{ref} {head} {ref} {_NO_OBJECT}\n", capture_output=True, text=True)
+        command = [sys.executable, str(root / script), *arguments, target.remote]
+        started, begun = clock().strftime("%Y-%m-%dT%H:%M:%SZ"), time.monotonic()
+        result = subprocess.run(command, cwd=root, input=f"{ref} {head} {ref} {_NO_OBJECT}\n",
+                                capture_output=True, text=True)
+        if invoked is not None:
+            invoked.append(Invoked(hook="pre-push", command=shlex.join(command),
+                                   exit_status=result.returncode, started=started,
+                                   seconds=time.monotonic() - begun))
         if result.returncode == 0:
             continue
         # A check may give its reasons on either stream, as a Git hook may.
@@ -115,7 +129,8 @@ def pre_push_findings(root: Path, target: PushTarget) -> list[str]:
     return findings
 
 
-def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
+def main(argv: Sequence[str] | None = None, root: Path | None = None,
+         environ: Mapping[str, str] = os.environ) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("action", choices=("check", "push"))
     args = parser.parse_args(argv)
@@ -132,7 +147,16 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
               file=sys.stderr)
         return 1
     assert target is not None
-    findings = pre_push_findings(root, target)
+    invoked: list[Invoked] = []
+    findings = pre_push_findings(root, target, invoked)
+    # Kept for the line of the session pushing, whatever the checks found; a failure
+    # to keep it is the record's, and refuses no push.
+    try:
+        keep_invocations(invocations_directory(root), environ.get(SESSION_ID),
+                         [entry.entry() for entry in invoked])
+    except (OSError, StepError) as exc:
+        print(f"WARNING: the pre-push checks run could not be kept for the session's line: "
+              f"{exc}", file=sys.stderr)
     if findings:
         for finding in findings:
             print("REFUSED: " + finding, file=sys.stderr)

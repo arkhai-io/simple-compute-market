@@ -14,7 +14,11 @@ from pathlib import Path
 
 import pytest
 
+from change_workflow import cli
 from change_workflow import push as guard
+from change_workflow.common import SESSION_ID, UNATTENDED_RUN
+from change_workflow.running import invocations_directory, kept_invocations
+from change_workflow_fixtures import CHANGE, SESSION, VALID, FakeClaude, event_lines, make_wrapper
 
 PUBLIC_CONTENT, SECRETS = (script for script, *_ in guard.PRE_PUSH_CHECKS)
 
@@ -182,6 +186,42 @@ def test_a_pre_push_check_failing_silently_is_named(
     assert guard.main(["push"], root=repo) == 1
     assert "exited with status 3" in capsys.readouterr().err
     assert _remote_head(repo, "feat/change") == ""
+
+
+def test_a_steps_push_refused_by_the_pre_push_hook_is_on_the_runs_line(repo: Path) -> None:
+    """CW-q5fy: the run's log line lists `pre-push` with the command it ran and its
+    exit status, and nothing is left kept once the line holds it."""
+    _provide_check(repo, "import sys\nprint('REFUSED: a private path')\nsys.exit(1)\n")
+    with (repo / ".git/info/exclude").open("a", encoding="utf-8") as exclude:
+        exclude.write("/openspec/changes/*/reviews/\n")
+    pushed: list[int] = []
+
+    class Pushing(FakeClaude):
+        """A validation run whose step makes the guarded push."""
+
+        def __call__(self, command, cwd, feed, step) -> int:
+            pushed.append(cli.main(["push"], root=repo,
+                                   environ={SESSION_ID: SESSION, UNATTENDED_RUN: step}))
+            return super().__call__(command, cwd, feed, step)
+
+    line = make_wrapper(repo, Pushing((event_lines(VALID["finished"]), 0))).run("validate",
+                                                                               CHANGE)
+
+    assert pushed == [1]
+    (invoked,) = line["invoked"]
+    assert (invoked["hook"], invoked["exit_status"]) == ("pre-push", 1)
+    assert invoked["command"].endswith(f"{PUBLIC_CONTENT} --pre-push origin")
+    assert {"started", "seconds"} <= invoked.keys()
+    assert kept_invocations(invocations_directory(repo), SESSION) == []
+
+
+def test_a_push_outside_any_session_keeps_nothing(repo: Path) -> None:
+    _provide_check(repo, "import sys\nsys.exit(0)\n")
+
+    assert guard.main(["push"], root=repo, environ={}) == 0
+
+    kept = invocations_directory(repo)
+    assert kept is not None and not kept.exists()
 
 
 def _provide_this_repositorys_check(repo: Path) -> None:

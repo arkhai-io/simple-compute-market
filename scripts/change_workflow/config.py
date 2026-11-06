@@ -257,6 +257,9 @@ def _parts(value: Any) -> tuple[Part, ...]:
     parts: list[Part] = []
     for name, declared in value.items():
         where = f"validation.parts.{name}"
+        if name == "preflight":
+            raise ConfigError(f"{where}: `preflight` names validation's preflight, so no part "
+                              "takes the name")
         table = _table(where, declared, _PART_KEYS)
         owed = table.get("owed", False)
         if not isinstance(owed, bool):

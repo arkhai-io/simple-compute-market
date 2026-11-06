@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -14,12 +15,17 @@ import pytest
 
 from change_workflow import config, hooks
 from change_workflow.cli import main
+from change_workflow.common import SESSION_ID, StepError
 from change_workflow.graph import HOOK_STEPS, STEPS
+from change_workflow.harness import run_codex
 from change_workflow.hooks import Hooks
 from change_workflow.log import read_log
-from change_workflow.review import run_review
-from change_workflow_fixtures import (CHANGE, VALID, FakeClaude, claude_review, codex_missing,
-                                      configured, event_lines, make_wrapper, review_text)
+from change_workflow.review import review_and_log, run_review
+from change_workflow.running import (drop_invocations, invocations_directory, keep_invocations,
+                                     kept_invocations)
+from change_workflow_fixtures import (CHANGE, NETWORK, SESSION, VALID, FakeClaude,
+                                      claude_review, codex_missing, configured, event_lines,
+                                      make_wrapper, review_text)
 from change_workflow_fixtures import repository as repository_with_records
 
 AT = datetime(2026, 11, 6, 9, 0, 0, tzinfo=timezone.utc)
@@ -82,7 +88,7 @@ def test_two_checks_fail(tmp_path: Path) -> None:
     assert shell.commands == ["make check-packaging", "make test"]
     assert [(i.command, i.exit_status) for i in runner.invoked] == [
         ("make check-packaging", 2), ("make test", 1)]
-    assert echoed[-1] == ("[change-workflow] pre-commit-functional at c0ffee: failed: "
+    assert echoed[-1] == ("[change-workflow] pre-commit-functional at c0ffee: failed, exit 2: "
                           "make check-packaging (exit 2); make test (exit 1)")
 
 
@@ -294,7 +300,7 @@ def test_an_absent_pre_commit_runs_the_defaults_and_records_its_skip(tmp_path: P
     assert runner.named("pre-commit", CHANGE, None, lambda: [])
 
     assert "[change-workflow] hooks.pre-commit: not declared; the default checks alone" in echoed
-    assert echoed[-1] == "[change-workflow] pre-commit at c0ffee: passed"
+    assert echoed[-1] == "[change-workflow] pre-commit at c0ffee: passed, exit 0"
     assert runner.invoked[-1].entry()["skipped"] == "not declared"
 
 
@@ -472,3 +478,488 @@ def test_run_refuses_an_unknown_change(tmp_path: Path,
                                        capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["run", "pre-archive", "no-such-change"], root=tmp_path, environ={}) == 1
     assert "no-such-change" in capsys.readouterr().err
+
+
+# Validation's preflight and parts, the kept marker, and the closing line.
+
+PARTS = """
+[validation]
+preflight = "make check-uv-version"
+
+[validation.parts.pipeline]
+start = "make run-e2e"
+collect = "make fetch-e2e-logs E2E_AFTER_RUN={after}"
+evidence = ".snapshot/e2e-logs/"
+
+[validation.parts.ci]
+owed = true
+start = "make run-ci WORKFLOW={owed}"
+collect = "make validate-ci WORKFLOW={owed} CI_AFTER_RUN={after}"
+evidence = ".snapshot/validation/"
+
+[validation.parts.local]
+run = "make validate-local"
+evidence = ".snapshot/validation/"
+
+[validation.parts.helm]
+after = "local"
+run = "make validate-helm CHANGE={change}"
+evidence = ".snapshot/validation/"
+cleanup = ["make record-capacity CHANGE={change}", "make -C helm teardown CHANGE={change}"]
+"""
+
+
+class Capture:
+    """Stands in for a `start`'s command: records it, and prints the next marker."""
+
+    def __init__(self, *printed: tuple[int, str | None]) -> None:
+        self.printed = list(printed)
+        self.commands: list[str] = []
+
+    def __call__(self, command: str, root: Path) -> tuple[int, str | None]:
+        self.commands.append(command)
+        return self.printed.pop(0)
+
+
+def _validating(root: Path, text: str = PARTS, shell: Shell | None = None,
+                capture: Capture | None = None, echoed: list[str] | None = None,
+                step: str | None = "validate", head: str = "c0ffee") -> Hooks:
+    runner = _hooks(root, text, environ={UNATTENDED: step} if step else {}, shell=shell,
+                    echoed=echoed)
+    runner.capture = capture or Capture()
+    runner.markers = lambda _: root / "markers"
+    runner.head = lambda _: head
+    return runner
+
+
+def test_the_preflight_runs_and_closes(tmp_path: Path) -> None:
+    shell, echoed = Shell(), []
+    runner = _validating(tmp_path, shell=shell, echoed=echoed)
+
+    assert runner.validation(CHANGE, None, "preflight")
+
+    assert shell.commands == ["make check-uv-version"]
+    assert echoed[-1] == "[change-workflow] validation preflight at c0ffee: passed, exit 0"
+
+
+def test_an_absent_preflight_is_skipped_saying_so(tmp_path: Path) -> None:
+    echoed: list[str] = []
+    runner = _validating(tmp_path, "[validation.parts.local]\nrun = 'true'\n", echoed=echoed)
+
+    assert runner.validation(CHANGE, None, "preflight")
+
+    assert echoed == ["[change-workflow] validation preflight at c0ffee: skipped, not declared"]
+
+
+def test_a_part_ends_with_the_engines_closing_line(tmp_path: Path) -> None:
+    shell, echoed = Shell({f"make validate-helm CHANGE={CHANGE}": 2}), []
+    runner = _validating(tmp_path, shell=shell, echoed=echoed)
+
+    assert not runner.validation(CHANGE, None, "helm", "run")
+
+    assert echoed[-1] == (
+        f"[change-workflow] validation helm run at c0ffee: failed, exit 2: make validate-helm "
+        f"CHANGE={CHANGE} (exit 2); evidence .snapshot/validation/")
+    assert [i.entry() for i in runner.invoked] == [
+        {"hook": "validation", "part": "helm", "phase": "run",
+         "command": f"make validate-helm CHANGE={CHANGE}", "exit_status": 2,
+         "started": "2026-11-06T09:00:00Z", "seconds": 0.0}]
+
+
+def test_an_owed_parts_closing_line_names_its_workflow(tmp_path: Path) -> None:
+    echoed: list[str] = []
+    runner = _validating(tmp_path, capture=Capture((0, "401")), echoed=echoed)
+
+    assert runner.validation(CHANGE, None, "ci", "start", owed="ci.yml")
+
+    assert echoed[-1] == ("[change-workflow] validation ci ci.yml start at c0ffee: passed, "
+                          "exit 0; evidence .snapshot/validation/")
+
+
+@pytest.mark.parametrize("part,phase,owed,refused", [
+    ("ci", "start", None, "validation.parts.ci is owed: give the workflow"),
+    ("local", "run", "ci.yml", "validation.parts.local is not owed, so it takes no --owed"),
+    ("local", "start", None, "declares run, so it is run with run, not start"),
+    ("pipeline", "run", None, "declares start, collect, so it is run with start or collect"),
+    ("smoke", "run", None, "declares no validation part 'smoke'"),
+])
+def test_a_part_run_another_way_than_it_declares_is_refused(
+        tmp_path: Path, part: str, phase: str, owed: str | None, refused: str) -> None:
+    shell = Shell()
+    runner = _validating(tmp_path, shell=shell)
+
+    with pytest.raises((hooks.HookError, config.ConfigError), match=refused):
+        runner.validation(CHANGE, None, part, phase, owed)
+    assert shell.commands == []
+
+
+def test_only_validation_runs_its_parts(tmp_path: Path) -> None:
+    with pytest.raises(hooks.HookError, match="the implement step may not run validation"):
+        _validating(tmp_path, step="implement").validation(CHANGE, None, "local", "run")
+
+
+@pytest.mark.parametrize("arguments", [
+    ["run", "validation", CHANGE], ["run", "validation", CHANGE, "local"],
+    ["run", "validation", CHANGE, "preflight", "run"],
+    ["run", "pre-commit", CHANGE, "local"], ["run", "cleanup", CHANGE, "--owed", "ci.yml"],
+])
+def test_run_takes_each_form_alone(tmp_path: Path, arguments: list[str]) -> None:
+    configured(_change(tmp_path), PARTS)
+
+    assert main(arguments, root=tmp_path, environ={}) == 2
+
+
+def test_two_owed_runs_are_collected_side_by_side(tmp_path: Path) -> None:
+    """CW-x9bt: each collect waits past its own start's marker."""
+    shell = Shell()
+    runner = _validating(tmp_path, shell=shell, capture=Capture((0, "401"), (0, "402")))
+
+    assert runner.validation(CHANGE, None, "ci", "start", owed="ci.yml")
+    assert runner.validation(CHANGE, None, "ci", "start", owed="docker.yml")
+    assert runner.validation(CHANGE, None, "ci", "collect", owed="docker.yml")
+    assert runner.validation(CHANGE, None, "ci", "collect", owed="ci.yml")
+
+    assert runner.capture.commands == ["make run-ci WORKFLOW=ci.yml",
+                                       "make run-ci WORKFLOW=docker.yml"]
+    assert shell.commands == ["make validate-ci WORKFLOW=docker.yml CI_AFTER_RUN=402",
+                              "make validate-ci WORKFLOW=ci.yml CI_AFTER_RUN=401"]
+
+
+def test_the_pipeline_is_collected(tmp_path: Path) -> None:
+    """CW-x9bt: the engine fills `{after}`, with no marker passed by the skill."""
+    shell = Shell()
+    runner = _validating(tmp_path, shell=shell, capture=Capture((0, "40733870392")))
+
+    runner.validation(CHANGE, None, "pipeline", "start")
+    runner.validation(CHANGE, None, "pipeline", "collect")
+
+    assert shell.commands == ["make fetch-e2e-logs E2E_AFTER_RUN=40733870392"]
+
+
+def test_a_retried_start_replaces_its_marker(tmp_path: Path) -> None:
+    shell = Shell()
+    runner = _validating(tmp_path, shell=shell, capture=Capture((0, "401"), (0, "405")))
+
+    runner.validation(CHANGE, None, "pipeline", "start")
+    runner.validation(CHANGE, None, "pipeline", "start")
+    runner.validation(CHANGE, None, "pipeline", "collect")
+
+    assert shell.commands == ["make fetch-e2e-logs E2E_AFTER_RUN=405"]
+
+
+@pytest.mark.parametrize("printed", [(1, "401"), (0, None)])
+def test_a_start_that_failed_or_printed_nothing_keeps_no_marker(
+        tmp_path: Path, printed: tuple[int, str | None]) -> None:
+    runner = _validating(tmp_path, capture=Capture((0, "399"), printed))
+    runner.validation(CHANGE, None, "pipeline", "start")
+
+    runner.validation(CHANGE, None, "pipeline", "start")
+
+    with pytest.raises(hooks.HookError, match="has kept a marker"):
+        runner.validation(CHANGE, None, "pipeline", "collect")
+
+
+def test_a_collect_with_no_marker_names_the_start_to_run(tmp_path: Path) -> None:
+    shell = Shell()
+    runner = _validating(tmp_path, shell=shell)
+
+    with pytest.raises(hooks.HookError,
+                       match=rf"run `scripts/change-workflow run validation {CHANGE} ci start "
+                             r"--owed ci.yml` first"):
+        runner.validation(CHANGE, None, "ci", "collect", owed="ci.yml")
+    assert shell.commands == []
+
+
+def test_a_marker_is_kept_for_its_commit(tmp_path: Path) -> None:
+    started = _validating(tmp_path, capture=Capture((0, "401")), head="aaaa")
+    started.validation(CHANGE, None, "pipeline", "start")
+
+    with pytest.raises(hooks.HookError, match="at bbbb has kept a marker"):
+        _validating(tmp_path, head="bbbb").validation(CHANGE, None, "pipeline", "collect")
+
+
+def test_a_start_passes_its_output_through_and_keeps_its_last_line(
+        tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
+    """Library integration: a real `sh` prints the dispatch's output and its marker."""
+    assert hooks.capture("printf 'dispatched\\n4073\\n\\n'", tmp_path) == (0, "4073")
+
+    assert capfd.readouterr().out == "dispatched\n4073\n\n"
+
+
+# `run cleanup`: every part's cleanup, as one list.
+
+def test_a_changes_validation_left_resources(tmp_path: Path) -> None:
+    """CW-ikmm: archive cleanup runs the Helm part's cleanup, in order."""
+    shell, echoed = Shell(), []
+    runner = _validating(tmp_path, shell=shell, echoed=echoed, step="archive-cleanup")
+
+    assert runner.cleanup(CHANGE, None)
+
+    assert shell.commands == [f"make record-capacity CHANGE={CHANGE}",
+                              f"make -C helm teardown CHANGE={CHANGE}"]
+    assert [(i.part, i.phase) for i in runner.invoked] == [("helm", "cleanup")] * 2
+
+
+def test_a_parts_cleanup_finds_nothing(tmp_path: Path) -> None:
+    """CW-ikmm: a cleanup that removes nothing succeeds; one failing still lets the
+    rest run, and fails the cleanup."""
+    text = PARTS.replace('[validation.parts.local]\nrun = "make validate-local"',
+                         '[validation.parts.local]\nrun = "make validate-local"\n'
+                         'cleanup = "make dist-clean"')
+    shell = Shell({"make dist-clean": 0, f"make record-capacity CHANGE={CHANGE}": 1})
+    runner = _validating(tmp_path, text, shell=shell, step="archive-cleanup")
+
+    assert not runner.cleanup(CHANGE, None)
+
+    assert shell.commands == ["make dist-clean", f"make record-capacity CHANGE={CHANGE}",
+                              f"make -C helm teardown CHANGE={CHANGE}"]
+
+
+def test_no_part_declaring_a_cleanup_is_skipped_saying_so(tmp_path: Path) -> None:
+    echoed: list[str] = []
+    runner = _validating(tmp_path, "[validation.parts.local]\nrun = 'true'\n", echoed=echoed,
+                         step="archive-cleanup")
+
+    assert runner.cleanup(CHANGE, None)
+
+    assert echoed == ["[change-workflow] cleanup at c0ffee: skipped, no part declares a cleanup"]
+
+
+def test_only_archive_cleanup_runs_the_cleanups(tmp_path: Path) -> None:
+    with pytest.raises(hooks.HookError, match="the validate step may not run cleanup"):
+        _validating(tmp_path).cleanup(CHANGE, None)
+
+
+# What a run invoked, kept by its session for its line.
+
+def _ignoring_records(root: Path) -> Path:
+    with (root / ".git/info/exclude").open("a", encoding="utf-8") as exclude:
+        exclude.write("/openspec/changes/*/reviews/\n")
+    return root
+
+
+def test_validations_helm_part_fails(repository: Path) -> None:
+    """CW-q5fy: library integration, a real `sh` and Git directory; the run's line
+    lists the part with its resolved command and exit status 2."""
+    configured(_ignoring_records(repository),
+               "[validation.parts.helm]\nrun = 'exit 2'\nevidence = '.snapshot/validation/'\n")
+    ran: list[int] = []
+
+    class Validating(FakeClaude):
+        """A validation run whose step runs the Helm part."""
+
+        def __call__(self, command, cwd, feed, step) -> int:
+            ran.append(main(["run", "validation", CHANGE, "helm", "run"], root=repository,
+                            environ={SESSION_ID: SESSION, UNATTENDED: step}))
+            return super().__call__(command, cwd, feed, step)
+
+    line = make_wrapper(repository, Validating((event_lines(VALID["finished"]), 0))).run(
+        "validate", CHANGE)
+
+    assert ran == [1]
+    (invoked,) = line["invoked"]
+    assert {key: invoked[key] for key in ("hook", "part", "phase", "command", "exit_status")} \
+        == {"hook": "validation", "part": "helm", "phase": "run", "command": "exit 2",
+            "exit_status": 2}
+
+
+def test_an_interactive_record_takes_what_its_session_invoked(
+        repository: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Library integration: `run` keeps by the session, `record` takes it onto the
+    line, and nothing is left kept."""
+    configured(_ignoring_records(repository), "[hooks]\npre-archive = ['true', 'false']\n")
+    session = {SESSION_ID: "5e55-1011"}
+
+    assert main(["run", "pre-archive", CHANGE], root=repository, environ=session) == 1
+    assert main(["record", CHANGE, "design", "--outcome", json.dumps(
+        {**VALID["finished"], "next": {"step": "review", "kind": "design"}})],
+        root=repository, environ=session) == 0
+
+    line = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert [(i["command"], i["exit_status"]) for i in line["invoked"]] == [
+        ("true", 0), ("false", 1)]
+    assert kept_invocations(invocations_directory(repository), "5e55-1011") == []
+
+
+def test_a_refused_record_keeps_the_invocations_for_the_next(repository: Path) -> None:
+    configured(repository, "[hooks]\npre-archive = 'true'\n")
+    session = {SESSION_ID: "5e55-1011"}
+    main(["run", "pre-archive", CHANGE], root=repository, environ=session)
+
+    assert main(["record", CHANGE, "design", "--outcome", "not json"], root=repository,
+                environ=session) == 1
+
+    assert len(kept_invocations(invocations_directory(repository), "5e55-1011")) == 1
+
+
+def test_a_run_outside_any_session_keeps_nothing(repository: Path) -> None:
+    configured(repository, "[hooks]\npre-archive = 'true'\n")
+
+    assert main(["run", "pre-archive", CHANGE], root=repository, environ={}) == 0
+
+    kept = invocations_directory(repository)
+    assert kept is not None and not kept.exists()
+
+
+def test_a_sessions_invocations_are_kept_in_order_and_dropped_as_a_line_takes_them(
+        tmp_path: Path) -> None:
+    keep_invocations(tmp_path, "s", [{"change": "a", "n": 1}, {"n": 2}])
+    keep_invocations(tmp_path, "s", [{"change": "b", "n": 3}, {"change": "a", "n": 4}])
+    keep_invocations(tmp_path, "other", [{"n": 9}])
+
+    taken = kept_invocations(tmp_path, "s", "a")
+    assert taken == [{"change": "a", "n": 1}, {"n": 2}, {"change": "a", "n": 4}]
+    drop_invocations(tmp_path, "s", taken)
+    assert kept_invocations(tmp_path, "s") == [{"change": "b", "n": 3}]
+    drop_invocations(tmp_path, "s", [{"change": "b", "n": 3}])
+    # Emptied, never removed, so an append waiting on its lock lands where it is read.
+    assert (tmp_path / "s.jsonl").read_text("utf-8") == ""
+    assert kept_invocations(tmp_path, "other") == [{"n": 9}]
+
+
+class Acting(FakeClaude):
+    """A run whose step does something, `action(step)`, before it ends."""
+
+    def __init__(self, action, *runs) -> None:
+        super().__init__(*runs)
+        self.action = action
+
+    def __call__(self, command, cwd, feed, step) -> int:
+        self.action(step)
+        return super().__call__(command, cwd, feed, step)
+
+
+def _session_lines(session: str, outcome: dict | None = None, said: str | None = None
+                   ) -> list[str]:
+    """A run's events under `session`: ending with `outcome`, or an error saying
+    `said`."""
+    if said is None:
+        return event_lines(outcome, session=session)
+    return [json.dumps(event) + "\n" for event in (
+        {"type": "system", "subtype": "init", "session_id": session},
+        {"type": "result", "subtype": "success", "is_error": True, "session_id": session,
+         "result": said, "permission_denials": []})]
+
+
+def test_a_resumed_turns_line_takes_only_what_its_session_invoked_since(
+        tmp_path: Path) -> None:
+    kept = tmp_path / "kept"
+    turns = iter([1, 2])
+    claude = Acting(lambda _: keep_invocations(kept, "d-1", [{"change": CHANGE,
+                                                              "turn": next(turns)}]),
+                    (_session_lines("d-1", VALID["question"]), 0),
+                    (_session_lines("d-1", VALID["finished"]), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    wrapper.invocations = lambda _: kept
+
+    first = wrapper.run("design", CHANGE)
+    second = wrapper.resume(CHANGE, first["seq"], "Yes.")
+
+    assert [entry["turn"] for entry in first["invoked"]] == [1]
+    assert [entry["turn"] for entry in second["invoked"]] == [2]
+
+
+def test_a_retried_attempts_invocations_are_the_runs_too(tmp_path: Path) -> None:
+    kept = tmp_path / "kept"
+    sessions = iter(["s-a", "s-b"])
+    claude = Acting(lambda _: keep_invocations(kept, next(sessions), [{"change": CHANGE}]),
+                    (_session_lines("s-a", said=NETWORK), 1),
+                    (_session_lines("s-b", VALID["finished"]), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    wrapper.invocations = lambda _: kept
+
+    line = wrapper.run("design", CHANGE)
+
+    assert len(line["invoked"]) == 2
+    assert kept_invocations(kept, "s-a") == kept_invocations(kept, "s-b") == []
+
+
+def test_a_review_on_claude_records_what_it_invoked(tmp_path: Path) -> None:
+    root = repository_with_records(tmp_path)
+    kept = tmp_path / "kept"
+    reviewer = Acting(lambda _: keep_invocations(kept, "c-1", [{"change": CHANGE,
+                                                                "hook": "pre-commit"}]),
+                      (claude_review(review_text("implementation")).runs[0]))
+
+    line = review_and_log(CHANGE, "implementation", root=root, runner=codex_missing,
+                          claude=reviewer, head=lambda _: "0" * 40,
+                          changed_since=lambda *_: None, echo=None, unvalidated=True,
+                          runs=lambda _: None, invocations=lambda _: kept)
+
+    assert line["invoked"] == [{"change": CHANGE, "hook": "pre-commit"}]
+    assert kept_invocations(kept, "c-1") == []
+
+
+def test_invocations_that_cannot_be_read_never_stop_a_line(tmp_path: Path) -> None:
+    kept = tmp_path / "kept"
+    kept.mkdir()
+    (kept / f"{SESSION}.jsonl").write_text(
+        'torn {"change"\n{"change": "' + CHANGE + '", "command": "a b"}\n', "utf-8")
+    wrapper = make_wrapper(tmp_path, FakeClaude((event_lines(VALID["finished"]), 0)))
+    wrapper.invocations = lambda _: kept
+
+    line = wrapper.run("design", CHANGE)
+
+    assert line["invoked"] == [{"change": CHANGE, "command": "a b"}]
+    assert (kept / f"{SESSION}.jsonl").read_text("utf-8") == 'torn {"change"\n'
+
+
+def test_a_hook_whose_invocations_cannot_be_kept_still_reports_its_result(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    runner = _hooks(tmp_path, "[hooks]\npre-archive = 'make a'\n",
+                    environ={SESSION_ID: "../elsewhere"})
+    runner.invocations = lambda _: tmp_path / "kept"
+
+    assert hooks.main("pre-archive", CHANGE, root=tmp_path,
+                      configuration=runner.configuration, environ=runner.environ,
+                      hooks=runner) == 0
+
+    assert "could not be kept" in capsys.readouterr().err
+
+
+def test_a_codex_review_sees_no_session_of_whatever_started_it(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(SESSION_ID, "the-orchestrators")
+    log = tmp_path / "review.log"
+
+    assert run_codex([sys.executable, "-c",
+                      f"import os; print(os.environ.get({SESSION_ID!r}))"], log) == 0
+
+    assert log.read_text("utf-8") == "None\n"
+
+
+def test_an_owed_start_and_collect_through_the_command(repository: Path,
+                                                       capfd: pytest.CaptureFixture[str]
+                                                       ) -> None:
+    """Library integration: a real `sh` and Git directory, through `cli.main`."""
+    configured(repository, """
+[validation.parts.ci]
+owed = true
+start = "echo dispatched {owed}; echo 77"
+collect = "echo waited past {after} for {owed}"
+""")
+    environ = {UNATTENDED: "validate"}
+
+    assert main(["run", "validation", CHANGE, "ci", "start", "--owed", "ci.yml"],
+                root=repository, environ=environ) == 0
+    assert main(["run", "validation", CHANGE, "ci", "collect", "--owed", "ci.yml"],
+                root=repository, environ=environ) == 0
+
+    out = capfd.readouterr().out
+    assert "dispatched ci.yml\n77\n" in out
+    assert "waited past 77 for ci.yml\n" in out
+
+
+def test_run_cleanup_through_the_command(repository: Path) -> None:
+    configured(repository, "[validation.parts.helm]\nrun = 'true'\n"
+                           "cleanup = ['touch first', 'touch second']\n")
+
+    assert main(["run", "cleanup", CHANGE], root=repository,
+                environ={UNATTENDED: "archive-cleanup"}) == 0
+
+    assert (repository / "first").exists() and (repository / "second").exists()
+
+
+def test_a_session_id_naming_another_place_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(StepError, match="no session id"):
+        keep_invocations(tmp_path, "../elsewhere", [{"n": 1}])
