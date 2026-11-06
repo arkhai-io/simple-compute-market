@@ -22,7 +22,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: dist-bare-metal-buyer
 .PHONY: run-e2e run-ci fetch-e2e-logs
 .PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
-.PHONY: design-review validate-local validate-ci validate-helm validate-parallel check-change install-gitleaks check-public-content check-secrets audit-secrets check-decision-destinations check-history-wording check-version-bumps check-local-imports check-capability-index record-capacity review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
+.PHONY: design-review validate-local validate-ci validate-helm validate-parallel check-change check-repository install-gitleaks check-public-content check-secrets audit-secrets check-decision-destinations check-history-wording check-version-bumps check-local-imports check-capability-index record-capacity review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks pre-push
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -832,15 +832,22 @@ review-wheelhouse-scope: ## Print the review projects resolved from REVIEW_PROJE
 	$(CURDIR)/scripts/resolve-review-scope.py $$args
 
 # The change workflow's targets — each step, the review, the round view, the
-# workflow's checks, and the guarded push — are the engine's make fragment, set to
-# this repository's branches: a change lands on dev, and a review reads it against
-# dev. HELM_ALL_SCENARIOS reaches the validation step as the skill's argument.
-CHANGE_WORKFLOW_MERGE_FROM := dev
-CHANGE_WORKFLOW_REVIEW_BASE := dev
+# workflow's checks, and the guarded push — are the engine's make fragment, which
+# reads the branch a change lands on from the change's clone. A value of the
+# owner's machine, such as HELM_ALL_SCENARIOS or HELM_CONTEXT given to `make
+# validate`, reaches the Helm part's command through the environment: make exports
+# a variable set on its command line to every command it runs, the validation
+# session included, and the part's own make reads it there.
 include scripts/change_workflow/workflow.mk
-validate: ARGUMENTS += $(if $(filter 1,$(HELM_ALL_SCENARIOS)),with HELM_ALL_SCENARIOS=1)
 
-check-change: ## Run a change's closing checks — comment hygiene, agent skills, its citations and task list, the change index, the indexed capabilities' specifications, the pinned strict OpenSpec validation, decision destinations, history wording, version bumps, local imports, and the capability index — printing only failures and one pass line (CHANGE=<change> [CHANGE_BASE=<the branch it lands on; dev>])
+# The owner's complete closing check is the workflow's whole `pre-commit`: its
+# default checks, then this repository's `check-repository`, each once. Run as the
+# engine runs it before a commit, a worktree changing a path outside the inert
+# paths runs the functional hooks first.
+check-change: ## Run the change workflow's pre-commit for a change: its default checks — the change index, the task list, the agent skills, the strict OpenSpec validation — then check-repository; when the worktree changes a path outside the inert paths, relocking, the packaging check, and every suite first (CHANGE=<change> [CHANGE_BASE=<the branch it lands on; the one its clone recorded>])
+	@scripts/change-workflow run pre-commit "$(CHANGE)"$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")
+
+check-repository: ## Run this repository's own closing checks of a change — comment hygiene, its citations, the indexed capabilities' specifications, decision destinations, history wording, version bumps, local imports, and the capability index — printing only failures and one pass line; the workflow's pre-commit hook (CHANGE=<change> [CHANGE_BASE=<the branch it lands on; the one its clone recorded>])
 	@python3 scripts/check_change.py "$(CHANGE)"$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")
 
 check-decision-destinations: ## Fail if a `### D<n>` decision of a change's design has no bullet starting `D<n>` in its proposal's "Knowledge to promote" (CHANGE=<change>)
@@ -883,16 +890,13 @@ validate-helm: round-view-closed ## Validate HEAD on the Helm charts in the chan
 validate-parallel: ## Run two changes' clones' Helm parts at the same moment and report whether each kept to its own namespace, tags, and scenario pod, and what it left in its namespace (CLONES="<clone> <clone>" HELM_CONTEXT=docker-desktop)
 	@python3 scripts/validate_parallel.py --context "$(HELM_CONTEXT)" $(CLONES)
 
-run-e2e: round-view-closed ## Run the E2E GitHub Actions workflow on the current branch.
-	@branch="$$(git branch --show-current)"; \
-	if [ -z "$$branch" ]; then \
-		echo "ERROR: run-e2e requires a checked-out branch." >&2; \
-		exit 1; \
-	fi; \
-	echo "Triggering E2E workflow on branch $$branch..."; \
-	gh workflow run e2e.yml --ref "$$branch"
+# Each dispatch ends its output with the newest run of its workflow on the branch
+# before the dispatch, alone on the last line: the marker validation's collect
+# waits past (fetch-e2e-logs' E2E_AFTER_RUN, validate-ci's CI_AFTER_RUN).
+run-e2e: round-view-closed ## Run the E2E GitHub Actions workflow on the current branch, ending with the newest run of it there before the dispatch
+	@python3 scripts/ci_evidence.py pipeline
 
-run-ci: round-view-closed ## Dispatch a CI workflow validation may dispatch on the current branch, refusing any other, and print the newest run of it there before the dispatch as CI_AFTER_RUN (WORKFLOW=<file>)
+run-ci: round-view-closed ## Dispatch a CI workflow validation may dispatch on the current branch, refusing any other, ending with the newest run of it there before the dispatch (WORKFLOW=<file>)
 	@python3 scripts/ci_evidence.py dispatch "$(WORKFLOW)"
 
 E2E_LOG_DIR ?= $(CURDIR)/.snapshot/e2e-logs
@@ -931,6 +935,20 @@ check-public-content: ## Scan staged changes for recognizable private content, a
 	@status=0; \
 	python3 scripts/check_public_content.py --staged || status=1; \
 	python3 scripts/check_secrets.py --staged || status=1; \
+	exit $$status
+
+REMOTE ?=
+
+# Git gives a pre-push hook its ref updates on standard input, which both checks
+# read, so they are read once and given to each; either refuses the push. The
+# updates go on with no newline added: Git runs the hook with no input when every
+# ref is up to date, and a blank line would be read as a malformed update. The
+# repository's Git hook and the workflow's guarded push both run this.
+pre-push: ## Run both public-content checks on what a push would send, as Git runs a pre-push hook: the ref updates on standard input (REMOTE=<remote>)
+	@if [ -z "$(REMOTE)" ]; then echo "ERROR: pre-push needs REMOTE=<remote>" >&2; exit 2; fi; \
+	updates=$$(cat); status=0; \
+	printf '%s' "$$updates" | python3 scripts/check_public_content.py --pre-push "$(REMOTE)" || status=1; \
+	printf '%s' "$$updates" | python3 scripts/check_secrets.py --pre-push "$(REMOTE)" || status=1; \
 	exit $$status
 
 check-secrets: ## Scan staged changes for private keys and provider credentials through the pinned gitleaks (.gitleaks.toml)

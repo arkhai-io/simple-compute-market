@@ -96,11 +96,11 @@ again, to be resumed, or its outcome recorded with the command above.
 Answers given from a partial picture are confidently wrong in exactly the
 places that matter, so read all of this first, in full:
 
-- `AGENTS.md` and every document it requires: `docs/development/ARCHITECTURE.md`,
-  `docs/development/TESTING.md`, `docs/development/DEPLOYMENT_AND_CONFIG.md`,
-  and `openspec/README.md`.
-- `docs/development/ROADMAP.md`, the goal this change serves, and this change's
-  row and campaign in `openspec/changes/README.md`.
+- The documents `scripts/change-workflow config load design` prints: the
+  repository's guidance, and the roadmap where the configuration names it for
+  design.
+- The goal this change serves, in the roadmap, and this change's row and campaign
+  in `openspec/changes/README.md`.
 - Every file in `openspec/changes/<change>/`, including `specs/`,
   `interventions.jsonl`, and any `reviews/` (earlier reviews and their triage
   are design input).
@@ -354,13 +354,16 @@ Only when the owner says the design is settled:
   keep its `## Permanent documentation impact` and `### Knowledge to promote`
   naming the permanent destination of every material decision: a bullet starting
   `D<n>` for each decision heading, `- D<n>: no permanent destination — <reason>`
-  for one with nothing to promote, which `make check-change` checks.
+  for one with nothing to promote, which the repository's closing checks check.
 - Amend the delta specs in `specs/` so every accepted behavior is a requirement
-  with at least one WHEN/THEN scenario.
-- Run `make check-change CHANGE=<change>`, which runs the strict OpenSpec
-  validation and the change's citations check among the repository's closing
-  checks, and report the result. A citation of a file the change itself will
-  create is expected; any other is a defect.
+  with at least one WHEN/THEN scenario. Run the OpenSpec CLI, wherever you need
+  it, as `scripts/change-workflow openspec <arguments>`, which runs the command
+  the repository's configuration names.
+- Run `scripts/change-workflow run pre-commit <change>`, which runs the strict
+  OpenSpec validation among the workflow's default checks and the change's
+  citations check among the repository's closing checks, and report the result.
+  A citation of a file the change itself will create is expected; any other is a
+  defect.
 - Commit the recorded design as one commit — the change's documents, the index
   row, and the ledger lines this step wrote — whose message names the change and
   says its design is settled, so the design review reads a committed design. Then

@@ -1646,24 +1646,30 @@ def test_make_targets_delegate_to_the_script() -> None:
     assert "--all-scenarios" in makefile
 
 
-def _validate_target(*variables: str) -> str:
-    """What `make -n validate` of the root Makefile runs, with no step variable
+def _make_n(target: str, *variables: str, environment: dict[str, str] | None = None) -> str:
+    """What `make -n <target>` of the root Makefile runs, with no step variable
     inherited from the caller, a make that ran these tests among them."""
     env = {key: value for key, value in os.environ.items()
            if key not in ("HELM_ALL_SCENARIOS", "UNATTENDED", "ARGUMENTS", "ALLOW",
                           "MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKELEVEL")}
     return subprocess.run(
-        ["make", "-n", "--no-print-directory", "-C", str(REPO_ROOT), "validate", "CHANGE=x",
-         *variables], capture_output=True, text=True, check=True, env=env).stdout.strip()
+        ["make", "-n", "--no-print-directory", "-C", str(REPO_ROOT), target, "CHANGE=x",
+         *variables], capture_output=True, text=True, check=True,
+        env={**env, **(environment or {})}).stdout.strip()
 
 
 @pytest.mark.parametrize("unattended", [[], ["UNATTENDED=1"]])
-def test_all_scenarios_travel_into_the_validation_session(unattended: list[str]) -> None:
-    # The instruction reaches the step as the skill's argument, interactive or not.
-    assert _validate_target("HELM_ALL_SCENARIOS=1", *unattended) == (
-        "scripts/change-workflow start validate \"x\" --arguments 'with "
-        "HELM_ALL_SCENARIOS=1'" + (" --unattended" if unattended else ""))
-    assert _validate_target() == 'scripts/change-workflow start validate "x"'
+def test_all_scenarios_reach_the_helm_part_through_the_environment(
+        unattended: list[str]) -> None:
+    """A value of the owner's machine is no argument the validation skill reads: `make
+    validate` passes none, and the Helm part's own make reads the value from the
+    environment it inherits."""
+    assert _make_n("validate", "HELM_ALL_SCENARIOS=1", *unattended) == (
+        'scripts/change-workflow start validate "x"'
+        + (" --unattended" if unattended else ""))
+    assert "--all-scenarios" in _make_n("validate-helm",
+                                        environment={"HELM_ALL_SCENARIOS": "1"})
+    assert "--all-scenarios" not in _make_n("validate-helm")
 
 
 def test_the_command_line_refuses_a_name_that_is_not_a_change(

@@ -103,13 +103,18 @@ the session, and every turn ends with an outcome matching
 - **A turn's end is its outcome.** Never end a turn with work still running: the
   wrapper logs that turn's report as the run's end, and what the work later finds
   reaches nobody. Run the fresh-context check's subagent in the foreground, never
-  with `run_in_background`. Run a long command such as `make test` in the
+  with `run_in_background`. Run a long command such as `scripts/change-workflow run
+  pre-commit <change>` in the
   background as written, with no redirect of its output — a redirect is a write no
   rule admits, and the harness keeps a background command's output in a file — and
   wait for it inside one Bash call, with `scripts/change-workflow wait <that-file>
-  '<pattern>'` matching the line it prints when it ends, repeated when the wait gives
-  up — never with `tail -f`, which hangs when that line is the last, Monitor, a
-  wake-up, or a shell loop.
+  '<pattern>'` matching the line it prints when it ends — for `run pre-commit`, the
+  closing line of `pre-commit`, its last hook, `[change-workflow] pre-commit at`
+  (the pattern a regular expression, so its brackets escaped:
+  `'^\[change-workflow\] pre-commit at|^ERROR:'`), or an `ERROR:` line when it
+  refuses — repeated when the wait gives up — never
+  with `tail -f`, which hangs when that line is the last, Monitor, a wake-up, or a
+  shell loop.
 - **The end is an outcome.** Each discussed finding you present (step 3) and, when
   you recommend another round, the question whether one is merited (step 6) is a
   `question`; the table of default acceptances rides on the last of them. When the
@@ -213,9 +218,8 @@ For an implementation round, also take:
   triage file saying so, so no later round picks it up again.
 - **The commits.** A review published by `make review` ends with
   `<!-- reviewed-commit: <commit> -->`; a validation record names its `Commit:`.
-  For a pasted external review, ask the owner which commit the reviewer saw — a
-  snapshot from `make code-snapshot` names it, `<repository>-<short commit>.zip` —
-  and append the same `reviewed-commit` comment to the saved record. Name
+  For a pasted external review, ask the owner which commit the reviewer saw, and
+  append the same `reviewed-commit` comment to the saved record. Name
   every record's commit at the top of its triage file, then compare them before
   anything else. When they differ, the records are a round
   only if the owner waives the rule, judging the changes between the commits: name
@@ -278,8 +282,8 @@ IDs of merged duplicates (`03 F2 / 04 F4a`). Carry that label into the design
 discussion and the records. Do not introduce a second numbering — questions,
 corrections, or new decision numbers — for issues a review already named.
 
-Then read what you need to judge the findings: `AGENTS.md` and the documents it
-requires, every file in the change, earlier reviews and their triage, and the code,
+Then read what you need to judge the findings: the documents
+`scripts/change-workflow config load triage` prints, every file in the change, earlier reviews and their triage, and the code,
 specifications, and guidance each finding cites.
 
 ## 2. Check every finding
@@ -571,17 +575,18 @@ acceptances' outcomes are carried out with the rest.
   commit it with the round's fixes. Record each in the task notes of the section it
   concerns, naming the finding; a fix that concerns no section goes in a note
   under the last implemented section. Then run `change-implement`'s checks before
-  committing (its step 5): `make lock` when a dependency changed, then `make
-  check-packaging`, the focused suites, `make test`, `make check-change
-  CHANGE=<change>` (before closeout its citations check may report only files the
+  committing (its step 5): the focused suites, `scripts/change-workflow run
+  pre-commit <change>`, whose hooks follow from the paths the fixes change — a fix
+  only under the repository's inert paths runs `pre-commit` alone — staging what
+  the hooks rebuilt (before closeout its citations check may report only files the
   change's tasks create at closeout; name them, and fix anything else; an active
   change with no spec deltas fails its validation every time, which is expected),
   and a
   fresh-context compliance check of the diff against the `HEAD` recorded at the
   start. In the fix's task
   note, record each check as `change-implement` records a section's evidence: each
-  suite with its level as `TESTING.md` defines them and its result, `make test`'s
-  result, and what the fresh-context check found and what was fixed or declined —
+  suite with its level as `TESTING.md` defines them and its result, each hook's
+  closing line, and what the fresh-context check found and what was fixed or declined —
   so the next review and validation can see what the fix was proven by.
   Commit, as one commit
   naming the change and the round: the fixes, the change documents the dispositions
@@ -590,12 +595,13 @@ acceptances' outcomes are carried out with the rest.
   with `scripts/change-workflow push`, the guarded push of exactly `HEAD`; if it refuses, stop
   and report its reasons. The fix commit is validated next (`make validate
   CHANGE=<change>`), which dispatches the pipeline — unless, after a pre-closeout
-  review, it changes only paths under `openspec/` and `docs/` (step 6).
+  review, it changes only the repository's inert paths (step 6).
 
-Then run `make check-change CHANGE=<change>` and report the result. It validates
-an active change with `openspec validate <change> --strict`, and an archived one —
-a closeout triage — with `openspec validate --specs --strict`, since its deltas are
-merged and the permanent specifications are what its fixes touched.
+Then run `scripts/change-workflow run pre-commit <change>` and report the result.
+Its default OpenSpec check validates an active change with `validate <change>
+--strict`, and an archived one — a closeout triage — with `validate --specs
+--strict`, since its deltas are merged and the permanent specifications are what
+its fixes touched.
 
 ## 6. Choose the exit
 
@@ -646,11 +652,11 @@ the merge of the branch the change lands on into its own (`change-merge`), whose
 own exits validate the
 merged `HEAD`, the triage's fixes with it, before closeout or a review of the
 merge; after a closeout
-review, archive cleanup, after a validation of `HEAD` when a path outside
-`openspec/` and `docs/` changed since the commit it reviewed. Another review of the
+review, archive cleanup, after a validation of `HEAD` when a path outside the
+repository's inert paths changed since the commit it reviewed. Another review of the
 same kind follows the fix commit's validation for an implementation or
 pre-closeout review — for a pre-closeout one, only when the fix changed a path
-outside `openspec/` and `docs/`; for an implementation one, once the owner has read
+outside the inert paths; for an implementation one, once the owner has read
 the fix too. A validation that failed, or was inconclusive, brings the exit to the
 owner. A return waits for the owner to
 confirm it; once they do, the returned review no longer governs, and what
@@ -681,7 +687,7 @@ index row, and any other tracked file an `edit` or a recorded defect changed —
 one commit naming the change and the review, and
 pushes it with `scripts/change-workflow push`, so the next step reads a committed change from
 a clean worktree. After a pre-closeout review such a commit needs no validation
-when it changes only paths under `openspec/` and `docs/`: closeout's own checks
+when it changes only the repository's inert paths: closeout's own checks
 read them again. Before then it is validated like any commit, unless it changes
 only changes' ledgers and reviews.
 

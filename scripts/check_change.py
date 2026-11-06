@@ -1,31 +1,33 @@
 #!/usr/bin/env python3
-"""Run a change's closing checks as one command, printing only what fails.
+"""Run this repository's own closing checks of a change as one command, printing
+only what fails.
 
-A step of an OpenSpec change ends by running the same checks: comment hygiene,
-the agent skills, the change's documentation citations and task list, the change
-index, the indexed capabilities' specifications against their indexes, the change's
-deltas counted, and the pinned OpenSpec validator in strict mode; then the written
-rules the change's own work must keep — each design decision's destination, no
-history wording in the comments it adds, one version step per package it bumps, a
-reason for each import it adds inside a function, and a capability index listing
+The change workflow's `pre-commit` hook runs the workflow's default checks of a
+change — the change index, its task list, the agent skills, and the strict OpenSpec
+validation — and then this repository's command for the hook, which is this one:
+comment hygiene, the change's documentation citations, the indexed capabilities'
+specifications against their indexes with the change's deltas counted, and the
+written rules the change's own work must keep — each design decision's destination,
+no history wording in the comments it adds, one version step per package it bumps,
+a reason for each import it adds inside a function, and a capability index listing
 every capability. Run as separate commands, each is a tool call that replays the
 step's whole conversation; run here, they are one call, and an answer of one line
 when everything passes. Every check runs whatever the others report, and each
-failing check's own output is printed under its name, so one call says
-everything that needs fixing.
+failing check's own output is printed under its name, so one call says everything
+that needs fixing.
 
 The checks of what the change adds read its diff from the merge-base with the
-branch it lands on, `dev` unless `--base` names another.
+branch it lands on: `--base` when given, as the hook gives it, else the landing
+branch the change's clone recorded, which `scripts/change-workflow find --json`
+prints as `base`. A change with neither is refused, naming `--base`, since a
+guessed branch would read another diff.
 
-An archived change has no delta left to validate, so the validator checks every
-permanent specification instead, its archive's merges among them.
-
-Usage: `make check-change CHANGE=<change> [CHANGE_BASE=<branch>]`.
+Usage: `make check-repository CHANGE=<change> [CHANGE_BASE=<branch>]`; `make
+check-change` runs the whole hook, defaults included.
 """
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -33,13 +35,9 @@ from typing import Callable, Sequence
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from change_diff import DEFAULT_BRANCH  # noqa: E402
 from workflow_command import WorkflowRefused, found_change  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
-# The validator version openspec/README.md pins, run through whichever package
-# runner the machine has.
-OPENSPEC = "@fission-ai/openspec@1.14.0"
 
 # Runs a command in a directory and returns its exit status and merged output.
 Runner = Callable[[Sequence[str], Path], tuple[int, str]]
@@ -52,27 +50,14 @@ def _run(command: Sequence[str], cwd: Path) -> tuple[int, str]:
     return done.returncode, done.stdout
 
 
-def openspec_command(which: Callable[[str], str | None] = shutil.which) -> list[str]:
-    """The pinned validator, through `bunx` where it is installed, else `npx`."""
-    return ["bunx", OPENSPEC] if which("bunx") else ["npx", "--yes", OPENSPEC]
-
-
-def checks(change: str, archived: bool,
-           which: Callable[[str], str | None] = shutil.which,
-           base: str = DEFAULT_BRANCH) -> list[tuple[str, list[str]]]:
+def checks(change: str, base: str) -> list[tuple[str, list[str]]]:
     """Each check's name and command, in the order they run."""
     make = ["make", "--no-print-directory"]
-    validate = (["validate", "--specs", "--strict"] if archived
-                else ["validate", change, "--strict"])
     lands_on = f"CHANGE_BASE={base}"
     return [
         ("comment hygiene", [*make, "check-comment-hygiene"]),
-        ("agent skills", [*make, "check-agent-skills"]),
         ("documentation citations", [*make, "check-doc-citations", f"CHANGE={change}"]),
-        ("task list", [*make, "check-tasks", f"CHANGE={change}"]),
-        ("change index", [*make, "check-change-index"]),
         ("specification index", [*make, "check-spec-index", f"CHANGE={change}"]),
-        ("openspec validate", [*openspec_command(which), *validate]),
         ("decision destinations", [*make, "check-decision-destinations", f"CHANGE={change}"]),
         ("history wording", [*make, "check-history-wording", lands_on]),
         ("version bumps", [*make, "check-version-bumps", lands_on]),
@@ -82,15 +67,19 @@ def checks(change: str, archived: bool,
 
 
 def run_checks(change: str, *, root: Path = ROOT, runner: Runner = _run,
-               which: Callable[[str], str | None] = shutil.which,
-               echo: Callable[[str], None] = print, base: str = DEFAULT_BRANCH) -> int:
+               echo: Callable[[str], None] = print, base: str | None = None) -> int:
     """Run every check, print each failure with its output, and return the exit status."""
     try:
-        archived = bool(found_change(root, change)["archived"])
+        found = found_change(root, change)
     except WorkflowRefused as exc:
         echo(f"ERROR: {exc}")
         return 1
-    planned = checks(change, archived, which, base)
+    lands_on = base or found.get("base")
+    if not isinstance(lands_on, str) or not lands_on:
+        echo(f"ERROR: {change} records no branch it lands on; give it with --base <branch> "
+             "(CHANGE_BASE=<branch>)")
+        return 1
+    planned = checks(change, lands_on)
     failed = []
     for name, command in planned:
         status, output = runner(command, root)
@@ -108,7 +97,7 @@ def run_checks(change: str, *, root: Path = ROOT, runner: Runner = _run,
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
-    base = DEFAULT_BRANCH
+    base = None
     if len(arguments) == 3 and arguments[1] == "--base" and arguments[2]:
         base = arguments[2]
         arguments = arguments[:1]

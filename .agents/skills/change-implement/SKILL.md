@@ -138,9 +138,12 @@ and it checks no task.
    decision: ask the owner, with the options and your recommendation. Then `git
    add` each resolved file.
 4. **Test.** Run the suites the verification tasks of the sections owning the
-   conflicted files name, and `make test`; `make lock` and `make check-packaging`
-   when a lock or a `pyproject.toml` conflicted. Fix what the merge broke, adding
-   each fix to the merge.
+   conflicted files name, then `scripts/change-workflow run pre-commit <change>`
+   (step 5): a resolution outside the inert paths is a functional change, so it
+   runs every hook of a functional commit. A conflicted derived file, such as a
+   lock, is resolved by taking one side before it runs, and the hook that rebuilds
+   it settles the rest. Fix what the merge broke, adding each fix, and what the
+   hooks rebuilt, to the merge.
 5. **Conclude.** `git commit -m "<Git's merge subject>" -m "<resolutions>"`
    concludes the merge without opening an editor: the subject is the one Git
    wrote for it (`Merge branch 'dev' into <branch>`), and the paragraph names each
@@ -185,9 +188,8 @@ If any check fails, stop and say why.
 
 Read in full, even if you believe you know it:
 
-- `AGENTS.md` and every document it requires: `docs/development/ARCHITECTURE.md`,
-  `docs/development/TESTING.md`, `docs/development/DEPLOYMENT_AND_CONFIG.md`, and
-  `openspec/README.md`;
+- the documents `scripts/change-workflow config load implement` prints: the
+  repository's guidance, which its configuration names;
 - the change's `proposal.md`, `design.md`, `specs/`, and all of `tasks.md` —
   especially earlier sections' notes, which carry the previous session's handoff;
 - the triage of the latest implementation review in `reviews/`, if any: accepted
@@ -289,27 +291,33 @@ planning defect, not a reason to let the session compact.
 
 Run each of these, and fix what it reports:
 
-- `make lock` when the section changed a dependency, then `make check-packaging`;
 - the focused suites the section's verification point names, and every suite that
   covers code the section changed;
-- `make test`, whatever the section touched: a change to a shared package, a
-  dependency, or a lock reaches projects no focused suite covers, and the full
-  suite is cheap beside a review round spent finding that;
-- `make check-change CHANGE=<change>`: comment hygiene, the agent skills, the
-  change's documentation citations and task list, the change index, the indexed
-  capabilities' specifications against their indexes, and the pinned strict
-  OpenSpec validation, in one call that prints only what fails.
-  Before closeout its citations check may report only the permanent documents the
-  change's tasks create at closeout — the promotion destinations its plan names;
-  list those in the report and fix anything else. A change with no spec deltas
-  fails the validation every time, since the validator rejects a change with
-  none; say so in the report and take that one failure as expected.
+- `scripts/change-workflow run pre-commit <change>`, the repository's checks
+  before a commit. The paths the worktree changes decide what it runs: when any
+  lies outside the repository's inert paths, it runs `after-functional-change`,
+  such as a relock, then `pre-commit-functional`, such as the packaging check
+  and every suite, then `pre-commit`; otherwise `pre-commit` alone. `pre-commit`
+  runs the workflow's default checks — the change index, the task list, the
+  skills, and the strict OpenSpec validation of the change — then the
+  repository's own closing checks. Each hook ends with the engine's closing line,
+  naming every command that failed with its exit status. Stage what the hooks
+  rebuilt, such as a lock, with the section's edits. Before closeout the
+  citations check may report only the permanent documents the change's tasks
+  create at closeout — the promotion destinations its plan names; list those in
+  the report and fix anything else. A change with no spec deltas fails the
+  validation every time, since the validator rejects a change with none; say so
+  in the report and take that one failure as expected. A change whose clone
+  recorded no landing branch, or that has no clone, needs `--base <branch>` where
+  the configuration names `{base}`, and the run refuses without it, naming it:
+  give the branch the change's log or its plan says it lands on.
 
 Then have the section's diff checked in a fresh context. Start a subagent that has
 seen none of this session, and give it only: the change name, the section, the
 command to see the diff (`git diff` against the section's starting commit, plus any
-untracked files), and this instruction — read `AGENTS.md` and every document it
-requires, plus the specs and architecture companions of the capabilities the diff
+untracked files), and this instruction — read the documents
+`scripts/change-workflow config load implement` prints and every document they
+require, plus the specs and architecture companions of the capabilities the diff
 touches; then report every place the diff breaks that guidance — layering,
 comments, test level, documentation placement, packaging — with file and line, and
 every evidence claim in the section's task notes that overstates what its tests

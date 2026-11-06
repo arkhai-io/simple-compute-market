@@ -18,6 +18,7 @@ from change_workflow.common import FORMAT, StepError
 from change_workflow.find import change_directory
 from change_workflow.log import (append_entry, log_path, note_orchestrator, note_round,
                                  read_log, record_outcome, unused_direction)
+from change_workflow_fixtures import configured
 
 CHANGE = "shape-bounds"
 # The review kind the design records below are named for.
@@ -162,10 +163,12 @@ FIX = ["scripts/change_next_step.py"]
 RECORDS_ONLY = [f"openspec/changes/{CHANGE}/interventions.jsonl"]
 
 
-# The change is worked in the checkout the computation runs in, with no clone,
-# unless a test says otherwise.
+# The change is worked in the checkout the computation runs in, with no clone, and
+# the repository declares `openspec/` and `docs/` inert, unless a test says otherwise.
+INERT = ("openspec/", "docs/")
 HERE = {"branch": lambda _: f"feat/{CHANGE}", "workspace": lambda _: None,
-        "clone": lambda *_: None, "merging": lambda _: False}
+        "clone": lambda *_: None, "merging": lambda _: False,
+        "inert_paths": lambda _: INERT}
 
 
 def _next(root: Path, *, uncommitted: bool = False, changed: list[str] | None = FIX,
@@ -193,6 +196,18 @@ def test_a_finished_design_goes_to_the_exit_it_named(tmp_path: Path) -> None:
 
     assert (result["step"], result["kind"]) == ("review", "design")
     assert f"the design run at seq {run['seq']} chose review:design" in result["reason"]
+
+
+def test_a_line_recording_what_it_invoked_routes_as_one_without(tmp_path: Path) -> None:
+    """`invoked` is an optional field of a run's line: nothing routes on it."""
+    plain, recorded = tmp_path / "plain", tmp_path / "recorded"
+    _log(_repository(plain, "in design"), "design", _done(_to("review", "design")))
+    _log(_repository(recorded, "in design"), "design", _done(_to("review", "design")),
+         invoked=[{"hook": "pre-commit", "command": "make check-repository",
+                   "exit_status": 0, "started": "2026-11-06T09:00:00Z", "seconds": 1.5}])
+
+    assert ({k: v for k, v in _next(recorded).items() if k != "reason"}
+            == {k: v for k, v in _next(plain).items() if k != "reason"})
 
 
 def test_a_published_design_review_is_triaged(tmp_path: Path) -> None:
@@ -984,6 +999,56 @@ def test_a_documentation_correction_at_closeout_needs_no_validation(tmp_path: Pa
     assert result["step"] == "archive-cleanup"
 
 
+# The inert paths are the repository's (CW-n7ra): the engine reads none of its own.
+
+def test_a_repository_marks_images_inert(tmp_path: Path) -> None:
+    """CW-n7ra's scenario, the inert paths read from the repository's own
+    configuration file."""
+    root = _repository(tmp_path, "in implementation")
+    configured(root, '[repository]\ninert-paths = ["docs/", "assets/"]\n')
+    _merged(root, reviewed="e" * 40)
+
+    assert _next(root, changed=["assets/logo.svg"], inert_paths=nxt._inert_paths)["step"] \
+        == "closeout"
+    assert _next(root, changed=DOCUMENTS[:1], inert_paths=nxt._inert_paths)["step"] \
+        == "validate"
+
+
+@pytest.mark.parametrize("arrange,changed", [
+    (lambda root: _merged(root, reviewed="e" * 40), DOCUMENTS),
+    (lambda root: _pre_closeout(root, to=_to("review", "pre-closeout"), reviewed="e" * 40),
+     DOCUMENTS),
+])
+def test_with_no_inert_path_declared_documents_are_read_as_code(tmp_path: Path, arrange,
+                                                                changed) -> None:
+    root = _repository(tmp_path, "in implementation")
+    arrange(root)
+
+    assert _next(root, changed=changed, inert_paths=lambda _: None)["step"] == "validate"
+    # Changes' records stay exempt whatever the repository declares.
+    assert _next(root, changed=RECORDS_ONLY, inert_paths=lambda _: None)["step"] != "validate"
+
+
+def test_with_no_inert_path_declared_a_documentation_correction_is_validated(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in closeout", archived=True)
+    _closeout_triaged(root)
+
+    result = _next(root, changed=["docs/agents/change-workflow.md"], inert_paths=lambda _: None)
+
+    assert (result["step"], result["target"]) == ("validate", {"step": "archive-cleanup"})
+
+
+def test_a_malformed_configuration_leaves_the_change_unclassified(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in design")
+    configured(root, "[repository]\ninert = []\n")
+
+    result = _next(root, inert_paths=nxt._inert_paths)
+
+    assert result["step"] == "unclassified"
+    assert "repository.inert is no field" in result["reason"]
+
+
 def test_the_owners_waiver_directs_archive_cleanup_past_a_missing_validation(
         tmp_path: Path) -> None:
     root = _repository(tmp_path, "in closeout", archived=True)
@@ -1431,7 +1496,8 @@ def test_a_dependency_gating_a_later_phase_does_not_hold_design(tmp_path: Path) 
     assert _next(root)["step"] == "design"
 
 
-def test_a_design_blocked_on_an_unlanded_prerequisite_waits_for_dev(tmp_path: Path) -> None:
+def test_a_design_blocked_on_an_unlanded_prerequisite_waits_for_its_landing(
+        tmp_path: Path) -> None:
     root = _repository(tmp_path, "in design")
     _log(root, "design", {"outcome": "blocked", "message": "Needs split-pools.",
                           "blocked_on": "split-pools"})
@@ -1439,7 +1505,7 @@ def test_a_design_blocked_on_an_unlanded_prerequisite_waits_for_dev(tmp_path: Pa
     result = _next(root)
 
     assert (result["step"], result["prerequisite"]) == ("owner", "split-pools")
-    assert "merge dev" in result["reason"]
+    assert "merge the branch it lands on" in result["reason"]
 
 
 def test_a_prerequisite_merged_in_is_recorded_by_design(tmp_path: Path) -> None:
@@ -1452,13 +1518,13 @@ def test_a_prerequisite_merged_in_is_recorded_by_design(tmp_path: Path) -> None:
     assert result["step"] == "design" and "record the dependency" in result["reason"]
 
 
-def test_a_dependency_with_no_directory_here_waits_for_dev(tmp_path: Path) -> None:
+def test_a_dependency_with_no_directory_here_waits_for_its_landing(tmp_path: Path) -> None:
     root = _repository(tmp_path, "in design", depends_on="`split-pools` (design)")
 
     result = _next(root)
 
     assert (result["step"], result["prerequisite"]) == ("owner", "split-pools")
-    assert "merge dev" in result["reason"]
+    assert "merge the branch it lands on" in result["reason"]
 
 
 def test_a_malformed_dependency_is_unclassified(tmp_path: Path) -> None:
@@ -2428,10 +2494,11 @@ def test_a_change_with_no_clone_and_no_records_names_its_clone(tmp_path: Path) -
 
     result = _from_workspace(root)
 
+    # No branch to land on is named: the clone records the workspace's checked-out
+    # branch as it is made.
     assert result["step"] == "clone"
-    assert result["arguments"] == {"CHANGE": CHANGE, "BRANCH": f"feat/{CHANGE}", "FROM": "dev"}
-    assert f"make change-clone CHANGE={CHANGE} BRANCH=feat/{CHANGE} FROM=dev" in (
-        result["reason"])
+    assert result["arguments"] == {"CHANGE": CHANGE, "BRANCH": f"feat/{CHANGE}"}
+    assert f"make change-clone CHANGE={CHANGE} BRANCH=feat/{CHANGE}`" in result["reason"]
 
 
 def test_a_change_whose_records_are_in_the_workspace_goes_to_the_owner(tmp_path: Path) -> None:

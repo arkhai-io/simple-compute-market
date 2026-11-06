@@ -14,17 +14,45 @@ skills that act on a task list before they do; its check, `task_problems`, is al
 the next-step computation's own backstop where it routes on sections. Prints each
 problem with its line on standard error and exits 1, or prints OK.
 
-Contract: openspec/specs/change-workflow/spec.md, CW-4rqr and CW-5r7l.
+`owed_lines` reads the evidence a task list's complete sections owe validation:
+each `Owed by validation:` line names, first in backticks, the CI workflow whose
+run only a push produces. A line under a section with an unchecked task owes
+nothing yet, since validation judges a section only once it is complete.
+
+Contract: openspec/specs/change-workflow/spec.md, CW-4rqr, CW-5r7l, and CW-g4oz.
 """
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
 from .common import StepError, repository_root
 from .find import ChangeNotFound, change_directory
-from .next_step import TASKS_FILE, task_problems
+from .next_step import TASKS_FILE, read_sections, section_heading, task_problems
+
+# An owed line, in a task's text or the section's notes, and its workflow.
+_OWED = re.compile(r"^\s*(?:- )?Owed by validation:\s*`(?P<workflow>[^`]+)`")
+
+
+def owed_lines(tasks: Path) -> list[tuple[str, str]]:
+    """Each `Owed by validation:` line of a complete section of the task list at
+    `tasks`, as its section's id and its workflow, in the list's order; none when
+    there is no list."""
+    if not tasks.is_file():
+        return []
+    complete = {section.id for section in read_sections(tasks) if section.complete}
+    owed: list[tuple[str, str]] = []
+    section: str | None = None
+    for line in tasks.read_text("utf-8").splitlines():
+        if (heading := section_heading(line)) is not None:
+            section = heading
+        elif line.startswith("## "):
+            section = None
+        elif section in complete and (match := _OWED.match(line)):
+            owed.append((section, match["workflow"]))
+    return owed
 
 
 def main(argv: list[str] | None = None, root: Path | None = None) -> int:

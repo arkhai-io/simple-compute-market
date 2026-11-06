@@ -25,8 +25,10 @@ class Fake:
     def __init__(self, *, branch: str = BRANCH, newest: list[dict] | None = None,
                  known: Sequence[str] = (DEV_COMMIT, COMMIT),
                  ancestors: Sequence[str] = (DEV_COMMIT,), merge_base_status: int | None = None,
-                 verify_status: int | None = None) -> None:
+                 verify_status: int | None = None, dispatch_status: int = 0) -> None:
         self.branch = branch
+        # `gh workflow run`'s exit.
+        self.dispatch_status = dispatch_status
         self.newest = [{"databaseId": 41}] if newest is None else newest
         self.known = set(known)
         self.ancestors = set(ancestors)
@@ -46,7 +48,7 @@ class Fake:
         if command[:3] == ["gh", "run", "list"]:
             return subprocess.CompletedProcess(command, 0, json.dumps(self.newest), "")
         if command[:3] == ["gh", "workflow", "run"]:
-            return subprocess.CompletedProcess(command, 0, "", "")
+            return subprocess.CompletedProcess(command, self.dispatch_status, "", "")
         if command[:4] == ["git", "rev-parse", "--verify", "--quiet"]:
             if self.verify_status is not None:
                 return subprocess.CompletedProcess(command, self.verify_status, "",
@@ -76,6 +78,8 @@ def test_a_listed_workflow_is_dispatched_on_the_branch_after_its_newest_run_is_r
         ["gh", "workflow", "run", "tests.yml", "--ref", BRANCH],
     ]
     assert "CI_AFTER_RUN=41" in said
+    # The marker the collect waits past, alone on the last line, after the dispatch.
+    assert said[-1] == "41"
 
 
 def test_a_branch_with_no_run_of_the_workflow_records_none() -> None:
@@ -83,6 +87,47 @@ def test_a_branch_with_no_run_of_the_workflow_records_none() -> None:
 
     assert ci_evidence.dispatch("tests.yml", runner=Fake(newest=[]), echo=said.append) == 0
     assert "CI_AFTER_RUN=0" in said
+    assert said[-1] == "0"
+
+
+def test_the_pipeline_is_dispatched_ending_with_the_newest_run_before_it() -> None:
+    fake = Fake(newest=[{"databaseId": 40733870392}])
+    said: list[str] = []
+
+    assert ci_evidence.dispatch_pipeline(runner=fake, echo=said.append) == 40733870392
+
+    assert fake.commands == [
+        ["git", "branch", "--show-current"],
+        ["gh", "run", "list", "--workflow", "e2e.yml", "--branch", BRANCH, "--limit", "1",
+         "--json", "databaseId"],
+        ["gh", "workflow", "run", "e2e.yml", "--ref", BRANCH],
+    ]
+    # Named as the pipeline's fetch takes it, then alone last.
+    assert "E2E_AFTER_RUN=40733870392" in said
+    assert said[-1] == "40733870392"
+
+
+def test_a_dispatch_gh_refuses_ends_with_no_marker() -> None:
+    fake = Fake(dispatch_status=1)
+    said: list[str] = []
+
+    with pytest.raises(ci_evidence.CIError, match="exited 1"):
+        ci_evidence.dispatch_pipeline(runner=fake, echo=said.append)
+    assert not said[-1].isdigit()
+
+
+def test_the_command_line_dispatches_the_pipeline_printing_its_marker_last(
+        capsys: pytest.CaptureFixture[str]) -> None:
+    assert ci_evidence.main(["pipeline"], runner=Fake()) == 0
+
+    assert capsys.readouterr().out.splitlines()[-1] == "41"
+
+
+def test_a_failed_dispatch_prints_no_marker(capsys: pytest.CaptureFixture[str]) -> None:
+    """A dispatch that fails keeps no marker: its last line is never a bare run ID."""
+    assert ci_evidence.main(["pipeline"], runner=Fake(branch="")) == 1
+
+    assert capsys.readouterr().out == ""
 
 
 @pytest.mark.parametrize("workflow", ["publish-pypi.yml", "e2e.yml", ""])

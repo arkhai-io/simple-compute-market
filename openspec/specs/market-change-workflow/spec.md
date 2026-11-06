@@ -17,21 +17,21 @@ Requirements are organized by `index.md`; their order here carries no meaning.
 
 ### Requirement: MCW-5tgp This repository provides the workflow's roles
 
-This repository MUST state, for each role the change workflow asks of an adopting
-repository, how it provides that role: the make target, path, branch, or document
-that fills it. Every make target and repository path the workflow's skills, step
-table, and make fragment name MUST appear in that statement, and so MUST the
-engine's own assumptions about this repository, marked as maintained by review.
+This repository's configuration, `.agents/workflow.toml`, MUST declare the fields the
+workflow defines, and this repository MUST state how it provides each role the
+configuration does not hold: the make target, path, or document that fills it. Every
+make target and repository path the workflow's skills and step table name MUST appear
+in that statement or in the configuration.
 
 #### Scenario: The local validation role
 
 - **WHEN** a reader looks up how this repository validates a commit locally
-- **THEN** the statement names `make validate-local`
+- **THEN** the configuration's `local` validation part names `make validate-local`
 
 #### Scenario: The protected branches role
 
 - **WHEN** a reader looks up this repository's protected branches
-- **THEN** the statement names `main` and `dev`, which the guarded push refuses
+- **THEN** the configuration names `main` and `dev`, which the guarded push refuses
 
 ### Requirement: MCW-v3tf Validation builds the packages it tests from the commit
 
@@ -319,27 +319,6 @@ replace review.
   removes it
 - **THEN** the guarded push refuses the history without printing the matched value
 
-### Requirement: MCW-ca51 The merge brings in `dev` unless the owner names another branch
-
-The branch a change lands on, which the merge before closeout brings in where the
-owner names no other, MUST be `dev` in this repository.
-
-#### Scenario: The merge runs with no branch named
-
-- **WHEN** the merge before closeout runs for a change whose owner named no branch
-- **THEN** it merges `dev` into the change's branch
-
-### Requirement: MCW-y37w The step table names no Fable or Astra model
-
-This repository forbids Fable and Astra models for its unattended steps: the step
-table MUST NOT name one, and the wrapper MUST refuse to load a table that does,
-naming the row.
-
-#### Scenario: A row names a forbidden model
-
-- **WHEN** the step table names a Fable model
-- **THEN** the wrapper refuses to load the table, naming the row
-
 ### Requirement: MCW-uqlq A clone's bootstrap is `make init`
 
 This repository's bootstrap of a change's clone MUST be `make init`, run in the
@@ -486,13 +465,48 @@ revision check fails on what it writes before it lands.
   rewrite its lock, with a uv older than the repository's minimum
 - **THEN** the command refuses before running uv, naming both versions
 
+### Requirement: MCW-r4tx This repository's hooks and validation parts
+
+This repository's configuration MUST relock after a functional change; run its own
+closing checks, `make check-repository`, before every commit, while `make
+check-change` runs the workflow's whole `pre-commit` for the owner; before a
+functional commit, clear the wheelhouse, so that the packaging check builds every
+wheel from the commit and no suite tests a wheel another commit built, then check
+packaging and run every suite; check packaging and the
+change's architecture exceptions before the archive; and declare validation's
+pipeline, owed CI, local, and Helm parts, the Helm part after the local one, with a
+cleanup that records the capacity measured and removes the change's namespace and
+images.
+
+#### Scenario: Validation runs this repository's parts
+
+- **WHEN** validation runs in this repository with no part waived and a complete
+  section owing `tests.yml`
+- **THEN** it starts the pipeline and the owed CI run, then runs the local part,
+  then the Helm part
+
+### Requirement: MCW-k3vy The pre-push checks are one make target
+
+The pre-push checks MUST be one make target, `make pre-push`, which runs both
+public-content checks under Git's hook contract, and which both the configuration's
+`pre-push` and the Git hook `scripts/hooks/pre-push` run.
+
+#### Scenario: The Git hook runs the checks
+
+- **WHEN** an owner's `git push` runs the repository's pre-push hook
+- **THEN** the hook runs `make pre-push` with the remote, which runs both
+  public-content checks the guarded push runs
+
 ## Evidence
 
-- How this repository provides each role, and meets each of the engine's own
-  assumptions: `README.md`, held complete for the targets and paths the skills,
-  step table, and make fragment name by
-  `scripts/tests/test_change_workflow_assumptions.py`; rationale and current limits:
-  `README.md`; the requirements' organization: `index.md`.
+- This repository's hooks, validation parts, protected branches, inert paths,
+  models, and documents to load: `.agents/workflow.toml`.
+- How this repository provides each role the configuration does not hold, and meets
+  each of the engine's own assumptions: `README.md`, held complete, with the
+  configuration's commands, for the targets and paths the skills, step table, and
+  make fragment name by `scripts/tests/test_change_workflow_assumptions.py`;
+  rationale and current limits: `README.md`; the requirements' organization:
+  `index.md`.
 - Validation: `make validate-local`, `make validate-helm`, and `make validate-ci`
   (`scripts/validate_slice.py`); run selection for the validated commit:
   `scripts/fetch-e2e-logs.py`; the workflows validation may dispatch and the
@@ -504,11 +518,10 @@ revision check fails on what it writes before it lands.
   teardown: `make -C helm teardown`; the memory one release needs:
   `helm/validation-capacity.toml`, written by `make record-capacity`; two clones'
   Helm parts at once: `make validate-parallel` (`scripts/validate_parallel.py`).
-- The protected branches and the pre-push check the guarded push runs:
-  `PROTECTED` and `PRE_PUSH_CHECK` in `scripts/change_workflow/push.py`, the check
-  being `scripts/check_public_content.py --pre-push`, which `scripts/hooks/pre-push`
-  also runs.
-- The branch a change lands on: `CHANGE_WORKFLOW_MERGE_FROM` and
-  `CHANGE_WORKFLOW_REVIEW_BASE`, set by the root `Makefile` before it includes the
-  workflow's fragment; the forbidden models: `scripts/change_workflow/steps.py`;
-  the clone's bootstrap: `BOOTSTRAP_COMMAND` in `scripts/change_workflow/clone.py`.
+- The pre-push checks: `make pre-push`, running `scripts/check_public_content.py
+  --pre-push` and `scripts/check_secrets.py --pre-push`, which the configuration's
+  `pre-push` and `scripts/hooks/pre-push` both run.
+- The closing checks: `make check-repository` (`scripts/check_change.py`), the
+  configuration's `pre-commit`; `make check-change`, running `scripts/change-workflow
+  run pre-commit`.
+- The clone's bootstrap: `make init`, the configuration's `post-clone`.

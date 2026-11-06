@@ -8,7 +8,7 @@ reader starting there never finds. Every `openspec/specs/<capability>/` holding 
 `spec.md`, and every row of that table must link a capability's `spec.md` and
 nothing that does not exist.
 
-Run by `make check-change`. Usage: `check_capability_index.py`.
+Run by `make check-repository`, the change workflow's `pre-commit`. Usage: `check_capability_index.py`.
 
 Contract: openspec/specs/market-change-workflow/spec.md, MCW-c4ek.
 """

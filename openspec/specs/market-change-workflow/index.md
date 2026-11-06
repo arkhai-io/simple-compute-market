@@ -8,7 +8,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 
 ## 1. The workflow's roles
 
-- [MCW-5tgp](spec.md#requirement-mcw-5tgp-this-repository-provides-the-workflows-roles) — the repository states how it fills each workflow role, covering every target, path, and engine assumption named.
+- [MCW-5tgp](spec.md#requirement-mcw-5tgp-this-repository-provides-the-workflows-roles) — `.agents/workflow.toml` declares the workflow's fields, and the repository states how it fills each role outside them; every named target and path appears in one or the other.
 
 ## 2. Validation
 
@@ -43,8 +43,8 @@ meaningful order; [`README.md`](README.md) is the readable description.
 
 - [MCW-farr](spec.md#requirement-mcw-farr-this-repositorys-protected-branches-are-main-and-dev) — the protected branches are `main` and `dev`, which the guarded push refuses.
 - [MCW-q8vd](spec.md#requirement-mcw-q8vd-the-pre-push-check-refuses-recognizable-private-content) — the pre-push check rejects private paths and denylisted identifiers across every commit, failing closed.
-- [MCW-ca51](spec.md#requirement-mcw-ca51-the-merge-brings-in-dev-unless-the-owner-names-another-branch) — the branch a change lands on, and the merge brings in, is `dev` unless the owner names another.
-- [MCW-y37w](spec.md#requirement-mcw-y37w-the-step-table-names-no-fable-or-astra-model) — Fable and Astra models are forbidden; the step table names none and the wrapper refuses one.
+- [MCW-k3vy](spec.md#requirement-mcw-k3vy-the-pre-push-checks-are-one-make-target) — the pre-push checks are one target, `make pre-push`, which the configuration's `pre-push` and the Git hook both run.
+- [MCW-r4tx](spec.md#requirement-mcw-r4tx-this-repositorys-hooks-and-validation-parts) — the configuration relocks, runs `make check-repository` before every commit, clears the wheelhouse, packages, and tests before a functional one, and declares the pipeline, owed CI, local, and Helm parts.
 - [MCW-uqlq](spec.md#requirement-mcw-uqlq-a-clones-bootstrap-is-make-init) — a clone's bootstrap is `make init`, run as the clone is made; implementation and validation wait on it.
 
 ## 5. This repository's checks
@@ -56,4 +56,5 @@ meaningful order; [`README.md`](README.md) is the readable description.
 
 ## Retired ids
 
-None.
+- MCW-ca51 — the merge brought in `dev` unless the owner named another branch; the branch a change lands on is now recorded with its clone or given as an argument (`change-workflow`'s CW-s3ju and CW-hdxi).
+- MCW-y37w — the step table named no Fable or Astra model; a repository now lists the models it prefers per step and keeps no forbidden list (`change-workflow`'s CW-ebmo and CW-zq4h).

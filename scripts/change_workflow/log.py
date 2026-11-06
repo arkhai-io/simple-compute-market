@@ -15,6 +15,12 @@ and resolving are distinct because a run can be denied a call and still end with
 question or a proposed return: its denials are read first, and its outcome is
 answered or decided after. This module is the log's only writer.
 
+A run's line may carry `invoked`: each hook, part, and command the run invoked
+through `run` or the guarded push, with its owed workflow and phase where it has
+them, the command it resolved to, its exit status, when it started, and how long it
+took. The field is optional, so a line without it reads as before and the record
+set's format does not move.
+
 The log holds only what the change's files cannot: session ids, the owner's round
 agreements, and the last outcome. Where the log and the files disagree, the files
 win. It lives in the change's untracked `reviews/` directory and moves with the
@@ -350,10 +356,11 @@ def record_outcome(path: Path, step: str, outcome: Entry, *, session: str | None
 
 
 def record_interactive(path: Path, step: str, outcome: Entry, *, session: str,
-                       commit: str | None, clock: Clock = utc_now) -> Entry:
+                       commit: str | None, invoked: Sequence[Entry] = (),
+                       clock: Clock = utc_now) -> Entry:
     """Append the outcome of a step the owner ran interactively, which records its
     own: checked as the wrapper checks an unattended run's, and marked
-    `interactive`.
+    `interactive`, with what the session `invoked`, when it invoked anything.
 
     A triage's finished or returned outcome is refused unless it names the records
     it triaged (`triage_outcome_problems`), as the wrapper records such a run
@@ -370,7 +377,9 @@ def record_interactive(path: Path, step: str, outcome: Entry, *, session: str,
         raise StepError("the triage's outcome does not name what it triaged: "
                         + "; ".join(problems))
     return record_outcome(path, step, outcome, session=session, commit=commit,
-                          extra={"interactive": True}, clock=clock)
+                          extra={"interactive": True,
+                                 **({"invoked": list(invoked)} if invoked else {})},
+                          clock=clock)
 
 
 def open_log(path: Path, change: str, step: str, *, interactive: bool,
