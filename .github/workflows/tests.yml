@@ -53,6 +53,7 @@ jobs:
           - test-provisioning-adapter
           - test-bare-metal
           - test-compute
+          - test-compute-delivery
           - test-vms-domain
           - test-vms-buyer
           - test-apicredits

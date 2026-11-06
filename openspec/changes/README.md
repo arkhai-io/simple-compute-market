@@ -438,6 +438,12 @@ No change owns these yet; both are the VM admin interrupt route's, which is Alka
 | `POST /api/v1/admin/deals/{escrow_uid}/interrupt` finds the live reservation by listing each site's reservations by `escrow_uid`, but negotiated VM deals reserve and commit with `deal_ref={negotiation_id}` and the ledger records `escrow_uid` only when the deal reference carries one, so the route answers "no live reservation" for a negotiated deal; only an admin-reserved hold matches | Goal 8 design, 2026-10-28; inferred from code, not reproduced |
 | The route logs `settlement_action="splitter_declaration_pending"` and echoes `seller_amount` and `refund_amount` without submitting any declaration; `automate-seller-spot` task 2.2 owns the execution | Goal 8 design, 2026-10-28 |
 
+### Unowned work found by `unify-compute-delivery-path`
+
+| Item | Origin |
+|---|---|
+| End service's `record_end` takes the caller's `Classification`, so VM's failure action, bare metal's lifecycle and the compute delivery path each choose between the seller failure they observed and an earlier lawful end that is due, reading `servicing_final_requests` directly to do it, although `deal-lifecycle` gives classification to end service. An `EndSession` method that makes that choice from the observed failure would leave one implementation in `kit/deal-servicing` | `unify-compute-delivery-path` section 3, 2026-11-06 |
+
 ## Lesser goal — Registry productionization
 
 **What it adds up to.** The registry runs on SQLite with an embedded-by-default topology suited to development and not to a shared marketplace. This sequence makes migrations explicit, separates the registry into a genuinely shared external service, makes it keep every listing field it acknowledges, moves it to PostgreSQL, and only then indexes filters against measured load. Not a roadmap goal — discovery semantics do not change — but it is what lets one registry serve more than one seller's storefront.

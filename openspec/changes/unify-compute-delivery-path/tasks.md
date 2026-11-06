@@ -175,7 +175,7 @@ resource", "A live acceptance hold is adopted"). Files: new
 `src/compute_delivery/`, `tests/`), `domains/Makefile` (`dist-compute-delivery`,
 `test-compute-delivery`), the root `Makefile`'s `dist-domains` and `test` aggregates.
 
-- [ ] 3.1 Create the distribution `arkhai-compute-delivery` (source `compute_delivery`)
+- [x] 3.1 Create the distribution `arkhai-compute-delivery` (source `compute_delivery`)
       at `domains/compute/delivery`, a compute specialization library depending on
       `arkhai-compute`, `arkhai-kit-deal-lifecycle`, `arkhai-kit-deal-servicing`,
       `arkhai-kit-capacity-publication`, `arkhai-kit-fulfillment` and the compute
@@ -183,23 +183,76 @@ resource", "A live acceptance hold is adopted"). Files: new
       `domains/Makefile` and the root `Makefile` so `make dist` and `make test` include
       it, per `docs/development/BUILD_AND_PACKAGING.md`. `make check-architecture`
       classifies it from its path with no override row (D1).
-- [ ] 3.2 Declare the two ports as `typing.Protocol`s — `DeliveryProgress` (load the
+      Done, with the declarations following the imports rather than the list: it
+      declares `arkhai-core` (the result envelope), `arkhai-kit-deal-lifecycle` and
+      its contracts, `arkhai-kit-deal-servicing`, `arkhai-kit-capacity-publication`,
+      `arkhai-kit-site-client` (the site refusal and unsigned-answer errors it
+      classifies), `arkhai-compute-provisioning-contracts`, `arkhai-kit-identity`
+      (canonical evidence bodies) and `pydantic`. It imports nothing from
+      `arkhai-compute` or `arkhai-kit-fulfillment` (the fulfillment surface it calls
+      is the provisioning contracts' wire models), so neither is declared:
+      `ARCHITECTURE.md` makes an undeclared import an error and a declaration without
+      an import a defect. Dev group: `arkhai-kit-alkahest`, whose once-only adapter
+      the tests compose; section 4 adds the payments kit with the tests that use it.
+      `domains/Makefile` gains `dist-compute-delivery` (in `dist`) and
+      `test-compute-delivery`; the root `Makefile` gains `test-compute-delivery` in
+      `test`. The project's first lock was bootstrapped by writing a header-only
+      `uv.lock` for `make lock PROJECTS=domains/compute/delivery` to rewrite, since
+      `scripts/uv_project.py lock` reads an existing lock.
+- [x] 3.2 Declare the two ports as `typing.Protocol`s — `DeliveryProgress` (load the
       recorded identities, step and activation instant; record reservation, dispatch,
       fulfillment and activation, each written once, in the caller's transaction) and
       `ComputeDeliveryDomain` (reserve claim, accepted hold if any, exact fulfillment
       request, ready evidence, continuation) — and `DeliveryOutcome` with its six
       outcomes, the closed `repair_required` reasons and the identities and evidence
       reference every `repair_required` and `ended` outcome carries (D1).
-- [ ] 3.3 Implement `drive(negotiation_id)`'s fail-closed entry: no servicing record or
+      Done in `ports.py` and `outcome.py`. Each `DeliveryProgress` method takes the
+      `sqlite3.Connection` of the transaction the path opens on end service's
+      database (both domains' rows live there), so a progress write commits with the
+      admission that permits it. The port reports its row as `RecordedProgress`
+      in the path's step vocabulary (`reserve`, `commit`, `dispatch`, `fulfillment`,
+      `activated`); a value the path does not know is passed through for the path to
+      refuse. Beyond the plan: `DeliveryProgress.release_claim` (3.4 releases the
+      convergence claim through the progress port, which needs a method);
+      `ComputeDeliveryDomain.accepted_deal`, returning `AcceptedDeal(commitment_ref,
+      binding, payment)` or `None` — the verified-settlement check 3.3 needs, the
+      listing's capacity binding that selects the site, and the payment adapter the
+      storefront's table resolves (`None` never allows); and `SiteFulfillment`, the
+      provisioning family's begin/status/result/lease reads routed by site, which
+      each storefront adapts its client to (the two domains' clients route by
+      different keyword arguments). `AcceptedHold` carries the hold's exact
+      `HoldPlacement` when it was placed under `:hold`, else its recorded expiry.
+      `ContinuationState` is `none`, `acknowledged` or `pending`.
+      `DeliveryOutcome.hook_disposition` gives the hook's fulfilled/deferred/failed
+      mapping. The outcome carries `evidence_ref` and a `detail` string.
+- [x] 3.3 Implement `drive(negotiation_id)`'s fail-closed entry: no servicing record or
       no verified evidence is `repair_required(no_accepted_deal)` with nothing written;
       no progress row is a first drive creating it under admission for `reserve`; an
       unknown step, malformed or conflicting identity, wrong-kind port result or empty
       fulfillment result is `repair_required` with its reason and no further effect (D1).
-- [ ] 3.4 Derive the window from `servicing_delivery`'s `start_at` and `term_end` only;
+      Done in `path.py` and `progress.py`. A settlement naming another commitment
+      than the servicing record is `no_accepted_deal`, and so is a servicing record
+      that does not parse in anything but its timing; a step that disagrees with the
+      identities beside it is `progress_unreadable`; a wrong-kind domain answer, a
+      fulfillment request for another reservation, an empty result envelope and a
+      result showing no ready evidence are `domain_result_invalid`. A refused
+      authorization that is not an end (no adapter, invalid commitment evidence) is
+      `no_accepted_deal` with the authorization's intent as its evidence; a pending
+      or unknown one is `pending`. A malformed site answer (another reservation, no
+      reservation identity, a provisioning acknowledgement for another reservation)
+      is `site_unanswered`. Evidence references name what was read
+      (`servicing_delivery:<id>`, `delivery_progress:<id>`, `settlement:<id>`,
+      `reservation:<id>`, `fulfillment:<id>`) or the end request's source.
+- [x] 3.4 Derive the window from `servicing_delivery`'s `start_at` and `term_end` only;
       missing or conflicting timing is `repair_required(timing_invalid)`. Before
       `start_at`, return `waiting(wake_at=start_at)` after the commit, releasing the
       convergence claim through the progress port, with nothing dispatched (D4).
-- [ ] 3.5 Commit: adopt a supplied acceptance hold first, following D6's table — commit
+      Done in `window.py`. Missing timing is a servicing record that does not parse
+      (its detail names the field); an empty term (`term_end <= start_at`) and a
+      commit answer whose start differs from the Agreement's or whose end is later
+      are conflicting timing. A committed end earlier than the Agreement's is
+      accepted: only truncation moves a lease's end, always earlier.
+- [x] 3.5 Commit: adopt a supplied acceptance hold first, following D6's table — commit
       it; retry an unanswered or unsigned commit; reserve under
       `<negotiation_id>:settlement` only for a hold verified lapsed (its `:hold` replay
       returns it expired or released, or, keyless, its recorded expiry has passed);
@@ -207,15 +260,62 @@ resource", "A live acceptance hold is adopted"). Files: new
       `CapacityEffects` after `authorize_delivery` for `commit`; a replayed reservation
       that comes back expired or released is repair-required or the end hand-off,
       never a fresh hold (D6).
-- [ ] 3.6 A site refusal of the commit of a held reservation — a live hold or a
+      Done. A signed 404 or 409 is a refusal; an unsigned answer, a transport
+      failure or any other status is unanswered and the same effect is repeated. A
+      keyed hold's `:hold` replay that the site refuses (409) or that finds another
+      reservation is `domain_result_invalid` (the domain mis-describes its hold), its
+      detail naming what the replay answered; nothing is released, since the site
+      answers a found and a newly placed reservation alike and the found one may be
+      the deal's live hold, while a placed one carries the hold's TTL. A keyless hold
+      with no recorded expiry is never verified lapsed. A refused `:settlement` placement (404 or 409), one that finds
+      no capacity (the site answers no reservation), and one that comes back
+      released take the end hand-off as `start_failure`, as D6's table and D11 say; a
+      released one is recorded first so the end releases it. A reservation is
+      recorded without admission: the end operation releases what is recorded, so a
+      reservation the site holds is recorded even when an end won meanwhile.
+- [x] 3.6 A site refusal of the commit of a held reservation — a live hold or a
       settlement placement — calls `record_end` with the seller-failure classification
       and its `delivery_end` filing at the Agreement start, then releases the
       reservation through end service's no-dispatch path under one key (D11).
-- [ ] 3.7 Dispatch: `authorize_delivery` for `dispatch`, the dispatch recorded through
+      Done (`_hand_off`, `_record_failure`): one transaction runs admission first (so
+      a missed deadline is established), retains the observed refusal as a
+      `seller_assertion` evidence item under a source fixed by the reservation
+      (`delivery:commit-refused:<reservation>`), and records the end as
+      `start_failure` with `failure_filing` (never-delivered basis, acting no earlier
+      than the Agreement start); an earlier lawful end already due controls the
+      classification instead, with no filing, as VM's failure action does. Then
+      `EndService.drive_physical` ends the physical side through the domain's end
+      port under the terminate intent's key; a failure there is logged and leaves the
+      intent pending, and the next drive (admission now `ended`) repeats it under the
+      same key. The classification query reads `servicing_final_requests` directly,
+      as both domains already do; `EndSession` offers no read of it. Deferred, for
+      the round's review to weigh: the fresh-context check read this, and the path's
+      choice between its own failure kind and an earlier lawful end's, as end
+      service's classification leaking into a third caller (`deal-lifecycle` "Cause
+      classification is owned by end service"). Today `record_end` takes the
+      caller's `Classification`, so VM's failure action, bare metal's lifecycle and
+      this path each build it; moving that choice and the read behind an
+      `EndSession` method is a `kit/deal-servicing` change outside this section's
+      files, recorded as unowned work under "Settlement and deal servicing depth" in
+      `openspec/changes/README.md`. Not separately tested: that admission runs first
+      in `_record_failure`.
+- [x] 3.7 Dispatch: `authorize_delivery` for `dispatch`, the dispatch recorded through
       the progress port before `begin_fulfillment`, the fulfillment identity recorded
       on acknowledgement; recovery with a recorded fulfillment polls it and never
       schedules or begins another (D1, D4).
-- [ ] 3.8 Verify: library integration in `domains/compute/delivery/tests/` against
+      Done. The dispatch record is the authorization's `apply` callback, so it
+      commits in the admission's transaction or not at all. A recorded dispatch with
+      no fulfillment identity repeats the same request, which provisioning answers
+      with the fulfillment it already accepted for the reservation. An exception from
+      a fulfillment call propagates with the steps before it recorded. Authorization
+      evidence holds only what is fixed before the phase (commit binds the
+      commitment, dispatch adds the reservation): end service keys an authorization
+      by phase and admission revision and refuses a same-revision retry whose
+      evidence differs, which the first run of the late-settlement test hit. With a
+      fulfillment recorded, `drive` polls its status and, once active, reads its
+      result and the domain's ready evidence, and returns `pending`; activation and
+      what follows are section 4's.
+- [x] 3.8 Verify: library integration in `domains/compute/delivery/tests/` against
       in-memory port fakes, a fake capacity client and fulfillment client, and the real
       `kit/deal-servicing` journal on SQLite, for every `drive` scenario of the
       `compute-delivery` delta named above — late settlement, missing timing, a forward
@@ -227,6 +327,63 @@ resource", "A live acceptance hold is adopted"). Files: new
       window derivation. Run `make -C domains test-compute-delivery`,
       `make check-packaging` (new distribution and lock) and `make test`. End-to-end:
       none until sections 5 and 7 compose the library.
+      Library integration (`tests/integration/`, `ComputeDeliveryPath.drive` over the
+      real servicing journal and end service on SQLite, the Alkahest once-only
+      adapter with a scripted validator, a fake site, provisioning service, domain
+      port and end port; the progress fake keeps its row in the same SQLite database
+      rather than in memory, so its writes share the path's transactions):
+      `test_drive_entry.py` — a never-accepted deal, no verified settlement, another
+      commitment, wrong-kind `accepted_deal`, `reserve_claim` and `accepted_hold`
+      answers, missing timing with a recorded reservation kept, an empty term, a
+      record unreadable beyond its timing, an unknown step, a self-contradicting row,
+      a commitment the adapter refuses, and no adapter; `test_drive_commit.py` — late
+      settlement (every commit, first and retried, sent the Agreement window), a
+      forward reservation waiting and its claim released, an end recorded while it
+      waits, a lost reserve acknowledgement, a released replay, a live hold committed,
+      a hold commit's answer lost, a keyed and a keyless hold verified lapsed, a
+      refused live hold (with and without a recorded expiry), a commit refused after
+      reservation with its evidence item, filing at the Agreement start and a restart
+      before the release acknowledgement retrying the same key, a placement finding
+      no capacity, a refused placement (404, 409), an unsigned and a 500 commit
+      answer each retried on the same reservation, malformed reserve and commit
+      answers, a lease committed under other timing, a hold placement the site
+      refuses, a hold replay answering another reservation (nothing released), a
+      reservation recorded although an end won while it was placed,
+      and an earlier lawful end controlling a commit refusal with no filing;
+      `test_drive_dispatch.py` — an end recorded after the dispatch authorization
+      was read (no dispatch, no dispatch record), an unknown authorization resolved
+      under the same intent, dispatch recorded before `begin_fulfillment`, a lost
+      dispatch acknowledgement repeating the same request, a worker polling the
+      recorded fulfillment, a request for another reservation, a dispatch
+      acknowledged for another reservation, an empty result and a result with no
+      ready evidence. Unit (`tests/unit/`): window derivation, timestamp reading, the
+      committed-window check, progress reading and outcome invariants.
+      `make -C domains test-compute-delivery`: 81 passed.
+      `make check-packaging` passes, its architecture rules with no warning for the
+      new package. `make test`'s first run failed only
+      `scripts/tests/test_tests_workflow.py::test_the_matrix_is_make_tests_targets`:
+      `.github/workflows/tests.yml`'s matrix must list every `make test` target, so it
+      gained `test-compute-delivery` (a file the plan did not name). A second run
+      failed two API-credit wheel-install tests
+      (`domains/apicredits/tests/test_distribution_install.py`) on an import from the
+      installed `market_core`; they passed alone (41 passed) and in the next full
+      run, which passed whole after the review's fixes. The `compute`
+      publish filter in `.github/workflows/publish-pypi.yml` is narrowed to that
+      project's own files, as `bare-metal`'s is, so the nested delivery project does
+      not republish `arkhai-compute`. `make check-change` reports only the citation of
+      `openspec/specs/compute-delivery/architecture.md`, which closeout (9.9)
+      creates. End-to-end: none, confirmed; sections 5 and 7 compose the library.
+      Owed by validation: none.
+      Handoff for sections 5 and 7: the published storefronts will depend on
+      `arkhai-compute-delivery`, so `publish-pypi.yml` needs its row (filter, after
+      `compute-provisioning-contracts` in the manifest) and `RELEASING.md` its row,
+      or `scripts/tests/test_publish_matrix.py` fails; a new PyPI project also needs
+      the owner's trusted-publisher setup, which no session can do. Each storefront
+      adapts its fulfillment client to `SiteFulfillment` (bare metal routes by
+      `capacity_reservation_id`, VM by `site_id`), builds `AcceptedDeal` from its
+      verified evidence, binding and payment-adapter table, and maps its progress
+      row onto the step vocabulary. The path holds no lock: the caller serializes
+      drives of one deal.
 
 ## 4. The family delivery library: activation through availability, the end hand-off and access
 
@@ -322,6 +479,15 @@ defers a VM deal, never fails it"). Files under `domains/vms/storefront/src/mark
       provisioning") passing. Run `make test-storefront`, `make check-packaging` and
       `make test`. End-to-end: `e2e_deal`, `e2e_deal_buyer_cli` and
       `e2e_vm_payment_deal` exercise VM delivery on the path once deployed.
+- [ ] 5.6 Publish `arkhai-compute-delivery` with the first storefront that depends on
+      it: a filter and a manifest row in `.github/workflows/publish-pypi.yml` (after
+      `compute-provisioning-contracts`, which it depends on) and a row in
+      `docs/development/RELEASING.md` naming its internal dependencies, or
+      `scripts/tests/test_publish_matrix.py` fails once a published storefront
+      declares it. A new PyPI project needs the owner's trusted-publisher setup and
+      its GitHub environment, which no session can make: ask the owner before the
+      section is committed. Added by section 3's implementation, which built the
+      distribution.
 
 ## 6. VM credentials read live and not replayed
 

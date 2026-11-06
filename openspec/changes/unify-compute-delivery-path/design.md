@@ -70,9 +70,11 @@ servicing.
 
 The path is a library distribution at `domains/compute/delivery` (source
 `compute_delivery`): a compute specialization, the family's kit for delivery beside
-`provisioning/compute` for physical provisioning. It depends on the compute
-contracts, the neutral lifecycle kits (`kit/deal-lifecycle`, `kit/deal-servicing`),
-`kit/capacity-publication` and `kit/fulfillment`, never on a storefront.
+`provisioning/compute` for physical provisioning. It depends on the provisioning
+family's wire contracts, the neutral lifecycle kits (`kit/deal-lifecycle` and its
+contracts, `kit/deal-servicing`), `kit/capacity-publication`, the site client, the
+core carriers and the identity kit, never on a storefront; it imports nothing from
+`arkhai-compute` or `kit/fulfillment`, so it declares neither.
 
 It owns the order of delivery — window derivation, the future-start wait, commit,
 dispatch, readiness, activation, billing start, availability, the end hand-off,
@@ -90,6 +92,16 @@ its implementations in when composed, as each already implements the foundation'
   fulfillment request (VM's fulfillment context, bare metal's materialization), its
   ready evidence from a fulfillment result, and its continuation after availability
   (an Alkahest claim, evidence publication), or none.
+
+As built, `ComputeDeliveryDomain` also answers `accepted_deal`: the deal's verified
+settlement as its commitment reference, the listing's durable capacity binding that
+selects the site, and the payment adapter the storefront's table resolves, or none;
+`DeliveryProgress` also releases the domain worker's convergence claim on a deal that
+waits; and the library declares `SiteFulfillment`, the provisioning family's begin,
+status, result and lease reads routed by site, which each storefront adapts its own
+client to. Progress methods take the connection of the transaction the library opens
+on end service's database, where both domains' rows already live. The site client
+supplies the refusal and unsigned-answer errors the library classifies.
 
 The library exposes one operation, `drive(negotiation_id) → DeliveryOutcome`, with
 outcomes `waiting(wake_at)`, `pending`, `repair_required(reason)`, `available`,
