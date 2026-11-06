@@ -22,26 +22,27 @@ tests, run in series by `unittest`: each `test_admission_installer` case drives 
 real `ansible-playbook` that builds real virtual environments, taking 25–45 seconds.
 They work in their own temporary directories and touch no shared path.
 
-**Some scenarios wait on timers and durations, against `TESTING.md`.** Its
-"Tests wait on events, never on durations" and "Pause the loop, then advance it
-explicitly" sections, and the end-to-end stage discipline, allow a scenario to wait
-only on a request it made. Five places in the pipeline's lanes do otherwise:
+**Some scenarios advance on timers or on time passing, against `TESTING.md`.** An
+end-to-end test proves a deterministic sequence of state changes — a sequence diagram
+run repeatably — never wall-clock time; `TESTING.md` allows a stage to wait only on a
+request it made. Three places in the pipeline's lanes do otherwise, and a fourth polls
+where one read suffices:
 
 - `test_buy_oneshot_buyer_cli` and `test_listing_shapes` hold the storefront's loops
   but not provisioning's fulfillment convergence or lease watchdog. Their
   `market buy` reaches `ready` only when convergence's 30-second timer next fires:
   in the run above, every such buy completed on a timer tick, about 40 seconds of
   waiting in all. This is the trap `TESTING.md` records as "A loop with no pause is
-  not paused".
-- The bare-metal introduction scenario polls the `introduction-retention` dry run
-  until the retention window has passed in real time, where the guidance asks a
-  deadline the scenario is defined by "as a deadline of now".
-- The bare-metal payment scenario, having advanced provisioning to `active`, polls
-  the storefront's fulfillment status for up to 30 seconds.
-- The VM introduction stages poll Mailpit for seller-side delivery, which runs off
-  the request path.
-- The API-credit buyer scenario polls through the sample app's 3-second verify
-  cache after a top-up.
+  not paused". Holds are uneven across the compute lanes generally: several modules
+  hold only the storefront's loops, and one holds nothing.
+- The bare-metal introduction scenario polls the held `introduction-retention` dry run
+  until the retention window has passed in real time, duplicating the storefronts'
+  integration tests of the held sweep.
+- The API-credit buyer scenario polls through the sample app's 3-second verify cache
+  after a top-up.
+- The bare-metal payment scenario, having advanced provisioning to `active`, polls the
+  storefront's fulfillment status for up to 30 seconds, though that status reads
+  provisioning live.
 
 Each wait costs little today, but each new scenario that copies one adds its
 own, and a timer-bound scenario's duration is set by the timer rather than by
@@ -49,30 +50,28 @@ the work it does.
 
 ## What Changes
 
-- **The native Ansible gate becomes a lane of its own.** A new `e2e.yml` job builds
-  the wheels and the provisioning image and runs `make test-provisioning-iac-native`;
-  the VM lane no longer runs it. The gate keeps its stance: a skipped test or an empty
-  run fails it.
-- **The compute family's native tests run concurrently** within the gate, so the new
-  lane does not become the pipeline's longest; the VM IaC's native tests may follow
-  the same runner.
-- **Every buy scenario holds what it depends on.** `test_buy_oneshot_buyer_cli` and
-  `test_listing_shapes` take the fulfillment-convergence and lease-watchdog holds, run
-  `market buy` in the background, and step convergence with `advance-cycle` once the
-  job is submitted, as `test_full_deal_buyer_cli` already does.
-- **The `introduction-retention` dry run and step accept an as-of time** on the
-  storefront admin API, so the bare-metal introduction scenario asks whether an
-  introduction is past its window at a time it names, rather than waiting for the
-  window to pass. This is an end-to-end test control on an admin route; production
-  callers omit it and the sweep reads the clock as today.
-- **The remaining waits are replaced by a step or a seam.** The bare-metal payment
-  scenario's storefront status poll, the VM introduction's Mailpit poll, and the
-  API-credit scenario's verify-cache poll each get the step or seam the design finds
-  for it.
-- **A source check keeps holds complete.** `e2e-tests/tests/unit/test_scenario_holds.py`
-  is extended so a scenario module that drives a fulfillment to delivery must hold
-  fulfillment convergence and the lease watchdog.
-- State: **proposed; design not started.**
+- **The native Ansible gate becomes a job of its own.** A new `e2e.yml` job,
+  `native-ansible-gate`, builds the wheels and the provisioning image
+  (`make build-e2e-native-gate`) and runs `make test-provisioning-iac-native`; the VM
+  lane no longer runs it. The gate keeps its stance: a skipped test or an empty run
+  fails it.
+- **The compute family's native tests run concurrently,** one process per test,
+  `os.cpu_count()` at a time, each test's output printed whole under its id, so the new
+  job stays off the pipeline's critical path. The VM IaC gate keeps its serial runner.
+- **Every compute-lane scenario module holds its lane's timers:** the storefront's
+  lifecycle loops, fulfillment convergence, and the lease watchdog, and in the VM lane
+  Alice's storefront loops. A source check reads each module's resolved fixtures and
+  fails one missing a hold.
+- **Buy scenarios step convergence.** `test_buy_oneshot_buyer_cli` and
+  `test_listing_shapes` run `market buy` in the background and advance convergence once
+  the job is submitted, through one shared helper.
+- **The e2e retention-sweep stage is removed;** the storefronts' integration tests own
+  the held sweep.
+- **The API-credit lane runs the sample app with no verify cache,** so a top-up is
+  visible to the next request.
+- **The bare-metal payment scenario reads fulfillment status once** after advancing it
+  to `active`.
+- State: **design settled.**
 
 ## Capabilities
 
@@ -82,16 +81,10 @@ None.
 
 ### Modified Capabilities
 
-- `test-compatibility`: "Scenarios hold shared services for the whole module" gains
-  the rule that a module driving a fulfillment holds convergence and the lease
-  watchdog, enforced from source; "Each domain runs in its own lane" or a sibling
-  requirement records that the native Ansible gate runs as its own pipeline job.
-- `contact-exchange-settlement`: the retention sweep's preview and step accept an
-  as-of time.
-- Others as design finds them: the API-credit and introduction-delivery
-  specifications if their seams change behaviour.
-
-Until design writes these deltas, `.openspec.yaml` sets `skip_specs`; design clears it.
+- `test-compatibility`: "Scenarios hold shared services for the whole module" requires
+  every compute-lane module to hold its lane's timers, enforced from each module's
+  resolved fixtures; a new requirement states that pipeline scenarios advance only by
+  their own steps and wait only on effects of their own requests.
 
 ## Non-Goals
 
@@ -107,39 +100,68 @@ Until design writes these deltas, `.openspec.yaml` sets `skip_specs`; design cle
 - Do not change the refund retry in payment-compensation cleanup, which runs only
   after a scenario has failed and already takes an injected clock and sleep.
 - Do not change the provisioning service's convergence interval.
-
-## Open questions
-
-- **The API-credit verify cache.** Whether the lane's sample app runs with no cache,
-  a top-up invalidates the cache, or another seam lets the scenario observe the
-  top-up; and where the cache's own behaviour is proven if the lane bypasses it.
-- **The bare-metal payment status poll.** Which storefront path makes an `active`
-  fulfillment visible: if it reads through to provisioning, the poll is a single
-  assertion; if a loop carries it, the scenario steps that loop.
-- **The VM introduction's Mailpit poll.** What dispatches seller-side delivery, and
-  which step or completion signal the scenario waits on instead.
-- **The as-of control's shape.** Its name, its validation (whether a time before the
-  storefront's clock is refused), and whether it applies to the dry run and the step
-  alike.
-- **Concurrency in the native gate.** One process per test or per module, the worker
-  count on a hosted runner, and how a failure's output stays attributable.
+- Do not add an `as-of` control to any lifecycle route, or change the API-credit
+  middleware's cache behaviour.
+- Do not move the bare-metal cleanup native gate (`make test-bare-metal-iac-native`)
+  into a workflow; that it runs in none is recorded as an unowned roadmap gap.
+- Do not hold the API-credit lane's loops; `apicredits-end-to-end-lane` owns that.
+- Do not change the introduction stages' Mailpit wait, which waits on a message the
+  stage's own reveal sends.
 
 ## Dependencies and Related Changes
 
+- `apicredits-end-to-end-lane` (in design) holds and steps the API-credit storefront's
+  loops and edits the same API-credit scenario module; it adopts this change's hold rule
+  for its lane. Neither waits for the other; whichever lands second merges.
 - `isolate-end-to-end-lane-stacks` makes several lane stacks able to share a host,
   which the deferred sharding step would build on. Neither waits for the other.
 - `extract-e2e-project` (deferred) would move the harness this change edits.
 
 ## Impact
 
-`.github/workflows/e2e.yml` (a gate job; the VM job's gate step removed); the root
-`Makefile` if the gate lane needs a build target of its own;
-`provisioning/compute/iac/scripts/native_ansible_gate.sh` and possibly
-`domains/vms/provisioning/iac/scripts/native_ansible_gate.sh`, with the VM IaC
-structure test that reads the latter; `scripts/fetch-e2e-logs.py` if the new job
-uploads logs; the scenario modules named above and their helpers; the storefront
-admin route and kit runner for `introduction-retention`, and its client; the
-API-credit sample app or middleware configuration; `TESTING.md`'s native-gate and
-lane sections and its hold rules; and the source check in
-`e2e-tests/tests/unit/test_scenario_holds.py`. Runtime behaviour changes only where
-an admin route gains the as-of control.
+`.github/workflows/e2e.yml` (the `native-ansible-gate` job; the VM job's gate step
+removed); the root `Makefile` (`build-e2e-native-gate`);
+`provisioning/compute/iac/scripts/native_ansible_gate.sh`; the VM and bare-metal scenario
+modules gaining holds, `test_buy_oneshot_buyer_cli.py`, `test_listing_shapes.py`,
+`test_bare_metal_introduction.py`, `test_bare_metal_payment_deal.py`, and
+`test_credits_deal_buyer_cli.py`; a buy helper under `e2e-tests/tests/e2e/roles/helpers/`;
+`e2e-tests/tests/unit/test_scenario_holds.py` or its sibling setup-plan check;
+`compose.apicredits-lane.yml` and the comment in `domains/apicredits/compose.yml`;
+`TESTING.md`; `ROADMAP.md`. No runtime behaviour, wire format, persistence, or
+deployment changes.
+
+## Permanent documentation impact
+
+- [x] `docs/development/ARCHITECTURE.md` — one line of the testing principle
+- [x] Existing subsystem specification — `openspec/specs/test-compatibility/spec.md`
+- [ ] New subsystem specification
+- [ ] No permanent documentation change
+
+### Knowledge to promote
+
+- D1: the native Ansible gate runs as its own E2E job beside the domain lanes —
+  `docs/development/TESTING.md` ("Ansible Syntax and Native Checks" and the lane list).
+- D2: the compute gate runs one process per test, concurrently, each test's output
+  whole — `docs/development/TESTING.md` ("Ansible Syntax and Native Checks").
+- D3: no workflow runs the bare-metal cleanup native gate — an unowned gap in
+  `docs/development/ROADMAP.md`.
+- D4: the held retention sweep is proven at integration level, not end to end —
+  `docs/development/TESTING.md` (the bare-metal lane's description).
+- D5: the API-credit lane runs the gate with no verify cache, and the cache is proven by
+  the conformance trace — `docs/development/TESTING.md` (the API-credit lane's
+  description).
+- D6: every compute-lane module holds its lane's timers, checked from the setup plan —
+  `openspec/specs/test-compatibility/spec.md` ("Scenarios hold shared services for the
+  whole module") and `docs/development/TESTING.md` (the hold rule).
+- D7: buy scenarios run `market buy` in the background and step convergence through one
+  helper — `docs/development/TESTING.md` (the hold rule's paragraph on stepping).
+- D8: no permanent destination — a scenario's single read after a step is what the new
+  `test-compatibility` requirement already states.
+- D9: no permanent destination — the Mailpit wait is unchanged, and the new
+  `test-compatibility` requirement states why it complies.
+- D10: no permanent destination beyond D1's — the job's name and Make target are
+  self-describing in `e2e.yml` and the `Makefile`.
+- The principle that an end-to-end test proves a deterministic sequence of state
+  changes, never wall-clock time — `docs/development/TESTING.md` ("The discipline every
+  scenario follows"), one line in `docs/development/ARCHITECTURE.md` ("Testing
+  strategy"), and `openspec/specs/test-compatibility/spec.md` (the new requirement).
