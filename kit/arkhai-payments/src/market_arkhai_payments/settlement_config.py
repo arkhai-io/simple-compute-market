@@ -12,6 +12,8 @@ from typing import Any
 import httpx
 from market_core.query_dsl import ComparisonOperator, FieldDescriptor, QueryValueType
 from market_core.schemas import (
+    AgreedPrice,
+    PriceBasis,
     RateValue,
     SettlementOption,
     SettlementPrice,
@@ -35,8 +37,10 @@ from market_settlement_runtime import (
 )
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
+from market_settlement_runtime.presentation import PaymentPresentation, amount_rate_quote
+
 from market_arkhai_payments.client import PaymentsClient
-from market_arkhai_payments.mandates import PaymentsOptionParams
+from market_arkhai_payments.mandates import PaymentsOptionParams, duration_seconds
 from market_arkhai_payments.models import AccountId, Asset
 from market_arkhai_payments.receipts import ReceiptIdentity
 
@@ -416,6 +420,8 @@ def arkhai_payments_option_builder(
     if clause.mechanism != ARKHAI_PAYMENTS_MECHANISM:
         raise ValueError("publication clause does not select Arkhai payments")
     params = ArkhaiPaymentsPublicationInput.model_validate(clause.mechanism_input)
+    if params.period is not None or params.setup_amount is not None:
+        raise ValueError("recurring payment publication requires the injected preset helper")
     if params.asset != clause.asset:
         raise ValueError("payment option asset must match the publication clause")
 
@@ -433,16 +439,16 @@ def arkhai_payments_option_builder(
             dispute_window_seconds=params.dispute_window_seconds,
             case_hold_max_seconds=params.case_hold_max_seconds,
         ),
-        **({"delivery_deadline_seconds": params.delivery_deadline_seconds}
-           if params.delivery_deadline_seconds is not None else {}),
+        **({"delivery_deadline_seconds": resources.get("delivery_deadline_seconds")}
+           if resources.get("compute") and resources.get("delivery_deadline_seconds") is not None else
+           {"delivery_deadline_seconds": params.delivery_deadline_seconds}
+           if not resources.get("compute") and params.delivery_deadline_seconds is not None else {}),
     })
     validate_terms(encode_terms(lifecycle), TermContext(
         mechanism=ARKHAI_PAYMENTS_MECHANISM, has_adapter=True,
         dispute_interfaces=frozenset(resources.get("dispute_interfaces", ())),
         authority=entry.requirements, compute=bool(resources.get("compute", False)),
     ))
-    if resources.get("compute") and lifecycle.delivery_deadline_seconds is None:
-        raise ValueError("compute option requires delivery_deadline_seconds")
 
     rates: list[RateValue] = []
     if clause.rate is not None:
@@ -464,7 +470,7 @@ def arkhai_payments_option_builder(
             value = int(clause.rate)
         rates.append(RateValue(field="amount", per=clause.per, value=value))
 
-    option_params = params.model_dump(mode="json", exclude={
+    option_params = params.model_dump(mode="json", exclude_none=True, exclude={
         "asset", "dispute_window_seconds", "case_hold_max_seconds", "delivery_deadline_seconds",
     })
     price = SettlementPrice(asset=params.asset, rates=rates)
@@ -489,12 +495,14 @@ def validate_payment_lifecycle(
 ) -> LifecycleTerms:
     """Admit only an exact accepted authority with compatible advertised minima."""
     terms = LifecycleTerms.model_validate(settlement_option_lifecycle(option))
+    params = _option_params(option)
     entry = next((item for item in authorities if item.authority == terms.adjudication.dispute), None)
     validate_terms(encode_terms(terms), TermContext(
         mechanism=ARKHAI_PAYMENTS_MECHANISM, has_adapter=True,
         dispute_interfaces=dispute_interfaces, authority=entry.requirements if entry else None,
         buyer=True, accepted_authorities=tuple(item.authority for item in authorities),
-        compute=compute,
+        compute=compute, has_stoppable_part=params is not None and params.period is not None,
+        supported_partial_periods=frozenset({"charged", "returned", "prorated", "chosen"}),
     ))
     AccountId.model_validate(terms.adjudication.dispute.account)
     return terms
@@ -524,7 +532,17 @@ def _payee_projection(option: Any) -> str | None:
 
 def _window_projection(option: Any) -> str | None:
     params = _option_params(option)
-    return params.window if params is not None else None
+    return (params.approval_window or params.window) if params is not None else None
+
+
+def _period_projection(option: Any) -> str | None:
+    params = _option_params(option)
+    return params.period if params is not None else None
+
+
+def _billing_projection(option: Any) -> str | None:
+    params = _option_params(option)
+    return ("per_period" if params.period is not None else "total") if params is not None else None
 
 
 def _deposit_projection(option: Any) -> bool | None:
@@ -543,9 +561,53 @@ def validate_arkhai_payments_publication_input(
     return ArkhaiPaymentsPublicationInput.model_validate(value)
 
 
+def payments_billing_basis(option: SettlementOption) -> PriceBasis:
+    """Interpret the accepted option's unit without consulting a current listing."""
+    if option.settlement_schema != ARKHAI_PAYMENTS_MECHANISM:
+        raise ValueError("billing projection requires an Arkhai payments option")
+    params = PaymentsOptionParams.model_validate(option.settlement_params)
+    return (PriceBasis(unit="per_period", period=params.period,
+                       period_seconds=duration_seconds(params.period))
+            if params.period is not None else PriceBasis(unit="total"))
+
+
+def payments_payment_presentation(
+    option: SettlementOption, duration_seconds: int | None, quote: AgreedPrice | None,
+) -> PaymentPresentation:
+    """Present setup and the initial whole-period reserve independently of usage."""
+    basis = payments_billing_basis(option)
+    params = PaymentsOptionParams.model_validate(option.settlement_params)
+    selected = quote or amount_rate_quote(option, duration_seconds, basis)
+    reserve = 0
+    if basis.unit == "per_period":
+        assert basis.period_seconds is not None and params.reserve_ahead_seconds is not None
+        reserve = selected.amount * ((params.reserve_ahead_seconds + basis.period_seconds - 1) // basis.period_seconds)
+    return PaymentPresentation(
+        quote=selected, setup_once=int(params.setup_amount or 0), initial_reserve=reserve,
+    )
+
+
 def create_arkhai_payments_registration() -> MechanismRegistration:
     """Register public option construction without escrow servicing hooks."""
     fields = (
+        SettlementClauseField(
+            descriptor=FieldDescriptor(
+                name="arkhai_payments.period", value_type=QueryValueType.STRING,
+                operators=_CLAUSE_OPERATORS, description="fixed billing period; absent for once-only options",
+            ), roles=frozenset({"buyer", "seller"}), projector=_period_projection,
+        ),
+        SettlementClauseField(
+            descriptor=FieldDescriptor(
+                name="arkhai_payments.billing_kind", value_type=QueryValueType.STRING,
+                operators=_CLAUSE_OPERATORS, description="total or per_period; setup beside rate remains per_period",
+            ), roles=frozenset({"buyer", "seller"}), projector=_billing_projection,
+        ),
+        SettlementClauseField(
+            descriptor=FieldDescriptor(
+                name="arkhai_payments.approval_window", value_type=QueryValueType.STRING,
+                operators=_CLAUSE_OPERATORS, description="approval expiry, independent of adjudication holds",
+            ), roles=frozenset({"buyer", "seller"}), projector=_window_projection,
+        ),
         SettlementClauseField(
             descriptor=FieldDescriptor(
                 name="arkhai_payments.payee_account",
@@ -590,6 +652,8 @@ def create_arkhai_payments_registration() -> MechanismRegistration:
         publication_input_model=ArkhaiPaymentsPublicationInput,
         publication_input_validator=validate_arkhai_payments_publication_input,
         negotiates_scalar_amount=True,
+        project_billing=payments_billing_basis,
+        present_payment=payments_payment_presentation,
     )
 
 

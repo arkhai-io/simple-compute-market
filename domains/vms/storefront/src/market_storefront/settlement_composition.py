@@ -16,6 +16,15 @@ from typing import Any
 from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
 from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from market_core.schemas import settlement_option_schema
+from market_deal_lifecycle.terms import LifecycleTerms
+from market_settlement_runtime.rate_servicing import RateServicing, RateServicingUnavailable
+from market_arkhai_payments.presets import PaymentsRatePresetHelper, rate_term_timing
+from market_arkhai_payments.settlement_config import ARKHAI_PAYMENTS_MECHANISM
+from market_settlement_runtime.horizon import RateTermProjections
+from market_settlement_runtime.rate_publication import (
+    RatePresetHelper, RatePresetRefusal, default_buyer_refusals,
+    derive_rate_preset, effective_delivery_deadline,
+)
 from arkhai_vms import VmProvisionTerms, normalize_vm_provision_terms
 from core_storefront.domain_lifecycle import (
     StorefrontFulfillmentContext,
@@ -35,7 +44,7 @@ from market_arkhai_payments import (
     PaymentSellerStage,
     servicing_stage,
 )
-from market_core import MarketDomainContract
+from market_core import MarketDomainContract, SettlementStageTable
 from market_core.schemas import (
     EscrowProposal,
 )
@@ -56,6 +65,7 @@ from market_settlement_runtime import (
 )
 
 from market_storefront.deal_lifecycle import VmDealLifecycle
+from market_storefront.services.vm_job_spec_service import settlement_vm_order
 from market_storefront.delivery_lifecycle import request_delivery_end, VmPhysicalEnd
 from market_deal_servicing.end import EndService
 from market_storefront.payment_settlement import VmPaymentsCoordinator
@@ -98,9 +108,28 @@ class VmSettlementComposition:
     lifecycle: VmDealLifecycle | None = None
     disputes: RegistryDisputePolicy = field(default_factory=lambda: RegistryDisputePolicy.from_document({}), repr=False)
 
+    rate_servicing: RateServicing = field(default_factory=RateServicing, repr=False)
+    rate_preset_helpers: Mapping[str, RatePresetHelper] = field(
+        default_factory=lambda: {ARKHAI_PAYMENTS_MECHANISM: PaymentsRatePresetHelper()}, repr=False,
+    )
+    rate_term_projections: RateTermProjections = field(default_factory=dict, repr=False)
+    delivery_deadline_for_pool: Callable[[str, str | None], int | None] = field(
+        default=lambda _site, _pool: None, repr=False,
+    )
+
+    def __post_init__(self) -> None:
+        if self.arkhai_payments_stage is not None:
+            self.arkhai_payments_stage.rate_servicing = self.rate_servicing
+        if not self.rate_term_projections:
+            object.__setattr__(self, "rate_term_projections", {
+                ARKHAI_PAYMENTS_MECHANISM: lambda option: rate_term_timing(
+                    option, authorities=self.disputes.for_publication(),
+                ),
+            })
+
     @property
-    def seller_stages(self):
-        return self.domain.settlement.seller_stages
+    def seller_stages(self) -> SettlementStageTable[Any]:
+        return _seller_stages(self.domain)
 
     async def readiness(self) -> tuple[MechanismReadiness, ...]:
         statuses = await self.configuration_registry.ordered_readiness(
@@ -152,8 +181,13 @@ class VmSettlementComposition:
     ) -> tuple[
         list[dict[str, Any]], list[dict[str, Any]], tuple[MechanismReadiness, ...]
     ]:
+        deadline = effective_delivery_deadline(self.delivery_deadline_for_pool(
+            str(resources.get("origin", "")), resources.get("pool_id"),
+        ))
+        diagnose = resources.get("publication_diagnostic", lambda _entry: None)
         merged_resources = {
             **self.mechanism_resources, **resources,
+            "delivery_deadline_seconds": deadline,
             "dispute_authorities": self.disputes.for_publication(),
             "dispute_interfaces": frozenset({MEDIATION_INTERFACE}), "compute": True,
         }
@@ -226,12 +260,28 @@ class VmSettlementComposition:
                     ",".join(blocker.code for blocker in status.blockers),
                 )
                 continue
-            envelope = self.configuration_registry.build_option(
-                status,
-                self.settlement_config,
-                role="seller",
-                resources=option_resources,
-            )
+            selected_clause: SettlementPublicationClause | None = option_resources.get("publication_clause")
+            if selected_clause is not None and selected_clause.recurring is not None:
+                result = derive_rate_preset(
+                    selected_clause, helper=self.rate_preset_helpers.get(selected_clause.mechanism),
+                    servicing=self.rate_servicing,
+                    authorities=self.disputes.for_publication(),
+                    max_duration_seconds=resources.get("max_duration_seconds"),
+                    available_until_utc=resources.get("available_until_utc"),
+                    delivery_deadline_seconds=deadline,
+                    now=datetime.now(timezone.utc), default_penalty_periods=24,
+                )
+                if isinstance(result, RatePresetRefusal):
+                    diagnose({"code": result.code, "detail": result.detail, "mechanism": selected_clause.mechanism})
+                    continue
+                envelope = {"settlement_options": [result.model_dump(mode="json")]}
+            else:
+                envelope = self.configuration_registry.build_option(
+                    status,
+                    self.settlement_config,
+                    role="seller",
+                    resources=option_resources,
+                )
             if not isinstance(envelope, Mapping):
                 raise RuntimeError(
                     f"settlement option builder {status.mechanism} returned no envelope"
@@ -239,9 +289,16 @@ class VmSettlementComposition:
             accepted_escrows.extend(
                 dict(item) for item in envelope.get("accepted_escrows", ())
             )
-            settlement_options.extend(
-                dict(item) for item in envelope.get("settlement_options", ())
-            )
+            for item in envelope.get("settlement_options", ()):
+                try:
+                    self.rate_servicing.require_option(item)
+                except RateServicingUnavailable as exc:
+                    diagnose({"code": "rate_servicing_undeclared", "detail": str(exc), "mechanism": settlement_option_schema(item)})
+                    continue
+                terms = LifecycleTerms.model_validate(item["lifecycle"]) if item.get("lifecycle") is not None else None
+                for detail in default_buyer_refusals(terms, has_adapter=terms is not None):
+                    diagnose({"code": "default_buyer_refusal", "detail": detail, "mechanism": settlement_option_schema(item), "option_id": item["option_id"]})
+                settlement_options.append(dict(item))
         # Nothing published is returned as such, with the readiness that
         # explains it: whether that refuses a listing, and how, is the caller's.
         return accepted_escrows, settlement_options, readiness
@@ -298,6 +355,7 @@ async def prepare_vm_settlement(
     if not isinstance(raw, bytes):
         raise ValueError("accepted Agreement bytes are unavailable")
     agreement = json.loads(raw)
+    order = settlement_vm_order(thread, dict(order), agreement["provision_terms"])
     stage = resolve_proposal_stage(
         domain.settlement.seller_stages, proposal_raw, agreement=agreement,
     )
@@ -484,7 +542,10 @@ async def fulfill_vm_settlement(
         negotiation_id=evidence.negotiation_id
     )
     agreement = json.loads(thread["agreement_bytes"])
-    stage = domain.settlement.seller_stages[settlement_option_schema(agreement["settlement"])]
+    mechanism = settlement_option_schema(agreement["settlement"])
+    if mechanism is None:
+        raise ValueError("accepted VM Agreement has no settlement mechanism")
+    stage = _seller_stages(domain)[mechanism]
     lifecycle = await fulfill_domain(
         domain,
         StorefrontFulfillmentContext(
@@ -763,8 +824,14 @@ def require_coherent_release_model(
     )
 
 
+def _seller_stages(domain: MarketDomainContract) -> SettlementStageTable[Any]:
+    if domain.settlement is None or domain.settlement.seller_stages is None:
+        raise ValueError("VM settlement requires a domain seller-stage table")
+    return domain.settlement.seller_stages
+
+
 def _alkahest_release_models(domain: MarketDomainContract) -> frozenset[str]:
-    stage = domain.settlement.seller_stages.get(ALKAHEST_MECHANISM_ID)
+    stage = _seller_stages(domain).get(ALKAHEST_MECHANISM_ID)
     return frozenset(getattr(stage, "release_models", ()) or ())
 
 

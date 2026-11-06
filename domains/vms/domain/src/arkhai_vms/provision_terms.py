@@ -14,7 +14,7 @@ class VmProvisionPayload(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    duration_seconds: int = Field(gt=0)
+    duration_seconds: int | None = Field(default=None, gt=0)
     ssh_public_key: str = ""
     start_utc: str | None = None
     compute_resource: dict[str, Any] | None = None
@@ -62,13 +62,13 @@ class VmProvisionTerms(BaseModel):
 
 def make_vm_provision_terms(
     *,
-    duration_seconds: int,
+    duration_seconds: int | None,
     ssh_public_key: str,
     start_utc: str | None = None,
     compute_resource: dict[str, Any] | None = None,
 ) -> VmProvisionTerms:
     payload: dict[str, Any] = {
-        "duration_seconds": int(duration_seconds),
+        **({"duration_seconds": int(duration_seconds)} if duration_seconds is not None else {}),
         "ssh_public_key": ssh_public_key,
     }
     if start_utc is not None:

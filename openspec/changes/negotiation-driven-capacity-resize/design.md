@@ -42,11 +42,11 @@ Verified against the tree at planning time; re-verify before implementing.
   shape-fixed by construction. `capacity-shape-envelope` supplies an
   admissibility predicate and `negotiation-capacity-feasibility-probe` a
   non-consuming authoritative probe, where a domain composes them.
-- `NegotiateContinueRequest` and `AdvanceRequest` in `core_storefront` carry
-  no `extra="forbid"`; an undeclared top-level field is dropped. A core-level
-  guard against that was tried and reverted: the risk is not a stray key but an
-  unexamined nested field, and the check belongs in the domain that understands
-  the content.
+- Reverified 2026-11-06: `NegotiateContinueRequest` and `AdvanceRequest` now
+  carry `extra="forbid"`; their `proposal` remains a dictionary, not a typed
+  revised-terms carrier. The Section 1 revert remains historical; this section
+  does not undo subsequent request-model strictness. Nested content still needs
+  the domain codec that understands it.
 
 ## Goals / Non-Goals
 
@@ -71,6 +71,17 @@ rather than introducing a core-level concept, so core stays schema-opaque and
 the VM codec decodes the payload as a family-grouped capability shape validated
 by `VM_CAPABILITY_SCHEMA`. Round 0 keeps `compute_resource`; whether it adopts
 the family form is another change's question.
+
+The wire child is `proposal.provision_terms`; its envelope payload is the whole
+family-grouped shape, not a patch. The VM decoder preserves the opening's duration,
+start and delivery credentials and replaces only `compute_resource` in the effective
+terms used by the existing VM codecs. Those full effective terms are recorded beside
+each scalar message. Continuation resumes the latest seller-quoted terms, not the
+immutable opening's shape or an unquoted buyer proposal. The round adapter may
+supply its agreed terms separately from the proposed revision. Domains that do not
+compose a revision decoder refuse a revised envelope. Revisit this boundary if
+non-shape delivery terms become negotiable; they need explicit domain validation,
+not arbitrary replacement of the opening's payload.
 
 The payload is limited to what seller policy can price. A nested field that
 passes through unexamined is an unpriced giveaway surface: a buyer could claim
@@ -133,11 +144,52 @@ structure; the floor is still expressed once and applies to every shape.
 
 **Wire.** The round carries the multiplier and, when it changes, the shape; the
 quote is derived by both sides from the listing's advertised rate structure,
-which is authoritative for both. It is not carried per round. Revisit trigger:
-the advertised structure ceasing to be authoritative for both parties (a seller
-repricing mid-negotiation), at which point the quote would have to travel.
+which is authoritative for both. It is not carried per round. At opening the
+seller pins the rate-structure digest; a changed structure refuses a later round
+or acceptance distinctly, requiring the buyer to reopen (D-e below). Revisit
+condition: sellers needing to reprice live negotiations.
 
-### Where a buyer reads the rate structure is a decision gate
+### Registry carrier and authority: D-a through D-d
+
+Each decision below is **decided by webapp owner 2026-11-06, pending maintainer review**.
+
+- **D-a — keep what the schema admits.** `store-registry-listings-as-published`
+  stores and serves each accepted listing as published. Listing-level terms need
+  not accumulate inside `listing_resource`; the schema describes the whole
+  accepted listing. Revisit if the registry's admitted schema becomes deliberately
+  narrower. Registry storage and verification are owned by that change, not here.
+- **D-b — listing-level rates.** Read `rate_structure` from the registry listing's
+  top level. Rates describe sale terms for multiple shapes, not the advertised
+  resource's shape. `asking_rate` stays in `listing_resource`; moving it is not
+  required by quote derivation. Revisit if the published pricing vocabulary changes.
+- **D-c — seller authority.** The registry retains the publisher's signed request
+  bytes and signature beside its own signed response. A buyer verifies the seller's
+  commitment, rather than treating the registry's copy as seller authority.
+  Revisit if the signed-listing proof contract changes.
+- **D-d — buyer rate access.** A buyer derives quotes from D-b's registry carrier,
+  verified with D-c's retained seller signature under D-a. This avoids an unsigned
+  storefront read or an additional negotiation commitment carrier. The registry
+  change is an implementation/deployment dependency. Revisit if discovery no
+  longer supplies the seller-authenticated rate structure.
+
+### D-e — a rate structure is pinned for the negotiation
+
+**Decided by webapp owner 2026-11-06, pending maintainer review.**
+
+At opening, persist the digest of the seller-signed rate structure. On a later
+round or acceptance, refuse distinctly as `rate_structure_changed_reopen` if the
+current structure differs, even if the advertised shape's composed total and
+settlement option identity are unchanged. A missing pin on a shape-priced thread
+also fails closed: in-flight absolute-amount negotiations must drain at upgrade.
+
+Publication updates terms in place and continuation resolves the current listing.
+The existing pinned-option guard already refuses withdrawn options; this rule
+extends that boundary to changes that only affect other shapes. Honoring the old
+snapshot would bind the seller to withdrawn rates, a new pricing commitment;
+explicit repricing would change the wire. Neither is implicit in a multiplier.
+Revisit condition: sellers needing to reprice live negotiations.
+
+### Carrier alternatives considered before D-a through D-d
 
 The quote for a revised shape is derived from the listing's rate structure, so a
 buyer must be able to read that structure with the authority the quote needs. Three
@@ -153,10 +205,9 @@ carriers are possible:
 The third depends on `store-registry-listings-as-published`, and that change's
 accepted carrier policy bears on the second as well: its review decides whether
 listing-level terms keep accumulating in `listing_resource`. This is therefore an
-explicit decision gate (task 2.1a), taken with that change's accepted design as an
-input. Whether any buyer needs the structure at discovery time, rather than once a
-negotiation opens, is part of the same decision. A storefront-served structure does
-not wait on the registry change's implementation.
+decision gate resolved by D-a through D-d above: the listing-level registry
+carrier is selected, including availability at discovery, and depends on the
+registry change's implementation.
 
 ### Evaluation order inside the seller's round
 
@@ -177,15 +228,96 @@ retry later, or accept the seller's counter. A domain that composes neither of
 the first two negotiates shapes on price alone and says so in its composition
 rather than silently.
 
+### Slice A composition and reference-price scale
+
+The VM composition resolves the requested shape's quantitative predicate from the
+listing's durable site/pool binding and the held pool projection, then reads the
+stored VM override and parsed configured default through the existing listing-shape
+resolver. The override replaces the hint's shape list whole; only the advertised
+base shape's constraints apply. Missing/unreadable policy refuses as
+`shape_policy_unavailable`, never as an unconstrained fallback. Admissibility
+refuses as `shape_inadmissible`; the categorical guard refuses as
+`shape_commercially_infeasible`. Requested-shape authoritative feasibility is
+**not checked**. Existing listing-source confirmation concerns the advertised
+shape alone and is not evidence that the requested shape fits.
+
+The VM-specific seller hook receives the effective grouped requested shape.
+For a shape-priced scalar option it evaluates both the advertised and requested
+shapes through `price_vm_shape` in that selected asset. Their exact rational
+ratio rescales the already-materialized option rate, reusing its base-unit scale
+without a token metadata RPC or an inferred decimal precision. Both composed
+prices must be positive. A selected asset with no matching family rates refuses
+as `shape_price_unavailable`, never falling back to another asset's rates.
+This preserves the current absolute scalar and truncation semantics until 2b;
+it is not the multiplier or payment-consumer conversion. Flat-priced listings
+remain shape-fixed, as the existing design's open question anticipates.
+
+Round-zero flat compute requests remain partial: omitted dimensions inherit the
+listing once, and the complete effective shape is recorded with the seller quote.
+A later grouped revision remains a whole shape and never inherits omitted
+families. Continuation validates policy before its fallback reference can price
+anything; exit performs no reference pricing, so withdrawn or unpriceable terms
+cannot prevent the buyer leaving. Revisit the scale bridge at the 2b conversion:
+quote derivation and upward rounding then have one shared amount contract.
+
+### Slice B scalar and payment boundary
+
+Shape-priced scalar negotiations use the multiplier; flat-priced and hidden-reserve
+paths retain their exact absolute-amount/truncation behavior. This is the delta's
+"where a domain's offering carries a resolvable rate structure" boundary, not a
+conversion of every market or of an amountless selection into multiplier bargaining.
+`core/tests/unit/test_rate_helpers.py` therefore stays unchanged: its generic
+`compute_rate_total` still serves legacy and other-domain consumers. Only the VM
+multiplier quote rounds up, once after the complete rational product.
+
+The buyer's public per-hour price surface remains monetary. The VM codec divides
+it by the selected option's advertised-shape hourly reference to form basis-point
+bounds, rounding those bounds down so quantization cannot exceed the caller's
+monetary bound. That anchor does not change on shape revision. The core buyer owns
+an optional schema-opaque codec; transcripts stay scalar, while `agreed_amount`
+on a buyer outcome remains monetary for aggregation, confirmation and settlement.
+`negotiated_scalar` records the separate policy quantity. Resume records retain the
+listing rate carrier and exact integer prices, not floats; the VM codec replays
+buyer shape revisions against the recorded terms without changing price bounds.
+
+The seller's `negotiation.multiplier_floor_bps` defaults to 10,000. The VM composition
+clamps sub-floor policy counter/accept decisions to a counter at that floor, and
+refuses acceptance below it; bisection itself remains unchanged. Its existing five
+percent convergence tolerance is not permission to undercut a strict seller floor.
+A buyer can accept the floor; repeated sub-floor counters terminate under the
+existing stale-round rule rather than re-anchoring on each shape.
+
+The shared quote helper evaluates selected-asset advertised and requested shapes,
+uses their exact ratio to preserve the selected option's materialized base-unit
+scale, applies duration and multiplier, and rounds upward once. The resulting
+uint256 payment enters the VM settlement build context, escrow/hosted obligation,
+and Agreement. A materialized escrow proposal must not overwrite the scalar
+`proposal` in the terminal round response; its monetary form remains in
+`accepted_escrow_proposal`. A buyer revision instruction is not echoed as an
+instruction to revise again when accepting a seller counter.
+
+Revisit the public-price adapter if the buyer gains explicit multiplier flags;
+revisit the scale bridge if publication supports fractional-base-unit hourly
+references. Permanent promotion remains the negotiation-protocol specification
+and repository architecture at the final slice's post-review closeout.
+
 ### The agreed shape reaches the claim through the accepted artifacts
 
-`build_vm_accepted_artifacts` writes the settlement order from the listing
-record. It writes the agreed shape into the order's `listing_resource`
-quantities instead, so `compute_capacity_claim_from_order` — unchanged — builds
-the claim from what was agreed, and fulfillment follows the committed
-reservation with no further work. `_place_capacity_hold` takes its claim from
-the same agreed order, so a deployment with a non-zero `hold_ttl_seconds` holds
-the agreed shape.
+The VM acceptance composition writes the agreed order into the settlement
+plan's `service_terms["vm.v1"].order` after the selected mechanism materializes
+its artifacts (`build_vm_accepted_artifacts` on Alkahest). One shared builder
+replaces the listing resource's whole quantitative/GPU shape with the accepted
+shape; omitted families do not inherit the advertised quantities. Capacity
+identity and sale terms remain unchanged, and the published listing is not
+mutated. `compute_capacity_claim_from_order` remains unchanged.
+
+Escrow and hosted-payment settlement read that snapshot for delivery facts.
+Legacy plans without an order derive one from the accepted provision terms.
+The fulfillment planner reads those facts; the provider already sizes from the
+committed reservation. `encode_compute_lease` encodes the supplied order's GPU
+terms and needs no new sizing authority. `_place_capacity_hold` derives its
+claim through the same agreed-order builder, so a deployment with a non-zero
+`hold_ttl_seconds` holds the agreed shape. No reservation is resized here.
 
 ### `resize_reservation` is not wired here
 
@@ -248,8 +380,11 @@ drain.
 | Accepted decision | Permanent location |
 |---|---|
 | A buyer-requested round-0 VM shape differing from the listing is rejected outright until a round can carry a shape | Temporary; lifted by Section 2. Never promoted |
-| Revised terms are a child of `proposal`; core reuses `ProvisionTerms` rather than adding vocabulary | `openspec/specs/negotiation-protocol/spec.md` — "A round may revise the capacity shape" |
+| Revised terms are a child of `proposal`; core reuses `ProvisionTerms` rather than adding vocabulary; durable seller-quoted terms survive continuation and acceptance | `openspec/specs/negotiation-protocol/spec.md` — "A round may revise the capacity shape" |
+| A schema-opaque buyer amount codec keeps transcript scalars separate from monetary outcomes and normalizes effective revised terms | `docs/development/ARCHITECTURE.md` — buyer negotiation composition; `openspec/specs/negotiation-protocol/spec.md` — "Rate-multiplier negotiation" |
 | The negotiated quantity is a multiplier in basis points; amounts stay exact | `openspec/specs/negotiation-protocol/spec.md` — "Rate-multiplier negotiation" |
 | A requested shape's feasibility, quantitative and categorical, is evaluated before pricing | `openspec/specs/negotiation-protocol/spec.md` — "Seller feasibility precedes pricing" |
 | The agreed shape is what the claim reserves | `openspec/specs/vm-storefront-fulfillment/spec.md` — "The agreed shape is reserved" |
 | No core-level extra-field guard; content validation lives in the domain codec | This change's `design.md` |
+| D-a through D-d: registry listing-level rate carrier and retained seller proof | `openspec/specs/negotiation-protocol/spec.md` — "Rate-multiplier negotiation"; registry storage/proof promotion belongs to `store-registry-listings-as-published` |
+| D-e: rate-structure pin and distinct refusal on repricing | `openspec/specs/negotiation-protocol/spec.md` — "Rate-multiplier negotiation" |

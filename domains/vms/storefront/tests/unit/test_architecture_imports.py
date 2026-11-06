@@ -3,9 +3,9 @@
 `make check-architecture` holds the layer and scope rules for every package
 (docs/development/ARCHITECTURE.md, "Package and dependency layers"). These
 tests hold what is narrower than those rules: VM domain concept modules
-implement core hook shapes from below without importing any core package, the
-storefront builds its domain contract in one place, the VM storefront never
-imports the bare-metal contribution it installs, and its wheel declares the
+use core carriers from below without importing role packages, the storefront
+builds its domain contract in one place, the VM storefront never imports the
+bare-metal contribution it installs, and its wheel declares the
 lower-layer contract package.
 """
 
@@ -30,12 +30,11 @@ def _repo_root() -> Path:
 
 REPO = _repo_root()
 
-# Lower-layer core contracts. These remain forbidden to VM concept modules,
-# but are valid dependencies of shared kits.
-CORE_PREFIXES = (
+# Core carriers are permitted specialization dependencies. Role packages
+# remain outside the concept modules' responsibility.
+ROLE_PACKAGE_PREFIXES = (
     "core_buyer",
     "core_storefront",
-    "market_core",
     "registry_client",
     "storefront_client",
 )
@@ -99,13 +98,13 @@ def _violations(roots, forbidden_prefixes):
     return out
 
 
-def test_domain_concept_modules_import_no_core_packages():
+def test_domain_concept_modules_import_no_role_packages():
     violations = _violations(
         CONCEPT_ROOTS,
-        CORE_PREFIXES + ROLE_EXECUTABLE_PREFIXES,
+        ROLE_PACKAGE_PREFIXES + ROLE_EXECUTABLE_PREFIXES,
     )
     assert not violations, (
-        "domain concept modules must not import core/composition packages "
+        "domain concept modules must not import role/composition packages "
         "(only composition roots like domains/vms/{buyer,storefront} and the "
         "provisioning service may):\n" + "\n".join(violations)
     )

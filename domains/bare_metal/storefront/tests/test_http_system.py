@@ -134,8 +134,8 @@ async def test_listing_routes_return_exact_validated_domain_payload(tmp_path) ->
         "host_id": "machine-1",
         "physical_host_id": "physical-host-1",
         "access_methods": ["ssh"],
-        "max_duration_seconds": 7200,
     }
+    assert listing.max_duration_seconds == 7200
     assert listing_list.count == 1
     assert listing_list.listings[0].listing_id == "listing-1"
     assert missing.value.status_code == 404

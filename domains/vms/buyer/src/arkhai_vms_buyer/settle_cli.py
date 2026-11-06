@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import base64
+
 import typer
+from market_core.schemas import Agreement
 from core_buyer.buyer_config import ResolvedBuyerIdentity
 from rich.console import Console
 
@@ -19,6 +22,7 @@ from .deal_helpers import (
 )
 from .settlement_composition import (
     buyer_stage,
+    disclose_accepted_agreement,
     resolve_buyer_settlement_policy,
 )
 from .settlement_stages import BuyerResumeContext
@@ -42,6 +46,10 @@ def run_settle_from_log(
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     log = open_run_log(run_id, signer=signer, profile_id=identity.profile_id)
+    if getattr(deal, "agreement_bytes", None) is not None:
+        disclose_accepted_agreement(Agreement.model_validate_json(
+            base64.b64decode(deal.agreement_bytes, validate=True),
+        ))
     log.event("settle_resumed", resumed_from=run_id)
     return stage.resume(BuyerResumeContext(
         run_id=run_id, deal=deal, log=log, signer=signer,

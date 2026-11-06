@@ -263,6 +263,8 @@ class SQLiteClient(CoreSQLiteClient):
             capacity_backing=normalized.capacity_backing,
         )
         listing_resource = normalized.model_dump(mode="json", exclude_none=True)
+        listing_resource.pop("max_duration_seconds", None)
+        listing_resource.pop("available_until_utc", None)
         listing_resource["offering_mode"] = domain_binding.offering_mode
         await self.upsert_listing_with_binding(
             binding=binding,
@@ -272,6 +274,7 @@ class SQLiteClient(CoreSQLiteClient):
             listing_resource=listing_resource,
             fulfillment_resource=None,
             max_duration_seconds=normalized.max_duration_seconds,
+            available_until_utc=normalized.available_until_utc,
             storefront_url=storefront_url,
             seller_principal=seller_principal,
             oracle_address=oracle_address,
@@ -290,9 +293,7 @@ class SQLiteClient(CoreSQLiteClient):
         row = await self.load_listing(listing_id=listing_id)
         if row is None:
             return None
-        raw = row.get("listing_resource")
-        value = json.loads(raw) if isinstance(raw, str) else raw
-        return self._market_domain.codecs.listing(value)
+        return self._market_domain.codecs.listing(row)
 
     async def _save_artifact(
         self,

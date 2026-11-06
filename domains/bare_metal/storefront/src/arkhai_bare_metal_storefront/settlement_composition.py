@@ -4,8 +4,19 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+import logging
 from types import MappingProxyType
 from typing import Any
+
+from market_deal_lifecycle.terms import LifecycleTerms
+from market_settlement_runtime.rate_servicing import RateServicing, RateServicingUnavailable
+from market_arkhai_payments.presets import PaymentsRatePresetHelper, rate_term_timing
+from market_settlement_runtime.horizon import RateTermProjections
+from market_settlement_runtime.rate_publication import (
+    RatePresetHelper, RatePresetRefusal, default_buyer_refusals,
+    derive_rate_preset, effective_delivery_deadline,
+)
 
 from core_storefront.publication_runner import NoSettlementOption, PublicationPayload
 from market_core import SettlementStageTable
@@ -53,6 +64,8 @@ from market_arkhai_payments import (
     create_arkhai_payments_registration,
     servicing_stage,
 )
+
+logger = logging.getLogger(__name__)
 
 SELLER_STAGES = SettlementStageTable(
     {
@@ -119,6 +132,14 @@ class BareMetalStorefrontSettlementComposition:
 
     disputes: RegistryDisputePolicy = field(default_factory=lambda: RegistryDisputePolicy.from_document({}), repr=False)
     seller_stages: SettlementStageTable[Any] = SELLER_STAGES
+    rate_servicing: RateServicing = field(default_factory=RateServicing, repr=False)
+    rate_preset_helpers: Mapping[str, RatePresetHelper] = field(
+        default_factory=lambda: {ARKHAI_PAYMENTS_MECHANISM: PaymentsRatePresetHelper()}, repr=False,
+    )
+    rate_term_projections: RateTermProjections = field(default_factory=dict, repr=False)
+    delivery_deadline_for_pool: Callable[[str, str | None], int | None] = field(
+        default=lambda _site, _pool: None, repr=False,
+    )
 
     def __post_init__(self) -> None:
         if any(
@@ -138,7 +159,15 @@ class BareMetalStorefrontSettlementComposition:
             self.config.mechanisms.get(ARKHAI_PAYMENTS_CONFIG_KEY),
             client_for_owner=self.payments_client_for_owner,
         )
+        if stage is not None:
+            stage.rate_servicing = self.rate_servicing
         object.__setattr__(self, "payments_stage", stage)
+        if not self.rate_term_projections:
+            object.__setattr__(self, "rate_term_projections", {
+                ARKHAI_PAYMENTS_MECHANISM: lambda option: rate_term_timing(
+                    option, authorities=self.disputes.for_publication(),
+                ),
+            })
 
     @classmethod
     def from_raw_config(
@@ -179,12 +208,12 @@ class BareMetalStorefrontSettlementComposition:
         self,
     ) -> dict[str, Callable[[Mapping[str, Any]], Mapping[str, Any] | None]]:
         payment_stage = self.payments_stage
-        return {
-            mechanism: lambda agreement, entry=entry: entry.accepted_data(
-                agreement, payment_stage
-            )
-            for mechanism, entry in self.seller_stages.items()
-        }
+        def build(entry: Any) -> Callable[[Mapping[str, Any]], Mapping[str, Any] | None]:
+            def accepted(agreement: Mapping[str, Any]) -> Mapping[str, Any] | None:
+                return entry.accepted_data(agreement, payment_stage)
+            return accepted
+
+        return {mechanism: build(entry) for mechanism, entry in self.seller_stages.items()}
 
     def configures(self, mechanism_id: str) -> bool:
         """Whether the settlement root has a section for ``mechanism_id``.
@@ -220,6 +249,7 @@ class BareMetalStorefrontSettlementComposition:
         candidate: Mapping[str, Any],
         clauses: Sequence[SettlementPublicationClause],
         max_duration_seconds: int | None = None,
+        publication_diagnostic: Callable[[dict[str, Any]], None] = lambda _entry: None,
     ) -> PublicationPayload:
         """Build ready settlement publication alternatives.
 
@@ -234,6 +264,14 @@ class BareMetalStorefrontSettlementComposition:
         naming their mechanisms and those whose readiness is unknown.
         """
 
+        deadline = effective_delivery_deadline(self.delivery_deadline_for_pool(
+            str(candidate["site_id"]), candidate.get("pool_id"),
+        ))
+
+        def diagnose(entry: dict[str, Any]) -> None:
+            publication_diagnostic(entry)
+            logger.warning("[PUBLICATION] %s: %s", entry["code"], entry["detail"])
+
         readiness = await self.readiness(clauses=clauses)
         readiness_by_mechanism = {item.mechanism: item for item in readiness}
         accepted_escrows: list[dict[str, Any]] = []
@@ -243,22 +281,39 @@ class BareMetalStorefrontSettlementComposition:
             mechanism_readiness = readiness_by_mechanism.get(clause.mechanism)
             if mechanism_readiness is None or not mechanism_readiness.ready:
                 continue
-            artifacts = self.registry.build_option(
-                mechanism_readiness,
-                self.config,
-                role="seller",
-                resources={
-                    **self.resources,
-                    "dispute_authorities": self.disputes.for_publication(),
-                    "dispute_interfaces": frozenset({MEDIATION_INTERFACE}), "compute": True,
-                    "publication_clause": clause,
-                    "candidate": dict(candidate),
-                    # The site the listing binding records, so a mechanism
-                    # resolving anything per origin sees the value its
-                    # negotiation will later inherit.
-                    "origin": str(candidate["site_id"]),
-                },
-            )
+            if clause.recurring is not None:
+                result = derive_rate_preset(
+                    clause, helper=self.rate_preset_helpers.get(clause.mechanism),
+                    servicing=self.rate_servicing,
+                    authorities=self.disputes.for_publication(),
+                    max_duration_seconds=max_duration_seconds,
+                    available_until_utc=candidate.get("available_until_utc"),
+                    delivery_deadline_seconds=deadline,
+                    now=datetime.now(UTC), default_penalty_periods=24,
+                )
+                if isinstance(result, RatePresetRefusal):
+                    diagnose({"code": result.code, "detail": result.detail, "mechanism": clause.mechanism})
+                    continue
+                artifacts = {"settlement_options": [result.model_dump(mode="json")]}
+            else:
+                if max_duration_seconds is None and self.seller_stages[clause.mechanism].fulfils_through_capacity:
+                    diagnose({"code": "reserved_lease_bound_missing", "detail": "reserved bare-metal publication requires a positive relative maximum", "mechanism": clause.mechanism})
+                    continue
+                artifacts = self.registry.build_option(
+                    mechanism_readiness,
+                    self.config,
+                    role="seller",
+                    resources={
+                        **self.resources,
+                        "dispute_authorities": self.disputes.for_publication(),
+                        "dispute_interfaces": frozenset({MEDIATION_INTERFACE}), "compute": True,
+                        "publication_clause": clause,
+                        "delivery_deadline_seconds": deadline,
+                        "candidate": dict(candidate),
+                        # Use the binding's site, also used in negotiation.
+                        "origin": str(candidate["site_id"]),
+                    },
+                )
             if not isinstance(artifacts, Mapping):
                 raise ValueError(
                     "settlement option builder returned an invalid artifact"
@@ -270,10 +325,17 @@ class BareMetalStorefrontSettlementComposition:
             ):
                 raise ValueError("settlement option builder returned invalid carriers")
             accepted_escrows.extend(dict(item) for item in built_escrows)
-            settlement_options.extend(
-                SettlementOption.model_validate(item).model_dump(mode="json")
-                for item in built_options
-            )
+            for item in built_options:
+                option = SettlementOption.model_validate(item)
+                try:
+                    self.rate_servicing.require_option(option)
+                except RateServicingUnavailable as exc:
+                    diagnose({"code": "rate_servicing_undeclared", "detail": str(exc), "mechanism": option.settlement_schema})
+                    continue
+                terms = LifecycleTerms.model_validate(option.lifecycle) if option.lifecycle is not None else None
+                for detail in default_buyer_refusals(terms, has_adapter=terms is not None):
+                    diagnose({"code": "default_buyer_refusal", "detail": detail, "mechanism": option.settlement_schema, "option_id": option.option_id})
+                settlement_options.append(option.model_dump(mode="json"))
 
         if not accepted_escrows and not settlement_options:
             mechanisms = tuple(dict.fromkeys(clause.mechanism for clause in clauses))

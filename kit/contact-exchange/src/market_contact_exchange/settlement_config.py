@@ -8,6 +8,7 @@ from collections.abc import Collection, Mapping
 from typing import Any, Literal
 
 from market_core.schemas import (
+    PriceBasis,
     SettlementOption,
     derive_settlement_option_id,
     settlement_option_asset,
@@ -555,6 +556,15 @@ def validate_contact_publication_input(
     return parsed
 
 
+def contact_billing_basis(option: SettlementOption) -> PriceBasis:
+    """A rateless introduction has no periodic monetary obligation."""
+    if option.settlement_schema != MECHANISM or option.price_rates or option.price_asset is not None:
+        raise ValueError("contact billing requires a rateless introduction option")
+    if set(option.settlement_params) != {"profile", "channel", "terms", "claimant_principal"}:
+        raise ValueError("contact billing requires introduction parameters")
+    return PriceBasis(unit="total")
+
+
 def create_contact_exchange_registration(
     *, command_group: Any | None = None
 ) -> MechanismRegistration:
@@ -566,6 +576,7 @@ def create_contact_exchange_registration(
         config_model=ContactSettlementConfig,
         roles=frozenset({"buyer", "seller"}),
         negotiates_scalar_amount=False,
+        project_billing=contact_billing_basis,
         preflight=contact_preflight,
         client_factory=contact_client_factory,
         option_builder=contact_option_builder,

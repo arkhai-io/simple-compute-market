@@ -434,21 +434,9 @@ class TestBuyFrom:
             "Settlement must not run when negotiation didn't agree"
         )
 
-    def test_buy_fresh_still_requires_duration_hours(self, runner):
-        """Fresh `market buy` (no --from) without --duration-hours fails fast.
-
-        Prices are now optional — when omitted they're derived from each
-        listing's seller-advertised min_price (interactively confirmed by
-        default; non-interactively under --auto-price). Duration is still
-        mandatory because it shapes the buyer's lease ask sent at
-        /negotiate/new.
-        """
-        result = runner.invoke(
-            app,
-            [
-                "buy",
-            ],
-        )
+    def test_buy_fresh_rejects_nonpositive_duration_hours(self, runner):
+        """An explicit duration must be positive; omission is resolved after selection."""
+        result = runner.invoke(app, ["buy", "--duration-hours", "0"])
         assert result.exit_code == 2
         assert "duration-hours" in result.output.lower()
 

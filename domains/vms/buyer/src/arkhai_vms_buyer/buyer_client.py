@@ -1,12 +1,10 @@
 """VM shim over the core buyer negotiation client.
 
-The round loop, chain loading, and outcome parsing moved to
-``core_buyer.negotiation_client`` when the API-credits domain became the
-second schema plugin. The seam that moved with it: listings broadcast
-**per-unit** rates and the core client scales them to absolute amounts
-by ``unit_count`` — this module supplies the VM unit, the lease hour
-(``duration_seconds / 3600``), and re-attaches ``duration_seconds`` to
-the outcome for VM callers and run-log compatibility.
+The core owns round sequencing and opaque acceptance checks. Shape-priced
+listings use the VM amount codec: policy scalars are basis points while accepted
+outcomes carry derived payments. Flat listings scale hourly bounds by the
+selected billing span: one period or the reserved term. A recurring horizon is
+optional; the VM outcome also carries the buyer's requested duration.
 
 Importing this module also installs the RL middleware registrar so
 ``rl``-named policies in buyer.toml resolve (core cannot import
@@ -43,6 +41,7 @@ from arkhai_vms import VmProvisionTerms
 from .common import chain_address_books
 from .escrow_client import encode_escrow_proposal
 from .settlement_composition import validate_buyer_acceptance
+from .negotiation_amounts import amount_codec, priced_unit_count
 
 
 def _validate_model(model_type, value):
@@ -131,13 +130,14 @@ def negotiate_with_seller(
     validate_acceptance: Callable[[CoreNegotiationOutcome], None]
     | None = validate_buyer_acceptance,
     capture: EnvelopeCapture | None = None,
+    listing: dict[str, Any] | None = None,
 ) -> NegotiationOutcome:
     """Run a synchronous negotiation with one seller, round-by-round.
 
-    VM instantiation of ``core_buyer.negotiation_client
-    .negotiate_with_seller``: prices are per-hour rates, scaled to
-    absolute amounts by the lease duration fixed in
-    ``provision_terms.duration_seconds``.
+    Prices are per-hour bounds for the advertised shape. A seller-authenticated
+    registry ``listing`` with a rate structure converts those bounds to basis
+    points once; accepted terms determine the monetary payment. Without a rate
+    structure, the selected period or reserved lease hours scale the bounds.
 
     ``validate_acceptance`` defaults to the purchase table's entry guard. An
     introduction has no purchase entry and passes None; its command checks
@@ -156,15 +156,14 @@ def negotiate_with_seller(
                 "required for fresh negotiations"
             )
         duration_seconds = provision_terms.duration_seconds
-        # Translate per-hour bounds → absolute amounts (× duration / 3600).
-        # Listings broadcast per-hour rates; once the duration is fixed,
-        # the whole negotiation runs on absolute totals.
-        if duration_seconds is None or duration_seconds <= 0:
-            raise RuntimeError(
-                "provision_terms.duration_seconds must be > 0 to translate "
-                "per-hour bounds into absolute amounts."
-            )
 
+    proposal_for_amount = settlement_selection or escrow_proposal
+    if resume is not None:
+        proposal_for_amount = next(
+            (entry.proposal for entry in resume.transcript if entry.sender == "us" and entry.proposal),
+            None,
+        )
+    codec = amount_codec(listing, proposal_for_amount) if proposal_for_amount is not None else None
     core_outcome = _core_negotiate_with_seller(
         seller_url=seller_url,
         principal=principal,
@@ -173,7 +172,7 @@ def negotiate_with_seller(
         initial_price=initial_price,
         max_price=max_price,
         unit_count=(
-            float(duration_seconds) / 3600.0 if duration_seconds is not None else None
+            priced_unit_count(listing, proposal_for_amount, duration_seconds) if resume is None else None
         ),
         provision_terms=provision_terms,
         encode_escrow_proposal=encode_escrow_proposal,
@@ -188,6 +187,7 @@ def negotiate_with_seller(
         policy_params=policy_params,
         validate_advertised_plan=validate_advertised_plan,
         validate_acceptance=validate_acceptance,
+        amount_codec=codec,
         resolve_seller_principals=resolve_seller_principals,
         capture=capture,
     )

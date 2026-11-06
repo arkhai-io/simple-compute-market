@@ -5,6 +5,15 @@ from .asking_rates import (
     asking_rate_entry_problems,
     validate_asking_rates,
 )
+from .capacity_bounds import (
+    CAPACITY_BOUNDS_POLICY_TAG,
+    CapacityBounds,
+    UtcAvailability,
+    capacity_bound_hint,
+    positive_duration_bound,
+    resolve_capacity_bounds,
+    validate_capacity_bounds,
+)
 from .backing import (
     BACKED,
     UNBACKED,
@@ -54,6 +63,13 @@ from .pools import (
 from .routes import RESOURCE_POOL_ROUTES, pool_route
 
 __all__ = [
+    "CAPACITY_BOUNDS_POLICY_TAG",
+    "CapacityBounds",
+    "UtcAvailability",
+    "capacity_bound_hint",
+    "positive_duration_bound",
+    "resolve_capacity_bounds",
+    "validate_capacity_bounds",
     "ASKING_RATES_POLICY_TAG",
     "asking_rate_entry_problems",
     "validate_asking_rates",

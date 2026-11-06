@@ -59,7 +59,7 @@ def test_complete_vm_terms_and_shapes_are_readable():
     ("terms", "field"),
     [
         ({"sla": -1}, "sla"),
-        ({"max_duration_seconds": 0}, "max_duration_seconds"),
+        ({"max_duration_seconds": 0.5}, "max_duration_seconds"),
         ({"max_duration_seconds": "60"}, "max_duration_seconds"),
         ({"min_price": "3"}, "min_price"),
         ({"token": "0xtoken"}, "token"),

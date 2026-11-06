@@ -115,6 +115,29 @@ class DealWatch:
         ):
             raise ValueError("watch binding names another deal")
 
+    def _record_payment_stop(self, end: EndSession, event: PaymentEvent) -> None:
+        if (event.negotiation_id, event.commitment_ref) != (self.negotiation_id, self.commitment_ref):
+            raise ValueError("authority stop names another deal")
+        request = FinalRequest(
+            negotiation_id=self.negotiation_id, source_ref="payment-stop:" + event.authority_record_ref,
+            ended_at=event.at, observed_at=self.clock(), actor=self.actor(event.actor),
+            cause=event.cause, source=event.authority_record_ref, evidence_refs=[event.authority_record_ref],
+        )
+        prior = next((item for item in end.requests(self.negotiation_id)
+                      if item.source_ref == request.source_ref), None)
+        if prior is not None:
+            if request.model_copy(update={"observed_at": prior.observed_at}) != prior:
+                raise ValueError("controlling payment stop changes its recorded end")
+            return
+        classification = self.classify_payment_end(event)
+        end.record_end(
+            request, now=self.clock(), classification=classification,
+            pending_classification=classification is None,
+            filing_intent=(end.failure_filing(
+                request, now=self.clock(), delivered=end.read(self.negotiation_id).available_at is not None,
+            ) if classification is not None and not classification.lawful else None),
+        )
+
     def _observe(
         self, record_ref: str, view: AuthorityView, *, dispute: bool,
     ) -> list[PaymentEvent | DisputeEvent]:
@@ -134,6 +157,11 @@ class DealWatch:
             cursor = watch.cursor(self.negotiation_id, record_ref)
             if max((event.sequence for event in events), default=-1) < cursor:
                 raise ValueError("authority read regresses below its durable cursor")
+            # A scheduled request can mature without a new event sequence. Read
+            # its controlling per-part record independently of the event cursor.
+            for part in view.parts:
+                if part.final_stop is not None:
+                    self._record_payment_stop(end, part.final_stop)
             fresh: list[PaymentEvent | DisputeEvent] = []
             for event in events:
                 if event.negotiation_id != self.negotiation_id or event.commitment_ref != self.commitment_ref:
@@ -211,23 +239,7 @@ class DealWatch:
                                 intent.intent_ref, {"reason": "authority confirmed closed case"}, state="skipped",
                             )
                 elif event.kind == "stop":
-                    request = FinalRequest(
-                        negotiation_id=self.negotiation_id, source_ref="payment-stop:" + event.authority_record_ref,
-                        ended_at=event.at, observed_at=self.clock(),
-                        actor=self.actor(event.actor), cause=event.cause, source=event.authority_record_ref,
-                        evidence_refs=[event.authority_record_ref],
-                    )
-                    classification = self.classify_payment_end(event)
-                    end.record_end(
-                        request, now=self.clock(), classification=classification,
-                        pending_classification=classification is None,
-                        filing_intent=(
-                            end.failure_filing(
-                                request, now=self.clock(),
-                                delivered=end.read(self.negotiation_id).available_at is not None,
-                            ) if classification is not None and not classification.lawful else None
-                        ),
-                    )
+                    self._record_payment_stop(end, event)
                 cursor = event.sequence
                 fresh.append(event)
             watch.save(self.negotiation_id, record_ref, cursor, view)

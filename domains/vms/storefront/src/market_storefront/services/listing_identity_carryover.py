@@ -159,6 +159,7 @@ async def carry_over_seller_state(sqlite_client: Any) -> CarryOverReport:
             listing_resource=listing_resource,
             fulfillment_resource=record.get("fulfillment_resource"),
             max_duration_seconds=record.get("max_duration_seconds"),
+            available_until_utc=record.get("available_until_utc"),
             storefront_url=record["storefront_url"],
             seller_principal=Identity.model_validate(record["seller_principal"]),
             oracle_address=record.get("oracle_address"),

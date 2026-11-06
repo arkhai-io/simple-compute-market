@@ -42,6 +42,13 @@ def resolve_prices_from_matches(
     )
 
 
+def emit_lifecycle_disclosure(rows, *, title: str) -> None:
+    """Keep public terms visible even when interactive confirmation is disabled."""
+    typer.echo(title, err=True)
+    for name, value in rows:
+        typer.echo(f"  {name}: {value}", err=True)
+
+
 def emit_buyer_explanation(payload: dict[str, Any]) -> None:
     """Print human evidence followed by one stable machine-readable JSON line."""
 
