@@ -1,5 +1,6 @@
 import pytest
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -508,6 +509,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "20261101_003_relay_lease_grants",
         "20261102_001_lease_end_reports",
         "20261106_001_reservation_activated_at",
+        "20261106_002_reservation_placement_key",
     }
 
 
@@ -531,6 +533,8 @@ def test_run_migrations_is_idempotent():
     assert ansible_columns.count("contract_version") == 0
     assert reservation_columns.count("release_requested_at") == 1
     assert reservation_columns.count("activated_at_utc") == 1
+    assert reservation_columns.count("placement_key") == 1
+    assert reservation_columns.count("placement_request") == 1
     assert ansible_columns.count("capacity_reservation_id") == 1
     assert ansible_columns.count("deal_ref") == 0
     assert ansible_columns.count("offering_mode") == 1
@@ -815,3 +819,95 @@ def test_a_database_already_carrying_the_activation_column_migrates_unchanged():
         for column in inspect(engine).get_columns("capacity_reservations")
     ]
     assert columns.count("activated_at_utc") == 1
+
+
+_PLACEMENT_MIGRATION_ID = "20261106_002_reservation_placement_key"
+
+
+def _database_before_placement_keys():
+    """A migrated database as it stood before reserve took a placement key,
+    holding leased, releasing and released reservations."""
+    engine = _sqlite_memory_engine()
+    run_migrations(engine)
+    with engine.begin() as connection:
+        connection.execute(text("DROP INDEX ix_capacity_reservations_placement_key"))
+        connection.execute(
+            text("ALTER TABLE capacity_reservations DROP COLUMN placement_key")
+        )
+        connection.execute(
+            text("ALTER TABLE capacity_reservations DROP COLUMN placement_request")
+        )
+        connection.execute(
+            text("DELETE FROM schema_migrations WHERE id = :id"),
+            {"id": _PLACEMENT_MIGRATION_ID},
+        )
+        for row in _RESERVATIONS_BEFORE_ACTIVATION:
+            connection.execute(
+                text(
+                    f"INSERT INTO capacity_reservations ({_RESERVATION_COLUMNS}) "
+                    "VALUES (:id, :units, :state, :mode, :hold, :target, "
+                    ":start, :end, :requested, :released)"
+                ),
+                dict(zip(
+                    ("id", "units", "state", "mode", "hold", "target", "start",
+                     "end", "requested", "released"),
+                    row,
+                )),
+            )
+    return engine
+
+
+def _placement_rows(engine) -> set[tuple]:
+    with engine.connect() as connection:
+        return {
+            tuple(row)
+            for row in connection.execute(text(
+                f"SELECT {_RESERVATION_COLUMNS}, placement_key, placement_request "
+                "FROM capacity_reservations"
+            ))
+        }
+
+
+def test_existing_reservations_migrate_with_no_placement_key():
+    """No backfill: every reservation migrates recording no placement key,
+    its state, window and release fields unchanged, and a rerun changes
+    nothing."""
+    engine = _database_before_placement_keys()
+    expected = {row + (None, None) for row in _RESERVATIONS_BEFORE_ACTIVATION}
+
+    run_migrations(engine)
+
+    assert _placement_rows(engine) == expected
+    assert _PLACEMENT_MIGRATION_ID in _migration_ids(engine)
+    check_schema_version(engine)
+
+    run_migrations(engine)
+
+    assert _placement_rows(engine) == expected
+
+
+def test_the_migration_creates_the_placement_key_s_unique_index():
+    """The migration indexes the placement key under the name a fresh
+    database's tables carry, and the index holds one reservation per key."""
+    engine = _database_before_placement_keys()
+
+    run_migrations(engine)
+
+    indexes = {
+        index["name"]: index
+        for index in inspect(engine).get_indexes("capacity_reservations")
+    }
+    placement = indexes["ix_capacity_reservations_placement_key"]
+    assert placement["column_names"] == ["placement_key"]
+    assert placement["unique"]
+    with engine.begin() as connection:
+        connection.execute(text(
+            "UPDATE capacity_reservations SET placement_key = 'neg-1:settlement' "
+            "WHERE capacity_reservation_id = 'r-leased'"
+        ))
+    with pytest.raises(IntegrityError):
+        with engine.begin() as connection:
+            connection.execute(text(
+                "UPDATE capacity_reservations SET placement_key = 'neg-1:settlement' "
+                "WHERE capacity_reservation_id = 'r-released'"
+            ))

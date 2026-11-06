@@ -307,6 +307,16 @@ recorded expiry has passed. Today's fallback to a fresh reserve on any commit er
 is removed: a commit whose answer was lost may have succeeded, and a second
 reservation beside it is the orphan this decision exists to prevent.
 
+The site records, beside the key, the request it was admitted for — resource type,
+claim attributes, offering mode, dimensions, and the window as asked (its start and
+duration) — and judges a replay against that record, not against the row: commit and
+truncation move the row's window after admission, and the exact replay of a
+truncated lease must still find it. The hold's TTL is not part of the request. A
+refused replay answers 409, a malformed key 422. A keyed reserve whose `escrow_uid`
+already holds a reservation placed without a key adopts it under the key, so a
+bare-metal deal reserved before the upgrade is found by its key once released;
+one held under another key is refused. A resize records no key on its new row.
+
 Delivery validates the returned
 reservation against its request; an expired or released result is repair-required or
 the end hand-off (D11), never a fresh hold. Both domains recover through this key;

@@ -530,6 +530,222 @@ def test_reserve_after_hold_expiry_reserves_fresh_for_the_same_escrow_uid(
     assert second["capacity_reservation_id"] != first["capacity_reservation_id"]
 
 
+_SETTLEMENT_KEY = "neg-4c1e:settlement"
+_HOLD_KEY = "neg-4c1e:hold"
+_WINDOW = {
+    "lease_start_utc": "2030-01-01T00:00:00Z",
+    "lease_duration_seconds": 3600,
+}
+
+
+def _keyed_reserve(
+    ledger: CapacityLedgerService,
+    key: str,
+    *,
+    claim: dict | None = None,
+    **kwargs,
+) -> dict | None:
+    window = {**_WINDOW, **kwargs}
+    return ledger.reserve(
+        claim=claim or {"offering_mode": "vm", "gpu_count": 2},
+        deal_ref={"listing_id": "lst-1", "placement_key": key},
+        **window,
+    )
+
+
+def _reservation_count(ledger: CapacityLedgerService) -> int:
+    with ledger._session_factory() as db:
+        return db.query(CapacityReservation).count()
+
+
+def test_a_lost_reserve_acknowledgement_is_replayed_under_its_placement_key(
+    seeded: CapacityLedgerService,
+):
+    """A storefront repeating a reserve whose answer it never received gets
+    the reservation the first call created, and the site admits nothing."""
+    first = _keyed_reserve(seeded, _SETTLEMENT_KEY)
+    _, version = seeded.events_after(0)
+
+    replay = _keyed_reserve(seeded, _SETTLEMENT_KEY)
+
+    assert replay["capacity_reservation_id"] == first["capacity_reservation_id"]
+    assert replay["state"] == "reserved"
+    assert replay["resource_id"] == first["resource_id"]
+    assert replay["deal_ref"]["placement_key"] == _SETTLEMENT_KEY
+    assert _reservation_count(seeded) == 1
+    assert seeded.events_after(0)[1] == version
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"lease_start_utc": "2030-01-01T00:30:00Z"},
+        {"lease_duration_seconds": 7200},
+        {"claim": {"offering_mode": "vm", "gpu_count": 3}},
+        {"claim": {"offering_mode": "vm", "gpu_count": 2, "pool_id": "default"}},
+        {"claim": {"offering_mode": "bare_metal", "gpu_count": 2}},
+    ],
+    ids=["start", "duration", "dimensions", "pool", "offering_mode"],
+)
+def test_a_replay_that_changes_the_request_is_refused_with_nothing_written(
+    seeded: CapacityLedgerService, change: dict
+):
+    first = _keyed_reserve(seeded, _SETTLEMENT_KEY)
+    _, version = seeded.events_after(0)
+    available = seeded.snapshot()[0]["available"]
+
+    with pytest.raises(CapacityConflictError):
+        _keyed_reserve(seeded, _SETTLEMENT_KEY, **change)
+
+    assert _reservation_count(seeded) == 1
+    assert seeded.events_after(0)[1] == version
+    assert seeded.snapshot()[0]["available"] == available
+    recorded = seeded.get_reservation(first["capacity_reservation_id"])
+    assert recorded["state"] == "reserved"
+    assert recorded["lease_start_utc"] == "2030-01-01T00:00:00+00:00"
+
+
+def test_a_lapsed_hold_is_replaced_by_another_placement_and_still_answers_its_key(
+    seeded: CapacityLedgerService,
+):
+    """An expired ``:hold`` placement does not stand in for the deal's
+    ``:settlement`` placement, which is admitted fresh; a replay under the
+    hold's key still returns the expired hold rather than a new one."""
+    hold = _keyed_reserve(seeded, _HOLD_KEY, ttl_seconds=60)
+    with seeded._session_factory() as db:
+        row = db.get(CapacityReservation, hold["capacity_reservation_id"])
+        row.hold_expires_at = (
+            datetime.now(timezone.utc) - timedelta(seconds=1)
+        ).isoformat()
+        db.commit()
+
+    settlement = _keyed_reserve(seeded, _SETTLEMENT_KEY)
+    hold_replay = _keyed_reserve(seeded, _HOLD_KEY, ttl_seconds=60)
+
+    assert settlement["capacity_reservation_id"] != hold["capacity_reservation_id"]
+    assert seeded.get_reservation(settlement["capacity_reservation_id"])["state"] == "reserved"
+    assert hold_replay["capacity_reservation_id"] == hold["capacity_reservation_id"]
+    assert hold_replay["state"] == "released"
+    assert hold_replay["failure_reason"] == "hold_expired"
+    assert _reservation_count(seeded) == 2
+
+
+def test_a_released_placement_replays_released_and_admits_nothing(
+    seeded: CapacityLedgerService,
+):
+    """Unlike the escrow lookup, a placement key answers after release: the
+    caller learns its placement ended, and is never handed a fresh hold."""
+    first = _keyed_reserve(seeded, _SETTLEMENT_KEY)
+    seeded.release(capacity_reservation_id=first["capacity_reservation_id"])
+    _, version = seeded.events_after(0)
+
+    replay = _keyed_reserve(seeded, _SETTLEMENT_KEY)
+
+    assert replay["capacity_reservation_id"] == first["capacity_reservation_id"]
+    assert replay["state"] == "released"
+    assert _reservation_count(seeded) == 1
+    assert seeded.events_after(0)[1] == version
+    assert seeded.snapshot()[0]["available_units"] == 8
+
+
+def test_a_replay_is_judged_against_the_request_not_the_lease_it_became(
+    seeded: CapacityLedgerService,
+):
+    """Commit and truncation move the row's window after admission; the exact
+    request replayed afterwards still finds the committed, truncated lease."""
+    first = _keyed_reserve(seeded, _SETTLEMENT_KEY)
+    seeded.commit(
+        capacity_reservation_id=first["capacity_reservation_id"],
+        lease_start_utc="2030-01-01T00:05:00+00:00",
+        lease_end_utc="2030-01-01T01:00:00+00:00",
+    )
+    seeded.truncate_lease(
+        capacity_reservation_id=first["capacity_reservation_id"],
+        lease_end_utc="2030-01-01T00:20:00+00:00",
+    )
+
+    replay = _keyed_reserve(seeded, _SETTLEMENT_KEY)
+
+    assert replay["capacity_reservation_id"] == first["capacity_reservation_id"]
+    assert replay["state"] == "leased"
+    assert replay["lease_start_utc"] == "2030-01-01T00:05:00+00:00"
+    assert replay["lease_end_utc"] == "2030-01-01T00:20:00+00:00"
+
+
+def test_a_keyed_reserve_adopts_its_escrow_s_unkeyed_reservation(
+    seeded: CapacityLedgerService,
+):
+    """A reservation placed by escrow alone is adopted under the first key that
+    names its escrow, so the key answers with it even after release."""
+    unkeyed = seeded.reserve(
+        claim={"offering_mode": "vm", "gpu_count": 2},
+        deal_ref={"escrow_uid": "0xadopt"},
+        **_WINDOW,
+    )
+    keyed_request = {
+        "claim": {"offering_mode": "vm", "gpu_count": 2},
+        "deal_ref": {"escrow_uid": "0xadopt", "placement_key": _SETTLEMENT_KEY},
+        **_WINDOW,
+    }
+
+    adopted = seeded.reserve(**keyed_request)
+    seeded.release(capacity_reservation_id=unkeyed["capacity_reservation_id"])
+    replay = seeded.reserve(**keyed_request)
+
+    assert adopted["capacity_reservation_id"] == unkeyed["capacity_reservation_id"]
+    assert replay["capacity_reservation_id"] == unkeyed["capacity_reservation_id"]
+    assert replay["state"] == "released"
+    assert _reservation_count(seeded) == 1
+
+
+def test_a_keyed_reserve_never_answers_with_another_placement_s_reservation(
+    seeded: CapacityLedgerService,
+):
+    """An escrow held under one placement key does not answer a reserve under
+    another: the second is refused, and nothing is written."""
+    seeded.reserve(
+        claim={"offering_mode": "vm", "gpu_count": 2},
+        deal_ref={"escrow_uid": "0xheld", "placement_key": _HOLD_KEY},
+        **_WINDOW,
+    )
+    _, version = seeded.events_after(0)
+
+    with pytest.raises(CapacityConflictError):
+        seeded.reserve(
+            claim={"offering_mode": "vm", "gpu_count": 2},
+            deal_ref={"escrow_uid": "0xheld", "placement_key": _SETTLEMENT_KEY},
+            **_WINDOW,
+        )
+
+    assert _reservation_count(seeded) == 1
+    assert seeded.events_after(0)[1] == version
+
+
+def test_a_keyed_request_whose_start_the_site_supplied_replays_equal(
+    seeded: CapacityLedgerService,
+):
+    """The window is recorded as asked, so a duration with no start replays
+    as the same request even though the site's clock has moved."""
+    first = _keyed_reserve(seeded, _SETTLEMENT_KEY, lease_start_utc=None)
+
+    replay = _keyed_reserve(seeded, _SETTLEMENT_KEY, lease_start_utc=None)
+
+    assert replay["capacity_reservation_id"] == first["capacity_reservation_id"]
+    assert _reservation_count(seeded) == 1
+
+
+@pytest.mark.parametrize("key", ["", "   ", 7])
+def test_a_placement_key_that_is_not_a_string_is_refused(
+    seeded: CapacityLedgerService, key
+):
+    with pytest.raises(ValueError):
+        seeded.reserve(
+            claim={"offering_mode": "vm", "gpu_count": 1},
+            deal_ref={"placement_key": key},
+        )
+    assert _reservation_count(seeded) == 0
+
+
 def test_future_reservation_ignores_non_overlapping_current_lease(seeded: CapacityLedgerService):
     first = seeded.reserve(claim={"offering_mode": "vm", **{"gpu_count": 8}}, deal_ref={"escrow_uid": "0xnow"},
     lease_start_utc="2030-01-01T00:00:00Z",

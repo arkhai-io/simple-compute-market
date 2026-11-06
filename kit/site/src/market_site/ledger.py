@@ -38,6 +38,7 @@ feed is always consistent with a snapshot.
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 from collections.abc import Callable, Iterator
@@ -235,6 +236,55 @@ def _requested_offering_mode(
         )
     return raw
 
+
+def _placement_key(deal_ref: Mapping[str, Any]) -> str | None:
+    """The placement key a reserve's ``deal_ref`` carries, if any.
+
+    The key is opaque to the site: it names a deal and the purpose of one
+    placement for it, and the site uses it only to find the reservation that
+    placement recorded.
+    """
+    raw = deal_ref.get("placement_key")
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError("deal_ref.placement_key must be a non-empty string")
+    return raw
+
+
+def _placement_request(
+    *,
+    resource_kind: str | None,
+    claim_attributes: Mapping[str, Any],
+    requested: Mapping[str, Decimal],
+    requested_mode: str | None,
+    lease_start_utc: str | None,
+    lease_duration_seconds: int | None,
+) -> dict[str, Any]:
+    """The reserve request a placement key records, as stored JSON.
+
+    The window is recorded as asked — its start, normalized, and its
+    duration — so a request whose start the site's clock supplied replays
+    equal to itself. The hold's TTL is not part of it: a replay returns the
+    recorded hold, whose expiry was fixed when it was admitted.
+    """
+    start = parse_utc(lease_start_utc)
+    return json.loads(
+        json.dumps(
+            {
+                "resource_type": resource_kind,
+                "attributes": dict(claim_attributes),
+                "offering_mode": requested_mode,
+                "dimensions": _serialize_dimensions(requested),
+                "lease_start_utc": start.isoformat() if start else None,
+                "lease_duration_seconds": (
+                    int(lease_duration_seconds)
+                    if lease_duration_seconds is not None
+                    else None
+                ),
+            }
+        )
+    )
 
 
 def _requested_units(
@@ -1175,7 +1225,20 @@ class CapacityLedgerService:
     ) -> dict[str, Any] | None:
         """Atomically check-and-reserve capacity matching ``claim``.
 
-        Idempotent by ``deal_ref["escrow_uid"]`` when present: a repeat
+        Idempotent by ``deal_ref["placement_key"]`` when present: a replay
+        under a recorded key returns that reservation in whatever state it
+        has reached -- held, committed, released, or lapsed -- and admits
+        nothing, and a replay that asks for anything the recorded
+        reservation was not admitted for is refused with
+        :class:`CapacityConflictError` and nothing written. Unlike the
+        escrow lookup below, a released reservation still answers its key:
+        a caller whose acknowledgement was lost must learn that its own
+        placement lapsed, not receive a fresh hold in its place, and a new
+        placement for the same deal names a new key. A keyed reserve whose
+        escrow already holds a reservation placed without a key adopts that
+        reservation under its key; one held under another key is refused.
+
+        Otherwise idempotent by ``deal_ref["escrow_uid"]`` when present: a repeat
         call for the same escrow_uid returns the existing held reservation
         (``reserved``/``provisioning``/``leased``/etc. -- anything in
         ``HELD_RESERVATION_STATES``) rather than minting a second one. This
@@ -1204,11 +1267,24 @@ class CapacityLedgerService:
         # normalizes `resource_id` into the matched attribute mapping, so a
         # listing that named one resource is carried here as an ordinary
         # categorical constraint rather than needing a second mechanism.
-        _, claim_attributes = _split_claim_requirement(
+        resource_kind, claim_attributes = _split_claim_requirement(
             claim, unit_claim_keys=self._unit_claim_keys
         )
         deal = dict(deal_ref or {})
         escrow_uid = deal.get("escrow_uid")
+        placement_key = _placement_key(deal)
+        placement_request = (
+            _placement_request(
+                resource_kind=resource_kind,
+                claim_attributes=claim_attributes,
+                requested=requested,
+                requested_mode=requested_mode,
+                lease_start_utc=lease_start_utc,
+                lease_duration_seconds=lease_duration_seconds,
+            )
+            if placement_key is not None
+            else None
+        )
         window_start, window_end = _lease_window(
             lease_start_utc=lease_start_utc,
             lease_duration_seconds=lease_duration_seconds,
@@ -1216,6 +1292,19 @@ class CapacityLedgerService:
         with self.serialized(), self._session_factory() as db:
             self._expire_stale_holds(db)
             _begin_decision_transaction(db)
+            if placement_key is not None:
+                recorded = (
+                    db.query(CapacityReservation)
+                    .filter(CapacityReservation.placement_key == placement_key)
+                    .one_or_none()
+                )
+                if recorded is not None:
+                    if recorded.placement_request != placement_request:
+                        raise CapacityConflictError(
+                            f"placement {placement_key!r} was reserved for a "
+                            "different claim, offering mode or lease window"
+                        )
+                    return self._reservation_payload_for_reserve(db, recorded)
             if escrow_uid:
                 existing = self._find_reservation(db, escrow_uid=escrow_uid)
                 if existing is not None:
@@ -1223,6 +1312,20 @@ class CapacityLedgerService:
                         raise CapacityConflictError(
                             "offering_mode does not match the existing reservation"
                         )
+                    if placement_key is not None:
+                        # The escrow's held reservation belongs to another
+                        # placement, or to none. Another placement's row is not
+                        # this one's to answer with; a row placed without a key
+                        # is adopted under this one, so its replay finds the row
+                        # once it is released rather than admitting a fresh one.
+                        if existing.placement_key is not None:
+                            raise CapacityConflictError(
+                                f"escrow {escrow_uid!r} is held by placement "
+                                f"{existing.placement_key!r}, not {placement_key!r}"
+                            )
+                        existing.placement_key = placement_key
+                        existing.placement_request = placement_request
+                        db.commit()
                     return self._reservation_payload_for_reserve(db, existing)
             match = self._find_candidate(db, claim, requested, window_start, window_end)
             if match is None:
@@ -1242,6 +1345,8 @@ class CapacityLedgerService:
                 state=ReservationState.reserved.value,
                 deal_ref=deal,
                 escrow_uid=deal.get("escrow_uid"),
+                placement_key=placement_key,
+                placement_request=placement_request,
                 hold_expires_at=hold_expires_at,
                 executor_ref=_executor_ref_for_resource(resource),
                 offering_mode=requested_mode,
@@ -1827,6 +1932,9 @@ class CapacityLedgerService:
                 state=ReservationState.reserved.value,
                 deal_ref=deal,
                 escrow_uid=deal.get("escrow_uid"),
+                # No placement key: a key names the reserve that admitted a
+                # row, and stays on the superseded row, so a replay of that
+                # reserve answers with what it recorded, now released.
                 hold_expires_at=hold_expires_at,
                 executor_ref=_executor_ref_for_resource(resource),
                 offering_mode=requested_mode,

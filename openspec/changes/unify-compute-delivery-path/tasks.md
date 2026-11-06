@@ -21,7 +21,7 @@ is keyed by the deal's placement"). Files: `kit/site/src/market_site/ledger.py`
 reserve body model needs the key named, `kit/site-client` only if its reserve call
 filters `deal_ref`, and their tests.
 
-- [ ] 1.1 Accept `deal_ref.placement_key` in `CapacityLedgerService.reserve` as an
+- [x] 1.1 Accept `deal_ref.placement_key` in `CapacityLedgerService.reserve` as an
       idempotency key beside `escrow_uid`, looked up in the reserve's own transaction
       across every state (held, committed, released), not only
       `HELD_RESERVATION_STATES`. An exact replay returns the recorded reservation's
@@ -29,11 +29,38 @@ filters `deal_ref`, and their tests.
       dimensions or attributes, the pool, the site, the offering mode or the lease
       window raises the ledger's conflict error with nothing written. A reserve
       without the key behaves exactly as today (D6).
-- [ ] 1.2 Add an index on the stored placement key if the lookup would otherwise scan
+      Done. The key is lifted from `deal_ref` into a unique
+      `capacity_reservations.placement_key` column, and the request it was admitted
+      for — resource type, claim attributes (the pool, when the claim names one),
+      offering mode, dimensions and the window *as asked* (normalized start, duration)
+      — into `placement_request` JSON. A replay is compared with that record, not with
+      the row's own window, because commit and truncation move the row's window after
+      admission: comparing against the row would refuse the exact replay of a
+      truncated lease. The site is the ledger itself, so a replay at another site
+      finds no key. The TTL is not compared: a replay returns the hold whose expiry
+      was fixed at admission. The placement lookup runs first; with no recorded key
+      the escrow lookup runs as before, and when it finds a held row placed without
+      a key it adopts that row under the key (so a bare-metal deal reserved before
+      the upgrade is found by its key once released), while a row held under another
+      key refuses the reserve. A non-string or blank key is a `ValueError` (422).
+      `resize_reservation` does not lift the key (it has no caller, and lifting would
+      put two rows under one key). These refinements are recorded in `design.md` D6.
+      Outside the plan: the reserve route mapped only
+      `UndeclaredOfferingModeError` to 409, so the existing escrow
+      offering-mode mismatch (`CapacityConflictError`) surfaced as a 500; the route
+      now maps every `CapacityConflictError` to 409, which the placement refusal
+      needs too (`kit/site/src/market_site/router.py`). `ReserveRequest.deal_ref`'s
+      description names the key (`http_models.py`); `kit/site-client` passes
+      `deal_ref` verbatim and needed no change.
+- [x] 1.2 Add an index on the stored placement key if the lookup would otherwise scan
       `deal_ref` JSON, in both services hosting the ledger (compute provisioning and API
       credits), as an ordered migration each; leave expiry indexing and retention to
       `capacity-reservation-lifecycle-hardening` (D6).
-- [ ] 1.3 Verify: library integration in `kit/site/tests/integration/test_ledger.py`
+      Done: `20261106_002_reservation_placement_key` (compute provisioning) and
+      `20261106_008_reservation_placement_key` (API credits) add both columns and the
+      unique index `ix_capacity_reservations_placement_key`, the name `create_all`
+      gives a fresh database. No backfill: no reserve carried a key before.
+- [x] 1.3 Verify: library integration in `kit/site/tests/integration/test_ledger.py`
       for the three `site-capacity` scenarios — a lost acknowledgement replayed, a
       changed window refused with nothing written, a lapsed `:hold` beside a new
       `:settlement` placement — plus a replay of a released reservation returning it
@@ -41,6 +68,29 @@ filters `deal_ref`, and their tests.
       `make -C kit test-site`, the compute provisioning and API-credit service suites
       for their migrations, and `make test`. End-to-end: none exercises the key until
       section 5 sends it; no scenario is owed here.
+      Library integration (`test_ledger.py`, real ledger on SQLite): the three
+      scenarios; a changed start, duration, dimensions, pool attribute and offering
+      mode each refused with no row, event or availability change; a released
+      replay; a lease committed with a later start and then truncated, replayed by
+      its exact request; a site-clock start replayed equal; a blank or non-string key
+      refused; an unkeyed escrow reservation adopted under the key and found by it
+      after release; an escrow held under another key refusing the reserve. The
+      existing escrow tests pass unchanged. `make -C kit test-site`: 366 passed.
+      Application integration (compute provisioning, typed `SiteCapacityClient`
+      against the in-process app, `test_capacity_api.py`): a keyed replay returns
+      the first reservation with the event version unchanged; a changed window
+      answers 409 with one reservation listed and its recorded start unchanged; an
+      escrow repeat naming another offering mode answers 409 (it was a 500); a
+      non-string key answers 422. Library integration of the migrations
+      (`provisioning/compute/service/tests/integration/test_database.py`,
+      `domains/apicredits/service/tests/integration/test_migrations.py`): existing
+      rows migrate with no key, a rerun changes nothing, the index is unique and
+      refuses a second row under one key (`IntegrityError`). After the fresh-context
+      review's fixes, `make test-provisioning` (unit 648, integration 589 passed)
+      and the API-credit service suite (82 passed) pass. `make test` passed before
+      those fixes, which touched only the keyed escrow path and tests; it is rerun
+      with section 2. `make check-comment-hygiene` passes within `make check-change`.
+      End-to-end: none, confirmed. Owed by validation: none.
 
 ## 2. Alkahest once-only delivery adapter
 
