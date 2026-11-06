@@ -832,7 +832,7 @@ halves of CW-g4oz, CW-ikmm, CW-l7hn, CW-i2we, and CW-e1sg. Touches
     its "recorded on the run's line" is the wrapper's existing denial record).
     Validation keeps `gh run list*`, which its skill no longer runs: the table's to
     trim, by the owner.
-- [ ] 7.2 Every skill that commits runs `scripts/change-workflow run pre-commit
+- [x] 7.2 Every skill that commits runs `scripts/change-workflow run pre-commit
   <change>` where it ran `make check-change`, and stages what the hooks rebuilt
   (D7, D17, CW-e1sg); implementation, triage, and the merge drop their own `make
   lock`, `make check-packaging`, and `make test` steps, which the tier now runs, and
@@ -864,7 +864,7 @@ halves of CW-g4oz, CW-ikmm, CW-l7hn, CW-i2we, and CW-e1sg. Touches
     orchestrating session's clone paragraph describes section 5's clone — `FROM`,
     else the workspace's branch, recorded as the landing branch — and the
     `post-clone` bootstrap.
-- [ ] 7.3 Validation learns its parts from `scripts/change-workflow config parts
+- [x] 7.3 Validation learns its parts from `scripts/change-workflow config parts
   <change>` and runs each through `run validation` — the preflight, every `start`
   dispatched first after the guarded push, then the `run` parts in order keeping each
   `after`, then every `collect` — with no `gh run list`, no `--after`, no
@@ -899,7 +899,7 @@ halves of CW-g4oz, CW-ikmm, CW-l7hn, CW-i2we, and CW-e1sg. Touches
     parts`, `run`, `next`, `log`, `note`, `find`, `record`, `history`, `check
     round-view`), `git`, or `gh auth status`, besides validation's diagnosis and
     the owner-named `kubectl scale` remedy.
-- [ ] 7.4 Every skill loads its documents from `scripts/change-workflow config load
+- [x] 7.4 Every skill loads its documents from `scripts/change-workflow config load
   <step>` where it named `AGENTS.md`, `ARCHITECTURE.md`, `TESTING.md`,
   `DEPLOYMENT_AND_CONFIG.md`, `openspec/README.md`, and the roadmap as its reading
   list (D6, CW-l7hn); a citation of a guidance section for a rule stays. Triage's
@@ -932,6 +932,11 @@ halves of CW-g4oz, CW-ikmm, CW-l7hn, CW-i2we, and CW-e1sg. Touches
   rules unlisted); `make test` passes but for those. End-to-end: none in
   `e2e-tests/`; the round's validation is run by the moved validation skill, and its
   record is the evidence for 7.3.
+  - Correction: 7.2, 7.3, and 7.4 carried their notes but were left unchecked
+    in the section's commit; they are checked in a later commit, their evidence
+    re-run at `HEAD` after sections 8 and 9 (the 7.2 grep, `make
+    check-agent-skills`, `config load design`, and reading archive cleanup's
+    commands), which touched no skill.
   - Done: `make check-agent-skills` passes; the assumptions suite fails only on
     `.agents/workflow.toml` unlisted (named in the step table), which 8.4 lists.
     `make test` ran every suite to `test-release-tooling`, which failed on that
