@@ -52,7 +52,8 @@ key, per-host revocation, and a host operator who supplies the keypair.
 
 **Goals:**
 
-- No unredacted copy of Ansible output is kept by default.
+- No unredacted copy of Ansible output is kept by default, and the connectivity
+  check returns its output redacted.
 - A protected key that cannot be decrypted is named — at dispatch, at the
   connectivity check, and in readiness — with how to recover, and without
   revealing ciphertext or key material.
@@ -101,11 +102,20 @@ must not be mechanically prevented from logging their runs; `log_path` is a
 service-wide configuration setting rather than a pool's, so the operator's own
 configuration is where that choice belongs.
 
+The connectivity check's result is the other place Ansible output leaves the
+service, and it is redacted too (10 F3). `check_connectivity_with_inventory`
+passes the `detail` it returns through `redact_ansible_output`, with the generic
+secret fields, since a probe runs no domain's playbook: both the output of
+`ansible -m ping` and the text of an exception running it. The redactor replaces
+only credential-shaped values, so SSH's diagnostic text survives.
+
 Rejected: forcing `ANSIBLE_LOG_PATH=/dev/null` into every Ansible subprocess,
 which overrides an operator's deliberate configuration; a per-run log removed
 when the run ends, a copy of output the runner already captures that nothing
-reads; and keeping the default log with documentation, which keeps an
-unredacted copy by default against this change's premise.
+reads; keeping the default log with documentation, which keeps an
+unredacted copy by default against this change's premise; and narrowing the
+promise to the log file alone, leaving the connectivity check's result raw,
+which keeps one Ansible output surface unredacted for no saving worth having.
 
 ### D3 — The existing transient files keep their layout
 
@@ -127,12 +137,19 @@ with another user.
 
 ### D4 — A protected key that cannot be decrypted is named at dispatch and at the probe
 
-`SshConnectionCodec.decrypt_private_key` raises a typed error, exported by the
-distribution, for both causes — a key protected under another key, and no key
-configured. Its message names the host's protected key as unreadable under the
-configured `ssh_decryption_key` and how to recover (restore the key it was
-protected under, or submit the host's private key again), and carries no
-ciphertext or key material.
+`SshConnectionCodec.decrypt_private_key(ciphertext, *, host_id)` raises a typed
+error, exported by the distribution, for every cause — a key protected under
+another key or malformed ciphertext, both of which Fernet reports as
+`InvalidToken`, and no key configured, which it reports as a key-format
+`ValueError` (10 F2). The codec catches both and raises the typed error, which
+carries `host_id` as an attribute. Its message names the host's protected key as
+unreadable under the configured `ssh_decryption_key` and how to recover (restore
+the key it was protected under, or submit the host's private key again), and
+carries no ciphertext or key material. The connection envelope holds no host id,
+so the caller passes it; the codec uses it only for the error. Every caller —
+the runner's `write_inventory`, which the job path and the probe share, and
+readiness (D5) — has the host in hand, so the job, the probe, and readiness
+report one text for one failure.
 
 A job lets it propagate, as relay execution lets `RelayUnusableAtExecutionError`
 propagate: the job engine records it with its message and never retries it,
@@ -140,10 +157,12 @@ since a retry meets the same configuration. The connectivity probe catches it
 and answers `reachable=False` with the message as its detail, keeping the
 route's rule that a host's state is a result rather than a refusal.
 
-Rejected: leaving `Internal error: ` as the whole diagnosis; and having the probe
+Rejected: leaving `Internal error: ` as the whole diagnosis; having the probe
 refuse with 422, which would keep configuration faults apart from reachability
 but gives a caller polling connectivity an error instead of a result for a host
-it can address.
+it can address; and a host-neutral error each caller wraps with the host id,
+which keeps host identity out of the codec but composes one diagnosis in three
+places that can drift apart.
 
 ### D5 — Readiness checks that each enabled host's embedded key decrypts
 
@@ -156,32 +175,68 @@ executor is real, since mocked executors need no keys. The detail keeps its
 fields and its schema version 1: only the documented meaning of `exists` for an
 embedded key widens, and a reader already handles `false` for a key file.
 
+The public host listing carries protected values by scheme only, so it gives
+readiness nothing to decrypt (10 F1). The host authority gains an internal read,
+`execution_hosts(enabled_only=True) -> list[ExecutionHost]`, beside `lookup`:
+the enabled hosts in one query, ordered by `host_id`, each with its full
+connection envelope. No route exposes it, and every ordinary read stays
+redacted. The composition root passes it to readiness in place of the public
+listing, so readiness reads one consistent snapshot through one input: key paths
+from each envelope's public fields, and embedded keys from its protected values.
+
+- If the read raises, the component reports the registry unreadable, as today.
+- A key that does not decrypt, whatever the cause (D4's typed error), marks only
+  that host's entry `exists: false` with a reason naming the host; every other
+  host is reported as it would be without it.
+- An enabled-host list that is empty is ready when the other checks pass.
+- Connection validation already requires an embedded host to hold a
+  `private_key` protected value, so a host with neither key cannot occur.
+
 Readiness exists to say whether a job can run, and it already reads key files
 from disk to say so; the plaintext stays within the codec and memory for the
-length of one decryption, inside what "Connection secrets stay protected"
-permits.
+length of one decryption. "Connection secrets stay protected" permits
+decryption only for execution and keeps protected values out of every host read
+today, so the change modifies it to admit this check and the authority's
+internal reads (D8).
 
-Rejected: leaving embedded keys reported present without trying them, which
+Rejected: composing `lookup` with the public listing at the composition root,
+which leaves the authority's interface unchanged but reads each embedded host
+twice and must define a host that disappears between the reads; leaving
+embedded keys reported present without trying them, which
 misstates the one thing readiness answers for this case; verifying without
 decrypting, impossible because Fernet carries no key id and a stored key
 fingerprint would be a persistence change; and documenting `exists` as
 unverified, honest but still ready while jobs fail.
 
-### D6 — The relay change's task 2A.7 is met by the existing variables-file handling
+### D6 — The relay change's task 2A.7 is revised to the requirement the existing handling meets
 
 The relay change hands this change the variables file's lifetime: owner-only,
 removed when the operation ends, and in a directory the operation owns. The
 first two hold (`write_extra_vars` creates the file `O_EXCL` at `0600`, and the
-executor's `finally` removes it, proven by `test_no_file_outlives_its_run`); D3
-rejects the third. This change records no dependency. Its closeout corrects the
-relay row's Notes to say so, removes the campaign graph edge naming this change
-as a prerequisite of that change's live verification, and rewrites the campaign
-paragraph that says this change is what allows an independently prepared host
-to be registered. The relay change ticks 2A.7 in its own closeout.
+executor's `finally` removes it, proven by `test_no_file_outlives_its_run`), and
+they are what the permanent requirement asks: the variables file has "the same
+lifetime and access restrictions as other decrypted secret material on the
+execution path". D3 rejects the third. This change records no dependency.
 
-Rejected: recording a dependency, which would gate the relay change's closeout
-on work this change does not do; and leaving the rows as they are, which keeps
-them false.
+Task 2A.7's own words demand the directory, so ticking it as written would
+record unbuilt work as done (10 F5). This change's closeout revises the relay
+change's commitment openly instead: it rewrites 2A.7 to state what it requires
+and what holds — the variables file created owner-only and `O_EXCL`, and removed
+on every ending of the run, meeting `physical-provisioning`'s requirement — with
+a note that a per-operation directory was weighed and rejected in this change's
+D3, and D3's revisit trigger. It rewrites to match the relay design's paragraph
+on the resolved variables file and its handoff note naming this change as owner
+of 2A.7. It also corrects the relay row's Notes, removes the campaign graph edge
+naming this change as a prerequisite of that change's live verification, and
+rewrites the campaign paragraph that says this change is what allows an
+independently prepared host to be registered. Ticking 2A.7 stays with the relay
+change's own closeout, since it is one of that change's decision gates.
+
+Rejected: building the per-operation directory, which reopens D3 for no failure
+anyone can name; ticking 2A.7 as written, which records a directory nobody
+built; recording a dependency, which would gate the relay change's closeout on
+work this change does not do; and leaving the rows as they are, which keeps them
+false.
 
 ### D7 — The roadmap's per-host-key gap is removed
 
@@ -195,28 +250,45 @@ readiness.
 
 Rejected: rewriting the row as a narrower gap, since none remains; leaving it.
 
-### D8 — The specification gains two requirements and drops the change's earlier ones
+### D8 — The specification gains two requirements, modifies one, and drops the change's earlier ones
 
 The change's earlier requirements are dropped: decrypted key material's lifetime
 is already "Connection secrets stay protected", and the inventory-placeholder
 requirement governs a renderer that no longer exists. Two requirements are added
 to `physical-provisioning`: Ansible output is kept only redacted unless an
 operator configures otherwise (D2), and a protected key that cannot be decrypted
-is named rather than hidden (D4, D5). Adding them rather than modifying the
-existing requirement keeps the new behaviour under headings of its own without
-restating that requirement.
+is named rather than hidden (D4, D5).
+
+"Connection secrets stay protected" is modified (10 F4). As it stands it lets a
+codec decrypt only "just in time for execution" and keeps a protected value out
+of every host-authority read, so readiness decrypting on a status read and
+`execution_hosts` returning envelopes would contradict it once the delta is
+archived. The modification widens exactly two clauses: a codec may also decrypt
+in memory to check that a protected value decrypts when the executor's readiness
+is reported, the plaintext discarded at once and never written to storage; and
+the host authority returns a protected envelope only through its internal reads
+for execution and readiness, never on an API read, log, or error surface. Every
+other guarantee and both existing scenarios stand, and a scenario is added for
+the readiness check.
+
+Rejected: adding the new requirements beside the old one unmodified, which
+leaves two normative rules that disagree on when a key may be decrypted.
 
 ## Implementation cadence
 
 One round, one session, then closeout. The round covers the packaged
-configuration's log line and its test; the codec's typed error and its unit
-tests for both causes, including that no ciphertext reaches the message; the
-probe's handling of it; readiness's decryption check and its wiring at the
+configuration's log line and its test; the codec's `host_id` keyword, its
+typed error, and its unit tests for every cause, including that no ciphertext
+reaches the message; the probe's handling of it, and the redaction of its result
+with a unit test planting a secret in Ansible's output; the host authority's
+`execution_hosts` read and its test; readiness's switch to that read, its
+decryption check, its per-host failure reporting, and its wiring at the
 composition root; and one integration test through the canonical client in
 which a host protected under another key fails its job unretried with the
 message, answers its connectivity check unreachable with the reason, and makes
 the `ansible` component not ready. The operator handbook, roadmap, and index
-edits are closeout's promotion.
+edits, and the revision of the relay change's 2A.7 (D6), are closeout's
+promotion.
 
 ## Risks / Trade-offs
 
