@@ -201,6 +201,8 @@ policies           = ["has_matching_inventory_guard", "escrow_shape_guard", "bis
 seller_model_path  = "domains/vms/negotiation/src/arkhai_vms_negotiation/rl/models/arkhai_negotiator_seller.pt"
 buyer_model_path   = "domains/vms/negotiation/src/arkhai_vms_negotiation/rl/models/arkhai_negotiator_buyer.pt"
 extra_policy_paths = []
+# One commercial floor for every shape priced by the advertised rate structure.
+multiplier_floor_bps = 10000
 
 [pricing]
 # Structured settlement option defaults. Each entry is one complete clause;
@@ -210,7 +212,9 @@ settlements = []
 # advertises no rate -- in the payment asset's base units per hour, as decimal
 # text. It constructs no settlement option.
 default_min_price            = ""
-default_max_duration_seconds = 0   # 0 means unlimited
+default_max_duration_seconds = 0   # nonpositive/unset means unlimited
+# Absolute UTC lease-end ceiling, independently resolved from capacity_bounds.vm.
+# default_available_until_utc = "2035-01-01T00:00:00Z"
 publish_priceless            = false
 # Whether a resource pool's own projected `sla` hint
 # is consulted at all when resolving a listing's advertised SLA (the

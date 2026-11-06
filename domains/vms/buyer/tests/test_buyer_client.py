@@ -357,6 +357,7 @@ def test_round_0_example_selection_is_pinned_and_returned(mock_urlopen):
         provision_terms=_provision(3600),
         settlement_selection=selection,
         policy_params={"_selected_settlement_option": option.model_dump(mode="json")},
+        validate_acceptance=None,  # This synthetic option exercises core's selection pin, not an escrow codec.
     )
 
     assert seen_body["proposal"]["settlement_selection"] == selection.model_dump()
@@ -409,6 +410,7 @@ def test_round_0_delegates_domain_plan_semantics_after_universal_checks(
         settlement_selection=selection,
         policy_params={"_selected_settlement_option": option.model_dump(mode="json")},
         validate_advertised_plan=lambda plan: validated.append(plan),
+        validate_acceptance=None,  # Domain-owned validation is the injected plan hook above.
     )
 
     assert outcome.status == "agreed"

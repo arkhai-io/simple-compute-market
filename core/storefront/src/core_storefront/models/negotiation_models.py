@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from typing_extensions import TypedDict
 from market_identity import Identity
 
 
@@ -71,6 +72,15 @@ class NegotiateNewResponse(BaseModel):
     agreement: Agreement | None = None
     agreement_bytes: str | None = None
     settlement_data: dict[str, Any] | None = None
+    rate_structure_digest: str | None = None
+    pricing_pin: dict[str, Any] | None = None
+
+
+class RoundProposal(TypedDict, total=False):
+    """Opaque proposal fields with one typed delivery-terms envelope."""
+
+    __pydantic_config__ = ConfigDict(extra="allow")
+    provision_terms: ProvisionTerms
 
 
 class NegotiateContinueRequest(BaseModel):
@@ -78,7 +88,7 @@ class NegotiateContinueRequest(BaseModel):
 
     action: Literal["counter", "accept", "exit"]
     buyer_principal: Identity
-    proposal: dict[str, Any] | None = None
+    proposal: RoundProposal | None = None
     settlement_selection: SettlementSelection | None = None
     reason: str | None = None
 
@@ -95,6 +105,8 @@ class NegotiateContinueResponse(BaseModel):
     agreement: Agreement | None = None
     agreement_bytes: str | None = None
     settlement_data: dict[str, Any] | None = None
+    rate_structure_digest: str | None = None
+    pricing_pin: dict[str, Any] | None = None
 
 
 class NegotiationSummary(BaseModel):
@@ -149,7 +161,7 @@ class AdvanceRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     action: Literal["counter", "accept", "exit"]
-    proposal: dict[str, Any] | None = None
+    proposal: RoundProposal | None = None
     reason: str | None = None
 
 

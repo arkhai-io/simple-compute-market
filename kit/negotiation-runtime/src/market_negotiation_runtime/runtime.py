@@ -97,6 +97,7 @@ class RoundRequest:
     # domain hands its policy chain; ``None`` where the domain contributes no
     # check. The runtime enforces the verdict itself whatever the chain does.
     listing_source: ListingSourceVerdict | None = None
+    revised_terms: NegotiationTerms | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +111,7 @@ class RoundEvaluation:
     uses_scalar_amount: bool
     buyer_amount: int | None = None
     domain_state: Any = None
+    agreed_terms: NegotiationTerms | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,6 +181,7 @@ class _OpeningPlan:
     artifacts: dict[str, Any]
     their_amount: int
     decision_amount: int | None
+    proposed_terms: NegotiationTerms
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,7 +234,10 @@ class ContinuationResolver(Protocol):
 DecodeTermsHook = Callable[[Any], NegotiationTerms]
 ValidateOpeningHook = Callable[[Any, Mapping[str, Any], NegotiationTerms], None]
 ValidateContinuationHook = Callable[
-    [Any, Any, Mapping[str, Any], NegotiationTerms, Mapping[str, Any]],
+    [
+        Any, Any, Mapping[str, Any], NegotiationTerms, Mapping[str, Any],
+        NegotiationTerms | None,
+    ],
     Awaitable[None],
 ]
 EvaluateRoundHook = Callable[[RoundRequest], Awaitable[RoundEvaluation]]
@@ -286,6 +292,12 @@ class NegotiationDomainHooks:
     # every seller decision and every acceptance. Unset for a domain whose
     # listings derive from no declaration.
     check_listing_source: ListingSourceCheckHook | None = None
+    # A revision decoder preserves the opening's non-negotiable terms and
+    # interprets only the domain-owned envelope carried by this proposal.
+    decode_revised_terms: Callable[[NegotiationTerms, Any], NegotiationTerms] | None = None
+    # Resolve domain bounds against the fixed acceptance clock before artifacts
+    # or durable writes, including a buyer accepting a previous seller counter.
+    resolve_acceptance: Callable[[Acceptance], Acceptance] | None = None
 
 
 #: Refusals an opening raises before or at seller policy; a preview reports them.
@@ -368,7 +380,7 @@ class NegotiationRuntime:
             requested_start_utc=decoded_terms.requested_start_utc,
             buyer_escrow_proposal=acceptance.pinned_proposal,
             provision_terms=(
-                dict(decoded_terms.wire) if decoded_terms.wire is not None else None
+                dict(plan.proposed_terms.wire) if plan.proposed_terms.wire is not None else None
             ),
         )
         await self._append_message(
@@ -381,13 +393,14 @@ class NegotiationRuntime:
             proposed_amount=plan.their_amount,
             action_taken="make_offer",
             message_type="offer",
+            terms=plan.proposed_terms,
         )
         opening = OpeningRecord(
             negotiation_id=negotiation_id,
             listing_id=listing_id,
             listing=acceptance.listing,
             listing_record=acceptance.listing_record,
-            terms=decoded_terms,
+            terms=plan.proposed_terms,
             buyer_principal=buyer,
             seller_principal=seller,
             pinned_proposal=acceptance.pinned_proposal,
@@ -404,6 +417,7 @@ class NegotiationRuntime:
             their_amount=plan.their_amount,
             decision=decision,
             decision_amount=plan.decision_amount,
+            terms=decoded_terms,
         )
         if plan.accepted:
             await self._commit_acceptance(
@@ -524,13 +538,9 @@ class NegotiationRuntime:
             )
         listing_source = await self._listing_source(repository, resolved)
 
-        proposal_wire = (
-            proposal.model_dump(mode="json")
-            if hasattr(proposal, "model_dump")
-            else dict(proposal)
-            if proposal is not None
-            else None
-        )
+        proposal_wire = _proposal_mapping(proposal)
+        if proposal_wire is not None and "provision_terms" in proposal_wire:
+            raise NegotiationStateError("opening terms belong in provision_terms")
         opening_history = (
             NegotiationRound(
                 round_number=0,
@@ -577,6 +587,8 @@ class NegotiationRuntime:
         )
         buyer_amount = hooks.amount_from_proposal(proposal_wire)
         their_amount = int(buyer_amount) if buyer_amount is not None else 0
+        proposed_terms = decoded_terms
+        decoded_terms = evaluation.agreed_terms or proposed_terms
         agreement = hooks.agreement_terms(
             resolved.listing,
             resolved.listing_record,
@@ -609,7 +621,7 @@ class NegotiationRuntime:
         if accepted:
             # The Agreement records the acceptance instant and the resolved
             # start, so both are fixed before accepted artifacts are built.
-            acceptance = self._fix_acceptance_time(acceptance)
+            acceptance = self._fix_acceptance_time(acceptance, hooks)
             artifacts = self._accepted_artifacts(hooks, acceptance)
         else:
             artifacts = dict(hooks.build_artifacts(acceptance, False))
@@ -621,6 +633,7 @@ class NegotiationRuntime:
             artifacts=artifacts,
             their_amount=their_amount,
             decision_amount=decision_amount,
+            proposed_terms=proposed_terms,
         )
 
     async def accept_administratively(
@@ -667,7 +680,7 @@ class NegotiationRuntime:
             seller_principal=Identity.model_validate(thread.get("seller_principal")),
             binding=resumed.resolved.binding,
         )
-        acceptance = self._fix_acceptance_time(acceptance)
+        acceptance = self._fix_acceptance_time(acceptance, hooks)
         artifacts = self._accepted_artifacts(hooks, acceptance)
         await self._append_message(
             repository,
@@ -716,7 +729,13 @@ class NegotiationRuntime:
         return thread
 
     async def _resume_thread(
-        self, repository: Any, thread: Mapping[str, Any], negotiation_id: str
+        self,
+        repository: Any,
+        thread: Mapping[str, Any],
+        negotiation_id: str,
+        *,
+        validate: bool = True,
+        revised_terms_wire: Any = None,
     ) -> _ResumedThread:
         """Resolve a recorded thread's binding and the values every round reads."""
 
@@ -728,18 +747,34 @@ class NegotiationRuntime:
         resolved = await self._resolve_continuation(repository, thread)
         self._require_listing_binding(resolved, listing_id)
         hooks = resolved.hooks
-        decoded_terms = hooks.decode_terms(thread.get("provision_terms"))
-        await hooks.validate_continuation(
-            repository,
-            resolved.listing,
-            resolved.listing_record,
-            decoded_terms,
-            thread,
-        )
-        pinned_proposal = _stored_mapping(thread.get("buyer_escrow_proposal"))
         messages = await repository.load_negotiation_thread(
             negotiation_id=negotiation_id
         )
+        terms_wire = thread.get("provision_terms")
+        for message in reversed(messages):
+            if (
+                message.get("sender_role") == "seller"
+                and message.get("provision_terms") is not None
+            ):
+                terms_wire = message["provision_terms"]
+                break
+        decoded_terms = hooks.decode_terms(terms_wire)
+        revised_terms = None
+        if revised_terms_wire is not None:
+            if hooks.decode_revised_terms is None:
+                raise NegotiationStateError("this domain does not negotiate revised terms")
+            revised_terms = hooks.decode_revised_terms(decoded_terms, revised_terms_wire)
+        if validate:
+            await hooks.validate_continuation(
+                repository,
+                resolved.listing,
+                resolved.listing_record,
+                decoded_terms,
+                thread,
+                revised_terms,
+            )
+        pinned_proposal = _stored_mapping(thread.get("buyer_escrow_proposal"))
+        decoded_terms = revised_terms or decoded_terms
         uses_scalar_amount = hooks.amount_from_proposal(pinned_proposal) is not None
         return _ResumedThread(
             listing_id=listing_id,
@@ -754,7 +789,7 @@ class NegotiationRuntime:
                 decoded_terms,
                 uses_scalar_amount,
                 pinned_proposal,
-            ),
+            ) if validate else 0,
             agreement=hooks.agreement_terms(
                 resolved.listing,
                 resolved.listing_record,
@@ -801,7 +836,20 @@ class NegotiationRuntime:
                 f"unsupported negotiation actor role {actor_role!r}"
             )
 
-        resumed = await self._resume_thread(repository, thread, negotiation_id)
+        buyer_proposal = _proposal_mapping(buyer_proposal)
+        revised_terms_wire = (
+            buyer_proposal.get("provision_terms") if buyer_proposal is not None else None
+        )
+        if revised_terms_wire is not None and buyer_action != "counter":
+            raise NegotiationStateError("only a counter may revise provision terms")
+
+        # Leaving a thread makes no pricing commitment, even when its terms
+        # fail the seller's commercial continuation validation.
+        resumed = await self._resume_thread(
+            repository, thread, negotiation_id,
+            validate=buyer_action != "exit",
+            revised_terms_wire=revised_terms_wire,
+        )
         listing_id = resumed.listing_id
         resolved = resumed.resolved
         hooks = resolved.hooks
@@ -844,7 +892,7 @@ class NegotiationRuntime:
                 seller_principal=stored_seller,
                 binding=resolved.binding,
             )
-            acceptance = self._fix_acceptance_time(acceptance)
+            acceptance = self._fix_acceptance_time(acceptance, hooks)
             artifacts = self._accepted_artifacts(hooks, acceptance)
             await self._append_message(
                 repository,
@@ -932,6 +980,7 @@ class NegotiationRuntime:
                 ),
                 binding=resolved.binding,
                 listing_source=listing_source,
+                revised_terms=decoded_terms if revised_terms_wire is not None else None,
             )
         )
         self._validate_evaluation(evaluation)
@@ -955,6 +1004,10 @@ class NegotiationRuntime:
             if decision_amount is not None
             else int(evaluation.our_amount)
         )
+        decoded_terms = evaluation.agreed_terms or decoded_terms
+        agreement = hooks.agreement_terms(
+            resolved.listing, resolved.listing_record, decoded_terms
+        )
         acceptance = Acceptance(
             negotiation_id=negotiation_id,
             listing_id=listing_id,
@@ -972,8 +1025,10 @@ class NegotiationRuntime:
         )
         accepted = decision.action == "accept"
         if accepted:
-            acceptance = self._fix_acceptance_time(acceptance)
+            acceptance = self._fix_acceptance_time(acceptance, hooks)
             artifacts = self._accepted_artifacts(hooks, acceptance)
+        elif decision.action == "counter":
+            artifacts = dict(hooks.build_artifacts(acceptance, False))
         else:
             artifacts = {}
 
@@ -987,6 +1042,7 @@ class NegotiationRuntime:
             proposed_amount=buyer_amount,
             action_taken="counter_offer",
             message_type="counter_proposal",
+            terms=resumed.terms,
         )
         terminal_state = await self._record_seller_decision(
             repository=repository,
@@ -996,6 +1052,7 @@ class NegotiationRuntime:
             their_amount=buyer_amount,
             decision=decision,
             decision_amount=decision_amount,
+            terms=decoded_terms,
         )
         if accepted:
             await self._commit_acceptance(repository, hooks, acceptance, artifacts)
@@ -1044,7 +1101,9 @@ class NegotiationRuntime:
         if not evaluation.strategy_label:
             raise NegotiationStateError("domain policy returned no strategy label")
 
-    def _fix_acceptance_time(self, acceptance: Acceptance) -> Acceptance:
+    def _fix_acceptance_time(
+        self, acceptance: Acceptance, hooks: NegotiationDomainHooks,
+    ) -> Acceptance:
         accepted_at = self._now()
         if accepted_at.tzinfo is None:
             accepted_at = accepted_at.replace(tzinfo=UTC)
@@ -1064,7 +1123,7 @@ class NegotiationRuntime:
                 start = start.replace(tzinfo=UTC)
             else:
                 start = start.astimezone(UTC)
-        return replace(
+        fixed = replace(
             acceptance,
             agreement=AgreementTerms(
                 duration_seconds=acceptance.agreement.duration_seconds,
@@ -1072,6 +1131,7 @@ class NegotiationRuntime:
             ),
             accepted_at=accepted_at,
         )
+        return hooks.resolve_acceptance(fixed) if hooks.resolve_acceptance else fixed
 
     def _accepted_artifacts(
         self,
@@ -1125,6 +1185,7 @@ class NegotiationRuntime:
         proposed_amount: int | None,
         action_taken: str,
         message_type: str,
+        terms: NegotiationTerms | None = None,
     ) -> int:
         return await repository.save_negotiation_message(
             negotiation_id=negotiation_id,
@@ -1137,6 +1198,9 @@ class NegotiationRuntime:
             action_taken=action_taken,
             message_type=message_type,
             timestamp=self._now().isoformat(),
+            provision_terms=(
+                dict(terms.wire) if terms is not None and terms.wire is not None else None
+            ),
         )
 
     async def _record_seller_decision(
@@ -1149,6 +1213,7 @@ class NegotiationRuntime:
         their_amount: int,
         decision: NegotiationDecision,
         decision_amount: int | None,
+        terms: NegotiationTerms,
     ) -> str | None:
         """Record the seller's message; return the terminal state it implies.
 
@@ -1174,6 +1239,7 @@ class NegotiationRuntime:
             ),
             action_taken=action_taken,
             message_type=message_type,
+            terms=terms,
         )
         return terminal
 
@@ -1395,7 +1461,10 @@ def _proposal_mapping(value: Any) -> dict[str, Any] | None:
     if value is None:
         return None
     if isinstance(value, Mapping):
-        return dict(value)
+        return {
+            key: child.model_dump(mode="json") if hasattr(child, "model_dump") else child
+            for key, child in value.items()
+        }
     if hasattr(value, "model_dump"):
         dumped = value.model_dump(mode="json")
         if isinstance(dumped, Mapping):

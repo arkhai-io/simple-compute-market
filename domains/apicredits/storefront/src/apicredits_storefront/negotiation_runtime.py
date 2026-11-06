@@ -644,6 +644,7 @@ async def _validate_continuation(
     _listing_record: Mapping[str, Any],
     terms: NegotiationTerms,
     thread: Mapping[str, Any],
+    _revised_terms: NegotiationTerms | None,
 ) -> None:
     negotiation_id = thread.get("negotiation_id")
     if not isinstance(negotiation_id, str) or not negotiation_id:

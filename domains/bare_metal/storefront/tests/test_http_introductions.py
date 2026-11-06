@@ -66,10 +66,8 @@ def _contact_option() -> dict[str, Any]:
     }
     return {
         "option_id": derive_settlement_option_id(
-            price={"asset": "introduction", "rates": []},
             settlement={"schema": CONTACT_MECHANISM, **(params or {})},
         ),
-        "price": {"asset": "introduction", "rates": []},
         "settlement": {"schema": CONTACT_MECHANISM, **(params or {})},
     }
 

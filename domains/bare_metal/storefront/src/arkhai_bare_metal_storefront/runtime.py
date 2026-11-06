@@ -243,6 +243,7 @@ class BareMetalStorefrontRuntime:
     #: The maximum lease duration a listing publishes unless its pool's override
     #: states one; a pool for which neither is positive is held at publication.
     default_max_duration_seconds: int | None = None
+    default_available_until_utc: str | None = None
     # Composes one publication cycle for the publication loop's timer and step;
     # None composes it from this runtime through ``compose_publication_cycle``.
     publication_cycle_factory: Callable[["BareMetalStorefrontRuntime"], Any] | None = (
@@ -337,6 +338,14 @@ class BareMetalStorefrontRuntime:
                     else {}
                 ),
                 seller_stages=self.domain.settlement.seller_stages,
+                rate_servicing=(
+                    self.settlement_composition.rate_servicing
+                    if self.settlement_composition is not None else None
+                ),
+                rate_term_projections=(
+                    self.settlement_composition.rate_term_projections
+                    if self.settlement_composition is not None else None
+                ),
             ),
         )
         object.__setattr__(self, "lifecycle", BareMetalLifecycle(self))
@@ -565,6 +574,7 @@ class BareMetalStorefrontRuntime:
         if self.capacity_client is None:
             return None
         state = self.site_projections
+
         return PoolOverrideService(
             store=SQLitePoolOverrideStore(self.db.db_path),
             site_ids=lambda: [binding.site_id for binding in self.site_bindings],
@@ -574,7 +584,7 @@ class BareMetalStorefrontRuntime:
                     BareMetalPoolOverrideContribution(
                         configured_max_duration_seconds=lambda: positive_lease_bound(
                             self.default_max_duration_seconds
-                        )
+                        ),
                     )
                 )
             },
@@ -960,6 +970,7 @@ def build_runtime_from_configuration(
         ),
         publication_clauses=publication_clauses,
         default_max_duration_seconds=active.pricing.default_max_duration_seconds,
+        default_available_until_utc=active.pricing.default_available_until_utc,
         introduction_delivery=introduction_delivery,
         db=db,
         domain=selected_domain,

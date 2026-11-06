@@ -19,7 +19,7 @@ from __future__ import annotations
 import contextlib
 from types import SimpleNamespace
 from copy import deepcopy
-from collections.abc import AsyncIterator, Collection, Iterator, Mapping
+from collections.abc import AsyncIterator, Callable, Collection, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -42,6 +42,7 @@ from market_core.schemas import RateValue, derive_settlement_option_id
 from core_storefront.service_peers import ServicePeerTrust
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_policy.identity import Identity as PolicyIdentity
+from market_settlement_runtime.rate_servicing import RateServicing
 from market_settlement_runtime import (
     MechanismReadiness,
     ReadinessBlocker,
@@ -215,6 +216,8 @@ class SettlementCompositionDouble:
     alkahest_blockers: tuple[ReadinessBlocker, ...] = ()
 
     def __init__(self, mechanism_fulfillment: Mapping[str, bool]) -> None:
+        self.rate_servicing = RateServicing()
+        self.rate_term_projections = {}
         self.configuration_registry = build_storefront_settlement_registry()
         self.settlement_config = self.configuration_registry.resolve(
             storefront_config.settlement_config_mapping(), role="seller"
@@ -557,10 +560,13 @@ async def publication_app(
     *,
     mechanism_fulfillment: Mapping[str, bool] | None = None,
     negotiation: bool = False,
+    negotiation_options: Mapping[str, Any] | None = None,
     second_site: bool = False,
     contacts: Mapping[str, Mapping[str, str]] | None = None,
     admissibility_default: Mapping[str, Any] | None = None,
     unreachable_sites: Collection[str] = (),
+    settlement_configuration: Mapping[str, Any] | None = None,
+    settlement_composition_factory: Callable[[Mapping[str, bool]], Any] = SettlementCompositionDouble,
 ) -> AsyncIterator[PublicationApp]:
     """Run the VM storefront app for publication tests.
 
@@ -607,7 +613,8 @@ async def publication_app(
         stack.enter_context(
             replaced_setting(
                 "settlement",
-                contact_settlement(contacts) if contacts is not None else SETTLEMENT,
+                settlement_configuration if settlement_configuration is not None
+                else contact_settlement(contacts) if contacts is not None else SETTLEMENT,
             )
         )
 
@@ -632,7 +639,7 @@ async def publication_app(
         )
         registry = storefront_config.storefront_domain_registry()
         db = SQLiteClient(db_path=str(tmp_path / "storefront.db"), registry=registry)
-        composition = SettlementCompositionDouble(
+        composition = settlement_composition_factory(
             mechanism_fulfillment
             if mechanism_fulfillment is not None
             else {"alkahest.v1": True, "arkhai.payments.v1": True}
@@ -733,11 +740,15 @@ async def publication_app(
                     binding=registration.binding,
                     capacity_runtime=capacity,
                     site_projections=site_projections,
-                    accepted_obligation_dispatch=(
-                        composition.accepted_obligation_dispatch()
-                        if contacts is not None
-                        else None
-                    ),
+                    rate_servicing=composition.rate_servicing,
+                    rate_term_projections=composition.rate_term_projections,
+                    **{
+                        "accepted_obligation_dispatch": (
+                            composition.accepted_obligation_dispatch()
+                            if contacts is not None else None
+                        ),
+                        **(negotiation_options or {}),
+                    },
                 )
             )
             routers = (negotiate_router,)

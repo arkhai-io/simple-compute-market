@@ -1,6 +1,6 @@
 """VM composition of discovery, negotiation and declared settlement stages.
 
-VM lease hours supply the core priced-unit count. The selected buyer entry
+The selected billing basis supplies the core priced-unit count. The selected buyer entry
 owns accepted-artifact validation, resource resolution and settlement effects.
 """
 
@@ -54,6 +54,7 @@ from .settlement_composition import (
     validate_buyer_acceptance,
 )
 from .settlement_stages import BuyerStageContext
+from .negotiation_amounts import amount_codec, priced_unit_count
 
 
 def make_legacy_negotiate_hook(
@@ -73,7 +74,7 @@ def make_legacy_negotiate_hook(
         config=config,
         constraints=constraints,
         provision=provision,
-        unit_count=float(provision.duration_seconds) / 3600.0,
+        unit_count=lambda listing, proposal: priced_unit_count(listing, proposal, provision.duration_seconds),
         build_escrow_proposal=build_escrow_proposal,
         encode_escrow_proposal=encode_escrow_proposal,
         decode_provision_terms=VmProvisionTerms.model_validate,
@@ -85,6 +86,7 @@ def make_legacy_negotiate_hook(
         validate_acceptance=validate_buyer_acceptance,
         advertised_plan_validator=advertised_plan_validator,
         accepted_listing_record=accepted_listing_record,
+        amount_codec_factory=amount_codec,
         capture=capture,
     )
 

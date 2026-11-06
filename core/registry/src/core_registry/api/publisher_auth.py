@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import time
@@ -246,6 +247,16 @@ def authenticate_publisher_request(
         AuthenticatedPublisherRequest(authenticated, replay_row, False, attempt_owner),
         allowed_roles,
     )
+
+
+async def retained_request_evidence(
+    request: Request, authenticated: AuthenticatedPublisherRequest
+) -> dict[str, Any]:
+    """Retain transport bytes and the envelope that binds their canonical JSON hash."""
+    return {
+        "body_base64": base64.b64encode(await request.body()).decode("ascii"),
+        "request": authenticated.request.model_dump(mode="json"),
+    }
 
 
 def registry_authority_signer(request: Request) -> Signer:

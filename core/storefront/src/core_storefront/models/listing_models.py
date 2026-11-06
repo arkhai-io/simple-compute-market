@@ -57,6 +57,7 @@ class CreateListingRequest(BaseModel):
         ),
     )
     max_duration_seconds: int | None = None
+    available_until_utc: str | None = None
     paused: bool = Field(
         default=False,
         description=(
@@ -132,10 +133,11 @@ class ListingResponse(BaseModel):
     accepted_escrows: list[dict[str, Any]] | None = None
     demands: list[dict[str, Any]] | None = None
     max_duration_seconds: int | None = None
+    available_until_utc: str | None = None
     storefront_url: str
     seller_principal: Identity
     # Domain-owned resolved rates a listing's prices derive from, when its
-    # domain records them; served here and never published to a registry.
+    # domain records them; also published as a listing-level term.
     rate_structure: dict[str, Any] | None = None
     model_config = ConfigDict(extra="allow")
 

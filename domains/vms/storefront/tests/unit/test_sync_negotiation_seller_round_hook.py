@@ -6,6 +6,7 @@ from datetime import datetime
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from arkhai_vms import price_vm_shape, vm_family_rate
 from core_storefront.aggregation import fill_first
 from core_storefront.domain_registry import (
     StorefrontListingBinding,
@@ -60,9 +61,13 @@ async def _noop_reconcile(_context) -> None:
     return None
 
 
-def _no_projections():
-    """A projection state over the runtime's site that has served nothing yet."""
-    return site_projection_state({"site-test": FakeProjectionSite(resource_pools=[])})
+async def _policy_projections():
+    """The held pool supplies policy; source confirmation is injected separately."""
+    state = site_projection_state({"site-test": FakeProjectionSite(resource_pools=[
+        {"pool_id": "pool-L-hook", "pool_metadata": {"policy_tags": {}}},
+    ])})
+    await state.poll_once()
+    return state
 
 
 def _capacity_runtime() -> CapacityRuntime:
@@ -269,7 +274,7 @@ async def _start(
         registry=sqlite_client.domain_registry,
         binding=registration.binding,
         capacity_runtime=capacity_runtime or _capacity_runtime(),
-        site_projections=_no_projections(),
+        site_projections=await _policy_projections(),
         seller_round_hook=seller_round_hook,
         listing_source_check=listing_source_check or _source_matches,
     )
@@ -311,7 +316,7 @@ async def _continue(
         registry=sqlite_client.domain_registry,
         binding=registration.binding,
         capacity_runtime=capacity_runtime or _capacity_runtime(),
-        site_projections=_no_projections(),
+        site_projections=await _policy_projections(),
         seller_round_hook=seller_round_hook,
         listing_source_check=listing_source_check or _source_matches,
     )
@@ -326,6 +331,69 @@ async def _continue(
         actor_role=("buyer" if actor_principal == buyer_principal else "admin"),
         seller_principal=seller_principal,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["counter", "accept", "exit"])
+async def test_rate_structure_repricing_refuses_even_with_unchanged_listing_total(db, action):
+    before = {"gpu": "60", "cpu": "10"}
+    after = {"gpu": "80", "cpu": "5"}
+    advertised = {"gpu": {"count": 1, "model": "H200"}, "cpu": {"count": 4}}
+    revised = {"gpu": {"count": 1, "model": "H200"}, "cpu": {"count": 2}}
+
+    def price(shape, rates):
+        return price_vm_shape(
+            shape, {family: vm_family_rate(rate, "hour") for family, rate in rates.items()}
+        ).amount
+
+    def structure(rates):
+        return {
+            family: [{"asset": _TOKEN, "rate": rate, "per": "hour"}]
+            for family, rate in rates.items()
+        }
+
+    assert price(advertised, before) == price(advertised, after) == "100"
+    assert price(revised, before) == "80"
+    assert price(revised, after) == "90"
+    await db.update_listing(listing_id="L-hook", rate_structure=structure(before))
+    hook = AsyncMock(return_value=SellerRoundResult(
+        our_amount=10_000,
+        strategy_label="maximize",
+        direction="maximize",
+        chain_label="custom",
+        decision=NegotiationDecision(action="counter", proposal=_selected_proposal(10_000)),
+    ))
+    opened = await _start(
+        sqlite_client=db, our_listing_id="L-hook",
+        buyer_principal=_BUYER, seller_principal=_SELLER,
+        proposal=_selected_proposal(9_000),
+        provision_terms=ProvisionTerms(kind="compute.v1", version=1, payload={
+            "duration_seconds": 3600, "ssh_public_key": "ssh-ed25519 AAAA",
+        }),
+        our_base_url="http://seller.test", their_agent_url="http://buyer.test",
+        seller_round_hook=hook,
+    )
+    await db.update_listing(listing_id="L-hook", rate_structure=structure(after))
+    hook.reset_mock()
+    if action == "exit":
+        response = await _continue(
+            sqlite_client=db, neg_id=opened["negotiation_id"],
+            buyer_action=action, buyer_proposal=None, buyer_reason=None,
+            buyer_principal=_BUYER, actor_principal=_BUYER, seller_round_hook=hook,
+        )
+        assert response["action"] == "exit"
+        hook.assert_not_awaited()
+        return
+    with pytest.raises(OfferUnfulfillableError, match="rate_structure_changed_reopen"):
+        await _continue(
+            sqlite_client=db, neg_id=opened["negotiation_id"],
+            buyer_action=action, buyer_proposal=_selected_proposal(10_000),
+            buyer_reason=None, buyer_principal=_BUYER, actor_principal=_BUYER,
+            seller_round_hook=hook,
+        )
+    hook.assert_not_awaited()
+    thread = await db.load_negotiation_thread_row(negotiation_id=opened["negotiation_id"])
+    assert thread["terminal_state"] is None
 
 
 def test_normalize_vm_message_terms_uses_domain_runtime() -> None:
@@ -477,93 +545,6 @@ async def test_negotiation_runtime_uses_injected_seller_round_hook(db):
 
 
 @pytest.mark.asyncio
-async def test_negotiation_runtime_rejects_mismatched_resource_shape(db):
-    """A buyer requesting a shape other than the listing's is refused outright.
-
-    Seller negotiation policy currently prices only the listing's
-    advertised shape; this pins the loud-rejection behavior rather than
-    silent admission or silent fallback to the listing's shape.
-    """
-
-    async def hook(**_kwargs):
-        raise AssertionError("seller policy must not run for a rejected request")
-
-    with pytest.raises(OfferUnfulfillableError) as exc_info:
-        await _start(
-            sqlite_client=db,
-            our_listing_id="L-hook",
-            buyer_principal=_BUYER,
-            seller_principal=_SELLER,
-            proposal=_proposal(50),
-            provision_terms=ProvisionTerms(
-                kind="compute.v1",
-                version=1,
-                payload={
-                    "duration_seconds": 3600,
-                    "ssh_public_key": "ssh-rsa AAAA",
-                    # Listing offers gpu_count=1; this asks for 2.
-                    "compute_resource": {"gpu_count": 2},
-                },
-            ),
-            our_base_url="http://test-seller:8001",
-            their_agent_url="http://buyer:9000",
-            seller_round_hook=hook,
-        )
-    assert "resource_shape_not_negotiable" in str(exc_info.value)
-
-
-@pytest.mark.asyncio
-async def test_an_opening_on_a_listing_without_gpus_compares_its_own_dimensions(db):
-    """The opening reads a listing stating no GPUs as compute, and compares the
-    dimensions the buyer names against the ones it states."""
-    await db.upsert_listing_with_binding(
-        binding=_listing_binding(db, "L-cpu"),
-        status="open",
-        created_at=datetime.now().isoformat(),
-        updated_at=datetime.now().isoformat(),
-        listing_resource={
-            "vcpu_count": 8,
-            "ram_gb": 32,
-            "sla": 99.9,
-            "region": "California, US",
-            "resource_id": "resource-cpu",
-            "offering_mode": "vm",
-        },
-        settlement_options=[_option().model_dump(mode="json")],
-        fulfillment_resource=None,
-        max_duration_seconds=7200,
-        storefront_url="http://seller:8001",
-        seller_principal=_SELLER,
-    )
-
-    async def hook(**_kwargs):
-        raise AssertionError("seller policy must not run for a rejected request")
-
-    with pytest.raises(OfferUnfulfillableError) as exc_info:
-        await _start(
-            sqlite_client=db,
-            our_listing_id="L-cpu",
-            buyer_principal=_BUYER,
-            seller_principal=_SELLER,
-            proposal=_proposal(50),
-            provision_terms=ProvisionTerms(
-                kind="compute.v1",
-                version=1,
-                payload={
-                    "duration_seconds": 3600,
-                    "ssh_public_key": "ssh-rsa AAAA",
-                    "compute_resource": {"vcpu_count": 16},
-                },
-            ),
-            our_base_url="http://test-seller:8001",
-            their_agent_url="http://buyer:9000",
-            seller_round_hook=hook,
-        )
-    assert "resource_shape_not_negotiable" in str(exc_info.value)
-    assert "'listing': 8" in str(exc_info.value)
-
-
-@pytest.mark.asyncio
 async def test_negotiation_runtime_permits_matching_resource_shape(db):
     """A buyer that names a shape equal to the listing's own is unaffected."""
     seen = {}
@@ -659,7 +640,13 @@ async def test_negotiation_runtime_continuation_uses_injected_seller_round_hook(
         sqlite_client=db,
         neg_id=opened["negotiation_id"],
         buyer_action="counter",
-        buyer_proposal=_selected_proposal(100),
+        buyer_proposal={
+            **_selected_proposal(100),
+            "provision_terms": {
+                "kind": "compute.v1", "version": 1,
+                "payload": {"gpu": {"model": "H200", "count": 1}},
+            },
+        },
         buyer_reason=None,
         buyer_principal=_BUYER,
         actor_principal=_BUYER,
@@ -667,6 +654,10 @@ async def test_negotiation_runtime_continuation_uses_injected_seller_round_hook(
     )
 
     assert response["action"] == "accept"
+    messages = await db.load_negotiation_thread(negotiation_id=opened["negotiation_id"])
+    assert messages[-1]["provision_terms"]["payload"]["compute_resource"] == {
+        "gpu_model": "H200", "gpu_count": 1,
+    }
     assert response["accepted_escrow_proposal"]["fields"]["amount"] == "100"
     thread = await db.load_negotiation_thread_row(negotiation_id=opened["negotiation_id"])
     assert thread["settlement_data"]["accepted_escrow_proposal"] == response["accepted_escrow_proposal"]

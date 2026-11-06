@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from arkhai_vms import DIMENSION_KEYS as _DIMENSION_COMPUTE_KEYS
+from arkhai_vms.capability_shapes import flatten_vm_shape, vm_listing_resource_shape
 from arkhai_vms_listings import extract_compute_from_order
 from arkhai_vms_listings.models import Listing
 
@@ -33,6 +34,45 @@ _VM_OFFERING_MODE = "vm"
 # provisioning adapter derives its Ansible fulfillment fields from, so
 # the two sides cannot independently drift on which dimension keys mean
 # what.
+
+
+def agreed_vm_order(
+    listing: dict[str, Any], provision_terms: Any,
+) -> dict[str, Any]:
+    """Snapshot the agreed shape without changing the published listing.
+
+    A revised shape is whole: dimensions and GPU attributes it omits must not
+    leak back from the advertised shape. Capacity identity and commercial terms
+    remain the listing's; feasibility has already checked the requested shape.
+    """
+    resource = extract_compute_from_order(dict(listing))
+    if hasattr(resource, "model_dump"):
+        resource = resource.model_dump(mode="json", exclude_none=True)
+    if not isinstance(resource, dict):
+        raise ValueError("Cannot build an agreed order without a listing resource")
+    resource = dict(resource)
+    if isinstance(provision_terms, dict):
+        payload = provision_terms.get("payload", provision_terms)
+        requested = payload.get("compute_resource")
+    else:
+        requested = getattr(provision_terms, "compute_resource", None)
+    if requested:
+        flat = flatten_vm_shape(vm_listing_resource_shape(requested))
+        for key in (*_DIMENSION_COMPUTE_KEYS, "gpu_model"):
+            resource.pop(key, None)
+        resource.update(flat.quantities)
+        resource.update(flat.attributes)
+    return {**listing, "listing_resource": resource}
+
+
+def settlement_vm_order(
+    thread: dict[str, Any], listing: dict[str, Any], provision_terms: Any,
+) -> dict[str, Any]:
+    """Use the accepted order snapshot, or derive legacy deals' agreed order."""
+    plan = thread.get("settlement_plan") or {}
+    service = (plan.get("service_terms") or {}).get("vm.v1") or {}
+    order = service.get("order")
+    return dict(order) if isinstance(order, dict) else agreed_vm_order(listing, provision_terms)
 
 
 def compute_capacity_claim_from_order(

@@ -81,6 +81,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "pydantic" },
+    { name = "typing-extensions" },
 ]
 wheels = [
     { path = "arkhai_core_storefront-0.17.1-py3-none-any.whl" },
@@ -209,6 +210,7 @@ dependencies = [
     { name = "arkhai-kit-capability-admissibility" },
     { name = "arkhai-kit-capability-pricing" },
     { name = "arkhai-kit-capability-shape" },
+    { name = "arkhai-kit-resource-pools-contracts" },
     { name = "pydantic" },
 ]
 
@@ -231,6 +233,7 @@ requires-dist = [
     { name = "arkhai-kit-capability-admissibility", specifier = ">=0.1.0" },
     { name = "arkhai-kit-capability-pricing", specifier = ">=0.1.0" },
     { name = "arkhai-kit-capability-shape", specifier = ">=0.3.0" },
+    { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.3.0" },
     { name = "pydantic", specifier = ">=2" },
 ]
 provides-extras = ["storefront"]

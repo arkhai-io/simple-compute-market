@@ -1156,7 +1156,7 @@ async def test_a_shape_without_gpus_publishes_no_gpu_field_and_refreshes_without
     published = world.registries.to("publish", listing_id)
     assert len(published) == len(world.registries.urls)
     body = published[0][1]["listing_resource"]
-    assert body == listing["listing_resource"]
+    assert body == {key: value for key, value in listing["listing_resource"].items() if value is not None}
     assert (body["vcpu_count"], body["ram_gb"]) == (16, 64)
     assert "gpu_count" not in body and "gpu_model" not in body
     assert all(other["listing_resource"] == body for _, other in published)
@@ -1486,9 +1486,11 @@ async def test_shape_priced_listings_publish_composed_rates_and_record_their_str
         assert (await _listing(world, listing_id))["rate_structure"] == {
             "gpu": _gpu_rates("80")["gpu"]["H100"]["rates"]
         }
-        # A registry receives the composed rate and never the structure.
+        # The composed rate and its resolved family structure travel together.
         for _, body in world.registries.to("publish", listing_id):
-            assert "rate_structure" not in body
+            assert body["rate_structure"] == {
+                "gpu": _gpu_rates("80")["gpu"]["H100"]["rates"]
+            }
             assert body["accepted_escrows"] == row["accepted_escrows"]
 
 
