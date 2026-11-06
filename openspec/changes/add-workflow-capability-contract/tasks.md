@@ -1264,7 +1264,7 @@ no code, test, or other document. The owner directed (log seq 82) that once this
 is done its implementation review and validation are waived and the change returns
 to closeout.
 
-- [ ] 11.1 In the docstring of `scripts/change_workflow/__init__.py`, list every
+- [x] 11.1 In the docstring of `scripts/change_workflow/__init__.py`, list every
   module of `scripts/change_workflow/` once, each with its role as its own module
   docstring states it: add `config` — the repository's workflow configuration,
   `.agents/workflow.toml`, read and checked whole, and the subcommands that read it;
@@ -1279,13 +1279,47 @@ to closeout.
   but `__init__.py` is named in the list exactly once, and no name in the list lacks
   its file; `make check-comment-hygiene` passes; the docstring names no change, task,
   or review.
-- [ ] 11.2 Verification: `scripts/change-workflow run pre-commit
+  - Done: the list gains `config` (with the subcommands dispatched to it: `config`,
+    `config load`, `config parts`, and `check config`), `hooks` (`run`'s hooks and
+    parts, the closing line, the marker kept from a dispatch for its collect, and,
+    beyond the plan's wording, `check change` and `openspec`, which `cli.py`
+    dispatches to it), and `wait`; `steps` holds each step's skill, its permission
+    rules, and what a model is, its models being the configuration's; `running`
+    also keeps a session's invocations through `run` and the guarded push until
+    its log line records them. Every other entry, the fragment's paragraph, and the
+    `Contract:` line still hold and are unchanged. The 31 modules beside
+    `__init__.py` are each named once and no name lacks its file (checked with
+    Grep against the glob, the planned inline script being denied); `make
+    check-comment-hygiene` passes; the docstring names no change, task, review,
+    or history. No test reads the docstring: the list's correctness rests on this
+    comparison, repeated by the fresh-context check, which found no violation and
+    whose two wording gaps (`steps` defines what a model is; `hooks` serves `check
+    change` and `openspec`) were taken.
+- [x] 11.2 Verification: `scripts/change-workflow run pre-commit
   add-workflow-capability-contract --base dev` (this change's clone records no
   landing branch, being older than the record), whose functional tier runs, since `scripts/` is
   outside the inert paths, fails on nothing but the specification index entries task
   10.9 writes; `pytest -q scripts/tests/test_change_workflow_cli.py` (unit) passes.
   End-to-end: none; no scenario exercises the workflow tooling, and a docstring
   changes no behaviour.
+  - Done: `scripts/change-workflow run pre-commit add-workflow-capability-contract
+    --base dev` ran the functional tier: "after-functional-change at 199a7a3c4…:
+    passed, exit 0", "pre-commit-functional at 199a7a3c4…: passed, exit 0" (the
+    packaging check and the whole `make test`), then `pre-commit`: the index,
+    tasks, and skills checks and `scripts/openspec validate … --strict` passed,
+    and it closed "failed, exit 2" on `make check-repository`, whose one failing
+    check of eight is the specification index (10.9's entries). The last wording
+    fix to the docstring came after that run; `make check-repository` rerun after
+    it fails on the specification index alone. `uv run --no-project --with pytest
+    pytest -q scripts/tests/test_change_workflow_cli.py` (unit; the bare `pytest`
+    the plan names is not allowed this step): 153 passed, before and after that
+    fix; it imports the package, so the docstring parses, and shows nothing of the
+    list's content. End-to-end: confirmed none. Owed by validation: nothing; the
+    owner waived this round's review and validation (log seq 82).
+  - Handoff: closeout resumes at 10.1, whose finding this section fixed; 10.2 and
+    10.7 are owed again over this commit. The engine-parts section of
+    `openspec/specs/change-workflow/README.md` still lacks `config`, `hooks`, and
+    `wait` and says `steps` reads models, which 10.9's promotion covers.
 
 ## 10. Closeout
 
