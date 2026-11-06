@@ -442,6 +442,60 @@ retention, a historical signature check and explicit injected projections; it do
 not qualify a recurring payment adapter. These choices need the same post-review
 promotion destinations as D2/D2a; no permanent documentation has been promoted.
 
+## Billing projection continuation (2026-11-07)
+
+Installed registrations now own an optional `project_billing` hook, dispatched by
+`SettlementConfigurationRegistry.project_billing` and its `agreed_price` convenience.
+A missing hook refuses interpretation. Reading an accepted option needs installed
+code, not current role enablement/readiness. Alkahest and the installed once-only
+payments adapter explicitly project totals; contact projects its rateless whole
+introduction. The payments parameter codec refuses rate/setup fields until its
+own adapter supports them. Core and VM pricing never parse a payments period.
+
+VM multiplier arithmetic takes a validated neutral `PriceBasis`: one period for
+recurring, the duration for total, with one upward rounding and uint256 refusal.
+The VM buyer codec and storefront policy/reference/final derivation receive the
+projection from their composition. Raw mathematical helper calls retain an explicit
+total default; production selected-option calls resolve the installed owner.
+Injected proposed projections qualify period arithmetic, not hosted rate execution.
+Absolute/flat pricing retains its existing truncation path. Proof enforcement and
+reader migration remain unfinished, so this does not qualify accepted recovery.
+
+## Acceptance-evidence binding question (2026-11-07)
+
+D2a's required verification has an unresolved carrier seam, not a new scalar/money
+choice. `negotiation_runtime._with_agreement` hashes the complete seller-side
+`acceptance.listing_record`. `core_storefront.SQLiteClient.load_listing` includes
+seller bookkeeping (`paused`, `closed_by`, timestamps, publication clauses and
+fulfillment fields) and some serialized resource fields. That representation is
+neither the signed registry publication nor the retained buyer pricing subset.
+The buyer cannot reconstruct and verify `Agreement.listing_hash` from its record.
+Resize's `message:rate-structure-pin` is persisted only on the seller; the response
+models expose no acceptance-bound pricing pin. A historical seller publication
+signature plus option equality proves advertised inputs, not which such publication
+this acceptance used. No fresh listing may fill that gap.
+
+The owner must choose the verifiable carrier before 2.1b proceeds:
+
+- **Recommended:** add an additive pricing-evidence object to the seller's signed
+  acceptance response, binding the negotiated multiplier and a canonical digest
+  of the exact pricing inputs (listing identity, advertised shape, rate structure
+  and selected option). Retain it with the existing exact acceptance/Agreement
+  bytes and publication proof. Verify the pin against the historical publication
+  before deriving or recovering money. This preserves `Agreement.amount`, the
+  existing `listing_hash` meaning and D-a–D-e, without exposing seller bookkeeping.
+- **Alternative:** retain and return the exact seller listing snapshot whose bytes
+  `Agreement.listing_hash` already commits. Verify that hash, then verify its pricing
+  projection against the retained publication. This avoids a new pin semantics but
+  expands the acceptance's data exposure/size and needs an explicit public snapshot
+  contract for fields the buyer currently never sees.
+
+Neither is implemented or silently selected. In either case legacy records lacking
+required bound evidence fail closed rather than being backfilled. Recovery/mandate
+reader migration and the direct-read guard wait for the choice; the independently
+verified billing projection slice is safe to checkpoint first. Its durable design
+belongs with D2/D2a at the existing promotion destinations, after review.
+
 ## Design promotion record
 
 Destinations are planned, not claims of implemented behavior.

@@ -9,7 +9,9 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 
-from market_core.schemas import settlement_option_schema, settlement_option_params
+from market_core.schemas import (
+    PriceBasis, SettlementOption, settlement_option_schema, settlement_option_params,
+)
 from market_settlement_runtime import (
     ComparisonOperator,
     FieldDescriptor,
@@ -932,6 +934,17 @@ def validate_alkahest_publication_input(
     return AlkahestPublicationInput.model_validate(value)
 
 
+def alkahest_billing_basis(option: SettlementOption) -> PriceBasis:
+    """An Alkahest escrow funds a whole-term total, never a recurring charge."""
+    if option.settlement_schema != ALKAHEST_MECHANISM_ID:
+        raise ValueError("billing projection requires an Alkahest option")
+    if option.lifecycle is not None or set(option.settlement_params) != {"accepted_escrow"}:
+        raise ValueError("Alkahest billing requires an escrow option without lifecycle terms")
+    if _alkahest_escrow(option) is None:
+        raise ValueError("Alkahest billing requires an accepted escrow")
+    return PriceBasis(unit="total")
+
+
 def create_alkahest_registration(
     *, command_group: Any | None = None
 ) -> MechanismRegistration:
@@ -943,6 +956,7 @@ def create_alkahest_registration(
         config_model=AlkahestSettlementConfig,
         roles=frozenset({"buyer", "seller"}),
         negotiates_scalar_amount=True,
+        project_billing=alkahest_billing_basis,
         preflight=alkahest_preflight,
         client_factory=alkahest_client_factory,
         option_builder=alkahest_option_builder,

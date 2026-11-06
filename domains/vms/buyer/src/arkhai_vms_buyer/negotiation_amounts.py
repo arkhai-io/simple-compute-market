@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
-from copy import deepcopy
 from decimal import Decimal
 from fractions import Fraction
 from typing import Any
@@ -12,28 +11,20 @@ from arkhai_vms import normalize_vm_provision_terms, vm_listing_resource_shape
 from arkhai_vms.capability_shapes import canonical_vm_shape, flatten_vm_shape
 from arkhai_vms_listings import extract_compute_from_order
 from arkhai_vms_negotiation.amounts import (
-    BASIS_POINTS, has_rate_structure, quote_from_multiplier, shape_hourly_amount,
+    BASIS_POINTS, has_rate_structure, quote_from_multiplier, selected_billing_basis,
+    shape_hourly_amount,
 )
 from arkhai_vms_negotiation.policies import proposal_uses_scalar_amount
 from core_buyer.negotiation_client import NegotiationAmountCodec
+from market_core.schemas import BillingProjection
+
+from .pricing_record import retained_pricing_record  # noqa: F401
+from .settlement_composition import buyer_settlement_registry
 
 
-def retained_pricing_record(listing: Mapping[str, Any]) -> dict[str, Any]:
-    """Keep pricing inputs and seller proof together for accepted recovery.
-
-    This is retention, not verification. The raw publication preserves signed
-    bytes and request context that a reconstructed listing subset cannot prove.
-    Copy nested values so later selection or listing edits cannot rewrite them.
-    """
-    return deepcopy({key: listing[key] for key in (
-        "listing_id", "listing_resource", "rate_structure", "settlement_options",
-        "accepted_escrows", "publisher_publication", "publisher_updates",
-        "publisher_principals", "publisher_id", "source_registry_url",
-        "source_registry_authority",
-    ) if key in listing})
-
-
-def amount_codec(listing: Any, proposal: Any) -> NegotiationAmountCodec | None:
+def amount_codec(
+    listing: Any, proposal: Any, *, project_billing: BillingProjection | None = None,
+) -> NegotiationAmountCodec | None:
     """Use the seller-authenticated registry listing, never a storefront read.
 
     Public per-hour buyer bounds are anchored to the advertised shape once.
@@ -48,6 +39,9 @@ def amount_codec(listing: Any, proposal: Any) -> NegotiationAmountCodec | None:
     if not proposal_uses_scalar_amount(listing, proposal):
         return None
     hourly = shape_hourly_amount(listing, proposal)
+    basis = selected_billing_basis(
+        listing, proposal, project_billing or buyer_settlement_registry().project_billing,
+    )
 
     def scalar(price: Any) -> int:
         value = Fraction(Decimal(str(price)))
@@ -64,7 +58,9 @@ def amount_codec(listing: Any, proposal: Any) -> NegotiationAmountCodec | None:
             vm_listing_resource_shape(terms.compute_resource)
             if terms.compute_resource is not None else None
         )
-        return quote_from_multiplier(listing, proposal, value, int(terms.duration_seconds), shape)
+        return quote_from_multiplier(
+            listing, proposal, value, int(terms.duration_seconds), shape, price_basis=basis,
+        )
 
     def effective(terms: Any, revision: Any):
         if hasattr(terms, "model_dump"):

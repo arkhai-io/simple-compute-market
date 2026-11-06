@@ -1,8 +1,9 @@
 # Tasks — open-ended compute terms
 
 Implementation started on the stacked resize and registry branches. The partial
-2.1 checkpoint adds the quote carrier/accessor and VM pricing-proof retention;
-consumer migration and recurring behavior are not implemented. Verification levels follow
+2.1 checkpoints add the quote carrier/accessor, VM pricing-proof retention,
+installed billing projections and period-aware VM multiplier derivation.
+Accepted-evidence enforcement and remaining consumer migration are not implemented. Verification levels follow
 `docs/development/TESTING.md`. New acceptance test implementation requires the
 maintainer's approval; the scenarios below are the intended contract, not tests
 added by this reconciliation.
@@ -126,6 +127,42 @@ added by this reconciliation.
   remain in their existing order; promotion and archival remain post-review. This
   is an authorized session checkpoint, not completion of the terms feature.
 
+### Billing-projection continuation checkpoint (2026-11-07)
+
+- Completed the projection/derivation slice 2.1a below. Installed Alkahest,
+  payments and contact registrations explicitly project their supported once/rateless
+  options as totals; missing projectors and unsupported payment rate parameters
+  fail closed. Projection is independent of current offer enablement/readiness.
+- VM buyer scalar conversion, seller policy/reference evaluation and final
+  monetary derivation now accept a mechanism-owned billing projection. Injected
+  rate projections evaluate one period, not the horizon, rounding upward once;
+  hosted rates are still unsupported and no offers are enabled. Flat absolute
+  quotes retain existing truncation. A small `pricing_record.py` extraction keeps
+  the shared proof-retention helper independent of the buyer composition and avoids
+  an import cycle when the amount codec uses its installed registry.
+- Evidence and fresh-checkout replay: `docs/attachments/negotiate-open-ended-compute-terms/billing-projection-checkpoint.md`.
+  Runtime/Alkahest/contact configuration unit suites passed (66/84/37); payments
+  unit suites passed (51) and mypy checked 22 files; VM buyer unit suites passed (45);
+  VM storefront unit and real-SQLite runtime suites passed (19); core unit suites
+  passed (21). `make check-packaging`, `make check-change` for this change and pinned
+  strict OpenSpec validation passed. No E2E marker proves the injected recurring
+  projection or acceptance-proof binding; deployed listing/reserved regressions
+  remain in 4.3. No push-only evidence is owed for this slice.
+  No permanent acceptance tests were added. The initial diagnostic fixture lacked
+  required seller/pool identity; the corrected fixture passes. An existing helper
+  caller exposed a new mandatory projector argument; preserving the helper's default
+  installed projection repaired that regression.
+- **Restart at 2.1b, not 2.2.** Resolve the acceptance-bound pricing carrier question
+  in `design.md` before claiming seller-proof/transcript-price authentication.
+  The current Agreement hash commits the full seller database listing representation,
+  not the buyer's retained publication/subset. Resize's rate pin is seller-local.
+  Merely verifying a publication signature does not bind that publication to this
+  acceptance. Keep monetary Agreement semantics and D-a–D-e unchanged.
+- 2.1c then finishes reader/cap/check migration and the direct-read guard. Mandate
+  and recovery readers have deliberately not been migrated before evidence enforcement.
+  Parent 2.1 and all later tasks stay unchecked. No deployment/E2E, independent review,
+  promotion, archival or final integration rebase is claimed; PR #351 stays draft.
+
 ## 2. Quote and capacity terms
 
 - [ ] 2.1 In `core/src/market_core/schemas.py` implement the unit-bearing accessor;
@@ -134,6 +171,17 @@ added by this reconciliation.
   existing check targets. Verify at unit level with `core/tests/unit/test_rate_helpers.py`
   and `test_settlement_options.py`: whole-term, sub-hour recurring, rounding, absolute
   amount fallback, accepted recovery and the guard's rejected direct reads.
+  - [x] 2.1a Wire mechanism-owned billing projections through installed registrations
+    and VM buyer/seller multiplier derivation. Verify once totals, fail-closed
+    unsupported projections and injected sub-hour period quotes using the committed
+    diagnostic and existing configuration/multiplier/buyer suites.
+  - [ ] 2.1b Decision gate: choose how signed acceptance binds retained pricing inputs
+    (design's acceptance-evidence question), then implement historical seller-proof,
+    exact option/context, transcript multiplier and accepted Agreement verification
+    before recovery or buyer mandate reads. Never substitute a current listing.
+  - [ ] 2.1c Migrate remaining both-domain policy/reference/cap/amount readers and
+    mandate checks, and integrate the fail-closed direct-read guard. Keep 2.1 unchecked
+    until all three slices and its focused validation pass.
 - [ ] 2.2 Add validated relative/UTC absolute hints in `kit/resource-pools-contracts`,
   models in `domains/vms/domain/src/arkhai_vms` and
   `domains/bare_metal/src/arkhai_bare_metal`, and both storefronts' override/default

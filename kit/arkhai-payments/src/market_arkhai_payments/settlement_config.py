@@ -12,6 +12,7 @@ from typing import Any
 import httpx
 from market_core.query_dsl import ComparisonOperator, FieldDescriptor, QueryValueType
 from market_core.schemas import (
+    PriceBasis,
     RateValue,
     SettlementOption,
     SettlementPrice,
@@ -543,6 +544,18 @@ def validate_arkhai_payments_publication_input(
     return ArkhaiPaymentsPublicationInput.model_validate(value)
 
 
+def payments_billing_basis(option: SettlementOption) -> PriceBasis:
+    """Project only the payments contract this adapter can actually service.
+
+    The installed adapter supports once parts. Its strict parameter codec
+    refuses rate/setup fields instead of silently labelling them as a total.
+    """
+    if option.settlement_schema != ARKHAI_PAYMENTS_MECHANISM:
+        raise ValueError("billing projection requires an Arkhai payments option")
+    PaymentsOptionParams.model_validate(option.settlement_params)
+    return PriceBasis(unit="total")
+
+
 def create_arkhai_payments_registration() -> MechanismRegistration:
     """Register public option construction without escrow servicing hooks."""
     fields = (
@@ -590,6 +603,7 @@ def create_arkhai_payments_registration() -> MechanismRegistration:
         publication_input_model=ArkhaiPaymentsPublicationInput,
         publication_input_validator=validate_arkhai_payments_publication_input,
         negotiates_scalar_amount=True,
+        project_billing=payments_billing_basis,
     )
 
 
