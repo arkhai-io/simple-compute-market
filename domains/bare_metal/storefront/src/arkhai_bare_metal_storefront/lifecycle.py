@@ -33,12 +33,16 @@ from market_deal_servicing.evidence import EvidenceSession, in_transaction, tran
 from market_deal_servicing.journal import stable_ref
 from market_identity import Identity, canonical_json
 
+from .fulfillment_service import TERMINATING, _TEARDOWN_STATES
 from .lifecycle_records import register_agreement
 from .models import BareMetalSettleRequest
 from .settlement_stages import SettlementRequestError
 
 
 logger = logging.getLogger(__name__)
+
+# Fulfillment states from which no delivery can still become available.
+_UNDELIVERABLE = _TEARDOWN_STATES | {TERMINATING, "failed", "released"}
 
 
 class BareMetalLifecycle:
@@ -254,6 +258,23 @@ class BareMetalLifecycle:
             )
             await in_transaction(self.path, lambda conn: EndSession(conn).physical_progress(negotiation_id, "released"))
 
+    async def adopt_fulfillment(self, deal):
+        # No site callback reports activation: only a fulfillment status read
+        # validates the delivered access and records `available`. Recovery
+        # performs that read for every dispatched, undisclosed deal, so delivery
+        # meets its deadline without depending on any buyer read.
+        # See openspec/specs/deal-lifecycle/spec.md, "The storefront records
+        # availability without a buyer read".
+        row = await self.runtime.db.load_bare_metal_fulfillment_lifecycle(negotiation_id=deal.negotiation_id)
+        if row is None or not row.get("fulfillment_id") or row.get("state") in _UNDELIVERABLE:
+            return
+        record = await in_transaction(self.path, lambda conn: EndSession(conn).read(deal.negotiation_id))
+        if record.available_at is not None:
+            return
+        await self.runtime.fulfillment_service().status(
+            negotiation_id=deal.negotiation_id, buyer_principal=deal.buyer,
+        )
+
     def classify_site(self, event, session):
         row = session.conn.execute(
             "SELECT negotiation_id FROM bare_metal_fulfillment_lifecycle WHERE capacity_reservation_id=?",
@@ -410,6 +431,10 @@ class BareMetalLifecycle:
                 await self.recover_site(deal.negotiation_id)
             except Exception:
                 logger.exception("bare-metal site recovery failed for %s", deal.negotiation_id)
+            try:
+                await self.adopt_fulfillment(deal)
+            except Exception:
+                logger.exception("bare-metal fulfillment adoption failed for %s", deal.negotiation_id)
             try:
                 await self.end.drive_physical(deal.negotiation_id)
                 if await asyncio.to_thread(self.reconcile_local, deal.negotiation_id):

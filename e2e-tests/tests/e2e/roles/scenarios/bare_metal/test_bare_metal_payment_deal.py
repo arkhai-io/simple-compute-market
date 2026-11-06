@@ -303,7 +303,7 @@ def payment_supply(
 
 def test_payment_deal_delivers_after_a_verified_receipt(
     payment_buyer_cli: BuyerCli, payment_deal_state: DomainDealState, payment_run: dict,
-    payment_supply, payment_fulfillment, provisioning_client, site_capacity,
+    payment_supply, payment_fulfillment, provisioning_client, site_capacity, storefront_admin_client,
 ) -> None:
     with _purchase_registry(payment_buyer_cli) as registry:
         listing = registry.get_listing(payment_run["listing_id"])
@@ -355,9 +355,18 @@ def test_payment_deal_delivers_after_a_verified_receipt(
     advance_fulfillment_to(
         provisioning_client, payment_deal_state.fulfillment_ref, "active", max_advances=8,
     )
+    # The storefront's own recovery pass must make delivery available; a
+    # fulfillment status read here would perform that step on its behalf.
+    signer = _purchase_signer(payment_buyer_cli, buy.run_id)
+
+    async def progress() -> str:
+        async with LifecycleClient(lane_setting("storefront_url"), signer, _pins("storefront")) as buyer:
+            return (await buyer.read(payment_deal_state.negotiation_id)).delivery.progress
+
     deadline = time.monotonic() + 30
-    while payment_fulfillment.status(payment_deal_state.negotiation_id)["state"] != "active":
-        assert time.monotonic() < deadline, "purchase fulfillment did not become ready"
+    while asyncio.run(progress()) != "active":
+        assert time.monotonic() < deadline, "the storefront never recorded the delivery available"
+        advance_storefront(storefront_admin_client, "delivery-recovery")
         time.sleep(0.2)
     payment_supply.assert_delivery(payment_deal_state)
     delivered = payment_fulfillment.result(payment_deal_state.negotiation_id)
