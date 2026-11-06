@@ -14,6 +14,8 @@ from pathlib import Path
 
 from arkhai_compute.end_classification import payment_actor
 from compute_provisioning_contracts import LeaseEndedEvent, SignedLeaseEndedReport, verify_lease_end
+from market_alkahest import ALKAHEST_MECHANISM_ID
+from market_alkahest.payment_adapter import AlkahestOnceAdapter
 from market_arkhai_mediation.adapter import MediationAdapter
 from market_arkhai_mediation.client import MediationClient, MediationCredential
 from market_arkhai_mediation.contract import INTERFACE
@@ -23,6 +25,7 @@ from market_deal_lifecycle.adapters import (
     DeliveryEndIntent, DisputeAdapterTable, PaymentAdapterTable, PaymentBinding, PaymentSelector,
 )
 from market_deal_lifecycle.claims import DeliveryEndClaims
+from market_deal_lifecycle.delivery import DeliveryEvidence
 from market_deal_lifecycle.evidence import CommitmentAttempt
 from market_deal_lifecycle.terms import decode_terms
 from market_deal_lifecycle_contracts.models import (
@@ -46,6 +49,7 @@ from market_storefront.delivery_lifecycle import VmPhysicalEnd
 from market_storefront.end_classification import resolve_site_corrections, site_classification
 from market_storefront.settlement_stages import PaymentSettlementError
 from market_storefront.services.capacity_client import build_capacity_runtime, build_fulfillment_client
+from market_storefront.services.vm_fulfillment_planner import VERIFIED_EVIDENCE_STATUSES
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +84,9 @@ class VmDealLifecycle:
             self.path, clock=clock, verify_site=self.verify_site, receipt_claim=self.receipt_claim,
             classify_site=self.classify_site,
         )
-        payment_entries = []
+        # An Alkahest deal authorizes delivery through its once-only adapter,
+        # since a mechanism with no adapter is never allowed.
+        payment_entries = [(PaymentSelector(ALKAHEST_MECHANISM_ID), self.alkahest_adapter)]
         if payments is not None:
             payment_entries.append((PaymentSelector("arkhai.payments.v1"), self.payment_adapter))
         self.seller = SellerServicing(
@@ -141,6 +147,30 @@ class VmDealLifecycle:
             floor = max(0, WatchSession(conn).cursor(binding.negotiation_id, "payment:" + data.transaction_id))
         return self.payments_coordinator.stage.payment_adapter(
             agreement, data, minimum_sequence=floor,
+        )
+
+    def alkahest_adapter(self, binding: PaymentBinding):
+        with transaction(self.path) as conn:
+            commitment_ref = EndSession(conn).read(binding.negotiation_id).commitment_ref
+        return AlkahestOnceAdapter(
+            negotiation_id=binding.negotiation_id, commitment_ref=commitment_ref,
+            validate_commitment=self.alkahest_commitment_valid,
+        )
+
+    async def alkahest_commitment_valid(self, evidence: DeliveryEvidence) -> bool:
+        """Whether delivery evidence names the deal's verified Alkahest settlement.
+
+        A reference being present proves nothing: it must be the escrow the
+        deal's recorded settlement evidence was verified for, under the
+        evidence schema delivery reads.
+        """
+        recorded = await self.db.load_vm_settlement_evidence(negotiation_id=evidence.negotiation_id)
+        return (
+            recorded is not None
+            and recorded.mechanism == ALKAHEST_MECHANISM_ID
+            and recorded.status in VERIFIED_EVIDENCE_STATUSES
+            and recorded.settlement_ref == evidence.commitment_ref
+            and recorded.evidence.get("schema") == "vm.settlement-evidence.v1"
         )
 
     def credential_available(self, authority):

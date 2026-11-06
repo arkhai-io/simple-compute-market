@@ -476,8 +476,7 @@ def test_reserve_is_idempotent_by_escrow_uid(seeded: CapacityLedgerService):
 
 def test_reserve_idempotent_hit_includes_resource_id(seeded: CapacityLedgerService):
     """The idempotent-hit payload must be byte-compatible with a fresh
-    reservation's payload for callers that read resource_id directly
-    (e.g. vm_fulfillment_service.py)."""
+    reservation's payload for callers that read resource_id directly."""
     first = seeded.reserve(claim={"offering_mode": "vm", **{"gpu_count": 1}}, deal_ref={"escrow_uid": "0xres"})
     second = seeded.reserve(claim={"offering_mode": "vm", **{"gpu_count": 1}}, deal_ref={"escrow_uid": "0xres"})
     assert second["resource_id"] == first["resource_id"] == "compute-kvm1-001"

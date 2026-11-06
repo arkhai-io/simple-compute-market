@@ -22,7 +22,10 @@ from core_storefront.sqlite_migrations import (  # noqa: F401 — re-exported
     apply_schema_migrations,
 )
 
-from market_storefront.payment_repository import add_vm_settlement_records
+from market_storefront.payment_repository import (
+    add_vm_delivery_activation,
+    add_vm_settlement_records,
+)
 from market_storefront.utils.config import chain_address_books
 
 logger = logging.getLogger(__name__)
@@ -378,4 +381,5 @@ VM_MIGRATIONS: tuple[Migration, ...] = (
         "20261027_001_fulfillment_context_carries_no_connectivity",
         _migrate_fulfillment_context_carries_no_connectivity,
     ),
+    Migration("20261106_001_vm_delivery_activation", add_vm_delivery_activation),
 )

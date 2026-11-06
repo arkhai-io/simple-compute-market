@@ -2928,9 +2928,8 @@ class CapacityLedgerService:
         """``_reservation_payload`` plus ``resource_id``, matching the shape
         ``reserve()``'s fresh-reservation path returns (via
         ``_match_payload``), so an idempotent-hit return is byte-compatible
-        with a fresh one for callers that read ``resource_id`` (for
-        example ``vm_fulfillment_service.py``'s
-        ``reserved.get("resource_id")``). ``resource_id`` is resolved via
+        with a fresh one for callers that read ``resource_id`` from
+        either. ``resource_id`` is resolved via
         the same backing-resource lookup ``get_reservation_backing_resource_id``
         already exposes, not duplicated here.
         """

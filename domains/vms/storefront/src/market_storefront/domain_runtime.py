@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
@@ -29,9 +30,12 @@ from market_core import (
     validate_domain_contract,
 )
 
+from compute_delivery import OutcomeKind
+
+from market_storefront.delivery_ports import drive_vm_delivery, vm_delivery_path
 from market_storefront.negotiation_runtime import build_vm_accepted_artifacts
-from market_storefront.services.fulfillment_service import fulfill_compute_obligation
 from market_storefront.settlement_stages import vm_seller_stages
+from market_storefront.utils.config import settings
 
 VM_STOREFRONT_DOMAIN_IDENTITY = DomainIdentity("compute.v1")
 _REQUIRED_VM_STOREFRONT_CAPABILITIES = frozenset(
@@ -77,38 +81,66 @@ async def _fulfill_vm_context(
     *,
     context: StorefrontFulfillmentContext,
 ) -> dict[str, Any]:
-    """Adapt the common frozen-binding carrier to VM fulfillment inputs."""
+    """Drive the VM deal through the compute delivery path, once.
 
-    raw = context.domain_input
+    ``ports`` may carry the capacity effects and fulfillment client the path
+    uses; each is built from the storefront's runtime when absent.
+    ``domain_input`` may carry the seller's ``failure_policy``. The path's
+    outcome maps to the hook's state: available or converged is fulfilled,
+    ended is failed once the end is durable, and anything else, including a
+    drive stopped by an exception, is deferred for the resume pass.
+    """
+
+    raw = context.domain_input if context.domain_input is not None else {}
     if not isinstance(raw, Mapping):
         raise TypeError("VM fulfillment requires a domain_input mapping")
-    result = await fulfill_compute_obligation(
-        sqlite_client=context.ports.repository,
-        evidence=context.settlement_evidence,
-        site_id=context.site_id,
-        failure_policy=raw.get("failure_policy"),
+    db = context.ports.repository
+    nid = context.negotiation_id
+    path = vm_delivery_path(
+        db, capacity=context.ports.capacity_client, fulfillment=context.ports.fulfillment_client,
     )
-    result = dict(result or {})
+    failure_policy = raw.get("failure_policy")
+    outcome = await drive_vm_delivery(path, db, nid, failure_policy=failure_policy)
+    # The settle task carries a dispatched VM until provisioning settles, as
+    # far as the provisioning timeout, polling at its interval; past that, or
+    # for any other outcome, the resume pass carries it on.
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + float(settings.provisioning.timeout)
+    while (
+        outcome is not None
+        and outcome.kind is OutcomeKind.PENDING
+        and outcome.fulfillment_id is not None
+        and loop.time() < deadline
+    ):
+        await asyncio.sleep(float(settings.provisioning.poll_interval))
+        outcome = await drive_vm_delivery(path, db, nid, failure_policy=failure_policy)
+    row = await db.load_vm_delivery(negotiation_id=nid) or {}
+    state = outcome.hook_disposition if outcome is not None else "deferred"
     order = context.settlement_evidence.evidence["delivery"]["payload"]["order"]
     listing_resource = order.get("listing_resource")
     if not isinstance(listing_resource, Mapping):
         listing_resource = {}
-    physical_resource_id = result.get("physical_resource_id")
-    if physical_resource_id is None:
-        physical_resource_id = listing_resource.get("resource_id")
+    detail = (
+        outcome.detail or outcome.kind.value
+        if outcome is not None
+        else "delivery stopped before it could report; the next drive resumes it"
+    )
     return {
-        "negotiation_id": context.negotiation_id,
+        "negotiation_id": nid,
         "settlement_ref": context.settlement_ref,
         "site_id": context.site_id,
-        "state": str(result.get("status") or "failed"),
-        "physical_resource_id": physical_resource_id,
-        "capacity_reservation_id": result.get("capacity_reservation_id"),
-        "settlement_resource_id": result.get("settlement_resource_id"),
-        "fulfillment_id": result.get("fulfillment_uid") or result.get("fulfillment_id"),
-        "failure_reason": result.get("message")
-        if result.get("status") != "fulfilled"
-        else None,
-        "domain_result": result,
+        "state": state,
+        "physical_resource_id": listing_resource.get("resource_id"),
+        "capacity_reservation_id": row.get("capacity_reservation_id"),
+        "fulfillment_id": row.get("fulfillment_id"),
+        "failure_reason": None if state == "fulfilled" else detail,
+        "domain_result": {
+            "outcome": outcome.kind.value if outcome is not None else None,
+            "reason": outcome.reason.value if outcome is not None and outcome.reason else None,
+            "message": detail,
+            "fulfillment_uid": row.get("fulfillment_uid"),
+            "connection_details": row.get("connection_details"),
+        },
     }
 
 

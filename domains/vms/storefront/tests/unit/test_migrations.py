@@ -23,6 +23,7 @@ from core_storefront.domain_registry import (
 from market_identity import Ed25519Signer
 
 from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
+from market_storefront.payment_repository import add_vm_delivery_activation
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.utils import sqlite_client as sqlite_module
 
@@ -348,3 +349,35 @@ async def test_evidence_and_delivery_bindings_survive_restart_without_payment_es
     assert await db.claim_vm_delivery(negotiation_id="payment-1", owner="worker-b", lease_until=expiry)
     with sqlite3.connect(path) as conn:
         assert conn.execute("SELECT COUNT(*) FROM escrows").fetchone()[0] == 0
+
+
+def test_delivery_activation_adds_a_null_instant_and_names_readiness_ready(tmp_path):
+    """An upgraded delivery record gains the activation column, null for every
+    existing row; ``activate`` rows read ``ready``; a rerun changes nothing."""
+    with sqlite3.connect(str(tmp_path / "activation.db")) as conn:
+        conn.execute(
+            "CREATE TABLE vm_delivery_records (negotiation_id TEXT PRIMARY KEY, status TEXT, "
+            "fulfillment_phase TEXT)"
+        )
+        conn.executemany(
+            "INSERT INTO vm_delivery_records VALUES (?, 'provisioning', ?)",
+            [("ready-1", "activate"), ("dispatch-1", "dispatch")],
+        )
+        add_vm_delivery_activation(conn)
+        add_vm_delivery_activation(conn)
+        phases = dict(conn.execute(
+            "SELECT negotiation_id, fulfillment_phase FROM vm_delivery_records"
+        ).fetchall())
+        instants = {row[0] for row in conn.execute("SELECT activated_at_utc FROM vm_delivery_records")}
+    assert phases == {"ready-1": "ready", "dispatch-1": "dispatch"}
+    assert instants == {None}
+
+
+def test_a_fresh_database_records_delivery_activation(tmp_path):
+    db_path = str(tmp_path / "fresh-activation.db")
+    SQLiteClient(db_path, registry=build_vm_storefront_registry(build_vm_storefront_domain()))
+    with sqlite3.connect(db_path) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(vm_delivery_records)")}
+        recorded = {row[0] for row in conn.execute("SELECT id FROM schema_migrations")}
+    assert "activated_at_utc" in columns
+    assert "20261106_001_vm_delivery_activation" in recorded

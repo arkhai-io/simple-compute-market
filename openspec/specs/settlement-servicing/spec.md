@@ -625,4 +625,4 @@ Hosted snapshot verification MUST accept configured current/retiring identities 
 - Alkahest mechanism dispatch and claim hooks:
   `kit/alkahest/tests/unit/test_claims.py` and `test_claim_hooks.py`.
 - Accepted-domain settlement/fulfillment carriers, exact-object dispatch, result codec routing, and mismatch rejection: `core/storefront/tests/unit/test_domain_lifecycle.py` and `domains/vms/storefront/tests/unit/test_settlement_composition.py`.
-- Selected-site restart and teardown routing: `domains/vms/storefront/tests/unit/test_fulfillment_resume_runtime.py`, `test_fulfillment_service.py`, and `test_lease_truncation.py`.
+- Selected-site restart and teardown routing: `domains/vms/storefront/tests/integration/test_fulfillment_resume_runtime.py`, `domains/vms/storefront/tests/unit/test_fulfillment_service.py`, and `test_lease_truncation.py`.

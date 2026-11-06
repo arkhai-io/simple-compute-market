@@ -10,16 +10,20 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
+from compute_delivery import RecordedProgress
 from market_core import SettlementEvidence
 from market_core.schemas import AGREEMENT_SETTLEMENT_SCHEMA_PATH
 from market_deal_lifecycle.delivery import DeliveryPhase
 
-from market_storefront.delivery_records import DeliveryEnded, admit_delivery, record_delivery_end
+from market_storefront.delivery_records import admit_delivery, record_delivery_end
 
 from market_storefront.services.vm_fulfillment_planner import (
     VERIFIED_EVIDENCE_STATUSES,
     build_vm_fulfillment_plan,
 )
+
+#: Delivery statuses the resume pass does not drive.
+TERMINAL_DELIVERY_STATUSES = ("ready", "failed", "refunded", "ended")
 
 
 class VmSettlementEvidenceConflict(ValueError):
@@ -64,12 +68,134 @@ def add_vm_settlement_records(conn: Any) -> None:
     """)
 
 
+def add_vm_delivery_activation(conn: Any) -> None:
+    """Add the site's activation instant, and read a provider-ready phase as ``ready``.
+
+    ``activated_at_utc`` is the instant the site returned when it activated the
+    lease; a null records no activation, which is all it means for a delivery
+    that became available without one. The phase ``ready`` is the provider
+    reporting the VM active, and ``activate`` names only the site's transition
+    of the lease, so a row whose phase records readiness as ``activate`` is
+    rewritten to ``ready``.
+    """
+    if not conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='vm_delivery_records'"
+    ).fetchone():
+        return
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(vm_delivery_records)")}
+    if "activated_at_utc" not in columns:
+        conn.execute("ALTER TABLE vm_delivery_records ADD COLUMN activated_at_utc INTEGER")
+    conn.execute(
+        "UPDATE vm_delivery_records SET fulfillment_phase='ready' WHERE fulfillment_phase='activate'"
+    )
+
+
 def _json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+#: Every ``fulfillment_phase`` a VM delivery record holds. A phase outside
+#: these is not a row this storefront wrote, and the path refuses it.
+_KNOWN_PHASES = frozenset({
+    "context_persisted", "capacity_reserved", "resource_scheduled", "dispatch",
+    "fulfillment_accepted", "ready", "physical_result_recorded", "physical_failed",
+    "onchain_submission_started", "onchain_fulfilled", "disclose", "complete", "activated",
+})
+
+
+class VmDeliveryProgress:
+    """The compute delivery path's progress port over ``vm_delivery_records``.
+
+    The step is read from what the row records, so a row written before the
+    path drove it reads the same way: an activation instant, then a
+    fulfillment identity, then a recorded dispatch, then a reservation. A phase
+    this storefront never writes is passed through as the step, which the path
+    refuses as unreadable. Every write is in the transaction the path hands
+    it, so a record commits with the admission that permits it; each identity
+    is written once, and a different value is refused.
+    """
+
+    def load(self, conn: sqlite3.Connection, negotiation_id: str) -> RecordedProgress | None:
+        row = conn.execute(
+            "SELECT capacity_reservation_id, fulfillment_id, fulfillment_phase, activated_at_utc "
+            "FROM vm_delivery_records WHERE negotiation_id=?",
+            (negotiation_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        reservation, fulfillment, phase, activated_at = row
+        if phase is not None and phase not in _KNOWN_PHASES:
+            step = phase
+        elif activated_at is not None:
+            step = "activated"
+        elif fulfillment is not None:
+            step = "fulfillment"
+        elif phase == "dispatch":
+            step = "dispatch"
+        elif reservation is not None:
+            step = "commit"
+        else:
+            step = "reserve"
+        return RecordedProgress(
+            step=step, capacity_reservation_id=reservation, fulfillment_id=fulfillment,
+            activated_at=activated_at,
+        )
+
+    def create(self, conn: sqlite3.Connection, negotiation_id: str) -> None:
+        now = _now()
+        conn.execute(
+            "INSERT OR IGNORE INTO vm_delivery_records (negotiation_id, status, created_at, updated_at) "
+            "VALUES (?, 'provisioning', ?, ?)",
+            (negotiation_id, now, now),
+        )
+
+    def _once(
+        self, conn: sqlite3.Connection, negotiation_id: str, column: str, value: Any, phase: str,
+    ) -> None:
+        current = conn.execute(
+            f"SELECT {column} FROM vm_delivery_records WHERE negotiation_id=?", (negotiation_id,),
+        ).fetchone()
+        if current is None:
+            raise ValueError("VM delivery checkpoint is not initialized")
+        if current[0] is not None and current[0] != value:
+            raise ValueError(f"VM delivery {column} cannot change after binding")
+        conn.execute(
+            f"UPDATE vm_delivery_records SET {column}=?, fulfillment_phase=?, updated_at=? "
+            "WHERE negotiation_id=?",
+            (value, phase, _now(), negotiation_id),
+        )
+
+    def record_reservation(
+        self, conn: sqlite3.Connection, negotiation_id: str, capacity_reservation_id: str,
+    ) -> None:
+        self._once(conn, negotiation_id, "capacity_reservation_id", capacity_reservation_id, "capacity_reserved")
+
+    def record_dispatch(self, conn: sqlite3.Connection, negotiation_id: str) -> None:
+        conn.execute(
+            "UPDATE vm_delivery_records SET fulfillment_phase='dispatch', updated_at=? WHERE negotiation_id=?",
+            (_now(), negotiation_id),
+        )
+
+    def record_fulfillment(
+        self, conn: sqlite3.Connection, negotiation_id: str, fulfillment_id: str,
+    ) -> None:
+        self._once(conn, negotiation_id, "fulfillment_id", fulfillment_id, "fulfillment_accepted")
+
+    def record_activation(
+        self, conn: sqlite3.Connection, negotiation_id: str, activated_at: int,
+    ) -> None:
+        self._once(conn, negotiation_id, "activated_at_utc", activated_at, "activated")
+
+    def release_claim(self, conn: sqlite3.Connection, negotiation_id: str) -> None:
+        conn.execute(
+            "UPDATE vm_delivery_records SET processing_owner=NULL, processing_lease_until=NULL, "
+            "updated_at=? WHERE negotiation_id=?",
+            (_now(), negotiation_id),
+        )
 
 
 class VmSettlementRepository:
@@ -378,26 +504,15 @@ class VmSettlementRepository:
                             f"VM delivery {key} cannot change after binding"
                         )
                 if (
-                    current["status"] in ("ready", "failed", "refunded", "ended")
+                    current["status"] in TERMINAL_DELIVERY_STATUSES
                     and fields.get("status", current["status"]) not in (current["status"], "ended")
                 ):
                     raise ValueError("terminal VM delivery cannot restart")
-                phase = {
-                    "capacity_reserved": DeliveryPhase.COMMIT,
-                    "dispatch": DeliveryPhase.DISPATCH,
-                    "activate": DeliveryPhase.ACTIVATE,
-                    "disclose": DeliveryPhase.DISCLOSE,
-                }.get(fields.get("fulfillment_phase"), DeliveryPhase.RESERVE)
-                protected = fields.get("status") == "ready" or any(
-                    key in fields for key in ("fulfillment_phase", "connection_details", "tenant_credentials")
-                )
-                if protected and not admit_delivery(
-                    conn, negotiation_id, phase, available=fields.get("status") == "ready",
-                ):
-                    # Keep the final request and terminal checkpoint together.
-                    conn.execute("UPDATE vm_delivery_records SET status='ended', updated_at=? WHERE negotiation_id=?", (_now(), negotiation_id))
-                    conn.commit()
-                    raise DeliveryEnded("VM delivery ended before checkpoint")
+                # No admission here: the compute delivery path admits every
+                # protected step in the transaction that records it. What is
+                # written here is the immutable fulfillment context, which
+                # permits nothing by itself, or follows availability, such as
+                # the Alkahest continuation, which an end does not stop.
                 conn.execute(
                     "UPDATE vm_delivery_records SET "
                     + ", ".join(key + "=?" for key in fields)
@@ -406,6 +521,27 @@ class VmSettlementRepository:
                 )
 
         await asyncio.to_thread(update)
+
+    async def record_vm_delivery_outcome(
+        self, *, negotiation_id: str, status: str, reason: str | None = None,
+    ) -> bool:
+        """Record where delivery left the deal, once: a terminal status stays.
+
+        The delivery path decided the outcome under its own admission, so this
+        writes the status alone; a delivery already terminal keeps its status,
+        whichever caller recorded it first. Returns whether this call recorded it.
+        """
+
+        def record() -> bool:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute(
+                    "UPDATE vm_delivery_records SET status=?, reason=COALESCE(?, reason), updated_at=? "
+                    "WHERE negotiation_id=? AND status NOT IN (?, ?, ?, ?)",
+                    (status, reason, _now(), negotiation_id, *TERMINAL_DELIVERY_STATUSES),
+                )
+                return cursor.rowcount == 1
+
+        return await asyncio.to_thread(record)
 
     async def list_incomplete_vm_deliveries(
         self, *, limit: int = 50

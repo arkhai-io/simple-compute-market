@@ -415,14 +415,8 @@ async def reserve_vm_settlement_start(
     await context.sqlite_client.save_vm_settlement_evidence(evidence)
     await context.sqlite_client.insert_vm_delivery(negotiation_id=negotiation_id)
     if inserted:
-        start_utc = (
-            evidence.evidence.get("delivery", {}).get("payload", {}).get("start_utc")
-        )
-        start = (
-            datetime.fromisoformat(start_utc.replace("Z", "+00:00"))
-            if start_utc
-            else datetime.now(timezone.utc)
-        )
+        start_utc = evidence.evidence["delivery"]["payload"]["start_utc"]
+        start = datetime.fromisoformat(start_utc.replace("Z", "+00:00"))
         claimed = await context.sqlite_client.claim_vm_delivery(
             negotiation_id=negotiation_id,
             owner=context.convergence_owner,
@@ -450,9 +444,15 @@ async def fulfill_vm_settlement(
     prepared: PreparedSettlement,
     *,
     sqlite_client: Any,
-    mechanism_client: Any,
-    bind_fulfillment_fn: Any = None,
+    mechanism_client: Any = None,
 ) -> FulfillmentOutcome:
+    """Deliver a prepared Alkahest settlement through the VM fulfillment hook.
+
+    ``mechanism_client`` is the coordinator's; the delivery path's Alkahest
+    continuation reaches the chain through the settlement composition's
+    evidence clients instead, as the resume pass does.
+    """
+    del mechanism_client
     fulfillment_input = prepared.fulfillment_input
     if not isinstance(fulfillment_input, StorefrontSettlementFulfillmentInput):
         raise TypeError("storefront settlement fulfillment input is missing")
@@ -464,13 +464,6 @@ async def fulfill_vm_settlement(
         raise TypeError("VM settlement provision input is missing")
     if not isinstance(listing_id, str) or not isinstance(order, dict):
         raise TypeError("VM settlement listing input is missing")
-    # Peer settlement publishes its fulfillment evidence as a string
-    # obligation through the alkahest client's own codecs, so it takes the
-    # chain client the mechanism adapter resolves rather than the adapter --
-    # the same distinction escrow verification needs. Handing over the
-    # adapter fails with "no attribute 'string_obligation'" after the VM is
-    # already provisioned, which is the most expensive place to find out.
-    delivery_client = mechanism_client.chain_client(prepared.projection_context.chain_name)
     delivery_anchor = prepared.mechanism_ref
     if not delivery_anchor:
         raise ValueError("settlement fulfillment anchor is unavailable")
@@ -508,7 +501,11 @@ async def fulfill_vm_settlement(
         if isinstance(lifecycle.domain_result, Mapping)
         else {}
     )
-    if lifecycle.state == "deferred":
+    # The delivery path runs the stage's continuation once the deal is
+    # available, publishing the fulfillment evidence and binding the claim. An
+    # available deal whose continuation is pending has a running VM and no
+    # claim yet, so it is deferred to the resume pass, never failed.
+    if lifecycle.state == "deferred" or result.get("outcome") == "available":
         return FulfillmentOutcome(
             status="deferred",
             public_result={"status": "provisioning", "message": result.get("message")},
@@ -519,39 +516,13 @@ async def fulfill_vm_settlement(
         return FulfillmentOutcome(
             status="failed",
             public_result={
-                "status": result.get("status"),
+                "status": "error",
                 "message": result.get("message"),
             },
             private_result=result,
-            reason=result.get("message") or f"status={result.get('status')!r}",
+            reason=result.get("message") or "delivery ended",
         )
-    delivery = await sqlite_client.load_vm_delivery(
-        negotiation_id=evidence.negotiation_id
-    )
-    try:
-        fulfillment_uid = await stage.continue_delivery(
-            evidence=evidence,
-            db=sqlite_client,
-            delivery=delivery,
-            connection_json=result["connection_details"],
-            client=delivery_client,
-            bind=bind_fulfillment_fn,
-        )
-    except Exception as error:
-        # The VM is running: publishing its evidence is retried by the
-        # fulfillment resume pass, never answered by failing the deal.
-        logger.warning(
-            "[SETTLE_JOB] Negotiation %s deferred after provisioning: "
-            "fulfillment evidence publication did not complete (%s)",
-            evidence.negotiation_id,
-            error,
-        )
-        return FulfillmentOutcome(
-            status="deferred",
-            public_result={"status": "provisioning", "message": str(error)},
-            private_result=result,
-            reason=f"fulfillment evidence publication did not complete: {error}",
-        )
+    fulfillment_uid = result.get("fulfillment_uid")
     if not isinstance(fulfillment_uid, str) or not fulfillment_uid.strip():
         return FulfillmentOutcome(
             status="failed",
@@ -593,23 +564,14 @@ async def persist_vm_settlement_outcome(
         raise TypeError("VM settlement listing input is missing")
     private = outcome.private_result if isinstance(outcome.private_result, dict) else {}
     # A deferred delivery stays open for the fulfillment resume pass, which
-    # owns finishing it, so only a fulfilled or failed outcome is terminal.
-    await context.sqlite_client.update_vm_delivery(
-        negotiation_id=context.negotiation_id,
-        status=(
-            "ready"
-            if outcome.status == "fulfilled"
-            else None
-            if outcome.status == "deferred"
-            else "failed"
-        ),
-        fulfillment_uid=outcome.fulfillment_ref,
-        connection_details=private.get("connection_details"),
-        tenant_credentials=json.dumps(private["tenant_credentials"])
-        if private.get("tenant_credentials") is not None
-        else None,
-        reason=outcome.reason,
-    )
+    # owns finishing it, so only a fulfilled or failed outcome is terminal; the
+    # delivery path already recorded its own, which this leaves in place.
+    if outcome.status != "deferred":
+        await context.sqlite_client.record_vm_delivery_outcome(
+            negotiation_id=context.negotiation_id,
+            status="ready" if outcome.status == "fulfilled" else "failed",
+            reason=outcome.reason,
+        )
     await context.sqlite_client.release_vm_delivery(
         negotiation_id=context.negotiation_id, owner=context.convergence_owner
     )
@@ -619,11 +581,6 @@ async def persist_vm_settlement_outcome(
             status="ready",
             fulfillment_uid=outcome.fulfillment_ref,
             connection_details=private.get("connection_details"),
-            tenant_credentials=(
-                json.dumps(private.get("tenant_credentials"))
-                if private.get("tenant_credentials") is not None
-                else None
-            ),
         )
         stage_event(
             "claims",
@@ -917,13 +874,6 @@ def build_vm_settlement_composition(
             await worker.wake(context.obligation_ref)
         return existing
 
-    async def bind_delivery_claim(*, obligation_ref: str, fulfillment_ref: str) -> None:
-        await runtime.bind_fulfillment(
-            obligation_ref,
-            fulfillment_ref,
-            local_principal=marketplace_signer.identity,
-        )
-
     coordinator = SettlementJobCoordinator(
         runtime,
         prepare=partial(
@@ -937,7 +887,6 @@ def build_vm_settlement_composition(
             fulfill_vm_settlement,
             domain,
             sqlite_client=sqlite_client,
-            bind_fulfillment_fn=bind_delivery_claim,
         ),
         persist_outcome=persist_vm_settlement_outcome,
         wake_servicing=wake_servicing,

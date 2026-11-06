@@ -591,22 +591,97 @@ defers a VM deal, never fails it"). Files under `domains/vms/storefront/src/mark
 `negotiation_runtime.py` (`_place_capacity_hold`), `delivery_records.py`,
 `utils/migrations.py`; `domains/vms/storefront/pyproject.toml` and its lock.
 
-- [ ] 5.1 Implement `DeliveryProgress` over `vm_delivery_records` and
+- [x] 5.1 Implement `DeliveryProgress` over `vm_delivery_records` and
       `ComputeDeliveryDomain` from VM's fulfillment context, claim, accepted hold,
       result codec and Alkahest continuation; declare `arkhai-compute-delivery`; compose
       the Alkahest adapter in VM's payment-adapter table (D1, D10).
-- [ ] 5.2 Run `drive` inside `_fulfill_vm_context` and from the resume pass and the
+      Done. `VmDeliveryProgress` (`payment_repository.py`) reads the step from what the
+      row records — activation instant, then fulfillment identity, then a `dispatch`
+      phase, then a reservation — so rows written before the path read the same way;
+      a phase VM never writes is passed through as the step, so the path's
+      `progress_unreadable` still fires for VM; each identity is written once in the
+      path's transaction. The new module
+      `delivery_ports.py` holds `VmDeliveryDomain`: `accepted_deal` reads the recorded
+      verified evidence (commitment = its settlement reference, the servicing record's)
+      and the listing's durable binding, and resolves the payment adapter from the deal
+      lifecycle's table; `reserve_claim` is the evidence's claim with the binding's
+      offering mode and `deal_ref` naming listing and negotiation (the path's commit
+      sends only the claim's `deal_ref`, so the negotiation must be in it);
+      `accepted_hold` reads `capacity_holds`, its `placement` when the hold was placed
+      under its key, else its recorded expiry; `fulfillment_request` reuses a stored
+      context once shown to match the evidence, else builds it from the evidence and
+      stores it; `ready_evidence` is `vm.connection-details.v1` over the endpoint,
+      readiness and resource identities (never a credential), checked against the
+      recorded identities; `continuation` reads the result again, runs the selected
+      stage's `continue_delivery` with the settlement composition, then records
+      `fulfillment_uid`, `connection_details` and the listing's fulfilled resource —
+      nothing VM-visible is written before availability. `VmSiteFulfillment` schedules
+      before it begins, since provisioning accepts a fulfillment only for a scheduled
+      reservation (the library calls only `begin_fulfillment`). The Alkahest entry is in
+      `VmDealLifecycle`'s one payment-adapter table (`alkahest_adapter`, validator
+      `alkahest_commitment_valid`: the recorded evidence's mechanism, status, escrow
+      reference and schema), so `SellerServicing` resolves it too; its read stays
+      rejected naming the mechanism. `arkhai-compute-delivery>=0.1.0` declared;
+      `make lock` changed only the VM storefront and `e2e-tests` locks.
+- [x] 5.2 Run `drive` inside `_fulfill_vm_context` and from the resume pass and the
       Alkahest servicing continuation, mapping outcomes to fulfilled, deferred or failed;
       remove the reservation, commit, dispatch and result steps the path now owns from
       `vm_fulfillment_service.py`, `fulfillment_service.py` and
       `fulfillment_resume_runtime.py` (D1, D4).
-- [ ] 5.3 Remove `_parse_start_utc`'s now-fallback and every `or 3600` duration default
+      Done. `_fulfill_vm_context` builds the path (`vm_delivery_path`, capacity and
+      fulfillment from `ports` when given, else the runtime's) and runs
+      `drive_vm_delivery`, which records `ready` on `converged` and `ended` on `ended`
+      (`record_vm_delivery_outcome`, first terminal write wins), runs the seller's
+      failure policy once when the end is the path's own failure record (evidence
+      `delivery:*`), treats a drive stopped by an exception as deferred, and emits the
+      `provision` stage events once each as the records first show them —
+      `job_submitted` when a fulfillment identity is first recorded (the lanes wait on
+      it), `fulfilled` on convergence, `failed` on the path's own failure end. As VM's
+      settle task did, the hook keeps driving a dispatched deal while provisioning
+      settles (`pending` with a fulfillment), polling at `[provisioning].poll_interval`
+      up to `[provisioning].timeout`; past that the resume pass carries it. The hook
+      maps `available`/`converged` to fulfilled, `ended` to failed, the rest deferred;
+      payment `_provision` and Alkahest `fulfill_vm_settlement` treat an `available`
+      outcome (continuation pending) as deferred, so the resume pass converges it. The
+      resume pass revalidates through the stage, then drives. `vm_fulfillment_service.py`
+      is deleted; `fulfillment_service.py` keeps the result reading
+      (`fulfillment_result_connection`), the job-spec preview and `terminate_vm_lease`.
+      `VmPaymentsCoordinator` takes optional `capacity`/`fulfillment`, the seam the tests
+      inject through. Outside the plan, needed by the path: `update_vm_delivery` no
+      longer admits (the path admits every protected step, and the Alkahest
+      continuation's own writes must survive an end after availability, D11);
+      `DeliveryEnded` and `admit_delivery`'s availability branch are gone;
+      `VmPhysicalEnd.apply_end` no longer writes `status='ended'`, which would stop the
+      resume pass driving an ended deal whose continuation is pending — the drive
+      records it; `_end_failed_delivery` (failure policy's `release_capacity`) adopts an
+      end the path recorded (`source == "delivery"`) instead of recording a second.
+      Section 6 work done here because the modules that did it are deleted: nothing
+      writes `tenant_credentials` (delivery record or escrow) or core's `credentials`
+      rows any more (D5); settle and settle-status therefore carry no credentials until
+      section 6's live read. Outside the plan, cross-references the deletions broke:
+      `openspec/specs/site-capacity/spec.md`, `storefront-publication/spec.md` and
+      `settlement-servicing/spec.md` cited removed or moved VM tests and now cite the
+      surviving ones; `kit/site`'s ledger docstring and one of its tests named the
+      deleted module.
+- [x] 5.3 Remove `_parse_start_utc`'s now-fallback and every `or 3600` duration default
       on the delivery path, keeping minute-format reads of persisted timestamps; remove
       the fresh-reserve fallback on a failed hold commit; `_place_capacity_hold` passes
       `<negotiation_id>:hold` (D4, D6).
-- [ ] 5.4 Migration: add `vm_delivery_records.activated_at_utc` and rename stored
+      Done: the fallbacks went with the deleted module and the rewritten resume pass;
+      `reserve_vm_settlement_start` reads the evidence's start with no now-fallback.
+      `_place_capacity_hold` reserves under `<negotiation_id>:hold` and stores the exact
+      request (`claim`, `deal_ref`, `ttl_seconds`, start, duration) as the hold
+      payload's `placement`, which `accepted_hold` replays. Tested: the key on the
+      reserve a force-accept sends (`test_negotiate_controller.py`) and the read side
+      (the live-hold delivery test seeds a recorded placement); the write of
+      `placement` itself is not exercised end to end, since that fixture's site holds no
+      matching capacity and saves no hold. The negotiation's own `or 3600` (an
+      Agreement term default, not delivery) is untouched.
+- [x] 5.4 Migration: add `vm_delivery_records.activated_at_utc` and rename stored
       `fulfillment_phase='activate'` to `'ready'`, in VM's ordered migration list (D1, D2).
-- [ ] 5.5 Verify: application integration through the canonical typed clients in
+      Done: `20261106_001_vm_delivery_activation` (`add_vm_delivery_activation` in
+      `payment_repository.py`), appended to `VM_MIGRATIONS`; idempotent.
+- [x] 5.5 Verify: application integration through the canonical typed clients in
       `domains/vms/storefront/tests/integration/test_payment_settlement.py`,
       `test_lifecycle_admission.py` and `test_servicing_composition.py` for a payment
       deal and an Alkahest deal each delivered through `drive` with activation and a
@@ -619,7 +694,95 @@ defers a VM deal, never fails it"). Files under `domains/vms/storefront/src/mark
       provisioning") passing. Run `make test-storefront`, `make check-packaging` and
       `make test`. End-to-end: `e2e_deal`, `e2e_deal_buyer_cli` and
       `e2e_vm_payment_deal` exercise VM delivery on the path once deployed.
-- [ ] 5.6 Publish `arkhai-compute-delivery` with the first storefront that depends on
+      Application integration through the canonical typed clients
+      (`tests/integration/test_vm_delivery_path.py`, a new file rather than additions to
+      the three the plan named, since their harness replaces VM's hook with a controlled
+      one; real app, middleware, SQLite, VM hook, path, end service and deal lifecycle,
+      the payments kit's fake behind `PaymentsClient`, and the site and provisioning
+      service replaced at the aggregate clients by `tests/delivery_fakes.py`): a payment
+      deal settled by `settle_agreement` is activated at the site, its billing intent's
+      `ActivatedDeliveryRef` names the reservation and the recorded instant, it is
+      available with no buyer read, `ready`, with connection details and no credential
+      stored, one reservation (under the negotiation and its `:settlement` key, no
+      settlement reference) and one schedule, and `job_submitted` then `fulfilled`
+      reported once each; a lifecycle `commit` reaches `active`
+      with no settle-status poll; late settlement commits the Agreement window on every
+      commit; a forward deal is committed and leased at settlement, its claim released,
+      nothing begun, and the resume pass still begins nothing before the start; a live
+      `:hold` is committed and is the only reservation; a lost reserve acknowledgement
+      leaves the deal open and the resume pass's replay under the placement key finds the
+      same reservation and delivers it. Through core's `fulfill_domain` with the
+      settlement already verified (the escrow check reads a chain): an Alkahest deal is
+      activated, its billing start is the once-only no-op, its claim is published and
+      bound and it converges `ready`, the published evidence carrying no credential; its
+      publication failing once leaves it `available`/open and the next drive publishes
+      it with no second fulfillment or reservation. The fulfillment request names no
+      guest, is stored before it is sent and rebuilt identically, and a stored request
+      for other evidence is refused. `tests/integration/test_fulfillment_resume_runtime.py`
+      (moved from `unit/`, rewritten: the resume pass over the real path and SQLite): a
+      recorded fulfillment resumes with no schedule or begin and converges; a failed
+      fulfillment is handed to the end and the failure policy runs once across two
+      passes; a result naming another fulfillment is never activated or made available;
+      a phase VM never writes leaves the deal unactivated (`progress_unreadable`).
+      Application integration with VM's hook replaced by the harness's controlled one:
+      an available deal whose continuation is pending stays open through payment
+      `_provision` (`test_payment_settlement.py`); the configured release adopts an end
+      the path recorded, with one end and one filing (`test_lifecycle_failures.py`); the
+      force-accept hold reserves under `<negotiation_id>:hold`
+      (`test_negotiate_controller.py`). Unit: the result-to-connection reading, the
+      no-relay source check and `terminate_vm_lease` (`test_fulfillment_service.py`,
+      which absorbed `test_fulfillment_provisioning.py`), the migration's column, rename
+      and rerun and a fresh database recording it (`test_migrations.py`), the outcome
+      projection storing no credential and an available Alkahest outcome deferred, not
+      fulfilled (`test_settlement_composition.py`), and the stage's ambiguous on-chain
+      recovery never resubmitting (new `test_settlement_stages.py`). Removed with the
+      code they tested: `test_two_phase_reserve.py`,
+      `test_fulfill_vm_obligation_error_handling.py`, the `_do_provision`/poll/retry
+      tests, `test_reservation_closes_oversized_dynamic_listings` (which drove the
+      deleted `fulfill_compute_obligation`; the capacity-delta subscriber it observed is
+      independent of delivery) and `test_committed_window`'s resume test (with the
+      recovery commit gone it tested only the fake). Amended because the controlled hook
+      no longer has `_provision` record availability: `test_lifecycle_failures.py`
+      records it in setup; `_seed` gained a start and the listing's `sla`/`region` (the
+      listing binding validates them); `vm_delivery_evidence`'s source names its chain,
+      as recorded evidence does. The foundation's
+      "A buyer ends before provisioning" and "The storefront restarts between the end and
+      provisioning" (`test_lifecycle_admission.py`) pass unchanged, as does
+      `test_servicing_composition.py` with the Alkahest adapter in the table.
+      `make test-storefront`: unit 1165 passed, integration 541 passed.
+      `make check-packaging` passes. `make test`'s first run failed only
+      `scripts/tests/test_publish_matrix.py::test_a_manifest_package_depends_only_on_manifest_packages[vms-storefront]`:
+      `manifests/published-distributions.json` also lists every published distribution
+      in dependency order, so it gained `compute-delivery` after
+      `compute-provisioning-contracts` (a file the plan did not name);
+      `make test-release-tooling` then passed (2433) and `make test` passed whole.
+      `make check-change` fails only on the closeout citation of
+      `openspec/specs/compute-delivery/architecture.md` (9.9).
+      End-to-end: `e2e_deal`, `e2e_deal_buyer_cli` and `e2e_vm_payment_deal` exercise VM
+      delivery on the path once deployed, confirmed. They also read `tenant_credentials`
+      from settle-status, which section 5 alone no longer stores; section 6's live read
+      restores them in the same round, so the round's pipeline, not this commit's, is
+      their evidence. Owed by validation: none.
+      Fresh-context check: no layering, import-placement or packaging defect. Fixed from
+      it: a progress row's unknown phase now reaches the path as unreadable; history
+      and planned-behaviour wording in three docstrings and a comment; the specs' and
+      `kit/site`'s stale citations; tests moved to their level (the stage-only test to
+      unit, the result-reading tests into the module's own unit file), the
+      fixture-testing commit test deleted, a vacuous assertion dropped, the delivery
+      test module's docstring corrected; tests added for an `available` outcome
+      deferred in both settle paths, the release policy adopting the path's end, and the
+      hold's placement key; and the dead `[provisioning].poll_interval` it reported is
+      live again in the hook's loop. Declined: replacing `lifecycle.end.physical` and
+      `fake_site`'s module patch with new seams, as the existing harnesses do the same
+      and the change is not about test seams.
+      Handoff: the library calls only `begin_fulfillment`, and provisioning accepts a
+      fulfillment only for a scheduled reservation, so VM's `VmSiteFulfillment`
+      schedules first; section 7's bare-metal adapter needs the same, or the schedule
+      step belongs in the library's `SiteFulfillment` contract. The Alkahest commitment
+      validator is VM's (`VmDealLifecycle.alkahest_commitment_valid`); if bare metal's
+      is the same check, hoist it into `kit/alkahest` as section 2's handoff says. A
+      settle response's `tenant_credentials` is empty until section 6.
+- [x] 5.6 Publish `arkhai-compute-delivery` with the first storefront that depends on
       it: a filter and a manifest row in `.github/workflows/publish-pypi.yml` (after
       `compute-provisioning-contracts`, which it depends on) and a row in
       `docs/development/RELEASING.md` naming its internal dependencies, or
@@ -628,6 +791,14 @@ defers a VM deal, never fails it"). Files under `domains/vms/storefront/src/mark
       its GitHub environment, which no session can make: ask the owner before the
       section is committed. Added by section 3's implementation, which built the
       distribution.
+      Done, on the owner's answer A (2026-11-06): the filter row and the manifest row
+      after `compute-provisioning-contracts` in `publish-pypi.yml`, the row in
+      `RELEASING.md` (and `arkhai-compute-delivery` in `arkhai-vms-storefront`'s row),
+      and the entry in `manifests/published-distributions.json`. The owner creates the
+      PyPI trusted publisher for `arkhai-compute-delivery` (environment
+      `pypi-arkhai-compute-delivery`) and the matching GitHub environment before the
+      next release; until then only that package's publish job fails. Release tooling
+      passes (2433).
 
 ## 6. VM credentials read live and not replayed
 
@@ -639,7 +810,9 @@ Files under `domains/vms/storefront/src/market_storefront/`: `settlement_composi
 (`serialize_settlement_job`), `controllers/settle_controller.py`,
 `middleware/seller_auth.py` and `middleware/buyer_auth.py`, `payment_settlement.py`,
 `services/fulfillment_resume_runtime.py` and `services/vm_fulfillment_service.py`
-(credential writes), `utils/migrations.py`.
+(credential writes), `utils/migrations.py`. Amended by section 5's implementation:
+`vm_fulfillment_service.py` is deleted and no credential is written any more (5.2's
+notes); the live read goes through `delivery_ports.py`'s path.
 
 - [ ] 6.1 `settle` and `settle-status` obtain credentials through the library's access
       check over provisioning's fulfillment result, filling the existing typed response;
