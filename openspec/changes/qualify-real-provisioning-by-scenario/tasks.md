@@ -209,6 +209,45 @@ purchase driver in `e2e-tests/tests/e2e/roles/scenarios/bare_metal/` (beside
   Owed by validation: `tests.yml`, job `test · test-e2e-unit` — passes with the purchase
   source check.
 
+Stopped before 2.1, under 2.1's own return-to-design rule (D15): `09b`'s settlement wait
+does not resolve the bare-metal payments deal, by its negotiation or by any reference.
+Nothing of section 2 was implemented; no task is checked.
+
+- **The evidence.** `09b` calls `storefront_admin_client.wait_for_settlement(settlement_ref)`,
+  `GET /api/v1/admin/settle/{ref}/wait`. The bare-metal storefront serves it
+  (`domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/api.py:1315-1339`)
+  through `settlement_admin_routes`, whose `settle_status` hook
+  (`deal_controls.py:133-136`) reads `runtime.db.load_escrow(escrow_uid=ref)`, a plain
+  lookup in the `escrows` table (`core/storefront/src/core_storefront/sqlite_client.py:3385-3402`),
+  and returns `None` when there is no row. The bare-metal storefront writes an `escrows`
+  row only on the Alkahest verified path (`settlement_stages.py:495`); an
+  `arkhai.payments.v1` deal writes none. The wait
+  (`kit/settlement-runtime/src/market_settlement_runtime/admin_routes.py:92-125`) treats
+  `None` as nothing terminal and polls until its timeout, so `09b` would fail every run
+  with `ready=False`, whether the reference is the negotiation or the transaction.
+- **Where the design's premise held.** The VM storefront's wait reads
+  `load_vm_settlement_job(reference=…)` (`domains/vms/storefront/src/market_storefront/controllers/settle_controller.py:201-202`),
+  the reference D15 relied on, so section 3's VM purchase is not affected. The
+  bare-metal buyer-facing status route already resolves a payments deal, by its
+  settlement record's reference or its negotiation (`api.py:913-915`); only the admin
+  wait does not. The other input `09c` needs on this path is available: `DealLease`
+  finds a hold by negotiation (`e2e-tests/tests/e2e/roles/helpers/compute_deal.py:442-444`),
+  so a purchase driver's `lease_view` needs nothing new.
+- **What the design must decide.** (1) The bare-metal storefront's admin settle wait
+  resolves a settlement as its buyer status route does — by its settlement record's
+  reference, then its negotiation — reporting from the deal's fulfillment lifecycle as
+  it does now: a small product change in the bare-metal storefront, against the
+  proposal's "no payment or provisioning behaviour change", with a storefront unit or
+  application-integration test, and a version bump. (2) `09b`'s readiness read becomes a
+  driver part (`ComputeDealDriver`), the Alkahest drivers keeping the admin wait and the
+  purchase driver reading the buyer's fulfillment status: no product change, but the
+  wait leaves the shared body and the stage's "server-side long-poll" becomes a
+  driver's choice. (3) The bare-metal purchase keeps its own readiness stage in place of
+  `09b`, and runs `09a` and `09c` shared: against D15's single-body rule for `09b`.
+  The implementer's recommendation is (1): the admin wait is the readiness oracle every
+  other shared stage's reader assumes, the buyer route already has the lookup it needs,
+  and the gap is the storefront's, not the scenario's.
+
 ## 3. The VM lane purchase through `market buy`
 
 Delivers the VM lane's buyer purchase in `arkhai.payments.v1`, its own resource, host and
