@@ -10,7 +10,7 @@
 **Added 2026-08-03, in response to the Section 3 review's process finding, applied retroactively to prevent it recurring.** Section 1 is discussion/investigation only -- no code, no schema, no new tests -- so its closeout is correspondingly light:
 
 - **Comment hygiene:** not applicable; no production code was touched by this section.
-- **Documentation compliance:** Section 1's findings (pool-identity scoping, the local physical-authority inventory) are recorded in `design.md` and feed later sections' own promotions (task 1.3's identity resolution -> `resource-pool-management/spec.md#pool-identity`, listed in the Design promotion record); Section 1 has no distinct permanent-doc destination of its own.
+- **Documentation compliance:** Section 1's findings (pool-identity scoping, the local physical-authority inventory) are recorded in `design.md` and feed later sections' own promotions (task 1.3's identity resolution -> `resource-pool-management/spec.md#requirement-domain-neutral-publication-and-hold-hints`, listed in the Design promotion record); Section 1 has no distinct permanent-doc destination of its own.
 - **Narrative compression:** already reasonably compressed; the two corrections noted in 1.4 (made in Sections 4 and 5 rather than here) are cross-referenced, not duplicated.
 - **Promotion:** none owed directly by this section; see Section 7's Design promotion record for where its findings ultimately land.
 
@@ -20,12 +20,12 @@
 
 - [x] 2.1 Add per-`(site_id, projection_kind)` load-state fields to the storefront's existing operator status surface, following the existing `resource_count`-diagnostic pattern. **Done, reopened once by external review and re-fixed (2026-08-03):** `site_projection_cache.projection_status_summary()` wired into `SystemService.get_health` under `result["site_projections"]`; `core_storefront.models.system_models.HealthResponse` and `storefront_client.models.HealthResponse` both gained the field for real (the first pass silently dropped it before reaching HTTP callers); `fetched_at` tracking added to `ProjectionCache`/`ProjectionCacheView`.
 - [x] 2.2 Confirm the poller already retries indefinitely on a site that has never successfully loaded, and add a regression test. **Done (2026-08-03):** confirmed by tracing `ProjectionCache.load()`/`refresh()` (every failure path catches internally, never raises); covered by `domains/vms/storefront/tests/unit/services/test_site_projection_cache.py`.
-- [x] 2.3 Document "ignorance ≠ zero" for Section 4's future projection consumer. **Done (2026-08-03):** promoted to `openspec/specs/site-capacity/spec.md#per-site-projection-load-state-visibility`.
+- [x] 2.3 Document "ignorance ≠ zero" for Section 4's future projection consumer. **Done (2026-08-03):** promoted to `openspec/specs/site-capacity/spec.md#requirement-per-site-projection-load-state-visibility`.
 - [x] 2.4 Add focused tests for per-site/family status reporting. **Done, corrected once by external review (2026-08-03):** `test_system_service.py` rewritten from module-level patching to constructor injection (`TESTING.md`'s own rule); real HTTP round-trip integration tests added to `test_admin_api.py`'s `TestHealthEndpoint`.
 - [x] 2.5 Confirm POOLS-7 task 2.3's durability note is already satisfied. **Done (2026-08-03):** closed directly in `pools-7-storefront-fulfillment-cutover/tasks.md`, no code needed here.
 - [x] 2.6 **Superseded, confirmed by direct inspection of the current tree, not assumed from this task's own original text.** This task originally named `RemoteCapacityClient` and flagged both `resource_pool_projection`/`capacity_bucket_projection` and their `_version` siblings as lacking real in-process integration coverage. `RemoteCapacityClient` no longer exists (moved to `SiteCapacityClient` in `kit/site-client` during Section 4's own work); `test_capacity_api.py` now has four tests proving `SiteCapacityClient.resource_pool_projection()` and `.capacity_bucket_projection()` against a real in-process provisioning app, added incrementally during Sections 3, 5, and 6 without this task ever being revisited. The one narrow gap those four didn't cover -- the `_version()` sibling methods -- closed directly as part of this audit: `test_site_capacity_projection_version_endpoints_through_the_real_client` proves both against the real client, including that each version's revision actually advances when its projection's content changes.
 
-**Permanent documentation destination:** `openspec/specs/site-capacity/spec.md#per-site-projection-load-state-visibility`.
+**Permanent documentation destination:** `openspec/specs/site-capacity/spec.md#requirement-per-site-projection-load-state-visibility`.
 
 <details>
 <summary>Original tasks 2.1–2.4 (persistence layer), superseded — kept for history</summary>
@@ -152,19 +152,65 @@ Listed in an earlier order; closeout works the parts in `openspec/README.md`'s o
 
 `openspec/README.md`'s closeout requirement had five parts when this section was written, in order: comment hygiene, import placement, documentation compliance, narrative compression, promotion. This section originally implemented only four, omitting import placement as its own task -- corrected below, found and fixed during a second closeout pass (2026-08-05) after the first pass's own omission was caught. A sixth part, roadmap currency, was added 2026-08-06 by `add-development-roadmap` and is appended as task 7.6. This document's promotion table also originally used a heading and column shape that didn't match the README's own template -- corrected in `design.md` as part of this section's own scope.
 
-- [x] 7.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve every match; separately, direct-read every touched file for `AGENTS.md`'s fuzzier provenance-narration rule the tool can't catch mechanically. **Done:** ran the real tool (not the manual greps every earlier section relied on) -- found and fixed two genuine violations in very recent test docstrings; re-ran clean across the entire repository. A second pass, prompted by external review, found and fixed one further fuzzy violation the mechanical tool structurally can't catch (a test docstring narrating how a bug was originally found, not just its literal change-ID text) -- confirming the mechanical/fuzzy distinction this task's own text already warned about.
-- [x] 7.2 **Import placement.** Migrate local imports to module level wherever safe; verify each candidate move against the real test suite. **Done:** audited every local import touched by this section's own work (test files only -- this section made no production-code changes). One local import in the new buyer regression test (`import domains.vms.listings`, after a `sys.modules` clear) has a genuine, documented reason to stay local: it is the test's own subject, and cannot be imported at file scope without defeating the `sys.modules`-clearing setup the test depends on. Recorded with an inline comment rather than left unexplained.
+### Closeout run (2026-11-06): returned to implementation
+
+The closeout run re-confirmed parts 1–3 against today's tree and stopped at part 2. Closeout
+never edits code, so the edits below need a fix round in implementation. Closeout resumes
+after that round and a validation of its `HEAD`; parts 7–11 (7.8–7.11 here) wait for it.
+
+- **Comment hygiene.** `make check-comment-hygiene` passes. Reading the comments this
+  change added in `domains/vms/listings/src/arkhai_vms_listings/` turned up three that
+  need rewriting:
+  - The `resolve_vm_listing_cardinality_mode` docstring (`listing_cardinality_mode.py`,
+    lines 53–64) narrates history: "the mode this pool would have gotten before the hint
+    existed", "pre-existing `member_count == 1` heuristic", "the moment this resolver is
+    wired in". State the invariant instead: an untagged pool with one enabled member
+    defaults to `specific_resource` and any other untagged pool to `fungible`, so that a
+    single-member pool keeps its resource-keyed derivation identity.
+  - Three module docstrings name the hints module as `kit/resource-pools.hints`
+    (`listing_cardinality_mode.py`, `pool_descriptors.py`, and `pricing_resolution.py`,
+    each at line 3). It is `market_resource_pools_contracts.hints`, in
+    `kit/resource-pools-contracts`.
+  - `listing_cardinality_mode.py` line 13 cites
+    `storefront-publication/spec.md#domain-owned-publication-and-hold-hints`. The heading's
+    anchor is `#requirement-domain-owned-publication-and-hold-hints`.
+- **Import placement: four local imports should move.**
+  - The four imports are `listing_cardinality_mode.py:77`, `pool_descriptors.py:35` and
+    `:70`, and `pricing_resolution.py:140`. Each imports
+    `market_resource_pools_contracts.hints` inside a function.
+  - Each gives the same reason: to keep `market_resource_pools` out of the buyer
+    distribution. That reason no longer holds. The imports now name the contracts
+    distribution, which `domains/vms/listings/pyproject.toml` declares as a required
+    dependency so that the buyer stays free of the pool authority. The package already
+    imports it at module level in `models.py:20`, `reconciler.py:20`, and
+    `listing_comparison.py:31`.
+  - The fix: move the four imports to module level and delete their comments. Attempt each
+    move against the suites to confirm there is no circular import.
+    `domains/vms/buyer/tests/test_no_resource_pools_dependency.py` still guards the buyer
+    boundary.
+- **Documentation compliance.** Fixed in this run:
+  - Every anchor in `design.md`'s promotion record now resolves. Requirement headings take
+    the `#requirement-` prefix. The `#pool-identity` and
+    `#storefronts-cache-independent-site-projections` rows now point at the requirements
+    that hold those rules today.
+  - The rows that later changes superseded say so.
+  - The two findings handed to this change (bare-metal host identity, and a region declared
+    only as a tag) are recorded as resolved elsewhere, each with its evidence, under their
+    own headings in `design.md`.
+
+- [x] 7.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve every match; separately, direct-read every touched file for `AGENTS.md`'s fuzzier provenance-narration rule the tool can't catch mechanically. **Done:** ran the real tool (not the manual greps every earlier section relied on) -- found and fixed two genuine violations in very recent test docstrings; re-ran clean across the entire repository. A second pass, prompted by external review, found and fixed one further fuzzy violation the mechanical tool structurally can't catch (a test docstring narrating how a bug was originally found, not just its literal change-ID text) -- confirming the mechanical/fuzzy distinction this task's own text already warned about. **Correction (closeout, 2026-11-06):** three comments in `arkhai_vms_listings` still need rewriting; see "Closeout run (2026-11-06)" above.
+- [x] 7.2 **Import placement.** Migrate local imports to module level wherever safe; verify each candidate move against the real test suite. **Done:** audited every local import touched by this section's own work (test files only -- this section made no production-code changes). One local import in the new buyer regression test (`import domains.vms.listings`, after a `sys.modules` clear) has a genuine, documented reason to stay local: it is the test's own subject, and cannot be imported at file scope without defeating the `sys.modules`-clearing setup the test depends on. Recorded with an inline comment rather than left unexplained. **Correction (closeout, 2026-11-06):** that audit covered only Section 7's own test files. Four production local imports this change added in Sections 5–6 now have a reason that no longer holds, and should move; see "Closeout run (2026-11-06)" above.
 - [x] 7.3 **Documentation compliance.** Re-check every accepted decision against `openspec/README.md`'s placement rules directly. **Done:** see 7.5's own audit findings below -- four stale/nonexistent-anchor promotion-table rows found and corrected; one permanent-spec evidence line found depending on an active change document for its own rationale (`design.md`'s "External review round," referenced by name) and corrected to be self-contained, per this same rule.
 - [x] 7.4 **Narrative compression.** Shorten completed-task notes to final behavior, material evidence, deferred work, and permanent destinations; move debugging narratives into `design.md` first. **Done, in two passes:** the first took this document from 415 lines to roughly 160, confirming `design.md` already carried the full rationale for every section before trimming. A second pass, prompted by external review, found this section's own closeout notes hadn't been held to the same standard -- still carrying which review found which problem and in what order, rather than final behavior and evidence. Trimmed further; the debugging-sequence detail that prompted this (a mechanical edit briefly deleting a section heading, later manual sweeps proving insufficient) has no lasting design value once the fix is verified, so it was cut rather than relocated.
 - [x] 7.5 **Promotion.** Complete the design-promotion record. **Done:**
   Archival uses `--skip-specs`: this task synchronized the specification by hand.
   - [x] 7.5.1 Projection load-state visibility and resource-pool projection metadata: already promoted incrementally through Sections 2-4; `architecture.md` confirmed not needing a change (7.5.4).
-  - [x] 7.5.2 Commercial mapping, claim routing, and the projection-becomes-default decision, to `openspec/specs/storefront-publication/spec.md`. **Corrected:** the original wording named "the local-physical-authority retirement boundary" as something this change promotes -- wrong, since Section 6 re-scoped the actual retirement out of this change entirely (task 6.4, now homed at `pools-9-retire-local-physical-authority`). What this change genuinely promotes instead: the projection path becomes the storefront's *default* once it has parity with a local-table path it still retains. Found and fixed a real gap: four promotion-table rows pointed at `#local-physical-authority`, a heading never actually created -- two moved out of this change's own promotion record entirely (re-scoped-away content, now belonging to `pools-9`), one struck as superseded by later rows, one given a real destination (`openspec/specs/storefront-publication/spec.md#storefronts-cache-independent-site-projections`, extended with a new scenario). Two further early rows removed for pointing at pre-rename anchors no longer in use.
+  - [x] 7.5.2 Commercial mapping, claim routing, and the projection-becomes-default decision, to `openspec/specs/storefront-publication/spec.md`. **Corrected:** the original wording named "the local-physical-authority retirement boundary" as something this change promotes -- wrong, since Section 6 re-scoped the actual retirement out of this change entirely (task 6.4, now homed at `pools-9-retire-local-physical-authority`). What this change genuinely promotes instead: the projection path becomes the storefront's *default* once it has parity with a local-table path it still retains. Found and fixed a real gap: four promotion-table rows pointed at `#local-physical-authority`, a heading never actually created -- two moved out of this change's own promotion record entirely (re-scoped-away content, now belonging to `pools-9`), one struck as superseded by later rows, one given a real destination (`openspec/specs/storefront-publication/spec.md#requirement-projection-backed-listing-candidate-derivation`, under its current heading, extended with a new scenario). Two further early rows removed for pointing at pre-rename anchors no longer in use.
   - [x] 7.5.3 Domain-neutral hint keys, domain-owned values, and pool-identity site-scoping, to `openspec/specs/resource-pool-management/spec.md`: already promoted incrementally through Sections 1, 5, and 6.
   - [x] 7.5.4 `docs/development/ARCHITECTURE.md`: confirmed not needing a change -- its existing "storefront is not the source of truth for physical resources" text already states the principle this whole change executes toward, at the correct level of generality.
   - [x] 7.5.5 Strict `openspec` validation, run for real: `change/pools-8-capacity-projection-and-listing-hints`, `spec/resource-pool-management`, `spec/storefront-publication`, and `spec/site-capacity` each validate clean individually. Archival itself is a separate, later action once every task in this change is genuinely complete.
 
-- [ ] 7.6 **Roadmap currency.** Update the affected goal's current state and gap mapping in `docs/development/ROADMAP.md`, or record that no goal is affected. Expected: this change's completed work is already reflected in Goal 1's current-state paragraph — projection-backed listing derivation being the default path, and storefronts consuming physical facts through the resource-pool and capacity-bucket projections — so no gap row is owed; confirm that remains accurate and record the disposition.
+- [x] 7.6 **Roadmap currency.** Update the affected goal's current state and gap mapping in `docs/development/ROADMAP.md`, or record that no goal is affected. Expected: this change's completed work is already reflected in Goal 1's current-state paragraph — projection-backed listing derivation being the default path, and storefronts consuming physical facts through the resource-pool and capacity-bucket projections — so no gap row is owed; confirm that remains accurate and record the disposition. **Done (closeout, 2026-11-06): no edit owed.** Goal 1's current state already says storefronts consume physical facts through both projections and derive every listing from them. Since `pools-9-retire-local-physical-authority`, that is the only path rather than the default. No gap row names this change.
 - [ ] 7.7 **Campaign index currency.** Update this change's row, and its campaign's dependency graph, in `openspec/changes/README.md`, or record that both are unchanged. Other rows' `Depends on` are left alone: archive cleanup releases dependents after the closeout gate.
 - [ ] 7.8 **Documentation citations.** After promotion, run `make check-doc-citations CHANGE=pools-8-capacity-projection-and-listing-hints` and resolve every match, then `openspec validate pools-8-capacity-projection-and-listing-hints --strict`.
 - [ ] 7.9 **End-to-end pipeline.** Record the passing run the latest validation names, its result, and the scenarios that exercise this change, or an explicit blocker naming its cause and the change that owns it, with the validations it gates treated as unrun.
