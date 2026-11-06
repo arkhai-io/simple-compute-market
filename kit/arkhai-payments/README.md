@@ -390,7 +390,9 @@ once-only end-service caller alone is not recurring enablement.
 
 `authorize` is read-only for commit, dispatch, physical start and disclose.
 Disclosure additionally requires `billing_operation_key` and a matching verified
-start event containing the same activation envelope. Unknown, unverified,
+start event containing the same activation envelope. A caller-supplied journaled
+`billing_start_result` reports definitive refusal rather than leaving disclosure
+pending; it must be paired with that operation identity. Unknown, unverified,
 regressing or stale snapshots never allow delivery. Pre-start reservations prove
 initial funding without inventing a funded-through date. Effective stops,
 exhaustion and maximum ends refuse; a future pending stop remains a bound.
@@ -415,7 +417,7 @@ This starts no server and needs no credentials. The invocation owns its determin
 fixture accounts, signer, funding/state and injected clock. It opens the library's
 rate surface directly: setup/rate derivation, buyer check, pure admission,
 activation-bound start with response loss and same-key replay, disclosure, seller
-notice and verified final stop. Its JSON is labelled fixture evidence, not hosted
+notice, an earlier payer protection stop and the verified controlling final stop. Its JSON is labelled fixture evidence, not hosted
 qualification. `examples/rate.py` is also the runnable entry point for a fresh
 verifier.
 

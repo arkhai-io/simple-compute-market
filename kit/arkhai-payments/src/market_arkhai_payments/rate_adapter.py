@@ -205,6 +205,12 @@ class RatePaymentAdapter(PaymentAdapter):
                 actor = stored.account.root if isinstance(stored, StoredEvent) else "terms"
                 sequence = stored.sequence
                 assert sequence is not None
+                if event.part is None:
+                    if kind == "start" and self.data.mandate.parts[part.part].root.kind != "rate":
+                        continue
+                    if kind == "stop" and not any(stop is not None and stop.sequence == sequence
+                                                   for stop in (part.stop, part.pendingStop)):
+                        continue
                 # Stop requests are not final ends. The winning final record,
                 # including an equal-time winner, lives in the per-part view.
                 projected = "stop_request" if kind == "stop" else kind
@@ -271,7 +277,8 @@ class RatePaymentAdapter(PaymentAdapter):
         return view.model_copy(update={"parts": observations, "state": state, "deadline": min(bounds) if bounds else None})
 
     async def authorize(self, phase: DeliveryPhase, evidence: DeliveryEvidence, *,
-                        billing_operation_key: str | None = None) -> DeliveryAuthorization:
+                        billing_operation_key: str | None = None,
+                        billing_start_result: BillingStartResult | None = None) -> DeliveryAuthorization:
         operation_id = f"{self.negotiation_id}:{phase.value if isinstance(phase, DeliveryPhase) else phase}"
         refs = [self.commitment_ref]
         def answer(status: Literal["allow", "refuse", "pending"], reason: str) -> DeliveryAuthorization:
@@ -298,6 +305,11 @@ class RatePaymentAdapter(PaymentAdapter):
             return answer("refuse", "verified stop or maximum term is effective")
         if phase == DeliveryPhase.COMMIT:
             return answer("allow", "verified timely approved rate commitment")
+        if phase == DeliveryPhase.DISCLOSE and billing_start_result is not None:
+            if billing_operation_key is None:
+                return answer("refuse", "journaled billing result requires its operation identity")
+            if isinstance(billing_start_result.outcome, Rejected):
+                return answer("refuse", "journaled billing start refused: " + billing_start_result.outcome.reason)
         if any(part.started is not None for part in parts):
             if snapshot.fundedThrough is None:
                 return answer("pending", "started rate has no verified funding boundary")
