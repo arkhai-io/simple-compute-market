@@ -273,6 +273,9 @@ def test_publication_builder_preserves_option_identity_and_rate_units(
     assert descriptors == {
         "arkhai_payments.payee_account",
         "arkhai_payments.window",
+        "arkhai_payments.approval_window",
+        "arkhai_payments.period",
+        "arkhai_payments.billing_kind",
         "arkhai_payments.deposit_agreement",
     }
 

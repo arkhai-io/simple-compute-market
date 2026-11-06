@@ -28,6 +28,17 @@ The mandate MUST be derived only from the exact accepted Agreement, binding its 
 - **THEN** setup once precedes rate, each with per-part authorities and maxHoldExtension
 - **AND** setup's encoded end is Agreement start, effectively clamped to approval if later, both holds are afterStop plus dispute window, and approval expiry still uses approval_window
 
+#### Scenario: The part's own authorities grant nothing beyond the accepted rights
+
+- **WHEN** a seller derives a mandate and the buyer checks it
+- **THEN** both derive the identical mandate: each once part authorizes no start or stop, each rate part derives its start and stop entries only from the accepted rights, reverse is limited to the seller and dispute authority, only the dispute authority extends holds, and each part states its accepted maxHoldExtension, null when unbounded
+- **AND** there are no mandate-level authorities
+
+#### Scenario: A mandate in the previous wire is refused
+
+- **WHEN** stored settlement data or a counterparty's mandate carries mandate-level authorities, or a part without its own authorities or maximum hold extension
+- **THEN** it is refused before any approval or verification, and the stored Agreement bytes and mandate are left as they are
+
 ## ADDED Requirements
 
 ### Requirement: Hosted rate mandates are derived from the selected option
@@ -55,7 +66,7 @@ SCM MUST derive time rate parts through the agreed-price accessor and lifecycle 
 - **GIVEN** the deal-lifecycle requirements for stop-authority and term-end treatment
 - **WHEN** a returned-capable rate mandate is derived
 - **THEN** the adapter uses the shared codec for rate stop entries and rate end, including the dispute authority's chosen entry
-- **AND** setup once ends carry no partialPeriod field
+- **AND** setup once ends retain the published schema's required inert returned partialPeriod, which prices no recurring period
 
 #### Scenario: A buyer stops before activation
 - **GIVEN** an approved mandate with a setup part

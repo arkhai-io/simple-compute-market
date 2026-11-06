@@ -22,7 +22,9 @@ from market_core.schemas import (
 )
 
 from market_deal_lifecycle.terms import LifecycleTerms
+from market_settlement_runtime.rate_servicing import RateServicing
 from market_arkhai_payments.canonical import wire_json
+from market_arkhai_payments.contracts import get_contract
 from market_arkhai_payments.errors import MandatePolicyError
 from market_arkhai_payments.mandates import MandatePolicy, PaymentsOptionParams, derive_mandate
 from market_arkhai_payments.models import AccountId, Mandate
@@ -111,8 +113,10 @@ def _policy(
         ) from exc
     try:
         quote = agreed_price(agreement, project_billing=payments_billing_basis)
-        if quote.unit != "total" or quote.asset is None:
-            raise MandatePolicyError("the installed payments adapter requires an asset-bearing total quote")
+        option = selected_payment_option(agreement)
+        expected_unit = "per_period" if option.period is not None else "total"
+        if quote.unit != expected_unit or quote.asset is None:
+            raise MandatePolicyError("payments quote has a different accepted billing unit or no asset")
         return MandatePolicy(
             buyer_account=payer,
             option=selected_payment_option(agreement),
@@ -144,8 +148,16 @@ class PaymentSettlementData(BaseModel):
 
     @classmethod
     def for_agreement(
-        cls, agreement: Mapping[str, Any], config: ArkhaiPaymentsConfig
+        cls, agreement: Mapping[str, Any], config: ArkhaiPaymentsConfig,
+        *, rate_servicing: RateServicing | None = None,
     ) -> PaymentSettlementData:
+        option = selected_payment_option(agreement)
+        if option.period is not None:
+            declaration = (rate_servicing or RateServicing()).select(ARKHAI_PAYMENTS_MECHANISM)
+            if declaration.contract_revision != str(get_contract().metadata["schema_sha256"]):
+                raise MandatePolicyError("rate servicing does not select the installed payments contract")
+            if declaration.publication == "proposed" and (config.livemode or config.service_identity is None):
+                raise MandatePolicyError("proposed rate servicing requires a pinned non-live authority")
         mandate = derive_mandate(dict(agreement), mandate_policy_for_agreement(agreement, config))
         return cls(mandate=mandate, transaction_id=transaction_id(mandate))
 

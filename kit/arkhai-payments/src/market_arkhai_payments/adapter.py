@@ -62,10 +62,10 @@ class PaymentAdapter:
     def __init__(
         self, agreement: Mapping[str, Any], data: PaymentSettlementData, *,
         account: str, client_for_owner: ClientForAccount, verify_snapshot: SnapshotVerifier,
-        minimum_sequence: int = 0,
+        minimum_sequence: int = 0, _allow_rate: bool = False,
     ) -> None:
         data.require_bound_to(agreement)
-        if any(part.root.kind != "once" for part in data.mandate.parts):
+        if not _allow_rate and any(part.root.kind != "once" for part in data.mandate.parts):
             raise ValueError("the hosted once adapter does not support rate parts")
         if minimum_sequence < 0:
             raise ValueError("minimum sequence must be nonnegative")
@@ -211,8 +211,8 @@ class PaymentAdapter:
         if (keys.negotiation_id, keys.operation_key) != (command.negotiation_id, command.operation_key):
             return Rejected(reason="operation keys do not match the command")
         part = str(command.payload["part"])
-        request_id = keys.part_event(part, "reverse")
-        expected = {"kind": "reverse", "part": int(part), "amount": command.payload["amount"]}
+        request_id = keys.part_event(part, command.kind)
+        expected = self.command_event(command)
         attempted = False
         try:
             before = self.snapshot_now()
@@ -238,13 +238,17 @@ class PaymentAdapter:
                        and event.root.requestId.root == request_id
                        and event.root.event.model_dump(mode="json", by_alias=True, exclude_none=True) == expected]
             if not matches:
-                return Unknown(reason="reverse response is not yet in the verified authority record")
+                return Unknown(reason="operation response is not yet in the verified authority record")
             return Accepted(records=[e for e in self.events(after.snapshot)
                                      if e.sequence == matches[0].root.sequence and e.part == part])
         except (PaymentsError, ArkhaiPaymentsConfigurationError, ValidationError) as exc:
             if attempted and not isinstance(exc, PaymentsAPIError):
-                return Unknown(reason=f"reverse requires verified read recovery: {exc}")
+                return Unknown(reason=f"operation requires verified read recovery: {exc}")
             return _failure(exc)
+
+    def command_event(self, command: LifecycleCommand) -> dict[str, Any]:
+        return {"kind": "reverse", "part": int(str(command.payload["part"])),
+                "amount": command.payload["amount"]}
 
     async def _commitment_matches(self, evidence: DeliveryEvidence) -> bool:
         if (evidence.negotiation_id, evidence.commitment_ref) != (self.negotiation_id, self.commitment_ref):
