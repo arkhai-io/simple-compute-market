@@ -17,6 +17,10 @@ from decimal import Decimal
 from fractions import Fraction
 import json
 import math
+import sqlite3
+
+import httpx
+from storefront_client import StorefrontClient, StorefrontClientError
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
@@ -30,10 +34,11 @@ from market_core.schemas import (
 )
 from market_deal_lifecycle.configuration import DisputeConfig, DisputeEntry
 from market_deal_lifecycle.terms import Adjudication, TermContext, encode_terms
-from market_identity import Ed25519Signer
+from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_pool_overrides import PoolOverrideClient
 from market_settlement_runtime import SettlementPublicationClause
 from market_settlement_runtime.rate_publication import RatePresetPricing
+from market_settlement_runtime.rate_servicing import RateServicing, RateServicingDeclaration, RateServicingUnavailable
 from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -141,7 +146,53 @@ def options(listing):
     return listing.extra["settlement_options"]
 
 
-async def exercise(admin, state, *, mode, clauses, address):
+def qualify_selector():
+    required = {MECHANISM: "fixture-rate-v1"}
+    proposed = RateServicingDeclaration(MECHANISM, "fixture-rate-v1", "proposed", "terms-probe")
+    published = RateServicingDeclaration(MECHANISM, "fixture-rate-v1", "published")
+    for declared, lane, allowed in (
+        ({}, None, False), ({MECHANISM: published}, None, True),
+        ({MECHANISM: proposed}, None, False),
+        ({MECHANISM: proposed}, "another-lane", False),
+        ({MECHANISM: proposed}, "terms-probe", True),
+        ({MECHANISM: replace(published, contract_revision="different")}, None, False),
+        ({MECHANISM: replace(published, mechanism="different")}, None, False),
+    ):
+        try:
+            selected = RateServicing(required, declared, lane).select(MECHANISM)
+        except RateServicingUnavailable:
+            assert not allowed
+        else:
+            assert allowed and selected is declared[MECHANISM]
+    print("published/proposed/absent/wrong revision/wrong mechanism/exact lane selection: PASS")
+
+
+def acceptance_snapshot(db):
+    with sqlite3.connect(db.db_path) as connection:
+        return connection.execute("SELECT * FROM negotiation_threads ORDER BY negotiation_id").fetchall()
+
+
+async def refuse_cached(buyer, db, identity, option, mode):
+    before = acceptance_snapshot(db)
+    payload = {"duration_seconds": 3600, "ssh_public_key": "ssh-ed25519 fixture"}
+    if mode != "VM":
+        payload["access_method"] = "ssh"
+    try:
+        await buyer.negotiate_new(
+            listing_id=identity, initial_amount=1,
+            provision_terms={"kind": "compute.v1" if mode == "VM" else "bare_metal.v2", "version": 1, "payload": payload},
+            settlement_selection={"option_id": option["option_id"],
+                                  "settlement": {"schema": MECHANISM, "payer_account": PAYEE}},
+            selection_only=True,
+        )
+    except StorefrontClientError as exc:
+        assert exc.status_code == 409 and "settlement_option_withdrawn_refetch" in str(exc), str(exc)
+    else:
+        raise AssertionError("undeclared cached rate option was accepted")
+    assert acceptance_snapshot(db) == before
+
+
+async def exercise(admin, state, *, buyer, db, mode, clauses, address):
     await admin.get_system_status()
     await admin.admin_run_lifecycle_cycle("site-projections")
     report = await admin.admin_run_lifecycle_cycle("publication")
@@ -160,6 +211,26 @@ async def exercise(admin, state, *, mode, clauses, address):
     assert on_demand["lifecycle"]["early_termination"]["premature_stop_penalty"] == "15000000"
     assert state["helper"].requests[-1].default_horizon_seconds == 7200
     print(mode, "typed publication: one capacity identity, reserved + hosted once + independently priced on-demand/spot: PASS")
+
+    declaration = state["declarations"][MECHANISM]
+    for invalid in (None, replace(declaration, contract_revision="different"),
+                    replace(declaration, lane_identity="another-lane")):
+        if invalid is None:
+            state["declarations"].clear()
+        else:
+            state["declarations"][MECHANISM] = invalid
+        await refuse_cached(buyer, db, identity, on_demand, mode)
+        report = await admin.admin_run_lifecycle_cycle("publication")
+        assert len(options(await admin.get_listing(identity))) == 2
+        assert sum(item.get("reason") == "rate_servicing_undeclared" for item in report["actions"]) == 2
+        state["declarations"][MECHANISM] = declaration
+        await admin.admin_run_lifecycle_cycle("publication")
+    print(mode, "absent/wrong revision/wrong lane: cached signed 409/refetch with no negotiation writes; publication keeps reserved identity: PASS")
+    state["declarations"][MECHANISM] = RateServicingDeclaration(MECHANISM, "fixture-rate-v1", "published")
+    await admin.admin_run_lifecycle_cycle("publication")
+    assert len(options(await admin.get_listing(identity))) == 4
+    state["declarations"][MECHANISM] = declaration
+    print(mode, "matching published declaration also permits recurring publication: PASS")
 
     overrides = PoolOverrideClient(admin)
     adjusted = deepcopy(clauses)
@@ -247,7 +318,10 @@ async def vm(path):
     from tests._settings_overrides import replaced_setting  # Lazy: VM environment only.
 
     helper = ProposedHelper()
-    state = {"helper": helper, "helpers": {MECHANISM: helper}, "deadline": 1200}
+    declarations = {MECHANISM: RateServicingDeclaration(MECHANISM, "fixture-rate-v1", "proposed", "terms-probe")}
+    state = {"helper": helper, "helpers": {MECHANISM: helper}, "deadline": 1200,
+             "declarations": declarations,
+             "servicing": RateServicing({MECHANISM: "fixture-rate-v1"}, declarations, "terms-probe")}
     raw = root_configuration({**SETTLEMENT["alkahest"], "release_models": ["recipient"]})
 
     def factory(_fulfillment):
@@ -260,13 +334,14 @@ async def vm(path):
             mechanism_resources={"wallet": SELLER_WALLET, "chains": dict(config.CHAINS),
                                  "clients": {"anvil": object()}},
             disputes=RegistryDisputePolicy(DisputeConfig(entries=[ENTRY])),
+            rate_servicing=state["servicing"],
             rate_preset_helpers=state["helpers"],
             delivery_deadline_for_pool=lambda site, pool: state["deadline"],
         )
 
     with patch.dict("os.environ", {"XDG_CACHE_HOME": seed_token_cache(path, 31337)}), \
          replaced_setting("pricing.defaults", {}):
-        async with publication_app(path, settlement_configuration=raw, settlement_composition_factory=factory) as app:
+        async with publication_app(path, negotiation=True, settlement_configuration=raw, settlement_composition_factory=factory) as app:
             clauses = [settlement_clause("1"), *presets()]
             app.set_settlement_clauses(clauses)
             projected = pool("bounded", backing="backed", capacity_bounds={"vm": {
@@ -274,7 +349,7 @@ async def vm(path):
             }})
             app.pools.append(projected)
             state["set_bounds"] = lambda bounds: projected["pool_metadata"]["policy_tags"].update(capacity_bounds={"vm": bounds})
-            await exercise(app.client, state, mode="VM", clauses=clauses,
+            await exercise(app.client, state, buyer=app.buyer, db=app.db, mode="VM", clauses=clauses,
                            address={"site_id": "site-a", "pool_id": "bounded", "offering_mode": "vm"})
 
 
@@ -282,12 +357,15 @@ async def bare(path):
     sys.path.insert(0, str(ROOT / "domains/bare_metal/storefront/tests"))
     from pytest import MonkeyPatch  # Lazy: bare-metal fixture construction only.
     from test_publication_cycle import Site, pool, member  # Lazy: bare-metal fixture only.
-    from test_http_system import _derivation_runtime, _app, _admin_client  # Lazy: bare-metal app only.
+    from test_http_system import _derivation_runtime, _app, _admin_client, SELLER_SIGNER  # Lazy: bare-metal app only.
     from test_http_publication_rates import _Sites  # Lazy: bare-metal site facade only.
     from arkhai_bare_metal_storefront.settlement_composition import build_bare_metal_settlement_registry  # Lazy: bare-metal environment only.
 
     helper = ProposedHelper()
-    state = {"helper": helper, "helpers": {MECHANISM: helper}, "deadline": 1200}
+    declarations = {MECHANISM: RateServicingDeclaration(MECHANISM, "fixture-rate-v1", "proposed", "terms-probe")}
+    state = {"helper": helper, "helpers": {MECHANISM: helper}, "deadline": 1200,
+             "declarations": declarations,
+             "servicing": RateServicing({MECHANISM: "fixture-rate-v1"}, declarations, "terms-probe")}
     site = Site(pool("pool-1", member("r1", "pool-1"), policy_tags={"capacity_bounds": {
         "bare_metal": {"max_duration_seconds": 7200, "available_until_utc": END},
     }}))
@@ -302,6 +380,7 @@ async def bare(path):
         composition = replace(
             original, registry=registry, config=registry.resolve(raw, role="seller"),
             disputes=RegistryDisputePolicy(DisputeConfig(entries=[ENTRY])),
+            rate_servicing=state["servicing"],
             rate_preset_helpers=state["helpers"],
             delivery_deadline_for_pool=lambda site, pool: state["deadline"],
         )
@@ -311,8 +390,12 @@ async def bare(path):
         ))
         app = _app(runtime)
         async with app.router.lifespan_context(app):
-            async with _admin_client(app) as admin:
-                await exercise(admin, state, mode="bare metal", clauses=clauses,
+            async with _admin_client(app) as admin, StorefrontClient(
+                "http://seller", signer=SERVICE, caller_role="buyer",
+                expected_publishers=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
+                transport=httpx.ASGITransport(app=app),
+            ) as buyer:
+                await exercise(admin, state, buyer=buyer, db=runtime.db, mode="bare metal", clauses=clauses,
                                address={"site_id": "site-a", "pool_id": "pool-1", "offering_mode": "bare_metal"})
 
 
@@ -320,6 +403,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("surface", choices=("vm", "bare"))
     args = parser.parse_args()
+    qualify_selector()
     with TemporaryDirectory(prefix="recurring-publication-") as directory:
         asyncio.run((vm if args.surface == "vm" else bare)(Path(directory)))
     print("LIMIT: proposed injected encoder; no rate authority, approval, materialization, deployed site deadline or acceptance guarantee.")

@@ -414,6 +414,7 @@ def _build_vm_services(
             settlement_composition.accepted_obligation_dispatch()
         ),
         arkhai_payments_stage=settlement_composition.arkhai_payments_stage,
+        rate_servicing=settlement_composition.rate_servicing,
     )
     listing_service = _build_listing_service(
         registry=registry,

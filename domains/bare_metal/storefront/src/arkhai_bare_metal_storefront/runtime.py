@@ -338,6 +338,10 @@ class BareMetalStorefrontRuntime:
                     else {}
                 ),
                 seller_stages=self.domain.settlement.seller_stages,
+                rate_servicing=(
+                    self.settlement_composition.rate_servicing
+                    if self.settlement_composition is not None else None
+                ),
             ),
         )
         object.__setattr__(self, "lifecycle", BareMetalLifecycle(self))

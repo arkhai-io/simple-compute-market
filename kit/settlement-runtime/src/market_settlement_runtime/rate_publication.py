@@ -20,6 +20,8 @@ from market_deal_lifecycle.terms import (
 )
 from pydantic import BaseModel, ConfigDict, Field
 
+from .rate_servicing import RateServicing, RateServicingDeclaration, RateServicingUnavailable
+
 Amount = Annotated[str, Field(pattern=r"^(0|[1-9][0-9]*)$")]
 Seconds = Annotated[int, Field(strict=True, ge=0)]
 
@@ -67,6 +69,7 @@ class RatePresetRequest:
     max_duration_seconds: int | None
     available_until_utc: datetime | None
     default_horizon_seconds: int
+    servicing: RateServicingDeclaration
 
 
 @dataclass(frozen=True)
@@ -111,6 +114,7 @@ def derive_rate_preset(
     clause: Any,
     *,
     helper: RatePresetHelper | None,
+    servicing: RateServicing,
     authorities: Sequence[DisputeEntry],
     max_duration_seconds: int | None,
     available_until_utc: datetime | str | None,
@@ -122,6 +126,10 @@ def derive_rate_preset(
     preset = clause.recurring
     if preset is None:
         raise ValueError("a recurring publication clause is required")
+    try:
+        declaration = servicing.select(clause.mechanism)
+    except RateServicingUnavailable as exc:
+        return RatePresetRefusal("rate_servicing_undeclared", str(exc))
     if helper is None:
         return RatePresetRefusal("rate_helper_missing", "no hosted recurring preset helper")
     deadline = effective_delivery_deadline(delivery_deadline_seconds)
@@ -188,7 +196,7 @@ def derive_rate_preset(
         ))
         request = RatePresetRequest(
             clause, preset, quote, lifecycle, max_duration_seconds,
-            available_until_utc, horizon,
+            available_until_utc, horizon, declaration,
         )
         result = helper.build(request)
         if isinstance(result, RatePresetRefusal):

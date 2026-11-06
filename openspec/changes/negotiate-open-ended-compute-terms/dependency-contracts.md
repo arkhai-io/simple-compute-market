@@ -70,7 +70,11 @@ injects a helper; live rate support is not inferred from a successful fixture.
 One composition-owned declaration identifies the serviced mechanism and contract
 revision and whether it is published or proposed. A proposed declaration requires
 an explicitly opted-in test lane; it is not production readiness. The neutral
-contract belongs in `kit/settlement-runtime` (task 3.1). Spot layers exact payments
+contract is `RateServicing` in `kit/settlement-runtime`'s `rate_servicing.py`.
+Its adapter-required revision map and current declaration map select the exact
+mechanism/revision; `proposed_lane` must equal the declaration's stable lane identity.
+`select(mechanism)` returns that declaration or raises `RateServicingUnavailable`
+with withdrawn-option/refetch semantics. Spot layers exact payments
 service identity and `livemode=false` checks on its lane materialization path.
 
 Publication, cached-option acceptance and materialization all consume that same
@@ -95,13 +99,15 @@ the latter reads site/pool facts, defaulting to no enforced deadline until the
 effective pool-facts port is wired. A raw clause value cannot stand in for it.
 The structured clause's `recurring` request is absent for once publication;
 its payer/payee notices derive the class rather than storing one. Servicing
-selection/declaration inputs still belong to task 3.1 and must gate this seam.
+selection now gates this seam through each composition's `rate_servicing` object;
+`RatePresetRequest.servicing` passes the selected declaration to the encoder.
 
 ## Ownership and implementation sequence
 
 Task 2.1 implements the accessor, accepted snapshot retention and reader guard.
 Task 2.3 consumes the injected helper in both publication compositions. Task 3.1
-implements the neutral declaration and its two terms-owned gates. Consumers may
+implements the neutral declaration and its two terms-owned gates (now qualified
+by the committed publication diagnostic). Consumers may
 implement against these contracts without this change reaching archive first.
 No consumer execution is a prerequisite for recording this handoff; actual
 activation remains gated by each consumer's evidence.

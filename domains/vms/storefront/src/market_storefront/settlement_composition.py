@@ -17,6 +17,7 @@ from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
 from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from market_core.schemas import settlement_option_schema
 from market_deal_lifecycle.terms import LifecycleTerms
+from market_settlement_runtime.rate_servicing import RateServicing, RateServicingUnavailable
 from market_settlement_runtime.rate_publication import (
     RatePresetHelper, RatePresetRefusal, default_buyer_refusals,
     derive_rate_preset, effective_delivery_deadline,
@@ -104,6 +105,7 @@ class VmSettlementComposition:
     lifecycle: VmDealLifecycle | None = None
     disputes: RegistryDisputePolicy = field(default_factory=lambda: RegistryDisputePolicy.from_document({}), repr=False)
 
+    rate_servicing: RateServicing = field(default_factory=RateServicing, repr=False)
     rate_preset_helpers: Mapping[str, RatePresetHelper] = field(default_factory=dict, repr=False)
     delivery_deadline_for_pool: Callable[[str, str | None], int | None] = field(
         default=lambda _site, _pool: None, repr=False,
@@ -246,6 +248,7 @@ class VmSettlementComposition:
             if clause is not None and clause.recurring is not None:
                 result = derive_rate_preset(
                     clause, helper=self.rate_preset_helpers.get(clause.mechanism),
+                    servicing=self.rate_servicing,
                     authorities=self.disputes.for_publication(),
                     max_duration_seconds=resources.get("max_duration_seconds"),
                     available_until_utc=resources.get("available_until_utc"),
@@ -271,6 +274,11 @@ class VmSettlementComposition:
                 dict(item) for item in envelope.get("accepted_escrows", ())
             )
             for item in envelope.get("settlement_options", ()):
+                try:
+                    self.rate_servicing.require_option(item)
+                except RateServicingUnavailable as exc:
+                    diagnose({"code": "rate_servicing_undeclared", "detail": str(exc), "mechanism": settlement_option_schema(item)})
+                    continue
                 terms = LifecycleTerms.model_validate(item["lifecycle"]) if item.get("lifecycle") is not None else None
                 for detail in default_buyer_refusals(terms, has_adapter=terms is not None):
                     diagnose({"code": "default_buyer_refusal", "detail": detail, "mechanism": settlement_option_schema(item), "option_id": item["option_id"]})

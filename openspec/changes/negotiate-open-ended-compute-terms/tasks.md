@@ -6,8 +6,9 @@ installed billing projections and period-aware VM multiplier derivation.
 Signed-acceptance evidence enforcement, accepted consumer migration and the
 fail-closed direct-read guard are implemented through 2.1c. Task 2.2 adds validated
 listing bounds and both storefronts' resolution/persistence/publication carriers.
-Task 2.3 adds injected recurring publication; servicing gates and later terms
-behavior remain unimplemented. Verification levels follow
+Task 2.3 adds injected recurring publication. Task 3.1 adds the shared servicing
+declaration and publication/cached-acceptance gates; horizon acceptance and later
+terms behavior remain unimplemented. Verification levels follow
 `docs/development/TESTING.md`. New acceptance test implementation requires the
 maintainer's approval; the scenarios below are the intended contract, not tests
 added by this reconciliation.
@@ -280,6 +281,36 @@ added by this reconciliation.
   are retained. Fresh setup remains `make dist-ci`, per-package `make reinit`,
   then the two committed probe commands in the evidence packet.
 
+### Servicing-declaration checkpoint (2026-11-07)
+
+- Completed 3.1: composition-owned required contract revisions and current
+  published/proposed declarations, exact test-lane opt-in, and one shared selector
+  consumed by both storefronts' publication and negotiation compositions. A rate
+  marker requires the declaration even if its peer marker is malformed. The
+  mechanism still owns wire parsing; no live contract revision is invented here.
+- Both typed buyer surfaces refuse cached recurring selections after withdrawal,
+  wrong revision or wrong lane with signed 409/refetch and no negotiation writes.
+  Publication omits recurring peers but retains reserved peers and capacity identity.
+  Published and explicitly opted-in proposed fixture declarations admit publication.
+  Final artifact building rechecks the same gate before acceptance persistence.
+- The injected preset request carries the selected declaration to the encoder.
+  Spot consumes this selector for materialization; convergence owns accepted-deal
+  continuation. Neither is implemented or claimed by this checkpoint. Deployed
+  compositions remain undeclared; accepted once-deal servicing regressions pass.
+- Setup, replayable fixtures, exact focused targets/results and limits:
+  `docs/attachments/negotiate-open-ended-compute-terms/servicing-declaration-checkpoint.md`.
+  No permanent tests added. A separate fixture repair gives the kept shape-priced
+  buyer integration scenario a signed as-published body and publisher trust rather
+  than weakening D2b's accepted-pricing verification.
+- **Restart at 3.2**: acceptance-time resolved start/bounds, optional recurring
+  horizon, whole-second starts and runway; remove only VM's round-zero fallback.
+  Then 3.3 records the already committed declaration fixture qualification after
+  3.2's integration, followed by section 4 buyer disclosure/validation and section 5.
+  Reuse `RateServicing` and `default_buyer_refusals`; do not duplicate either gate.
+- PR #351 remains draft. No final rebase, review, deployed E2E, promotion or archive
+  is claimed. No external resources or resident servers remain. Recreate wheels
+  and environments and run both committed probe commands in the evidence packet.
+
 ## 2. Quote and capacity terms
 
 - [x] 2.1 In `core/src/market_core/schemas.py` implement the unit-bearing accessor;
@@ -324,7 +355,7 @@ added by this reconciliation.
 
 ## 3. Servicing doors and acceptance
 
-- [ ] 3.1 In `kit/settlement-runtime` define the composition-owned declaration agreed
+- [x] 3.1 In `kit/settlement-runtime` define the composition-owned declaration agreed
   with the rate adapter. Wire both storefronts' publication and acceptance checks;
   reject cached recurring options before acceptance persistence. Unit verification
   covers published/proposed contract selection and lane-only opt-in; app integration

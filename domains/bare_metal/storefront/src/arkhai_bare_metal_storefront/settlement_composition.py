@@ -10,6 +10,7 @@ from types import MappingProxyType
 from typing import Any
 
 from market_deal_lifecycle.terms import LifecycleTerms
+from market_settlement_runtime.rate_servicing import RateServicing, RateServicingUnavailable
 from market_settlement_runtime.rate_publication import (
     RatePresetHelper, RatePresetRefusal, default_buyer_refusals,
     derive_rate_preset, effective_delivery_deadline,
@@ -129,6 +130,7 @@ class BareMetalStorefrontSettlementComposition:
 
     disputes: RegistryDisputePolicy = field(default_factory=lambda: RegistryDisputePolicy.from_document({}), repr=False)
     seller_stages: SettlementStageTable[Any] = SELLER_STAGES
+    rate_servicing: RateServicing = field(default_factory=RateServicing, repr=False)
     rate_preset_helpers: Mapping[str, RatePresetHelper] = field(default_factory=dict, repr=False)
     delivery_deadline_for_pool: Callable[[str, str | None], int | None] = field(
         default=lambda _site, _pool: None, repr=False,
@@ -269,6 +271,7 @@ class BareMetalStorefrontSettlementComposition:
             if clause.recurring is not None:
                 result = derive_rate_preset(
                     clause, helper=self.rate_preset_helpers.get(clause.mechanism),
+                    servicing=self.rate_servicing,
                     authorities=self.disputes.for_publication(),
                     max_duration_seconds=max_duration_seconds,
                     available_until_utc=candidate.get("available_until_utc"),
@@ -311,6 +314,11 @@ class BareMetalStorefrontSettlementComposition:
             accepted_escrows.extend(dict(item) for item in built_escrows)
             for item in built_options:
                 option = SettlementOption.model_validate(item)
+                try:
+                    self.rate_servicing.require_option(option)
+                except RateServicingUnavailable as exc:
+                    diagnose({"code": "rate_servicing_undeclared", "detail": str(exc), "mechanism": option.settlement_schema})
+                    continue
                 terms = LifecycleTerms.model_validate(option.lifecycle) if option.lifecycle is not None else None
                 for detail in default_buyer_refusals(terms, has_adapter=terms is not None):
                     diagnose({"code": "default_buyer_refusal", "detail": detail, "mechanism": option.settlement_schema, "option_id": option.option_id})
