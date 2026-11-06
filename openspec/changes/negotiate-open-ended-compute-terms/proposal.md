@@ -106,10 +106,28 @@ options are immutable and cannot be rewritten from the current listing.
 
 ### Knowledge to promote
 
-- Derived classes/unit-bearing price: architecture vocabulary and negotiation spec.
-- Listing bounds/tier resolution: publication spec and architecture companion;
-  resource-pool-management spec.
-- Servicing doors: settlement-configuration spec and publication architecture.
-- Optional horizon/truthful display: buyer-orchestration spec and architecture.
-- Codec/authority ownership stays in the foundation's lifecycle contract; no second
-  codec is introduced here.
+- D1: derived classes → `docs/development/ARCHITECTURE.md` and
+  `openspec/specs/negotiation-protocol/spec.md`.
+- D2: unit-bearing price → `docs/development/ARCHITECTURE.md` and
+  `openspec/specs/negotiation-protocol/spec.md`; reconcile the dependency carrier
+  before implementing or promoting this decision.
+- D3: shared-codec consumption and penalty recommendations →
+  `openspec/specs/settlement-configuration/spec.md`; codec and authority ownership
+  remain in `openspec/specs/deal-lifecycle/spec.md`.
+- D4: lifecycle placement → `openspec/specs/settlement-configuration/spec.md`,
+  referencing the foundation-owned `openspec/specs/deal-lifecycle/spec.md`.
+- D5: listing bounds, tier resolution and accepted horizon →
+  `openspec/specs/negotiation-protocol/spec.md`,
+  `openspec/specs/storefront-publication/spec.md`,
+  `openspec/specs/storefront-publication/architecture.md` and
+  `openspec/specs/resource-pool-management/spec.md`.
+- D6: servicing doors → `openspec/specs/settlement-configuration/spec.md` and
+  `openspec/specs/storefront-publication/architecture.md`.
+- D7: optional horizon and truthful display →
+  `openspec/specs/buyer-orchestration/spec.md` and
+  `openspec/specs/buyer-orchestration/architecture.md`.
+- D8: setup pricing versus seller refusal policy →
+  `openspec/specs/buyer-orchestration/spec.md` and
+  `openspec/specs/buyer-orchestration/architecture.md`.
+
+These are post-review destinations, not promotion of unimplemented behavior.
