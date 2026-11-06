@@ -251,6 +251,31 @@ def _refusals(definition: dict, config: dict) -> list[str]:
     return [error.message for error in Draft7Validator(definition).iter_errors(config)]
 
 
+_DISPUTE_CREDENTIAL = {
+    "interface": "arkhai.mediation.v1",
+    "origin": "https://dispute.example",
+    "account": "acct_example",
+    "record_key": "ed25519:example",
+}
+
+
+def test_a_dispute_credentials_token_is_refused_and_its_entry_closed(definition) -> None:
+    """A dispute credential's token reaches the storefront only through its
+    secret overlay, so the entry is typed by the credential model with its
+    token refused in any spelling, as null too, and its other fields closed."""
+    entry = _section(definition, "DisputeCredential")["items"]
+    assert entry["additionalProperties"] is False
+    assert _allowed(entry, "interface", "origin", "account", "record_key", "api_key_env")
+    assert _withheld(entry, "api_key")
+    assert not _refusals(definition, {"DisputeCredential": [_DISPUTE_CREDENTIAL]})
+    for spelling in ("api_key", "API_KEY"):
+        for value in ("a-token", None):
+            stated = [{**_DISPUTE_CREDENTIAL, spelling: value}]
+            assert _refusals(definition, {"DisputeCredential": stated}), (spelling, value)
+            assert _refusals(definition, {"disputecredential": stated}), (spelling, value)
+    assert _refusals(definition, {"DisputeCredential": [{**_DISPUTE_CREDENTIAL, "token": "x"}]})
+
+
 def test_a_null_removing_a_section_a_field_or_a_delivery_instance_validates(definition) -> None:
     """A values file's ``null`` removes the key it names, so the definition lets
     it through wherever the key is accepted."""

@@ -32,6 +32,7 @@ from market_config.values_schema import (
     settlement_fragment,
     sink_typed_section,
 )
+from market_deal_lifecycle.configuration import DisputeCredential
 from market_delivery import SINK_KEY, discover_sink_settings_models
 
 from .config import BareMetalStorefrontSettings
@@ -60,7 +61,9 @@ def storefront_config_definition(role: str = ROLE) -> dict[str, Any]:
 
     The settings model types the whole document; its two open mappings,
     ``[Settlement]`` and ``[Delivery]``, which the settlement and delivery kits
-    read, are typed here by what those kits register and discover. It accepts
+    read, are typed here by what those kits register and discover, and its
+    ``[[DisputeCredential]]`` entries, which the deal-lifecycle kit reads, by
+    that kit's credential model, so an entry's token is refused. It accepts
     ``null`` wherever it accepts a key, since a values file's ``null`` removes the
     key; a key it refuses stays refused.
     """
@@ -73,6 +76,10 @@ def storefront_config_definition(role: str = ROLE) -> dict[str, Any]:
     fields[any_case("delivery")] = sink_typed_section(
         sinks, sink_key=SINK_KEY, section_fields=DELIVERY_SETTINGS, role=role
     )
+    fields[any_case("disputecredential")] = {
+        "type": "array",
+        "items": model_fragment(DisputeCredential, role=role),
+    }
     return accepting_null(definition)
 
 

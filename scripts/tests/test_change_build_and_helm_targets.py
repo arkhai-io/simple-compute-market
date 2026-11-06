@@ -549,3 +549,36 @@ def test_topology_secrets_writes_the_payments_key_into_each_storefronts_overlay(
         assert overlay["Wallet"]["private_key"].startswith("0x"), secret
     holding = {path.parent.name for path in stored.glob("*/*") if token in path.read_text()}
     assert holding == {"arkhai-bob-runtime", "arkhai-bare-metal-storefront-runtime"}
+
+
+def test_topology_secrets_gives_bob_his_compose_dispute_credential(tmp_path: Path) -> None:
+    """Bob's runtime overlay states the Compose overlay's dispute credential,
+    bound to the pinned dispute authority release 1's registry recommends; the
+    bare-metal storefront, whose lane carries none, gets none."""
+    stored = tmp_path / "secrets"
+    _fake_kubectl(tmp_path, tmp_path / "kubectl.log", namespaces=NAMESPACE, secrets=stored)
+    # Development values only: cast answers every derivation with Anvil account 0's
+    # published key and address, never for a public network.
+    _executable(tmp_path, "cast", 'case "$2" in\n'
+                "  private-key) echo 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;;\n"
+                "  address) echo 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;;\n"
+                "esac\n")
+
+    created = _make("topology-secrets", "CHANGE=pilot", path=tmp_path)
+
+    assert created.returncode == 0, created.stderr
+    with (REPO_ROOT / "dev-env/identities/bob.storefront.secrets.toml").open("rb") as handle:
+        compose = tomllib.load(handle)["DisputeCredential"]
+    with (REPO_ROOT / "tools/payments-lane-double/fixtures/dispute-authority.toml").open("rb") as handle:
+        authority = tomllib.load(handle)
+    bob = tomllib.loads((stored / "arkhai-bob-runtime" / "storefront.secrets.toml").read_text())
+    assert bob["DisputeCredential"] == compose
+    (credential,) = bob["DisputeCredential"]
+    assert credential["api_key"]
+    assert {key: credential[key] for key in ("interface", "origin", "account", "record_key")} == {
+        key: authority[key] for key in ("interface", "origin", "account", "record_key")
+    }
+    bare_metal = tomllib.loads(
+        (stored / "arkhai-bare-metal-storefront-runtime" / "storefront.secrets.toml").read_text()
+    )
+    assert "DisputeCredential" not in bare_metal

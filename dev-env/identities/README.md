@@ -253,7 +253,7 @@ The lane values that are not the double's:
 |---|---|---|
 | 32 bytes of `0xb1`, as unpadded base64url | `buyer_marketplace_credential` in `e2e-tests/config/config-payments-lane.yml` | the payment scenarios' wallet-free Ed25519 buyer marketplace seed |
 | `bob.identity.env`, `api-credits.identity.env` | this directory, restated in each `config-<lane>-lane.yml` | the seller credential a payment scenario refunds with: each lane storefront's own key, in its own scheme |
-| `vm-lane-dispute-public-development-credential` | `[[DisputeCredential]]` in `bob.storefront.secrets.toml` | Bob's credential toward the pinned dispute authority; nothing at its `.invalid` origin ever reads it |
+| `vm-lane-dispute-public-development-credential` | `[[DisputeCredential]]` in `bob.storefront.secrets.toml`, which `helm/scripts/topology-secrets.sh` copies into the local Helm release's `arkhai-bob-runtime` | Bob's credential toward the pinned dispute authority; nothing at its `.invalid` origin ever reads it |
 
 The full local stack mounts the same secret overlays. There the storefront
 configurations leave payments off, and its registries recommend no dispute

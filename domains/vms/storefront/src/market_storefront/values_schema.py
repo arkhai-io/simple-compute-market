@@ -29,6 +29,7 @@ from market_config.values_schema import (
     settlement_fragment,
     sink_typed_section,
 )
+from market_deal_lifecycle.configuration import DisputeCredential
 from market_delivery import SINK_KEY, discover_sink_settings_models
 
 from market_storefront.settlement_composition import (
@@ -78,6 +79,12 @@ def storefront_config_definition(role: str = ROLE) -> dict[str, Any]:
         "delivery": sink_typed_section(
             sinks, sink_key=SINK_KEY, section_fields=_DELIVERY_SETTINGS, role=role
         ),
+        # Each entry's token is a secret setting, refused here so it reaches the
+        # storefront only through its secret overlay.
+        "disputecredential": {
+            "type": "array",
+            "items": model_fragment(DisputeCredential, role=role),
+        },
         "identity": model_fragment(IdentityConfigDeclaration, role=role),
         "registry": model_fragment(RegistryConfigDeclaration, role=role),
         "settlement": settlement_fragment(

@@ -19,12 +19,16 @@
 # every payments value below restates; a render test holds them equal. Each is a
 # public development value, never for a public network. `make -C helm
 # topology-secrets` creates the ConfigMap from the committed lane CA and writes
-# the double's seller token into the overlay. `check-local-secrets` requires the
-# ConfigMap and the overlay's Secret, not the token inside it: a Secret written
-# without one fails `helm test`'s payments check, naming neither api_key nor
-# api_key_env configured. The
-# release serves no payment scenario; that check reads Bob's own balance at the
-# double.
+# into the overlay the double's seller token and Bob's [[DisputeCredential]]
+# toward the dispute authority the registry below recommends, copied from his
+# Compose secret overlay; without it, servicing would report his payment deals
+# repair_required. `check-local-secrets` requires the ConfigMap and the
+# overlay's Secret, not what the overlay holds: the storefront itself reports a
+# Secret written without the token, its payments readiness blocked by
+# arkhai_payments.api_key_missing, and `helm test`'s payments check fails at its
+# configuration step, naming neither api_key nor api_key_env configured. The
+# release serves no payment scenario; that check reads
+# Bob's own balance at the double.
 payments-lane-double:
   enabled: true
 storefront:
