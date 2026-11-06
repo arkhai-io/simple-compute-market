@@ -24,6 +24,7 @@ from importlib.metadata import entry_points
 from pathlib import Path
 
 import pytest
+from alembic import command
 from market_schema_migrations import (
     CheckState,
     MigrationRefused,
@@ -39,6 +40,7 @@ from core_registry.db.models import Publisher, PublisherIdentity
 from core_registry.main import app, lifespan
 from core_registry.db.migrations import (
     FLOOR_REVISION,
+    alembic_config,
     IncompatibleDatabase,
     check_database,
     migrate_database,
@@ -47,6 +49,7 @@ from core_registry.db.migrations import (
 
 FLOOR = Path(__file__).resolve().parents[1] / "fixtures" / "v0_3_0_floor"
 BASELINE = "v0_3_0_baseline"
+HEAD = "019_retained_publications"
 
 
 def _url(path: Path) -> str:
@@ -92,11 +95,10 @@ def _floor_database(path: Path, revision: str = FLOOR_REVISION) -> Path:
 
 def test_the_chain_reproduces_the_floor_fixture(tmp_path: Path) -> None:
     database = tmp_path / "registry.db"
-    report = migrate_database(_url(database))
-    assert not report.adopted and report.applied == (BASELINE,)
+    command.upgrade(alembic_config(_url(database)), BASELINE)
     assert _snapshot(database) == json.loads((FLOOR / "schema.json").read_text())
     assert _revisions(database) == [BASELINE]
-    assert check_database(_url(database)).compatible
+    assert check_database(_url(database)).state is CheckState.BEHIND
 
 
 def test_a_migrated_database_refuses_a_second_primary_identity_for_one_publisher(
@@ -155,15 +157,21 @@ def test_a_v0_3_0_database_is_adopted_keeping_its_rows(tmp_path: Path) -> None:
 
     report = migrate_database(_url(database))
 
-    assert report.adopted and report.applied == ()
-    assert _revisions(database) == [BASELINE]
+    assert report.adopted and report.applied == (HEAD,)
+    assert _revisions(database) == [HEAD]
     assert check_database(_url(database)).compatible
-    assert _snapshot(database) == json.loads((FLOOR / "schema.json").read_text())
+    fresh = tmp_path / "fresh.db"
+    fresh_report = migrate_database(_url(fresh))
+    assert fresh_report.applied == (BASELINE, HEAD)
+    assert _snapshot(database) == _snapshot(fresh)
     connection = sqlite3.connect(database)
     try:
         assert connection.execute("SELECT listing_id, publisher_id FROM listings").fetchall() == [
             ("listing-1", 1)
         ]
+        assert connection.execute(
+            "SELECT published_document, publisher_publication, publisher_updates FROM listings"
+        ).fetchall() == [(None, None, None)]
         assert connection.execute("SELECT storefront_url FROM publishers").fetchall() == [
             ("http://storefront.test/",)
         ]
@@ -319,7 +327,7 @@ def test_the_command_migrates_and_then_checks_compatible(
     migrate.main([])
     migrate.main(["--check"])
     assert "compatible" in capsys.readouterr().out
-    assert _revisions(command_database) == [BASELINE]
+    assert _revisions(command_database) == [HEAD]
 
 
 def test_the_command_refuses_an_ahead_database_unchanged(
@@ -352,7 +360,7 @@ def test_the_command_reads_only_the_database_and_log_settings(
     monkeypatch.setenv("CONFIG_DIRECTORY", str(tmp_path))
     monkeypatch.setenv("ACTIVE_PROFILES", "registry")
     migrate.main([])
-    assert _revisions(database) == [BASELINE]
+    assert _revisions(database) == [HEAD]
 
 
 def test_the_command_does_not_load_the_application_settings() -> None:

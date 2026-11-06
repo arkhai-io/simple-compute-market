@@ -98,7 +98,7 @@ class DerivedVmListing:
     clauses: tuple[SettlementPublicationClause, ...]
     binding: Any
     #: A shape-priced listing's resolved family rates, recorded beside the
-    #: listing as a term of sale and never sent to a registry; ``None`` for a
+    #: listing as a published term of sale; ``None`` for a
     #: flat-priced listing.
     rate_structure: Mapping[str, Any] | None = None
 
@@ -803,6 +803,7 @@ class ListingService:
             )
             return CreateListingResponse(status="created", listing_id=listing_id)
 
+        listing_dict["rate_structure"] = derived.rate_structure
         publish_result = await self._publish_to_registries(listing_dict)
         return CreateListingResponse(
             status="created",

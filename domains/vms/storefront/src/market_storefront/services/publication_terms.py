@@ -329,6 +329,11 @@ def compose_clause_rates(
     )
 
 
+def published_rate_terms(rate_structure: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Domain-owned commercial terms carried opaquely by registry publication."""
+    return {"rate_structure": _plain_pricing(rate_structure)} if rate_structure is not None else {}
+
+
 def configured_family_rate_problems() -> list[str]:
     """Every problem with the configured family-rate defaults; empty when valid."""
     pricing = getattr(settings, "pricing", None)

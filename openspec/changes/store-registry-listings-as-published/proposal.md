@@ -1,50 +1,28 @@
 ## Why
 
-A registry acknowledges listing content it then discards. The compute filter
-specification's `listing_shape` admits top-level properties it does not name
-(`additionalProperties: true`), and buyers and publishers read that served schema
-as the registry's contract. The publish route, the `Listing` table, and the listing
-serializer, however, keep exactly six carriers — `listing_resource`,
-`accepted_escrows`, `settlement_options`, `demands`, `max_duration_seconds`, and
-`oracle_address`. Any other top-level field a publisher sends passes, is answered
-with `201`, and is gone. Nothing tells the publisher.
-
-The registry also does not enforce its schema where it stores: the publish boundary
-refuses only the retired listing spellings, and full `listing_shape` validation runs
-only in the dry-run route.
-
-`registry-discovery`'s "Opaque market payload storage" requirement says the
-registry treats domain payloads as opaque except for declarative filter paths and
-validation rules. The code instead hard-codes the carrier set into route, table,
-and serializer, so the effective listing contract is not the one the filter
-specification serves. It is the same invisible skew the v6 filter specification
-cites as its reason to refuse retired spellings rather than ignore them.
-
-No listing has lost data to it yet only because every listing-level term added so
-far went into `listing_resource` — deliberately, in `asking_rate`'s case. That
-workaround pushes every future listing-level term into the capacity description,
-where the storefront's listing comparison must classify each one as identity or
-term of sale.
+A registry acknowledges listing content it then discards: publication and reads
+select six named carriers even though the configured listing schema admits other
+terms. Buyers need a listing's resolved rates to price another shape, without
+confusing commercial terms with the advertised capacity description. Registry-only
+response signatures do not prove what the seller published.
 
 ## What Changes
 
-The registry stops acknowledging content it does not keep. Two shapes are under
-design review, and the review chooses one (see `design.md`):
+- Choose Option A: persist and serve the complete accepted publication document;
+  whole-document republication replaces commercial terms rather than merging.
+- Authenticate and validate the configured listing shape at publication. Reserve
+  registry metadata names explicitly; never acknowledge and discard a field.
+- Synthesize existing rows from retained carriers until republication; expose
+  absent seller evidence honestly, without invented backfills.
+- Retain exact publication body bytes and the authenticated v2 envelope/signature.
+  Keep lifecycle/oracle update proofs distinct from the publication proof.
+- Publish the VM storefront's `rate_structure` as a top-level listing term through
+  an opaque extra-term transport. Keep `asking_rate` in `listing_resource`.
+- Supply the carrier and seller-authority answer to resize gate 2.1a; its buyer
+  accessor and pricing behavior remain downstream work.
 
-- **Keep what the schema admits.** Store each accepted listing document as
-  published, so the filter specification, not route code, decides what a listing
-  carries; filters keep compiling from specification paths.
-- **Admit only what is kept.** Close the served `listing_shape` to the stored
-  carriers and enforce the specification at the publish boundary, so a new
-  top-level term becomes an explicit filter-specification contract change.
-
-Either way the requirement is the same and is stated in this change's delta: a
-field the registry accepts is stored and served, and a field it will not store is
-refused at publish.
-
-Either way the delta also brings `registry-discovery`'s "Schema-driven listing
-validation" into line with the chosen option. Today that requirement says an ordinary
-publish validates against the listing shape, which the publish route does not do.
+D-a through D-e in `design.md` were decided by webapp owner 2026-11-06, pending
+maintainer review. The PR calls these out before its implementation summary.
 
 ## Capabilities
 
@@ -54,56 +32,58 @@ None.
 
 ### Modified Capabilities
 
-- `registry-discovery`: accepted listing content is retained, never silently
-  discarded.
+- `registry-discovery`: retained opaque documents, replacement, schema admission,
+  legacy synthesis and verifiable seller publication/update evidence.
+- `storefront-publication`: publish resolved rate structures at listing level.
 
 ## Non-Goals
 
-- Do not change discovery semantics, filter evaluation, or any filter
-  specification's filters.
-- Do not add any market's field. Which listing-level terms a market publishes, and
-  where, stays with the change that introduces each one.
-- Do not move existing terms out of `listing_resource`, including `asking_rate`.
-- Do not index filters (`index-registry-filters`) or change the database engine
-  (`migrate-registry-to-postgres`).
+- No new filter operators, indexes, database engine, or migration entry points.
+- No domain imports or rate interpretation in the registry engine.
+- No asking-rate relocation, shape negotiation, open-ended or spot behavior.
+- No storefront startup migration changes.
 
 ## Impact
 
-- **Affected code:** `core/registry` (publish and update routes, the listing model,
-  the serializer, validation at publish, an Alembic migration), `core/registry-client`
-  listing models, and the compute filter specification under either option.
-- **Wire compatibility:** under "keep", a registry serves fields it previously
-  dropped; under "admit only", a publisher sending an unnamed top-level field is
-  refused where it was silently accepted. Either is observable to publishers and
-  is called out in `design.md`.
-- **Persistence:** a registry migration. It follows the migration-command
-  conventions `add-database-migration-commands` establishes, and precedes
-  `migrate-registry-to-postgres` so the PostgreSQL chain includes it.
+- `core/registry`: additive Alembic revision, document/evidence columns, publication,
+  update, serialization and validation routes.
+- `core/registry-client`: opaque additional listing terms; evidence remains in the
+  already-preserved response extras.
+- `core/storefront`, VM listing models and VM storefront: carry publication terms
+  across create, refresh and reopen; compute schema declares top-level rates.
+- Wire behavior: schema-invalid complete publications now fail rather than being
+  stored; partial republication is not a patch. Unknown admitted terms survive.
+  New response evidence fields are additive; legacy rows have null evidence.
+- Persistence: additive columns, no backfill, no recovered discarded content.
+  Downgrade loses documents/evidence and must not be used as data-preserving rollback.
 
 ## Permanent documentation impact
 
-- [ ] `docs/development/ARCHITECTURE.md` — the registry's description as the
-      schema-centralizing point for discovery, if the chosen option changes it.
-- [x] Existing subsystem specification — `openspec/specs/registry-discovery/spec.md`.
+- [ ] `docs/development/ARCHITECTURE.md` — assess at closeout; authority detail
+  currently belongs to the owning subsystem companions.
+- [x] Existing specifications and companions — registry discovery and storefront publication.
 - [ ] New subsystem specification — none.
 
 ### Knowledge to promote
 
-- Accepted listing content is retained — `openspec/specs/registry-discovery/spec.md`.
-- Which option was chosen, and why — `openspec/specs/registry-discovery/architecture.md`.
+- D-a document replacement, legacy synthesis and filter semantics —
+  `openspec/specs/registry-discovery/spec.md` and `architecture.md`.
+- D-b listing-level rates — `openspec/specs/storefront-publication/spec.md` and
+  `architecture.md`.
+- D-c seller proof and registry metadata boundaries —
+  `openspec/specs/registry-discovery/spec.md` and `architecture.md`.
+- D-d verified carrier for resize — registry architecture; downstream gate records
+  the consumption contract when resize work starts.
+- D-e dependency correction is temporary sequencing rationale in this change and
+  `openspec/changes/README.md`, not permanent architecture.
 
 ## Dependencies and Related Changes
 
-- Sequenced after `add-database-migration-commands` and, by preference rather than
-  dependency, before
-  `migrate-registry-to-postgres`, in the "Registry productionization" lesser goal.
-  No roadmap goal blocks on it.
-- Its accepted carrier policy is a decision input — not an implementation
-  dependency — for `negotiation-driven-capacity-resize` §2 and
-  `billable-capacity-reservations`, each of which decides where a buyer reads a
-  rate structure. Either may proceed without it by serving the structure from the
-  storefront.
-- `capacity-shape-pricing` does not depend on it: its rate structure is a
-  storefront term of sale and its registry payload is unchanged.
-- `publish-indicative-listing-rates` adds registry engine primitives (exact
-  decimals, filter co-requirements) and is independent of it.
+- `add-database-migration-commands` is not a dependency: its scope is VM/API-credit
+  roles, not registry Alembic. D-e records the owner-approved correction.
+- Prefer landing before `migrate-registry-to-postgres` so its chain inherits the
+  additive revision. No new migration command is introduced.
+- `index-registry-filters` remains deferred; future indexes project from the opaque
+  document and prove parity for legacy synthesis rather than assuming carriers.
+- This supplies the registry carrier needed by `negotiation-driven-capacity-resize`
+  §2 and the later open-ended/spot chain. It does not implement their behavior.

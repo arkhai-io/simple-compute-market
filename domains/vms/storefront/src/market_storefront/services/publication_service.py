@@ -28,6 +28,7 @@ import market_storefront.container as container
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
 from market_storefront.services.capacity_client import capacity_binding_for_listing
 from market_storefront.utils.config import BASE_URL_OVERRIDE, settings
+from market_storefront.services.publication_terms import published_rate_terms
 
 
 class VmPublicationHooks:
@@ -37,9 +38,10 @@ class VmPublicationHooks:
         self._db = sqlite_client
 
     def validate_candidate(
-        self, candidate: PublicationCandidate[Listing]
+        self, candidate: PublicationCandidate[dict[str, Any]]
     ) -> None:
-        mode = candidate.payload.listing_resource.offering_mode
+        listing = Listing.model_validate(candidate.payload)
+        mode = listing.listing_resource.offering_mode
         offering_mode = mode.value if hasattr(mode, "value") else str(mode or "")
         if offering_mode != candidate.binding.offering_mode:
             raise CapacityBindingError(
@@ -89,7 +91,7 @@ def build_publication_runtime(
     sqlite_client: Any,
     *,
     registry_client_factory: Callable[[], Any],
-) -> PublicationRuntime[Listing]:
+) -> PublicationRuntime[dict[str, Any]]:
     """Compose VM schema/persistence hooks with the injected registry transport."""
     return PublicationRuntime(
         repository=sqlite_client,
@@ -106,7 +108,7 @@ def build_publication_runtime(
     )
 
 
-async def _candidate(sqlite_client: Any, value: Listing | dict) -> PublicationCandidate[Listing]:
+async def _candidate(sqlite_client: Any, value: Listing | dict) -> PublicationCandidate[dict[str, Any]]:
     listing = Listing.model_validate(
         value.model_dump(mode="python") if isinstance(value, Listing) else value
     )
@@ -115,7 +117,12 @@ async def _candidate(sqlite_client: Any, value: Listing | dict) -> PublicationCa
     # publishes, so a listing never discloses a category its binding does not
     # record and no stored payload can be republished without one.
     listing.listing_resource.capacity_backing = binding.backing.label
-    return PublicationCandidate(listing.listing_id, binding, listing)
+    payload = listing.model_dump(mode="json")
+    # Optional capacity attributes are absent commitments, not JSON nulls;
+    # the compute publication schema types every present attribute.
+    payload["listing_resource"] = listing.listing_resource.model_dump(mode="json", exclude_none=True)
+    payload["publication_terms"] = published_rate_terms(listing.rate_structure)
+    return PublicationCandidate(listing.listing_id, binding, payload)
 
 
 async def publish_order_to_registry(
@@ -219,7 +226,7 @@ async def reopen_available_compute_listings_after_capacity_change(
         configured_sites=configured_sites,
         admissibility_default=container.resolved_admissibility_default,
     )
-    candidates: list[PublicationCandidate[Listing]] = []
+    candidates: list[PublicationCandidate[dict[str, Any]]] = []
     for listing_id in ids:
         row = await sqlite_client.load_listing(listing_id=listing_id)
         if row is None:

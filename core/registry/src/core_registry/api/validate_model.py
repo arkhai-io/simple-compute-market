@@ -4,16 +4,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ValidatePublishRequest(BaseModel):
     """Body for POST /api/v1/listings/validate-publish.
 
-    Carries the same listing fields as POST /listings. The route authenticates
-    the complete normalized model as a canonical v2 marketplace request before
-    performing its read-only schema check.
+    Carries common fields and opaque additional terms. Authentication and
+    schema validation use the received document, not materialized defaults.
+    The model supplies response summaries without changing admitted content.
     """
+
+    model_config = ConfigDict(extra="allow")
 
     listing_id: str = Field(description="Listing ID to validate")
     storefront_url: str = Field(
