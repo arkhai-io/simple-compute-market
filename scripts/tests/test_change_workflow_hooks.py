@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -702,6 +703,30 @@ def test_a_start_passes_its_output_through_and_keeps_its_last_line(
     assert hooks.capture("printf 'dispatched\\n4073\\n\\n'", tmp_path) == (0, "4073")
 
     assert capfd.readouterr().out == "dispatched\n4073\n\n"
+
+
+@pytest.mark.skipif(shutil.which("make") is None, reason="needs make")
+def test_a_start_run_from_a_session_a_make_started_keeps_its_marker(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capfd: pytest.CaptureFixture[str]) -> None:
+    """CW-x9bt, library integration: a session started by a make target inherits its
+    recursion state; a declared `make` dispatch run from it, by a real `sh` and
+    `make`, still ends with its marker rather than make's "Leaving directory"."""
+    (tmp_path / "Makefile").write_text("dispatch:\n\t@echo dispatched\n\t@echo 4073\n", "utf-8")
+    monkeypatch.setenv("MAKELEVEL", "1")
+    monkeypatch.setenv("MAKEFLAGS", "w")
+
+    assert hooks.capture("make dispatch", tmp_path) == (0, "4073")
+    assert "directory" not in capfd.readouterr().out
+
+
+def test_a_declared_command_keeps_the_callers_variables_but_not_makes_recursion() -> None:
+    """A variable given on the outer make's command line reaches the command, as make
+    exports it; the variables that make a `make` act as a sub-make do not."""
+    shown = hooks.command_environment({"HELM_CONTEXT": "kind", "MAKELEVEL": "2",
+                                       "MAKEFLAGS": "w -- HELM_CONTEXT=kind", "MFLAGS": "-w",
+                                       "MAKEOVERRIDES": "${-*-command-variables-*-}"})
+    assert shown == {"HELM_CONTEXT": "kind"}
 
 
 # `run cleanup`: every part's cleanup, as one list.

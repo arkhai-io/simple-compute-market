@@ -648,12 +648,72 @@ def test_a_settings_file_that_is_not_the_link_is_refused(workspace: Path) -> Non
     assert settings.read_text("utf-8") == "{}\n"
 
 
-def test_a_workspace_without_an_origin_is_refused(workspace: Path) -> None:
+def _upstream(workspace: Path) -> Path:
+    """A second bare remote, `upstream`, which the workspace's dev now tracks."""
+    upstream = workspace.parent / "upstream.git"
+    _git(workspace.parent, "init", "-q", "--bare", "-b", "dev", str(upstream))
+    _git(workspace, "remote", "add", "upstream", str(upstream))
+    _git(workspace, "push", "-q", "-u", "upstream", "dev")
+    return upstream
+
+
+def test_a_workspace_without_an_origin_clones_onto_its_landing_branchs_remote(
+        workspace: Path) -> None:
+    """CW-8jyb: the engine names no remote, so a workspace whose dev tracks `upstream`
+    and that has no `origin` clones, the new branch tracking `upstream`."""
+    _upstream(workspace)
     _git(workspace, "remote", "remove", "origin")
 
-    with pytest.raises(clones.CloneError, match="no origin remote"):
-        _create(workspace)
-    assert not clones.clone_directory(workspace, CHANGE).exists()
+    clone = _create(workspace).clone
+
+    assert _git(clone, "remote").split() == ["upstream", "workspace"]
+    assert _git(clone, "config", f"branch.{BRANCH}.remote") == "upstream"
+    assert _git(clone, "rev-parse", "HEAD") == _git(workspace, "rev-parse", "dev")
+
+
+def test_a_branch_of_the_changes_name_on_another_remote_is_not_taken(workspace: Path) -> None:
+    """CW-8jyb: with dev tracking `upstream`, a stale branch of the change's name on
+    `origin` is neither the branch's start nor its upstream."""
+    _upstream(workspace)
+    _git(workspace, "switch", "-q", "-c", "stale")
+    _commit(workspace, "stale.txt", "stale\n")
+    _git(workspace, "push", "-q", "origin", f"stale:{BRANCH}")
+    _git(workspace, "switch", "-q", "dev")
+
+    clone = _create(workspace).clone
+
+    assert _git(clone, "config", f"branch.{BRANCH}.remote") == "upstream"
+    assert _git(clone, "rev-parse", "HEAD") == _git(workspace, "rev-parse", "dev")
+
+
+def test_a_change_branch_tracking_a_removed_remote_falls_to_the_landing_branchs(
+        workspace: Path) -> None:
+    """CW-8jyb: a workspace branch of the change whose upstream names a remote the
+    workspace does not have is read as tracking none, so the clone takes dev's."""
+    _git(workspace, "branch", "--quiet", BRANCH, "dev")
+    _git(workspace, "config", f"branch.{BRANCH}.remote", "gone")
+    _git(workspace, "config", f"branch.{BRANCH}.merge", f"refs/heads/{BRANCH}")
+
+    clone = _create(workspace).clone
+
+    assert _git(clone, "config", f"branch.{BRANCH}.remote") == "origin"
+    assert "gone" not in _git(clone, "remote").split()
+
+
+def test_a_change_branch_tracking_its_own_remote_keeps_it(workspace: Path) -> None:
+    """CW-8jyb: a fork's change branch, tracking `origin` in the workspace while dev tracks
+    `upstream`, keeps tracking `origin` in the clone, and starts where it is."""
+    _upstream(workspace)
+    _git(workspace, "switch", "-q", "-c", BRANCH)
+    head = _commit(workspace, "work.txt", "work\n")
+    _git(workspace, "push", "-q", "-u", "origin", BRANCH)
+    _git(workspace, "switch", "-q", "dev")
+
+    clone = _create(workspace).clone
+
+    assert _git(clone, "config", f"branch.{BRANCH}.remote") == "origin"
+    assert _git(clone, "rev-parse", "HEAD") == head
+    assert _git(clone, "remote", "get-url", "upstream") == str(workspace.parent / "upstream.git")
 
 
 def test_creating_a_clone_from_a_clone_is_refused(workspace: Path) -> None:

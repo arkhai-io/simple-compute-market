@@ -116,10 +116,12 @@ def _printed(capsys: pytest.CaptureFixture[str], run: Callable[[], int]) -> tupl
 def test_a_subcommand_does_what_its_modules_command_line_does(
         tmp_path: Path, capsys: pytest.CaptureFixture[str], subcommand: list[str],
         module: Callable[[Path], int]) -> None:
-    # A workspace with no origin, a dirty worktree, and no round view: every
-    # subcommand here reads it or refuses, and none changes it.
+    # A workspace whose change's clone directory is a file, a dirty worktree, and no
+    # round view: every subcommand here reads it or refuses, and none changes it.
     root = _repository(tmp_path / "workspace", CHANGE)
     (root / "openspec/changes/README.md").write_text("", "utf-8")
+    (tmp_path / "workspace.changes").mkdir()
+    (tmp_path / "workspace.changes" / CHANGE).write_text("not a clone\n", "utf-8")
 
     expected = _printed(capsys, lambda: module(root))
     assert _printed(capsys, lambda: cli.main(subcommand, root=root)) == expected

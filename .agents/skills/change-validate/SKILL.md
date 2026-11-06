@@ -201,19 +201,18 @@ dispatched, a waived owed run not started, and the push still made. Every `start
 returns at once, so the parts it dispatches — the slowest, such as this
 repository's end-to-end pipeline — run while everything else does:
 
-1. `gh auth status` — without it a dispatch fails after the push.
-2. `scripts/change-workflow push` — the guarded push of exactly `HEAD`, never forced. If it
+1. `scripts/change-workflow push` — the guarded push of exactly `HEAD`, never forced. If it
    refuses, stop and report its reasons. The steps that commit push their
    commits, but a push starts no run: this repository's pipeline runs on dispatch
    and nightly, so the run that describes `HEAD` is the one you dispatch.
-3. For each `start, collect` run of the plan, in its order:
+2. For each `start, collect` run of the plan, in its order:
    `scripts/change-workflow run validation <change> <part> start`, adding
    `--owed <workflow>` for an owed run. It dispatches the part's work for `HEAD`
    and returns; the engine keeps the marker the dispatch printed last for the
    commit, the part, and the workflow, a retried start replacing it, so no two
    runs share one. A start that failed keeps none, and its collect then refuses,
    naming the start to run: the failure is diagnosed like any (step 4).
-4. Then each started run's collect, in the background:
+3. Then each started run's collect, in the background:
    `scripts/change-workflow run validation <change> <part> collect`, with the
    same `--owed`. The engine gives it the kept marker, so it waits for the run of
    `HEAD` newer than the marker — a commit validated before never collects its

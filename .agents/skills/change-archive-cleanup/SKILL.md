@@ -257,9 +257,10 @@ nothing more.
 A cleanup may write a tracked file — in this repository, the capacity figure in
 `helm/validation-capacity.toml`, with when it was measured and this change's name,
 replacing any earlier one. `git status --porcelain` shows it: commit each such file
-alone, the message naming the change and what the file now records. A file
-unchanged, or none written, commits nothing; a figure the cleanup did not record
-leaves any earlier one as it is.
+alone, the message naming the change and what the file now records, with no hook
+before it — the file is the repository's own record, made by its declared command,
+which answers for it (CW-e1sg). A file unchanged, or none written, commits nothing;
+a figure the cleanup did not record leaves any earlier one as it is.
 
 Add to the pull request description's notes, in `reviews/pull-request.md`, what the
 cleanup reported — on a rerun, as a line appended to the file rather than an edit of

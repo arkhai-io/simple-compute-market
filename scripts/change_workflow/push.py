@@ -41,7 +41,7 @@ from typing import Mapping, Sequence
 from . import config
 from .common import SESSION_ID, StepError, repository_root
 from .find import WORKSPACE_REMOTE
-from .hooks import Hooks, Invoked
+from .hooks import Hooks, Invoked, command_environment
 from .running import invocations_directory, keep_invocations
 
 PRE_PUSH = "pre-push"
@@ -111,7 +111,8 @@ def _fed(line: str):
     hook, its output, both streams in order, written to standard error."""
     def run(command: str, root: Path) -> int:
         result = subprocess.run(["sh", "-c", command], cwd=root, input=line, text=True,
-                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                env=command_environment())
         sys.stderr.write(result.stdout)
         sys.stderr.flush()
         return result.returncode

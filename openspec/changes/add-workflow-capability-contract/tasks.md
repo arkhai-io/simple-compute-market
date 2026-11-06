@@ -140,6 +140,15 @@ by validation:` lines), and new tests in
     the design left open: two lines owing one workflow are one run, owed by both
     sections, since a run is named, and its marker kept, by part and workflow
     (D10); CW-g4oz's "once per line" and "once per owed workflow" agree only so.
+  - Fix, implementation triage 28 F4: the check refused only an `after` naming no
+    other part, so it accepted an order validation cannot follow. It now also
+    refuses an `after` naming a part declared later, which rules out every cycle,
+    and a `start` part's `after` naming a `run` part, since every dispatch starts
+    before any long part runs; CW-g4oz's delta says so and D3 records why
+    (topological ordering rejected). Evidence (unit, config suite): the forward
+    reference, the two-part cycle, and the dispatch after a long part refused,
+    naming the field; dispatch-after-dispatch and long-after-either accepted; this
+    repository's file still loads. Checks: see 9.2's triage note.
 - [x] 1.6 Verification: `pytest -q scripts/tests/test_change_workflow_config.py
   scripts/tests/test_change_workflow_cli.py scripts/tests/test_change_workflow_cli_steps.py`
   (unit) passes; `make test` passes. End-to-end: none; no scenario exercises the
@@ -323,6 +332,22 @@ invocations, `scripts/change_workflow/wrapper.py`, `scripts/change_workflow/log.
     pruned; one entry per commit and part is small. A `start` that leaves a
     background process holding its output keeps `capture` reading until it exits:
     a dispatch must return at once, as D10's contract says.
+  - Fix, implementation triage 31 A1 (validation 31's pipeline collect failed): a
+    session launched by a make target (`make validate`, `make orchestrate`)
+    inherits `MAKELEVEL`, so the declared `make run-e2e` ran as a sub-make and
+    printed "make[2]: Leaving directory …" after its marker, which the engine
+    kept as `{after}`. `hooks.shell`, `hooks.capture`, and the guarded push's
+    `pre-push` runner now run their command in `hooks.command_environment()`,
+    the caller's environment without `MAKELEVEL`, `MAKEFLAGS`, `MFLAGS`, and
+    `MAKEOVERRIDES`; a variable given on the outer make's command line still
+    reaches the command as an environment variable, which this repository's `?=`
+    assignments read. The `post-clone` bootstrap and the configured OpenSpec
+    command keep the caller's environment. Evidence: a `start` running a real
+    `make` with `MAKELEVEL=1` and `MAKEFLAGS=w` set keeps its marker and prints no
+    directory line (hooks suite, library integration: a real `sh` and `make`;
+    without the fix make prints the line last); the environment's filtering
+    (unit). The fix commit's validation runs the pipeline part through it.
+    Checks: see 9.2's triage note.
 - [x] 3.3 Add `run cleanup <change>`, running every declared part's `cleanup` in
   declaration order as one list (D3, CW-ikmm). Verify: unit tests for "A change's
   validation left resources" and "A part's cleanup finds nothing" (CW-ikmm) with the
@@ -582,6 +607,32 @@ CW-59c7 (the remote and a new branch's upstream), CW-xx5f, and CW-h8vm. Touches
     landing branch. The suites' workspaces now push `dev` with `-u`, as a real
     workspace's `dev` tracks `origin`. A rerun that adds the landing branch's remote
     settles the upstream again after adding it.
+  - Fix, implementation triage 28 F3: clone creation required `origin` and made
+    the change branch track `origin`'s branch of its name whenever one existed,
+    against D4. It now takes its push remote from Git's record in the workspace:
+    the upstream remote of the workspace's branch of the change, when that remote
+    still exists there, else the landing branch's (`clone._push_remote`). It adds
+    that remote and the landing branch's upstream remote, each under its workspace
+    name and URL, compares the branch's copies in the workspace and on the push
+    remote, and tracks the push remote's branch; no remote is named in the engine.
+    A push remote not yet added leaves an existing clone's upstream as it is until
+    the pass after it is added. CW-8jyb is modified in the delta (its "The clone's
+    `origin` MUST be the workspace's `origin`" was the requirement in the way),
+    D4 records the derivation, and the guide's clone paragraph and the merge
+    skill's fetch line name the remote the branch tracks rather than `origin`.
+    Evidence (library integration, real workspaces and bare remotes): a workspace
+    with no `origin` whose dev tracks `upstream` clones, the branch tracking
+    `upstream`; a stale branch of the change's name on `origin` is neither the
+    start nor the upstream when dev tracks `upstream`; a fork's change branch
+    tracking `origin` keeps it, with `upstream` added; a change branch tracking a
+    removed remote falls to dev's. The first two fail on the old code. The CLI
+    suite's delegation test, which relied on a workspace without `origin` making
+    `clone` refuse, now refuses through a file at the clone's path. Left: the
+    merge step's rules allow `git fetch origin *` and `git fetch workspace *`
+    only, and the orchestrating skill's `pull --no-rebase origin dev`; both hold
+    in this repository, the step table being the owner's to widen. Closeout's
+    10.9 now names the clone diagrams and README rows still drawing `origin`.
+    Checks: see 9.2's triage note.
 - [x] 5.2 `find --json` prints `base`, the recorded landing branch or `null` (D4,
   CW-s3ju); the merge, the review's base, and the hooks' `{base}` read it, an argument
   overriding it for one run (the merge's `FROM`, the review's `--base`), and a step
@@ -710,6 +761,15 @@ Implements MCW-r4tx and MCW-k3vy, and D20's repository-side fixes but
     branch, so its marker has no `base`: `run pre-commit` here (section 7's skills,
     section 8's `make check-change`) needs `--base dev` until the marker records one,
     or `{base}` is refused naming `--base`.
+  - Fix, implementation triage 29 O2 (the owner's note: a stage passed `make test`
+    against stale wheels): `pre-commit-functional` begins with `make dist-clean`,
+    so the packaging check builds every wheel from the commit, as validation's
+    local part already does; the orchestrating session made the edit of the
+    protected file on the owner's word. MCW-r4tx's delta, the design's listing,
+    the guide, and the config suite's test of this repository's hooks say so.
+    Unconfirmed: whether each suite's `uv run --find-links` reinstalls a rebuilt
+    wheel whose name and version are unchanged; if not, this guard is partial.
+    Checks: see 9.2's triage note.
 - [x] 6.2 Add `make pre-push REMOTE=<remote>`, running both public-content checks
   (`scripts/check_public_content.py --pre-push` and `scripts/check_secrets.py
   --pre-push`) under Git's hook contract, the ref lines read once from standard input
@@ -765,6 +825,14 @@ Implements MCW-r4tx and MCW-k3vy, and D20's repository-side fixes but
     (`test_change_workflow_cli_steps.py`, library integration); Grep finds no
     `code-snapshot` in the Makefile. The triage skill's sentence (7.4) and the
     provision row (8.4) still name it.
+  - Reverted, implementation triage 29 O1 (the owner's note: the target is still
+    useful): `make code-snapshot`, its `.PHONY` entry, and
+    `scripts/tests/test_code_snapshot.py` are restored as they stood before this
+    task, and the test asserting the target's absence is removed. It stays a
+    target of the repository's own that no skill names, so triage's sentence and
+    the role and provision rows stay removed; D20 and the proposal say so. The
+    restored test passes (library integration, a real `zip` and `unzip`). Checks:
+    see 9.2's triage note.
 - [x] 6.5 Verification: `pytest -q scripts/tests/test_change_workflow_config.py
   scripts/tests/test_check_public_content.py scripts/tests/test_check_secrets.py
   scripts/tests/test_ci_evidence.py scripts/tests/test_validate_slice.py
@@ -899,6 +967,17 @@ halves of CW-g4oz, CW-ikmm, CW-l7hn, CW-i2we, and CW-e1sg. Touches
     parts`, `run`, `next`, `log`, `note`, `find`, `record`, `history`, `check
     round-view`), `git`, or `gh auth status`, besides validation's diagnosis and
     the owner-named `kubectl scale` remedy.
+  - Fix, implementation triage 28 F2: validation no longer runs `gh auth status`
+    before its push, a GitHub prerequisite outside the plan that a local-only plan
+    (CW-g4oz's "A repository has no Helm part") would still have needed; a
+    dispatch failing for want of a sign-in fails in its own `start`, diagnosed
+    from its output. The step table still grants it, the owner's to trim.
+  - Settled, implementation triage 28 F1 (the conflict the note under 7.5 left for
+    review): CW-e1sg's delta now says a tracked file a validation part's cleanup
+    writes is the repository's own record, which archive cleanup commits on its
+    own with no hook before it, with a scenario; D3 records why (running the
+    functional hooks after the archive rejected), and archive cleanup's step 8
+    says so. No code changes. Checks: see 9.2's triage note.
 - [x] 7.4 Every skill loads its documents from `scripts/change-workflow config load
   <step>` where it named `AGENTS.md`, `ARCHITECTURE.md`, `TESTING.md`,
   `DEPLOYMENT_AND_CONFIG.md`, `openspec/README.md`, and the roadmap as its reading
@@ -1134,6 +1213,36 @@ names removed targets or variables.
     dev` over this documents-only worktree ran `pre-commit` alone, its tier, and
     failed only on the specification index (10.9) and this machine's missing
     `bunx` (8.5's handoff). End-to-end: confirmed none.
+  - Implementation triage of the round (review 28, the owner's notes 29,
+    validation 31), fixes made against `820629f39`: 28 F1 (7.3), 28 F2 (7.3),
+    28 F3 (5.1), 28 F4 (1.5), 31 A1 (3.2), 29 O1 (6.4), 29 O2 (6.1); each is noted
+    under its task. Evidence: the config, hooks, clone, push, CLI-steps,
+    code-snapshot, assumptions, CLI, and find suites pass, 530 together (unit and
+    library integration, as each note says), the clone suite 80 after the last
+    docstring edit. `scripts/change-workflow run pre-commit
+    add-workflow-capability-contract --base dev` ran the functional tier:
+    "[change-workflow] after-functional-change at 820629f39…: passed, exit 0"
+    (no lock changed), "[change-workflow] pre-commit-functional at 820629f39…:
+    passed, exit 0" (`make dist-clean`, `make check-packaging`, the whole `make
+    test`), then `pre-commit`: the index, tasks, and skills checks passed; it
+    closed "failed, exit 127" on the OpenSpec default (`bunx` absent here, 8.5's
+    handoff) and `make check-repository`, which failed on the specification
+    index (10.9) and on history wording in two of this fix's docstrings ("no
+    longer"). Those two were reworded, after which `make check-repository
+    CHANGE=add-workflow-capability-contract CHANGE_BASE=dev` fails on the
+    specification index alone. Not run: the strict OpenSpec validation of the
+    delta edits (CW-e1sg, CW-g4oz, CW-8jyb, MCW-r4tx), since `bunx` is absent and
+    no rule of the triage step allows `npx`; the fix commit's validation, and
+    closeout's 10.10, run it where it can. A fresh-context check of the diff found
+    no blocking defect; taken from it: `_push_remote` passes over an upstream
+    naming a remote the workspace lacks (with a test), an existing clone's
+    upstream is left alone until its push remote is added, D4 records the
+    derivation, the test docstrings cite CW-8jyb rather than D4, the
+    `command_environment` docstring states what a command-line variable keeps,
+    10.9 names the clone diagrams, and two wrapping fixes. Declined: removing the
+    step table's `gh auth status` grant to validation and its steps-suite chain,
+    and the orchestrating skill's `pull --no-rebase origin dev`, which hold in
+    this repository; the step table is the owner's to trim.
 
 ## 10. Closeout
 
@@ -1183,7 +1292,11 @@ implementation.
     bind unattended runs only" for the hook table, the marker naming the step, and the
     protected configuration (D9, D14); "Pushing is guarded, never repaired" and "A
     change is worked in its own clone" for the derived remote and landing branch and
-    clone removal (D4); "Models are policy, with no same-vendor fallback" for models
+    clone removal (D4), with the clone diagrams that still draw `origin` as the
+    clone's remote (`diagrams/change-workflow-state.drawio` and
+    `change-workflow-engine-parts.drawio`, each with its `.svg`) and the README's
+    and `market-change-workflow` README's rows naming `origin` as a held remote
+    (28 F3); "Models are policy, with no same-vendor fallback" for models
     per step and no forbidden list (D5); "Interfaces are tiered" for the new
     subcommands (D16); "Current limits" losing the bullet on repository paths held as
     constants and naming what stays fixed in the engine (D1).
@@ -1195,8 +1308,8 @@ implementation.
     outcomes"; CW-s3ju under "Clones and history"; the links of the renamed CW-zq4h,
     CW-w2ld, and CW-p7kq moved; the summaries of the modified CW-hdxi, CW-trdu,
     CW-j1ab, CW-gqav, CW-8tdv, CW-tnp6, CW-h8vm, CW-zkhs, CW-ebmo, CW-zq4h, CW-w2ld,
-    CW-59c7, CW-p7kq, CW-8npg, CW-ikmm, CW-xx5f, and CW-m4ps revised where they no
-    longer hold.
+    CW-59c7, CW-p7kq, CW-8jyb, CW-8npg, CW-ikmm, CW-xx5f, and CW-m4ps revised where
+    they no longer hold.
   - `openspec/specs/market-change-workflow/README.md`: "This repository is the
     workflow's first adopter" losing its sentence that the engine does not yet match;
     "Validation's parts" naming the declared parts (D3); "Branches, models, and the
@@ -1219,6 +1332,6 @@ implementation.
   --strict`.
 - [ ] 10.11 Archival: `scripts/change-workflow openspec archive
   add-workflow-capability-contract -y`, merging the `change-workflow` delta (19
-  added, 3 renamed, 17 modified) and the `market-change-workflow` delta (2 added, 1
+  added, 3 renamed, 18 modified) and the `market-change-workflow` delta (2 added, 1
   modified, 2 removed), no `--skip-specs`; the row then links the archived directory,
   and `make check-spec-index` passes unscoped.

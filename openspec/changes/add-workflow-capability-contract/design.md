@@ -87,8 +87,9 @@ after-functional-change = ["make lock"]
 # Every step that commits, before each commit, after the workflow's default checks.
 # `make check-change`, the owner's complete closing check, runs `run pre-commit`.
 pre-commit = "make check-repository CHANGE={change} CHANGE_BASE={base}"
-# Also before a commit that changes a path outside `inert-paths`.
-pre-commit-functional = ["make check-packaging", "make test"]
+# Also before a commit that changes a path outside `inert-paths`. The wheelhouse is
+# cleared first, so no suite tests a wheel another commit built (29 O2).
+pre-commit-functional = ["make dist-clean", "make check-packaging", "make test"]
 # change-closeout, once, before the archive.
 pre-archive = ["make check-packaging", "make check-architecture-change CHANGE={change}"]
 # Engine, guarded push: before anything is sent, under Git's hook contract.
@@ -248,7 +249,18 @@ Archive cleanup runs the cleanup of every part that declares one, with one call,
 `scripts/change-workflow run cleanup <change>`, which runs them in declaration order
 as one list (D2), so archive cleanup needs no plan. A cleanup tolerates finding
 nothing to clean (CW-ikmm), so cleanup reads no field of the validation record.
-Whatever tracked file a cleanup writes, archive cleanup commits on its own.
+Whatever tracked file a cleanup writes, archive cleanup commits on its own, with no
+hook before it (28 F1): the file is the repository's own record, made by its
+declared command, which answers for it, and the hooks check what a step changed.
+CW-e1sg states the exception. Running the functional hooks there instead was
+rejected: it would rebuild the wheelhouse and run every suite after the archive to
+commit one measured figure, and widen archive cleanup's hooks in the engine's table.
+
+A part's `after` names a part declared before it, and a started part follows only
+another started part, since every dispatch starts before any long part runs; the
+configuration's check refuses any other `after`, cycles included (28 F4). Ordering
+the plan topologically was rejected: it would break the declared order CW-g4oz
+promises in order to tolerate an ordering mistake.
 
 Rejected: individual capabilities the skill sequences, which keeps one repository's
 validation in the skill; one engine operation running every part (14 F1), which
@@ -278,6 +290,20 @@ The remote is the branch's upstream unless an argument overrides it. `clone` giv
 new change branch its landing branch's upstream remote as its upstream
 configuration, so the first push needs no fallback; a branch with neither upstream
 nor argument refuses to push.
+
+Clone creation reads the remote from Git alone (28 F3): the push remote is the
+upstream remote of the workspace's branch of the change, when the workspace has one
+tracking a remote it still has, else the landing branch's. The clone adds that
+remote and the landing branch's upstream remote, which the merge fetches from, each
+under its workspace name and URL; it compares the change branch's copies in the
+workspace and on the push remote, and tracks the push remote's branch of its name.
+`origin` is neither required nor preferred, so a workspace without one clones, a
+fork's change branch tracking the fork keeps it, and a stale branch of the change's
+name on a remote the landing branch does not track is ignored. A rerun settles an
+existing clone's branch onto the derived remote too; in this repository, where every
+branch tracks `origin`, nothing moves. Rejected: preferring `origin`'s branch of the
+change's name when one exists, a remote name held in the engine that picks a stale
+branch over the landing branch's remote.
 
 Rejected: a committed `lands-on` value and remote, which P2 rules out; falling back
 to the remote's default branch, which here is `main` while changes land on `dev`;
@@ -573,8 +599,10 @@ Small, understood fixes that the decisions need, kept in the change
 - `make run-e2e` and `make run-ci` end their output with the bare marker their
   collect waits past, and the validation skill stops running `gh run list` itself.
 - `make dist-clean` folds into the parts' own commands.
-- `make code-snapshot`, its triage sentence, and its role and provision rows are
-  removed: no skill needs it.
+- `make code-snapshot`'s triage sentence and its role and provision rows are
+  removed: no skill needs it. The target itself stays, a convenience of the
+  repository's own that the workflow neither names nor provides (29 O1, which
+  reverted its removal).
 - `check_change.py` drops the checks the default `pre-commit` runs, reads its base
   from `find --json`, and becomes `make check-repository`, the `pre-commit` hook's
   command; `make check-change` runs `scripts/change-workflow run pre-commit` and

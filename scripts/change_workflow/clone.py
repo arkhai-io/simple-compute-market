@@ -13,15 +13,16 @@ left and never reclones:
 
 1. clone the workspace, without a checkout, its remote named `workspace` — how
    every script in the clone finds the workspace;
-2. set `origin` to the workspace's `origin` URL, and the landing branch's upstream
-   remote, when it is another, to that remote's URL, so the push guard's upstream of
-   the same name holds;
+2. add the change's push remote — the remote the workspace's branch of the change
+   tracks, else the one its landing branch tracks, as Git records them; the engine
+   names no remote of its own — and the landing branch's upstream remote, each under
+   its workspace name and URL, so the push guard's upstream of the same name holds;
 3. check out the branch: the existing one at its furthest point between the
-   workspace and `origin`, or a new one from the branch the change lands on,
-   refusing a branch whose two copies have diverged; it tracks `origin`'s branch
-   when there is one, and otherwise a branch of its own name on the landing
-   branch's upstream remote, so its first push goes there, and never the
-   workspace's, so no push goes to the workspace;
+   workspace and the push remote, or a new one from the branch the change lands on,
+   refusing a branch whose two copies have diverged; it tracks its branch of the
+   same name on the push remote, so its first push goes there, and never the
+   workspace's, so no push goes to the workspace; with no push remote it tracks
+   nothing, and the guarded push refuses it;
 4. link `.claude/settings.local.json` to the workspace's, so the owner's local
    permissions have one source;
 5. start the bootstrap, the workflow configuration's `post-clone` as the clone's
@@ -329,18 +330,21 @@ def start_bootstrap(clone: Path, commands: Sequence[str] | None,
     return bootstrap_state(clone)
 
 
-def _remote_branches(clone: Path, names: Sequence[str]) -> set[str]:
-    """Which of `names` are branches on `origin`, fetched as `origin/<name>`."""
-    listed = _git(clone, "ls-remote", "--heads", "origin",
+def _remote_branches(clone: Path, remote: str | None, names: Sequence[str]) -> set[str]:
+    """Which of `names` are branches on `remote`, the change's push remote, fetched as
+    `<remote>/<name>`; none with no remote."""
+    if remote is None:
+        return set()
+    listed = _git(clone, "ls-remote", "--heads", remote,
                   *(f"refs/heads/{name}" for name in names), check=False)
     if listed.returncode != 0:
-        raise CloneError(f"could not read origin's branches from {clone}: "
+        raise CloneError(f"could not read {remote}'s branches from {clone}: "
                          f"{listed.stderr.strip()}")
     found = {line.split("\t", 1)[1].removeprefix("refs/heads/")
              for line in listed.stdout.splitlines() if "\t" in line}
     for name in sorted(found):
-        _git(clone, "fetch", "--quiet", "origin",
-             f"+refs/heads/{name}:refs/remotes/origin/{name}")
+        _git(clone, "fetch", "--quiet", remote,
+             f"+refs/heads/{name}:refs/remotes/{remote}/{name}")
     return found
 
 
@@ -369,12 +373,13 @@ def _merged(clone: Path, head: str, into: str) -> bool:
     return merge.returncode == 0 and merge.stdout.strip() == tree
 
 
-def _furthest(clone: Path, name: str, on_origin: set[str]) -> tuple[str, str] | None:
-    """`name` at its furthest point among the workspace's branch and `origin`'s, as
+def _furthest(clone: Path, name: str, remote: str | None,
+              on_remote: set[str]) -> tuple[str, str] | None:
+    """`name` at its furthest point among the workspace's branch and `remote`'s, as
     (ref, commit); refused when the two have diverged, since either could be meant."""
     candidates = [(ref, commit) for ref in (f"refs/remotes/{WORKSPACE_REMOTE}/{name}",
-                                            *([f"refs/remotes/origin/{name}"]
-                                              if name in on_origin else []))
+                                            *([f"refs/remotes/{remote}/{name}"]
+                                              if name in on_remote else []))
                   if (commit := _ref(clone, ref))]
     if not candidates:
         return None
@@ -386,7 +391,7 @@ def _furthest(clone: Path, name: str, on_origin: set[str]) -> tuple[str, str] | 
             ref, commit = other_ref, other
             continue
         raise CloneError(f"{name} has diverged between the workspace ({commit[:12]}) and "
-                         f"origin ({other[:12]}); reconcile them, then run this again")
+                         f"{remote} ({other[:12]}); reconcile them, then run this again")
     return ref, commit
 
 
@@ -395,43 +400,47 @@ def _uncommitted(clone: Path) -> list[str]:
     return [line for line in status.stdout.splitlines() if line.strip()]
 
 
-def _check_out(clone: Path, branch: str, from_ref: str) -> None:
+def _check_out(clone: Path, branch: str, from_ref: str, remote: str | None) -> None:
     # The workspace's branches as they are now, not as they were when the clone
     # was made: a rerun after the owner reconciled a diverged branch reads that.
     _git(clone, "fetch", "--quiet", "--prune", WORKSPACE_REMOTE)
-    on_origin = _remote_branches(clone, [branch, from_ref])
-    existing = _furthest(clone, branch, on_origin)
+    on_remote = _remote_branches(clone, remote, [branch, from_ref])
+    existing = _furthest(clone, branch, remote, on_remote)
     if existing is not None:
         start = existing[1]
     else:
-        start_from = _furthest(clone, from_ref, on_origin)
+        start_from = _furthest(clone, from_ref, remote, on_remote)
         start = start_from[1] if start_from else _ref(clone, from_ref)
         if start is None:
+            where = f"the workspace or {remote}" if remote else "the workspace"
             raise CloneError(f"{branch} does not exist, and {from_ref}, the branch it lands "
-                             "on, names no branch of the workspace or origin, nor a commit")
+                             f"on, names no branch of {where}, nor a commit")
     # No index yet: nothing was ever checked out here, so the worktree holds no
     # tracked work for the forced checkout to overwrite.
     _git(clone, "checkout", "--quiet", "--force", "--no-track", "-B", branch, start)
 
 
 def _settle_upstreams(clone: Path, branch: str, remote: str | None) -> None:
-    """The change's branch tracks `origin`'s branch of its name when there is one,
-    and otherwise a branch of its name on `remote`, the landing branch's upstream
-    remote, so the guarded push, which pushes a branch to its upstream's remote,
-    needs no fallback for the first push; with neither it tracks nothing. No branch
-    of the clone tracks the workspace, so no push goes into the owner's workspace.
+    """The change's branch tracks its branch of the same name on `remote`, the
+    change's push remote (`_push_remote`), so the guarded push, which pushes a branch
+    to its upstream's remote, needs no fallback for the first push; with no remote it
+    tracks nothing, and its push refuses. No branch of the clone tracks the
+    workspace, so no push goes into the owner's workspace.
 
     Run on every pass, not only after the checkout, so a run interrupted between
     the checkout and this is finished by the next.
     """
-    if _remote_url(clone, "origin") and _ref(clone, f"refs/remotes/origin/{branch}"):
-        _git(clone, "branch", "--quiet", f"--set-upstream-to=origin/{branch}", branch)
+    if remote and _remote_url(clone, remote) and _ref(clone, f"refs/remotes/{remote}/{branch}"):
+        _git(clone, "branch", "--quiet", f"--set-upstream-to={remote}/{branch}", branch)
     elif remote and _remote_url(clone, remote):
         # The branch does not exist there yet, so Git's own --set-upstream-to, which
         # needs the remote-tracking ref, cannot name it.
         _git(clone, "config", f"branch.{branch}.remote", remote)
         _git(clone, "config", f"branch.{branch}.merge", f"refs/heads/{branch}")
-    elif _git(clone, "config", f"branch.{branch}.remote", check=False).stdout.strip():
+    elif remote is None and _git(clone, "config", f"branch.{branch}.remote",
+                                 check=False).stdout.strip():
+        # A push remote not added to the clone yet leaves the upstream as it is: the
+        # pass after the remote is added settles it.
         _git(clone, "branch", "--quiet", "--unset-upstream", branch)
     tracking = _git(clone, "for-each-ref", "--format=%(refname:short) %(upstream:remotename)",
                     "refs/heads/").stdout.splitlines()
@@ -444,11 +453,24 @@ def _settle_upstreams(clone: Path, branch: str, remote: str | None) -> None:
                 _git(clone, "branch", "--quiet", "--unset-upstream", name)
 
 
-def _upstream_remote(workspace: Path, landing: str) -> str | None:
-    """The remote the workspace's `landing` branch tracks, when it is a branch that
+def _upstream_remote(workspace: Path, name: str) -> str | None:
+    """The remote the workspace's branch `name` tracks, when it is a branch that
     tracks one other than the workspace itself."""
-    remote = _git(workspace, "config", f"branch.{landing}.remote", check=False).stdout.strip()
+    remote = _git(workspace, "config", f"branch.{name}.remote", check=False).stdout.strip()
     return remote if remote not in ("", ".", WORKSPACE_REMOTE) else None
+
+
+def _push_remote(workspace: Path, branch: str, landing: str) -> str | None:
+    """The remote the change's branch pushes to, as Git records it in the workspace:
+    the change's branch's own upstream remote when the workspace has the branch and it
+    tracks one, else the landing branch's. The engine names no remote of its own, so
+    a workspace with no `origin` clones, and a fork's change branch tracking the fork
+    keeps it while its landing branch tracks the repository it was forked from. An
+    upstream naming a remote the workspace does not have is passed over, as if the
+    branch tracked none."""
+    return next((name for name in (_upstream_remote(workspace, branch),
+                                   _upstream_remote(workspace, landing))
+                 if name and _remote_url(workspace, name)), None)
 
 
 def create(workspace: Path, change: str, *, branch: str | None = None,
@@ -462,10 +484,6 @@ def create(workspace: Path, change: str, *, branch: str | None = None,
     if workspace_of(workspace) is not None:
         raise CloneError(f"{workspace} is itself a change's clone; run this in the owner's "
                          "workspace")
-    origin = _remote_url(workspace, "origin")
-    if not origin:
-        raise CloneError(f"the workspace {workspace} has no origin remote, which the clone's "
-                         "pushes go to")
     target = clone_directory(workspace, change)
     done: list[str] = []
     given = from_ref or _current_branch(workspace)
@@ -499,13 +517,19 @@ def create(workspace: Path, change: str, *, branch: str | None = None,
     landing = recorded.get("base") or given
     if not landing:
         raise CloneError(unknown)
-    remote = _upstream_remote(workspace, landing)
+    remote = _push_remote(workspace, branch, landing)
+    # The push remote, and the landing branch's upstream remote, which the merge
+    # fetches the landing branch from, each under its workspace name and URL.
+    wanted = {name: url
+              for name in dict.fromkeys((remote, _upstream_remote(workspace, landing)))
+              if name is not None and (url := _remote_url(workspace, name))}
 
     # What is already in the clone is refused before anything is written to it.
-    current_origin = _remote_url(target, "origin")
-    if current_origin not in (None, origin):
-        raise CloneError(f"{target}'s origin is {current_origin}, not the workspace's "
-                         f"{origin}; nothing was changed")
+    for name, url in wanted.items():
+        current_url = _remote_url(target, name)
+        if current_url not in (None, url):
+            raise CloneError(f"{target}'s {name} is {current_url}, not the workspace's "
+                             f"{url}; nothing was changed")
     checked_out = _checked_out(target)
     if checked_out:
         current = _current_branch(target)
@@ -521,13 +545,9 @@ def create(workspace: Path, change: str, *, branch: str | None = None,
                              + "\n".join(dirty))
 
     added = False
-    if current_origin is None:
-        _git(target, "remote", "add", "origin", origin)
-        added = True
-    if remote not in (None, "origin") and _remote_url(target, remote) is None:
-        url = _remote_url(workspace, remote)
-        if url:
-            _git(target, "remote", "add", remote, url)
+    for name, url in wanted.items():
+        if _remote_url(target, name) is None:
+            _git(target, "remote", "add", name, url)
             added = True
     if added:
         done.append("remotes")
@@ -535,7 +555,7 @@ def create(workspace: Path, change: str, *, branch: str | None = None,
             # Settled above before the remote it tracks was there.
             _settle_upstreams(target, branch, remote)
     if not checked_out:
-        _check_out(target, branch, landing)
+        _check_out(target, branch, landing, remote)
         _settle_upstreams(target, branch, remote)
         done.append("branch")
     if not recorded:

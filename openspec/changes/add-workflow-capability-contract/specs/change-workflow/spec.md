@@ -115,12 +115,20 @@ records are exempt where a requirement exempts them.
 Before a commit changing any path outside the inert paths, a step MUST run
 `after-functional-change`, then `pre-commit-functional`, then `pre-commit`; before
 any other commit, `pre-commit` alone. Only implementation, triage, and the merge make
-functional commits.
+functional commits. A tracked file a validation part's cleanup writes is the
+repository's own record, made by its declared command, which answers for it:
+archive cleanup MUST commit it on its own, without the hooks (CW-ikmm).
 
 #### Scenario: A triage fix changes only documents
 
 - **WHEN** a triage's accepted fix changes only paths under the inert paths
 - **THEN** the triage runs `pre-commit` alone before committing it
+
+#### Scenario: A cleanup records a figure in a tracked file
+
+- **WHEN** archive cleanup's run of the cleanups rewrites a tracked file outside the
+  inert paths
+- **THEN** archive cleanup commits that file alone, running no hook before it
 
 ### Requirement: CW-c8lw A hook's default checks run unless disabled by name
 
@@ -166,7 +174,10 @@ diagnose each failure from the part's declared evidence. It MUST learn the parts
 preflight, then each run of a part in declaration order with its shape, the part it
 follows, and its evidence, an owed part once per owed workflow, named by its part and
 that workflow, or once as not owed when no complete section owes it. Which parts are
-waived MUST stay validation's judgement, not the plan's.
+waived MUST stay validation's judgement, not the plan's. A part's `after` MUST name a
+part declared before it, and a part that is started and collected MUST follow only
+another such part, since every dispatch starts before any long part runs; the
+configuration's check MUST refuse any other `after`.
 
 #### Scenario: Two sections owe CI workflows
 
@@ -561,6 +572,37 @@ naming the branch and `HEAD`, as for a new branch, on its input, and the remote 
 
 - **WHEN** the guarded push runs in a repository with no `pre-push`
 - **THEN** it pushes once its own check passes
+
+### Requirement: CW-8jyb Creating a clone is safe to repeat
+
+Creating a clone MUST be safe to repeat: it MUST finish a clone left incomplete, and
+MUST refuse, deleting nothing, a directory that is not a clone of the workspace, has
+another branch checked out, or has uncommitted changes. One of the clone's remotes
+MUST name the workspace. The clone MUST take its push remote from Git's record in
+the workspace — the upstream remote of the workspace's branch of the change, else of
+the branch the change lands on — and the landing branch's upstream remote, each
+under its workspace name and URL, and its branch MUST track its branch of the same
+name on the push remote; the engine MUST name no remote of its own.
+
+#### Scenario: Clone creation was interrupted
+
+- **WHEN** an orchestrating session restarts after creating a change's clone only
+  in part
+- **THEN** the computation names the clone again, and creating it finishes the
+  steps not yet done without recloning or deleting anything
+
+#### Scenario: A workspace with no origin
+
+- **WHEN** the workspace's landing branch tracks `upstream` and the workspace has no
+  `origin`
+- **THEN** the clone is made, with an `upstream` remote and no `origin`, and its
+  branch tracks its own name on `upstream`
+
+#### Scenario: A stale branch of the change's name on another remote
+
+- **WHEN** the workspace's landing branch tracks `upstream`, the workspace has no
+  branch of the change, and `origin` holds an old branch of the change's name
+- **THEN** the clone's branch starts from the landing branch and tracks `upstream`
 
 ### Requirement: CW-8npg A clone's bootstrap gates implementation and validation
 

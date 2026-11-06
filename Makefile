@@ -21,7 +21,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: dist-bare-metal-buyer
 .PHONY: run-e2e run-ci fetch-e2e-logs
 .PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
-.PHONY: design-review validate-local validate-ci validate-helm validate-parallel check-change check-repository install-gitleaks check-public-content check-secrets audit-secrets check-decision-destinations check-history-wording check-version-bumps check-local-imports check-capability-index record-capacity review-diff last-diff review-wheelhouse-prepare review-locks pre-push
+.PHONY: design-review validate-local validate-ci validate-helm validate-parallel check-change check-repository install-gitleaks check-public-content check-secrets audit-secrets check-decision-destinations check-history-wording check-version-bumps check-local-imports check-capability-index record-capacity review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks pre-push
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -907,6 +907,17 @@ check-architecture-change: ## Fail while CHANGE=<name> owns an architecture exce
 
 architecture-report: ## Write the full architecture report, no exception applied (OUT=<path>, else stdout)
 	@python3 scripts/architecture_report.py $(if $(OUT),--out "$(OUT)")
+
+# `zip -y` stores a symlink as a link. Without it the agent-skill links under
+# .claude/skills and .codex/skills unzip as empty directories, and the snapshot no
+# longer shows which skills each harness loads.
+code-snapshot: round-view-closed ## Zip all git-tracked files for sharing (excludes gitignored artifacts).
+	@mkdir -p .snapshot
+	@OUTFILE="$(CURDIR)/.snapshot/$(GIT_NAME)-$(GIT_SUFFIX).zip"; \
+	echo "Creating $$OUTFILE ..."; \
+	git ls-files --recurse-submodules | zip -y -@ "$$OUTFILE"; \
+	SIZE=$$(du -sh "$$OUTFILE" | cut -f1); \
+	echo "Done: $$OUTFILE ($$SIZE)"
 
 # review-diff must capture untracked new files, not only modifications to
 # tracked ones -- a reviewer needs to see everything under review, and

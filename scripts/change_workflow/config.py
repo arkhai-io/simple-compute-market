@@ -336,11 +336,23 @@ def _parts(value: Any) -> tuple[Part, ...]:
         parts.append(Part(name, run=commands.get("run"), start=commands.get("start"),
                           collect=commands.get("collect"), owed=owed, after=after,
                           evidence=evidence, cleanup=cleanup))
-    names = {part.name for part in parts}
-    for part in parts:
-        if part.after is not None and (part.after not in names or part.after == part.name):
-            raise ConfigError(f"validation.parts.{part.name}.after names {part.after!r}, "
-                              "which is no other declared part")
+    # Validation runs the parts in declaration order, every dispatch before any long
+    # part, so an `after` it could not keep — a part declared later, which also
+    # rules out every cycle, or a long part followed by a dispatch — is refused
+    # here rather than left for an unattended run to improvise around.
+    declared = {part.name: index for index, part in enumerate(parts)}
+    for index, part in enumerate(parts):
+        if part.after is None:
+            continue
+        where = f"validation.parts.{part.name}.after"
+        if part.after not in declared or part.after == part.name:
+            raise ConfigError(f"{where} names {part.after!r}, which is no other declared part")
+        if declared[part.after] > index:
+            raise ConfigError(f"{where} names {part.after!r}, which is declared after it; a "
+                              "part follows only a part declared before it")
+        if part.start is not None and parts[declared[part.after]].run is not None:
+            raise ConfigError(f"{where} names {part.after!r}, a `run` part, but every "
+                              "`start` is dispatched before any `run` part runs")
     return tuple(parts)
 
 

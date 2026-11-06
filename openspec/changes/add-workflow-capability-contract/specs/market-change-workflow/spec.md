@@ -4,8 +4,10 @@
 
 This repository's configuration MUST relock after a functional change; run its own
 closing checks, `make check-repository`, before every commit, while `make
-check-change` runs the workflow's whole `pre-commit` for the owner; check
-packaging and run every suite before a functional commit; check packaging and the
+check-change` runs the workflow's whole `pre-commit` for the owner; before a
+functional commit, clear the wheelhouse, so that the packaging check builds every
+wheel from the commit and no suite tests a wheel another commit built, then check
+packaging and run every suite; check packaging and the
 change's architecture exceptions before the archive; and declare validation's
 pipeline, owed CI, local, and Helm parts, the Helm part after the local one, with a
 cleanup that records the capacity measured and removes the change's namespace and

@@ -58,7 +58,8 @@ states what the workflow assumes about a repository.
   given landing branch refuses instead of assuming `dev`. Its pre-push checks become
   one make target its Git hook also runs, `make check-change` stays the complete
   closing check by running the engine's `pre-commit`, whose hook is the new `make
-  check-repository`, and the legacy `make code-snapshot` is removed.
+  check-repository`, and `make code-snapshot` stays a target of the repository's own
+  that no skill names.
 
 ## Capabilities
 
@@ -102,8 +103,8 @@ states what the workflow assumes about a repository.
   derivations.
 - `.agents/workflow.toml`, new, and this repository's `Makefile`: `pre-push`, the
   markers of `run-e2e` and `run-ci`, `dist-clean` folded into the parts,
-  `check-repository` added and `check-change` running the engine's `pre-commit`, and
-  `code-snapshot` removed; `scripts/hooks/pre-push`.
+  `check-repository` added and `check-change` running the engine's `pre-commit`;
+  `scripts/hooks/pre-push`.
 - `.agents/skills/change-*/SKILL.md`, which invoke hooks, `openspec`, and `config
   load` instead of this repository's targets and documents.
 - `.claude/change-steps.toml`: models moved out, `run` and `openspec` rules added,

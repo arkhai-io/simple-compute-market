@@ -56,6 +56,16 @@ def _checked(text: str) -> config.Configuration:
     ("[validation.parts.helm]\nrun = 'a'\nafter = 'local'\n",
      "validation.parts.helm.after names 'local', which is no other declared part"),
     ("[validation.parts.helm]\nrun = 'a'\nafter = 'helm'\n", "which is no other declared part"),
+    # Validation keeps declaration order, so a part follows only one declared before it,
+    # which also refuses every cycle.
+    ("[validation.parts.helm]\nrun = 'a'\nafter = 'local'\n[validation.parts.local]\nrun = 'b'\n",
+     "validation.parts.helm.after names 'local', which is declared after it"),
+    ("[validation.parts.a]\nrun = 'x'\nafter = 'b'\n[validation.parts.b]\nrun = 'y'\n"
+     "after = 'a'\n", "validation.parts.a.after names 'b', which is declared after it"),
+    # Every dispatch starts before any long part runs.
+    ("[validation.parts.local]\nrun = 'a'\n[validation.parts.pipeline]\nstart = 'b'\n"
+     "collect = 'c'\nafter = 'local'\n",
+     "validation.parts.pipeline.after names 'local', a `run` part"),
     ("[defaults]\ndisable = [{ check = 'lint', reason = 'r' }]\n",
      "defaults.disable[0] names 'lint', which is no default check"),
     ("[defaults]\ndisable = [{ check = 'skills', reason = ' ' }]\n",
@@ -86,6 +96,31 @@ def test_a_malformed_configuration_is_refused_naming_the_field(text: str, named:
     with pytest.raises(ConfigError) as refused:
         _checked(text)
     assert named in str(refused.value)
+
+
+def test_a_part_may_follow_an_earlier_part_validation_can_keep_it_after() -> None:
+    """CW-g4oz: a dispatch after an earlier dispatch, and a long part after an earlier
+    part of either shape, keep declaration order and the dispatches-first rule."""
+    checked = _checked("""
+[validation.parts.pipeline]
+start = "a"
+collect = "b"
+
+[validation.parts.ci]
+start = "c"
+collect = "d"
+after = "pipeline"
+
+[validation.parts.local]
+run = "e"
+after = "ci"
+
+[validation.parts.helm]
+run = "f"
+after = "local"
+""")
+    assert [(part.name, part.after) for part in checked.parts or ()] == [
+        ("pipeline", None), ("ci", "pipeline"), ("local", "ci"), ("helm", "local")]
 
 
 def test_placeholders_fill_where_they_are_available_and_the_shells_own_pass() -> None:
@@ -496,15 +531,17 @@ def test_the_repositorys_own_configuration_passes_its_check(
 
 def test_the_repository_declares_every_hook() -> None:
     """MCW-r4tx: this repository relocks after a functional change, runs its own
-    closing checks before every commit, checks packaging and runs every suite
-    before a functional commit, checks packaging and the change's architecture rows
-    before the archive, and runs its pre-push checks as one target."""
+    closing checks before every commit, clears the wheelhouse, checks packaging and
+    runs every suite before a functional commit, checks packaging and the change's
+    architecture rows before the archive, and runs its pre-push checks as one
+    target."""
     loaded = config.load(REPOSITORY)
 
     assert loaded.hook("after-functional-change") == ("make lock",)
     assert loaded.hook("pre-commit") == (
         "make check-repository CHANGE={change} CHANGE_BASE={base}",)
-    assert loaded.hook("pre-commit-functional") == ("make check-packaging", "make test")
+    assert loaded.hook("pre-commit-functional") == ("make dist-clean", "make check-packaging",
+                                                    "make test")
     assert loaded.hook("pre-archive") == ("make check-packaging",
                                           "make check-architecture-change CHANGE={change}")
     assert loaded.hook("pre-push") == ("make pre-push REMOTE={remote}",)

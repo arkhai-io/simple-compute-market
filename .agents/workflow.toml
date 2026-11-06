@@ -22,7 +22,7 @@ after-functional-change = ["make lock"]
 pre-commit = "make check-repository CHANGE={change} CHANGE_BASE={base}"
 # Engine, `run pre-commit`, for change-implement, change-triage, and change-merge:
 # also before a commit that changes a path outside `inert-paths`.
-pre-commit-functional = ["make check-packaging", "make test"]
+pre-commit-functional = ["make dist-clean", "make check-packaging", "make test"]
 # Engine, `run pre-archive`, for change-closeout: once, before the archive.
 pre-archive = ["make check-packaging", "make check-architecture-change CHANGE={change}"]
 # Engine, guarded push: before anything is sent, under Git's hook contract. The

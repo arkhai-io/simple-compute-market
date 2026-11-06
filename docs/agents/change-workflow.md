@@ -95,8 +95,8 @@ closing line naming the hook, the commit, the result, and each failed command wi
 its exit status. Before each commit a step runs `run pre-commit <change>`: when the
 worktree changes a path outside the configuration's inert paths (here `openspec/`
 and `docs/`), it runs `after-functional-change` (here `make lock`), then
-`pre-commit-functional` (`make check-packaging`, `make test`), then `pre-commit`;
-otherwise `pre-commit` alone. The step stages what the hooks rebuilt. Closeout runs
+`pre-commit-functional` (`make dist-clean`, `make check-packaging`, `make test`),
+then `pre-commit`; otherwise `pre-commit` alone. The step stages what the hooks rebuilt. Closeout runs
 `run pre-archive <change>` (`make check-packaging`, `make check-architecture-change`)
 before the archive; validation learns its parts from `scripts/change-workflow config
 parts <change>` and runs its preflight (`make check-uv-version`) and then each part
@@ -573,12 +573,14 @@ workspace, with another `BRANCH`, or a `FROM` when you name one — a change lan
 on another branch than the one your workspace has checked out; you can run it by
 hand too. It records the branch the change lands on — `FROM`, or else the
 workspace's checked-out branch, refusing a detached workspace given none — and
-keeps that record on every rerun. It clones the workspace locally, sets the
-clone's `origin` to the workspace's and adds a `workspace` remote naming the
-workspace, and checks out the branch — the existing one, or a new one from the
-landing branch — at its furthest point between the workspace's copy and `origin`'s,
-refusing one where the two have diverged; the branch tracks its own name on
-`origin`, or on the landing branch's upstream remote, never the workspace. It links
+keeps that record on every rerun. It clones the workspace locally, with a
+`workspace` remote naming the workspace, and adds the change's push remote — the
+remote your workspace's branch of the change tracks, else the one the landing
+branch tracks, `origin` here — and the landing branch's upstream remote, each under
+its name in your workspace. It checks out the branch — the existing one, or a new
+one from the landing branch — at its furthest point between the workspace's copy
+and the push remote's, refusing one where the two have diverged; the branch tracks
+its own name on the push remote, never the workspace. It links
 the clone's `.claude/settings.local.json` to the workspace's and starts the
 configuration's `post-clone`, `make init` here, in the background. It is safe to run again: it finishes a clone left incomplete, restarts
 a failed bootstrap, and refuses, deleting nothing, a directory that is not a clone

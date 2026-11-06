@@ -124,9 +124,11 @@ the latest pre-closeout review and its triage; and the latest validation record.
 
 ## 3. Merge
 
-1. Fetch the base from the remote that has it: `git fetch origin <base>`; for a
-   change worked in its own clone, a branch only the owner's workspace holds comes
-   from its `workspace` remote, `git fetch workspace <base>`. The base is then
+1. Fetch the base from the remote that has it — the remote the branch tracks in the
+   owner's workspace, which a clone has under the same name (`git remote` lists
+   them; `origin` in this repository): `git fetch <remote> <base>`; for a change
+   worked in its own clone, a branch only the owner's workspace holds comes from its
+   `workspace` remote, `git fetch workspace <base>`. The base is then
    `<remote>/<base>`, written `<base>` below. List what it gained: `git log
    --oneline HEAD..<base>`. When it lists nothing, the base is merged already:
    nothing is merged, and `HEAD` and its validation stand. Go to step 7, which

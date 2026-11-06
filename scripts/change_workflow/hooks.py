@@ -1,8 +1,9 @@
 """Running the repository's hooks: `scripts/change-workflow run <hook> <change>`.
 
 A hook is one command or a list (`config`). Each command has its placeholders filled,
-each value shell-quoted, and runs with `sh -c` from the repository's root, its
-output passed through. A list runs every command in order, whatever an earlier one
+each value shell-quoted, and runs with `sh -c` from the repository's root, without
+the recursion state of any make that started the session (`command_environment`),
+its output passed through. A list runs every command in order, whatever an earlier one
 reported, and the hook fails when any failed, naming each, so one call reports every
 failure. Every hook ends with one closing line the engine writes in a fixed form
 (`closing_line`), naming the hook, the commit, the result, and each failed command
@@ -54,6 +55,7 @@ from __future__ import annotations
 
 import fcntl
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -100,15 +102,33 @@ class HookError(StepError):
     required field."""
 
 
+# What a make passes the commands it runs so that a make among them acts as its
+# sub-make. A session started by a make target inherits them, and a declared
+# `make …` would then print its "Leaving directory" line after a `start`'s marker,
+# which must be its last line.
+_MAKE_RECURSION = ("MAKELEVEL", "MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES")
+
+
+def command_environment(environ: Mapping[str, str] | None = None) -> dict[str, str]:
+    """The environment a hook's or a part's command runs in: the caller's, without
+    make's recursion state, so the command runs as a fresh invocation from the
+    repository's root. A variable given to the outer make on its command line stays,
+    since make exports it, but as an environment variable: a Makefile's `?=` takes
+    it, while a plain `=` or `:=` assignment overrides it."""
+    return {key: value for key, value in (os.environ if environ is None else environ).items()
+            if key not in _MAKE_RECURSION}
+
+
 def shell(command: str, root: Path) -> int:
-    return subprocess.run(["sh", "-c", command], cwd=root).returncode
+    return subprocess.run(["sh", "-c", command], cwd=root, env=command_environment()).returncode
 
 
 def capture(command: str, root: Path) -> tuple[int, str | None]:
     """Run `command` as `shell` does, passing each line of its standard output
     through as it arrives, and return its status and its last non-empty line."""
     process = subprocess.Popen(["sh", "-c", command], cwd=root, stdout=subprocess.PIPE,
-                               text=True, encoding="utf-8", errors="replace")
+                               text=True, encoding="utf-8", errors="replace",
+                               env=command_environment())
     assert process.stdout is not None
     last = None
     for line in process.stdout:

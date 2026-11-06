@@ -723,19 +723,6 @@ def test_the_root_makefile_runs_the_command_through_the_fragment(
     assert _make_n(target, "CHANGE=X", *variables) == commands
 
 
-def test_the_repository_keeps_no_code_snapshot_target() -> None:
-    """No skill needs a zip of the tracked tree, so the repository defines none."""
-    env = {**{key: value for key, value in os.environ.items()
-              if key not in ("MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKELEVEL")},
-           "LC_ALL": "C"}
-    printed = subprocess.run(["make", "-n", "--no-print-directory", "code-snapshot"],
-                             cwd=Path(__file__).resolve().parents[2], capture_output=True,
-                             text=True, env=env)
-
-    assert printed.returncode != 0
-    assert "No rule to make target 'code-snapshot'" in printed.stderr
-
-
 @pytest.mark.parametrize("target,variables,commands", [
     ("run-e2e", [], [f"{COMMAND} check round-view", "python3 scripts/ci_evidence.py pipeline"]),
     ("run-ci", ["WORKFLOW=tests.yml"],
