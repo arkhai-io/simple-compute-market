@@ -210,6 +210,11 @@ added by this reconciliation.
   passes the existing signed HTTP settlement/recovery suite. Kept test fixtures
   now provide the explicit total projector and required payment payee; no new
   permanent tests were added and no assertions were weakened.
+- A separate small repair corrects VM confirmation's second duration scaling of
+  an already-total accepted payment and the resumed escrow's hourly label. The
+  committed consumer probe drives/declines that confirmation; 54 existing VM
+  buyer regressions and packaging/change checks pass. This does not complete
+  4.1's broader lifecycle/recurring disclosure.
 - **Restart at 2.2**, then continue in order. Listing bounds, publication,
   servicing doors, horizon acceptance and complete buyer disclosure are not yet
   implemented. PR #351 stays draft; independent review, final rebase, promotion

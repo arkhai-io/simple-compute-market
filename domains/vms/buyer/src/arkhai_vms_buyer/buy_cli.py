@@ -109,19 +109,19 @@ def _confirm_settlement_interactive(*, terms, listing: dict, console: Console) -
     no on-chain transaction has been emitted and the seller's /settle
     endpoint hasn't been touched yet. Declining here is a clean exit.
 
-    Displays the agreed per-hour rate, duration, total payment (= rate
-    x duration_seconds / 3600), seller URL, and listing ID so the buyer
-    can sanity-check the cost before committing.
+    The installed once mechanisms accept a monetary total, not an hourly
+    asking rate. Show it unchanged alongside the duration, seller and listing
+    so confirmation never scales an already-derived payment a second time.
     """
     duration_hours = terms.duration_seconds / 3600
-    total = terms.agreed_amount * terms.duration_seconds // 3600
+    total = terms.agreed_amount
     table = Table.grid(padding=(0, 2))
     table.add_column(style="bold")
     table.add_column()
     table.add_row("Seller", str(terms.seller_url))
     table.add_row("Listing", str(terms.listing_id))
     table.add_row("Negotiation", str(terms.negotiation_id))
-    table.add_row("Agreed price", f"{terms.agreed_amount} (per hour, raw token units)")
+    table.add_row("Agreed price", f"{terms.agreed_amount} (total, raw token units)")
     table.add_row("Duration", f"{terms.duration_seconds}s ({duration_hours:.4g}h)")
     table.add_row("Total payment", f"{total} (raw token units)")
     console.print(Panel(table, title="Confirm settlement", border_style="yellow"))

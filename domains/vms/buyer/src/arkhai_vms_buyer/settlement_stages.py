@@ -524,7 +524,9 @@ def _resume_alkahest(context: BuyerResumeContext) -> dict:
     header.add_row("Run ID", run_id)
     header.add_row("Seller", deal.seller_url)
     header.add_row("Negotiation", deal.negotiation_id)
-    header.add_row("Agreed price (per hour)", str(deal.agreed_amount))
+    header.add_row("Agreed price (total)", str(
+        exact_agreed_amount(deal, project_billing=alkahest_billing_basis)
+    ))
     header.add_row("Duration (seconds)", str(effective_duration))
     if chain.token_contract:
         header.add_row(
