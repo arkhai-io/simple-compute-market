@@ -236,23 +236,103 @@ Slice A handoff (2026-11-06; 2.4–2.6, still not deployment-ready):
   boundary. No PR, release, promotion, archive or deployment is claimed here;
   the existing post-review closeout remains required for the final slice.
 
+### Slice B handoff (2026-11-06; 2.7–2.11)
+
+- Shape-priced scalar threads now carry integer basis points in `fields.amount`;
+  `negotiation.multiplier_floor_bps` defaults to 10,000 and may be lowered
+  explicitly. Bisection remains scalar and unchanged; sub-floor counter/accept
+  decisions counter at the floor, and acceptance below the floor is refused.
+- `arkhai_vms_negotiation.amounts` shares selected-asset quote derivation between
+  seller and buyer. Exact rational arithmetic retains fractional base units until
+  one final upward rounding; uint256 overflow refuses as `shape_price_overflow`.
+  Flat-priced and hidden-reserve paths retain their existing exact/truncating
+  semantics. **No existing truncation assertion was changed**, including
+  `core/tests/unit/test_rate_helpers.py`: that generic legacy helper is not the
+  multiplier quote contract.
+- Consumer audit/conversion: VM seller references and proposal hooks carry bps;
+  `_build_response_artifacts` converts before `_accepted_settlement_artifacts`,
+  the settlement-stage context, escrow/hosted obligation construction and
+  `_with_agreement`. Monetary escrow artifacts no longer overwrite the scalar
+  terminal proposal. The core buyer codec validates Agreement/obligation amounts
+  against the derived payment, not bps. VM direct-client and orchestration entry
+  points supply that codec, bypassing duration scaling only for multiplier mode.
+  Buyer outcomes keep monetary `agreed_amount` for aggregation, confirmation and
+  settlement and record `negotiated_scalar` separately. Resume retains the rate
+  carrier, exact integer prices, and effective shape revisions. Buyer escrow
+  materialization and accepted-deal recovery already read the monetary outcome
+  or Agreement and therefore require no scalar reinterpretation. Storefront
+  transcript/detail scalars remain exact text-backed integers, not payments.
+- Focused evidence: 121 VM cases pass (including 20 existing thread cases), including the new pure arithmetic and
+  SQLite integration regressions and the served buyer in flat and shape-priced
+  modes; 71 core buyer cases and 69 VM buyer cases pass; 49 unchanged policy and
+  generic rate-helper cases pass. The large-payment integration reconstructs the
+  runtime and SQLite client, then derives the identical payment above 2^63 from
+  accepted shape, pinned rates, duration and bps. The buyer's unchanged bisection
+  accepts the floor after the revision without re-anchoring. The replay observes
+  reference 10,000 → 10,000 → 10,000 while derived quotes are 80 → 120 → 120.
+- Corrected encounters: initial setup omitted `make dist`; verified wheelhouse
+  preparation fixed it. Early test attempts used wrong filenames/response field
+  names, and a shape-priced publication fixture retained a forbidden clause rate;
+  corrected invocations and policy setup pass. Driving the real buyer exposed the
+  escrow proposal overwrite; accepting a revised counter exposed an echoed revision
+  instruction. Both are repaired and the focused encounters re-driven. Repeating
+  sub-floor counters hits the existing bisection stale exit, so the observational
+  script opens a fresh thread for subsequent refusal checks.
+- Setup/evidence: `docs/attachments/resize-shape-pricing/index.md` and
+  `first_use.py`. Required and prepared target: checkout-owned temporary SQLite,
+  public deterministic development principals, loaded fake pool projection and
+  injected advertised-listing source match. No secrets, deployed chain/registry/
+  site, or resident server. From root run `make check-packaging`, then
+  `make -C domains/vms/storefront reinit`, then
+  `(cd domains/vms/storefront && PYTHONPATH=src:. uv run --frozen --no-sync python ../../../docs/attachments/resize-shape-pricing/first_use.py)`.
+- Gates: `make check-packaging` and all twelve `make check-change
+  CHANGE=negotiation-driven-capacity-resize CHANGE_BASE=6f387f0b3` checks pass,
+  including comment hygiene and pinned strict OpenSpec validation. No typing,
+  deployed/e2e, independent acceptance, promotion, archive or PR is claimed.
+- **Restart at 2.12–2.16.** Prices are now monetary at settlement construction, but
+  the settlement order and hold still use the listing's quantities: carry the
+  agreed shape into both before deployment. Drain in-flight absolute-amount
+  threads across the eventual deployment boundary. The parallel registry
+  carrier/seller-proof contract remains a deployment dependency; no registry-side
+  implementation or deployed proof-verification result is claimed here. Parent
+  integration owns landing on `resize-multiplier`; this worker does not merge or
+  push its parent's target branch. Preserve the existing post-review closeout.
+
 ### 2b. The multiplier
 
-- [ ] 2.7 Reinterpret the negotiated reference quantity as a multiplier in basis
+Slice B plan (2026-11-06):
+
+- Centralize exact shape/duration/multiplier quote arithmetic in
+  `domains/vms/negotiation/src/arkhai_vms_negotiation/amounts.py`, reused by
+  seller hooks and buyer conversion. Round only the final quote upward and
+  reject uint256 overflow. Keep legacy flat/hidden-reserve paths unchanged;
+  the delta applies where a listing has a resolvable rate structure.
+- Convert the VM seller reference and enforce one configurable multiplier floor;
+  keep kit bisection scalar and shape-independent. Convert accepted amounts
+  before VM settlement context, escrow, hosted obligation and Agreement creation.
+- Add a schema-opaque scalar/payment codec seam to core buyer negotiation and
+  orchestration; VM adapters supply the listing-aware codec. Preserve monetary
+  outcome/settlement amounts while transcripts retain the negotiated scalar.
+  Carry the registry listing through CLI, orchestration and resume records.
+- Exercise focused exact arithmetic, convergence, persistence and existing buyer
+  and seller regression suites. Permanent destinations remain the design-promotion
+  record; the existing post-review closeout applies after 2c, not this checkpoint.
+
+- [x] 2.7 Reinterpret the negotiated reference quantity as a multiplier in basis
       points over the advertised minimum rate structure, through the
       `reference_amount`, `amount_from_proposal`, and `proposal_from_amount` hooks.
       Every intermediate value is an exact integer or `Decimal`; the quote rounds up;
       a quote exceeding the asset's amount type is refused.
-- [ ] 2.8 Audit every consumer that assumed the negotiated scalar was an amount in
+- [x] 2.8 Audit every consumer that assumed the negotiated scalar was an amount in
       an asset's base units — the escrow and hosted obligation construction paths
       first, since a missed consumer surfaces as a wrong on-chain amount. This is an
       audit, not a rename.
-- [ ] 2.9 Express the seller's floor once as a multiplier bound (default 10,000)
+- [x] 2.9 Express the seller's floor once as a multiplier bound (default 10,000)
       and confirm it applies to a shape never explicitly priced; a policy may lower
       it explicitly.
-- [ ] 2.10 Confirm `bisection_middleware` converges unchanged on the reinterpreted
+- [x] 2.10 Confirm `bisection_middleware` converges unchanged on the reinterpreted
       quantity, and that a shape change between rounds does not re-anchor bounds.
-- [ ] 2.11 Focused tests: concession comparability across a shape change; floor
+- [x] 2.11 Focused tests: concession comparability across a shape change; floor
       applied to an unanticipated shape; agreed terms yield one derivable price;
       a base-unit amount above 2^63 survives a full round trip through persistence
       and the hooks unchanged.

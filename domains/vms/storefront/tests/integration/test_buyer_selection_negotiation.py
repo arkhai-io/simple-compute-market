@@ -11,6 +11,8 @@ from __future__ import annotations
 import asyncio
 import json
 
+import pytest
+
 from arkhai_vms import make_vm_provision_terms
 from arkhai_vms_buyer.buyer_client import negotiate_with_seller
 from arkhai_vms_buyer.settlement_composition import (
@@ -27,7 +29,7 @@ from market_storefront.utils import config as storefront_config
 from tests.fake_site import TEST_MARKETPLACE_SIGNER
 from tests.introduction_deals import publish
 from tests.loopback import serving
-from tests.publication_app import BUYER_SIGNER, pool, publication_app
+from tests.publication_app import BUYER_SIGNER, pool, publication_app, settlement_clause
 
 # VM may publish Alkahest for an unbacked pool in this composition double.
 _ALKAHEST_PUBLISHABLE = {"alkahest.v1": False, "arkhai.payments.v1": True}
@@ -50,8 +52,9 @@ def _buyer_chain(tmp_path, monkeypatch, address_book) -> None:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(config_dir.parent))
 
 
+@pytest.mark.parametrize("shape_priced", [False, True])
 async def test_a_buyer_selection_of_a_priced_alkahest_option_reaches_acceptance(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, shape_priced
 ) -> None:
     book = json.loads(anvil_address_book_path().read_text())
     # Deterministic local contract fixture; never used on a public network.
@@ -62,7 +65,15 @@ async def test_a_buyer_selection_of_a_priced_alkahest_option_reaches_acceptance(
     async with publication_app(
         tmp_path, mechanism_fulfillment=_ALKAHEST_PUBLISHABLE, negotiation=True
     ) as world:
-        world.pools.append(pool("broker-a", backing="unbacked"))
+        pricing = ({"gpu": {"H100": {"rates": [{
+            "asset": "0x" + "22" * 20, "rate": "100", "per": "hour",
+        }]}}} if shape_priced else {})
+        clause = settlement_clause()
+        if shape_priced:
+            clause.pop("rate")
+            clause.pop("per")
+        world.set_settlement_clauses([clause])
+        world.pools.append(pool("broker-a", backing="unbacked", pricing=pricing))
         configured = storefront_config.settlement_config_mapping()
         configured["alkahest"].update(
             release_models=["recipient", "interruptible"],
@@ -88,6 +99,7 @@ async def test_a_buyer_selection_of_a_priced_alkahest_option_reaches_acceptance(
         assert "oracle" in raw["settlement"]["accepted_escrow"]["demand"]["demand_data"]
         option = SettlementOption.model_validate(raw)
         hourly = int(option.price_rates[0].value)
+        assert bool(listing.get("rate_structure")) == shape_priced
         selection = SettlementSelection(
             option_id=option.option_id,
             settlement={"schema": option.settlement_schema},
@@ -113,6 +125,7 @@ async def test_a_buyer_selection_of_a_priced_alkahest_option_reaches_acceptance(
                         principal=BUYER_SIGNER.identity,
                         signer=BUYER_SIGNER,
                         listing_id=listing_id,
+                        listing=listing,
                         resolve_seller_principals=lambda: TrustedIdentitySet(
                             identities=(TEST_MARKETPLACE_SIGNER.identity,)
                         ),
@@ -141,6 +154,7 @@ async def test_a_buyer_selection_of_a_priced_alkahest_option_reaches_acceptance(
 
     assert outcome.status == "agreed", outcome
     assert outcome.agreed_amount == hourly
+    assert outcome.negotiated_scalar == (10000 if shape_priced else hourly)
     assert outcome.settlement_selection.option_id == option.option_id
     assert outcome.accepted_escrow_proposal is not None
     assert rounds[-1][1] == "accept"

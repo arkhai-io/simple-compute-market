@@ -75,7 +75,12 @@ def accepted_listing_record(match: Mapping[str, Any], _proposal: Any) -> dict[st
     selected = match.get("_selected_settlement")
     if not isinstance(selected, SelectedSettlementOption):
         return {}
-    return buyer_stage(selected.selection.settlement_schema).listing_record(match)
+    record = buyer_stage(selected.selection.settlement_schema).listing_record(match)
+    if match.get("rate_structure"):
+        record = {**record, **{key: match[key] for key in (
+            "listing_id", "listing_resource", "rate_structure", "settlement_options", "accepted_escrows"
+        ) if key in match}}
+    return record
 
 
 def validate_buyer_acceptance(outcome) -> None:
