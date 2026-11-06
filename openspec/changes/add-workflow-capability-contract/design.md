@@ -324,7 +324,14 @@ under `docs/` but the packaging checks read it, which is safe because closeout's
 
 The same list tiers the pre-commit hooks: a commit changing a path outside it runs
 `after-functional-change`, then `pre-commit-functional`, then `pre-commit`; any
-other runs only `pre-commit`. The skill does not decide which tier it is in.
+other runs only `pre-commit`. The skill does not decide which tier it is in: the
+paths the commit changes do. So `scripts/change-workflow run pre-commit <change>`
+reads the tier itself from the worktree's changes against `HEAD` — staged, unstaged,
+and untracked — and, when any lies outside the inert paths, runs
+`after-functional-change` and `pre-commit-functional` before `pre-commit`, each
+still held to the engine's hook table (D9). The skill then stages what the hooks
+rebuilt, such as a lock, with its own edits. A review's clean worktree runs
+`pre-commit` alone, which changes nothing (CW-y6mj).
 
 Rejected: the names `documentation-paths`, which is narrower than the files it
 holds, `revalidation-exempt`, which names only one use, and `non-functional-paths`,
