@@ -2814,7 +2814,7 @@ tests/test_render.py}` and the same under `helm/charts/bare-metal-storefront/`;
     suite runs. The next step is the round's validation and implementation review, in
     fresh sessions.
 
-- [ ] 12.6 **Integration publication gate (D4; MCW-s8gk).** The combined current
+- [x] 12.6 **Integration publication gate (D4; MCW-s8gk).** The combined current
   publication rule rejects D3's deterministic PKCS8 fixture. Amend `.gitleaks.toml`
   with an exact-match-and-canonical-path allowance for that key rule only; leave
   `scripts/gitleaks-audit.toml` unchanged. Add real pinned-scanner cases in
@@ -2829,7 +2829,7 @@ tests/test_render.py}` and the same under `helm/charts/bare-metal-storefront/`;
   verify them on the combined source rather than adding another implementation.
   Record complete round evidence before advancing to closeout.
 
-- [ ] 12.7 **Complete the recorded dispute-credential schema requirement (D19).**
+- [x] 12.7 **Complete the recorded dispute-credential schema requirement (D19).**
   Section 7's handoff, reiterated in section 12, records that neither storefront
   values generator types dispute credentials deeply enough to refuse `api_key`
   in public chart configuration. Add the shared `DisputeCredential` model to
@@ -2843,7 +2843,7 @@ tests/test_render.py}` and the same under `helm/charts/bare-metal-storefront/`;
   required validation before closeout. The existing deployment-state delta and
   section 13.9 own permanent promotion; this completes an existing requirement.
 
-- [ ] 12.8 **Validate the configured buyer token before scenarios.** Independent
+- [x] 12.8 **Validate the configured buyer token before scenarios.** Independent
   specification review found that `configured_payments` validates the key's
   environment-variable name but lets an absent token through, so the payment
   scenario can mutate marketplace state before buyer-client construction fails.
@@ -2872,6 +2872,17 @@ Integration handoff for 12.6–12.7:
 - Combined round validation remains due: full root suites, Compose lane payment
   scenarios and the deployed Helm payments check. These local results do not
   prove an external rental, hosted Stripe funding or deployed configuration.
+
+Combined integration verification at `31a1ba47c`: Tests workflow run42180770193
+passed all24jobs, including all21root test targets. E2E run42180876034 passed all
+three lanes: bare metal70passed, API credits4passed, VM153passed with only the two
+expected missing-mediation case-stage skips. All three authenticated payments setup
+checks succeeded. Deployed Helm validation passed14served compatibility tests and
+the actual payments-check pod exited0. These results establish local double and
+configuration compatibility, not hosted funding or physical hardware delivery.
+Independent Standards/Spec review and its incremental rechecks have no unresolved
+finding. Existing deployment-state requirements own the credential-schema correction;
+no new production behavior or design decision was introduced by these integration fixes.
 
 ## 13. Closeout
 
@@ -2916,9 +2927,10 @@ returns the change to implementation.
   - add an unowned gap: the signing credential `ARKHAI_IDENTITY_CREDENTIAL` is the one
     secret not delivered as a secret profile, revisited when a change decides identity
     credential delivery (D19, the design's Open Questions).
-- [ ] 13.6 **Campaign index currency.** In `openspec/changes/README.md`, set this change's
-  row to its archived state and link, and update the Reach hosts campaign's graph lines
-  naming it. Note in `qualify-real-provisioning-by-scenario`'s row that its storefront
+- [ ] 13.6 **Campaign index currency.** In `openspec/changes/README.md`, keep this
+  change's row `in closeout` and update the Reach hosts campaign's graph lines
+  naming it. Prepare the archive link for the archival step; apply that link only
+  when 13.11 moves the directory. Archive cleanup sets the final `archived` status. Note in `qualify-real-provisioning-by-scenario`'s row that its storefront
   chart CA option is delivered here as a chart-derived `ca_bundle_path`, the storefront's
   payments key being `api_key` in its secret overlay, and that its delta's same-named
   requirement must be dropped or reduced to a MODIFIED at its reverification; note in
