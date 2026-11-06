@@ -110,57 +110,6 @@
     "storefrontServiceConfig": {
       "type": "object",
       "patternProperties": {
-        "^[dD][iI][sS][pP][uU][tT][eE][cC][rR][eE][dD][eE][nN][tT][iI][aA][lL]$": {
-          "type": [
-            "array",
-            "null"
-          ],
-          "items": {
-            "additionalProperties": false,
-            "type": "object",
-            "patternProperties": {
-              "^[iI][nN][tT][eE][rR][fF][aA][cC][eE]$": {
-                "minLength": 1,
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "^[oO][rR][iI][gG][iI][nN]$": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "^[aA][cC][cC][oO][uU][nN][tT]$": {
-                "minLength": 1,
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "^[rR][eE][cC][oO][rR][dD]_[kK][eE][yY]$": {
-                "minLength": 1,
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "^[aA][pP][iI]_[kK][eE][yY]$": false,
-              "^[aA][pP][iI]_[kK][eE][yY]_[eE][nN][vV]$": {
-                "anyOf": [
-                  {
-                    "pattern": "^[A-Z_][A-Z0-9_]*$",
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              }
-            }
-          }
-        },
         "^[dD][eE][lL][iI][vV][eE][rR][yY]$": {
           "type": [
             "object",

@@ -2343,3 +2343,11 @@ The first combined chart invocation hit a pytest module-name collision before
 execution; importlib collection passed all147. Full CI, three Compose lanes,
 affected deployed Helm proof and independent review of this new executable
 candidate remain pending; earlier source evidence is retained as historical proof.
+
+Independent integration review identified equal duplicate object keys in two
+JSON schema artifacts, hidden by dictionary-based equality. Canonical
+`make helm-values-schema` regeneration removed them; a raw object-pairs parse
+confirms zero duplicate keys across all three schemas. No credential-validation
+bypass was observed. Stale-candidate CI was cancelled so full validation targets
+the corrected generated artifacts. Packaging evidence remains applicable: only
+generated duplicate removal and this task note changed after the passing check.
