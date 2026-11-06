@@ -242,7 +242,10 @@ on every ending of the run, meeting `physical-provisioning`'s requirement — wi
 a note that a per-operation directory was weighed and rejected in this change's
 D3, and D3's revisit trigger. It rewrites to match the relay design's paragraph
 on the resolved variables file and its handoff note naming this change as owner
-of 2A.7. It also corrects the relay row's Notes, removes the campaign graph edge
+of 2A.7, and applies the same correction to the two other places the relay
+change states this change's earlier role: its design-promotion row saying the
+per-host-key fix is owned here, and its sequencing paragraph calling this change
+a practical prerequisite of its section 8. It also corrects the relay row's Notes, removes the campaign graph edge
 naming this change as a prerequisite of that change's live verification, and
 rewrites the campaign paragraph that says this change is what allows an
 independently prepared host to be registered. Ticking 2A.7 stays with the relay
