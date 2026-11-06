@@ -109,8 +109,8 @@ options are immutable and cannot be rewritten from the current listing.
 - D1: derived classes → `docs/development/ARCHITECTURE.md` and
   `openspec/specs/negotiation-protocol/spec.md`.
 - D2: unit-bearing price → `docs/development/ARCHITECTURE.md` and
-  `openspec/specs/negotiation-protocol/spec.md`; reconcile the dependency carrier
-  before implementing or promoting this decision.
+  `openspec/specs/negotiation-protocol/spec.md`; D2a retains resize's monetary
+  Agreement carrier and transcript multiplier, with recurring derivation before acceptance.
 - D3: shared-codec consumption and penalty recommendations →
   `openspec/specs/settlement-configuration/spec.md`; codec and authority ownership
   remain in `openspec/specs/deal-lifecycle/spec.md`.

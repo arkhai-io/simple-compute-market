@@ -4,15 +4,18 @@
 
 Compute price consumers MUST use one core accessor returning the agreed quote and
 its unit, `total` or `per_period`, with the selected period available for display.
-It MUST preserve negotiated rate-multiplier semantics, upward rounding and asset
-amount limits. Prepaid quotes use Agreement duration; recurring quotes use one
-selected option period. Direct reads of `Agreement.amount` outside the accessor and
+`Agreement.amount` MUST contain the accepted monetary amount, not the multiplier.
+Before acceptance, prepaid quotes MUST use Agreement duration and recurring quotes
+one selected option period, preserving upward rounding once and asset amount limits.
+The multiplier MUST remain negotiation-transcript state; the accessor MUST return
+the accepted amount and label it using the selected option's acceptance-bound billing kind. Direct reads of `Agreement.amount` outside the accessor and
 explicit raw negotiation hooks MUST fail the repository check.
 
 #### Scenario: Sub-hour recurring quote
 
-- **WHEN** a 10,000-bps Agreement selects PT1M at 2,500,000 USD/6 per hour
-- **THEN** the accessor returns 41,667 per period rather than the full maximum-term price
+- **WHEN** a negotiation agrees 10,000 bps and selects PT1M at 2,500,000 USD/6 per hour
+- **THEN** acceptance writes the upward-rounded monetary amount 41,667 into the Agreement
+- **AND** the accessor returns that accepted 41,667 per period rather than the full maximum-term price
 
 #### Scenario: Prepaid recovery
 
@@ -22,7 +25,8 @@ explicit raw negotiation hooks MUST fail the repository check.
 #### Scenario: Publication is repriced before materialization
 
 - **WHEN** the pool rate changes after signed acceptance but before mandate derivation or restart recovery
-- **THEN** the accessor and buyer check use the acceptance-bound rate structure and selected option, and the agreed price does not change
+- **THEN** the accessor returns the accepted monetary amount with the accepted option's unit, and the agreed price does not change
+- **AND** recovery and buyer mandate checks verify it against the acceptance-bound rate structure and transcript multiplier, never the current listing
 
 #### Scenario: A consumer bypasses the accessor
 
