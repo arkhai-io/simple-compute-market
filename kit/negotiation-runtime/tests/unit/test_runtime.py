@@ -95,6 +95,7 @@ class HookHarness:
         self.policy_calls: list[RoundRequest] = []
         self.events: list[tuple[str, str, dict[str, Any]]] = []
         self.reference_calls: list[dict[str, Any] | None] = []
+        self.revision_decoder = None
         self.next_decision = NegotiationDecision(
             action="counter",
             proposal={proposal_key: 12},
@@ -167,6 +168,7 @@ class HookHarness:
             _listing_record: Mapping[str, Any],
             _terms: NegotiationTerms,
             thread: Mapping[str, Any],
+            _revised_terms: NegotiationTerms | None,
         ) -> None:
             if thread.get("binding") == "mismatch":
                 raise NegotiationStateError("recorded binding mismatch")
@@ -207,6 +209,7 @@ class HookHarness:
                 else (_ for _ in ()).throw(ValueError("units must be positive"))
             ),
             validate_continuation=validate_continuation,
+            decode_revised_terms=self.revision_decoder,
             evaluate_round=self.evaluate,
             determine_strategy=lambda _listing, _record: "domain-policy",
             reference_amount=self.reference_amount,
@@ -284,6 +287,53 @@ async def test_round_zero_uses_domain_codec_and_persists_canonical_principals() 
     assert harness.policy_calls[0].terms.decoded == {"decoded": 3}
     assert response["buyer_principal"] == _BUYER.model_dump(mode="json")
     assert response["proposal"] == {"credits": 12}
+
+
+@pytest.mark.asyncio
+async def test_a_round_without_revision_and_acceptance_resume_the_last_quoted_terms() -> None:
+    repository = RecordingRepository()
+    harness = HookHarness()
+    harness.revision_decoder = lambda previous, raw: NegotiationTerms(
+        decoded={"decoded": int(raw["units"])}, wire={"units": int(raw["units"])}
+    )
+    runtime = runtime_for(repository, harness)
+    await runtime.start(
+        repository=repository,
+        listing_id="listing-1",
+        buyer_principal=_BUYER,
+        seller_principal=_SELLER,
+        actor_principal=_BUYER,
+        proposal={"price": 10},
+        terms={"units": 7},
+        seller_agent_url="https://seller.example",
+        buyer_agent_url="https://buyer.example",
+    )
+    continuation = dict(
+        repository=repository,
+        negotiation_id="neg-fixed",
+        buyer_reason=None,
+        buyer_principal=_BUYER,
+        actor_principal=_BUYER,
+        actor_role="buyer",
+    )
+    await runtime.continue_negotiation(
+        **continuation, buyer_action="counter",
+        buyer_proposal={"price": 11, "provision_terms": {"units": 3}},
+    )
+    assert harness.policy_calls[-1].revised_terms.decoded == {"decoded": 3}
+    assert repository.messages["neg-fixed"][-1]["provision_terms"] == {"units": 3}
+    # Reconstruct the runtime, so no in-memory policy state can carry the shape.
+    runtime = runtime_for(repository, harness)
+    await runtime.continue_negotiation(
+        **continuation, buyer_action="counter", buyer_proposal={"price": 11},
+    )
+    assert harness.policy_calls[-1].terms.decoded == {"decoded": 3}
+    assert harness.policy_calls[-1].revised_terms is None
+    response = await runtime.continue_negotiation(
+        **continuation, buyer_action="accept", buyer_proposal=None,
+    )
+    assert response["accepted_artifact"]["terms"] == {"units": 3}
+    assert repository.threads["neg-fixed"]["provision_terms"] == {"units": 7}
 
 
 @pytest.mark.asyncio

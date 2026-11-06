@@ -896,7 +896,7 @@ def load_negotiation_resume_point(
                     raise typer.BadParameter(
                         f"Run-log {run_id!r} has invalid persisted {field_name}."
                     )
-                parsed_price = float(raw_price)
+                parsed_price = raw_price
                 previous = initial_price if field_name == "initial_price" else max_price
                 if previous is not None and previous != parsed_price:
                     raise typer.BadParameter(

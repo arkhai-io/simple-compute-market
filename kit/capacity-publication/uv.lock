@@ -70,6 +70,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "pydantic" },
+    { name = "typing-extensions" },
 ]
 wheels = [
     { path = "arkhai_core_storefront-0.17.1-py3-none-any.whl" },

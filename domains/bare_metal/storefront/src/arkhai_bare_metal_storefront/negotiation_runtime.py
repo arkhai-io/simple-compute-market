@@ -502,6 +502,7 @@ def build_bare_metal_negotiation_runtime(
         _record: Mapping[str, Any],
         terms: NegotiationTerms,
         thread: Mapping[str, Any],
+        _revised_terms: NegotiationTerms | None,
     ) -> None:
         recorded = await repository.load_bare_metal_message(
             negotiation_id=str(thread["negotiation_id"])

@@ -334,6 +334,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "pydantic" },
+    { name = "typing-extensions" },
 ]
 wheels = [
     { path = "arkhai_core_storefront-0.17.1-py3-none-any.whl" },
@@ -805,8 +806,10 @@ name = "arkhai-vms-negotiation"
 version = "0.6.0"
 source = { registry = "../../../.dist" }
 dependencies = [
+    { name = "arkhai-core" },
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-policy" },
+    { name = "arkhai-vms" },
     { name = "arkhai-vms-listings" },
 ]
 wheels = [

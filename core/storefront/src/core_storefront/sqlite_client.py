@@ -698,6 +698,7 @@ class SQLiteClient:
                   action_taken TEXT NOT NULL,
                   message_type TEXT NOT NULL,
                   timestamp TEXT NOT NULL,
+                  provision_terms TEXT,
                   FOREIGN KEY(negotiation_id) REFERENCES negotiation_threads(negotiation_id),
                   UNIQUE(negotiation_id, round)
                 )
@@ -2246,6 +2247,7 @@ class SQLiteClient:
         action_taken: str,
         message_type: str,
         timestamp: str,
+        provision_terms: Mapping[str, Any] | None = None,
     ) -> int:
         """Save a negotiation message to the database.
 
@@ -2324,9 +2326,10 @@ class SQLiteClient:
                     INSERT INTO negotiation_messages(
                         negotiation_id, round, sender_role,
                         sender_scheme, sender_identifier, our_price, their_price,
-                        proposed_price, action_taken, message_type, timestamp
+                        proposed_price, action_taken, message_type, timestamp,
+                        provision_terms
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(negotiation_id, round) DO UPDATE SET
                         sender_role = excluded.sender_role,
                         sender_scheme = excluded.sender_scheme,
@@ -2336,7 +2339,8 @@ class SQLiteClient:
                         proposed_price = excluded.proposed_price,
                         action_taken = excluded.action_taken,
                         message_type = excluded.message_type,
-                        timestamp = excluded.timestamp
+                        timestamp = excluded.timestamp,
+                        provision_terms = excluded.provision_terms
                     """,
                     (
                         negotiation_id,
@@ -2350,6 +2354,8 @@ class SQLiteClient:
                         action_taken,
                         message_type,
                         timestamp,
+                        json.dumps(dict(provision_terms), allow_nan=False)
+                        if provision_terms is not None else None,
                     ),
                 )
                 conn.commit()
@@ -2374,7 +2380,7 @@ class SQLiteClient:
                     """
                     SELECT round, sender_role, sender_scheme, sender_identifier,
                            our_price, their_price, proposed_price,
-                           action_taken, message_type, timestamp
+                           action_taken, message_type, timestamp, provision_terms
                     FROM negotiation_messages
                     WHERE negotiation_id = ?
                     ORDER BY round ASC
@@ -2397,6 +2403,9 @@ class SQLiteClient:
                             "action_taken": row[7],
                             "message_type": row[8],
                             "timestamp": row[9],
+                            "provision_terms": (
+                                json.loads(row[10]) if row[10] is not None else None
+                            ),
                         }
                     )
                 return result
@@ -2448,10 +2457,9 @@ class SQLiteClient:
         run (or be retried) as a separate step by reading these columns,
         without replaying the round-by-round message history.
 
-        ``agreed_price`` is the absolute payment amount in base units of
-        the payment token (the column name is retained from before the
-        per-hour → absolute refactor; semantically it now holds the
-        amount, not a per-hour rate). ``agreed_duration_seconds`` echoes
+        ``agreed_price`` stores the exact domain-negotiated scalar; the
+        accepted Agreement carries the derived monetary amount, when applicable.
+        ``agreed_duration_seconds`` echoes
         the buyer's negotiation-init ask and is used by settlement-time
         arbiter codecs that bind the seller's delivery window.
         """
@@ -4678,8 +4686,8 @@ class SQLiteClient:
                     "terminal_state",
                     "requested_duration_seconds",
                     "requested_start_utc",
-                    # Column stays ``agreed_price``; wire field is
-                    # ``agreed_amount`` (absolute amount in base units).
+                    # The wire exposes the domain-negotiated scalar; monetary
+                    # settlement terms are carried by the accepted Agreement.
                     "agreed_amount",
                     "agreed_duration_seconds",
                     "agreed_at",
@@ -4758,9 +4766,8 @@ class SQLiteClient:
                     "seller_identifier",
                     "requested_duration_seconds",
                     "requested_start_utc",
-                    # Column is named ``agreed_price`` (kept from before the
-                    # per-hour → absolute refactor); the wire field is
-                    # ``agreed_amount`` since it holds an absolute amount.
+                    # The column and wire field carry the exact negotiated
+                    # scalar, whose units belong to the domain.
                     "agreed_amount",
                     "agreed_duration_seconds",
                     "agreed_at",

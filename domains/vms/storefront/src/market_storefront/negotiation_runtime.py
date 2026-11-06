@@ -11,7 +11,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from arkhai_vms import DIMENSION_KEYS as _DIMENSION_COMPUTE_KEYS
+from arkhai_vms.capability_shapes import (
+    canonical_vm_shape,
+    flatten_vm_shape,
+    vm_listing_resource_shape,
+)
+from arkhai_vms.provision_terms import VM_PROVISION_KIND, VM_PROVISION_VERSION
 from core_storefront import (
     StorefrontDomainBinding,
     StorefrontDomainRegistry,
@@ -24,6 +29,7 @@ from arkhai_vms_listings import (
 from arkhai_vms_listings.models import Listing
 from arkhai_vms_negotiation import storefront_round as vm_storefront_round
 from arkhai_vms_negotiation.policies import _amount_from_proposal
+from arkhai_vms_negotiation.amounts import has_rate_structure, multiplier_floor, quote_from_multiplier
 from arkhai_vms_negotiation.storefront_round import SellerRoundHook
 from arkhai_vms_settlement.proposals import accepted_escrow_artifacts_from_proposal
 from market_alkahest.proposals import (
@@ -40,6 +46,7 @@ from market_core import MarketDomainContract
 from market_storefront.settlement_stages import resolve_proposal_stage
 from market_core.schemas import (
     Agreement,
+    ProvisionTerms,
     SettlementObligation,
     SettlementOption,
     SettlementPlan,
@@ -68,6 +75,11 @@ from market_storefront.lifecycle import trading_pause
 from market_storefront.services.listing_source_check import check_listing_source
 from market_capacity_publication import PublicationBinding
 from market_storefront.services.capacity_client import capacity_binding_for_listing
+from market_storefront.services.negotiation_shapes import check_requested_shape
+from market_storefront.services.vm_job_spec_service import (
+    agreed_vm_order,
+    compute_capacity_claim_from_order,
+)
 from market_storefront.utils.config import (
     chain_address_books,
     get_evm_wallet_address,
@@ -79,6 +91,16 @@ logger = logging.getLogger(__name__)
 AcceptedObligationDispatch = Mapping[
     str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any] | None
 ]
+
+
+def _rate_structure_digest(listing: Mapping[str, Any]) -> str | None:
+    structure = listing.get("rate_structure")
+    if structure is None:
+        return None
+    encoded = json.dumps(
+        structure, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _negotiation_settings() -> Any:
@@ -112,14 +134,23 @@ def seller_reference_amount(
     listing: Any,
     duration_seconds: int | None,
     proposal: Mapping[str, Any] | None = None,
+    requested_shape: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> int:
     """The seller's reference amount from the option ``proposal`` selects."""
-    return vm_storefront_round._seller_reference_amount(
-        listing,
-        duration_seconds,
-        default_min_price=_default_min_price(),
-        proposal=proposal,
-    )
+    try:
+        if has_rate_structure(listing):
+            return multiplier_floor(_negotiation_settings())
+        return vm_storefront_round._seller_reference_amount(
+            listing,
+            duration_seconds,
+            default_min_price=_default_min_price(),
+            proposal=proposal,
+            requested_shape=requested_shape,
+        )
+    except ValueError as exc:
+        if str(exc).startswith("shape_price_unavailable:"):
+            raise OfferUnfulfillableError(str(exc)) from exc
+        raise
 
 
 def _default_seller_round_hook(domain: MarketDomainContract) -> SellerRoundHook:
@@ -166,28 +197,31 @@ def _decode_vm_terms(domain: MarketDomainContract, raw_terms: Any) -> Negotiatio
     )
 
 
+def _decode_vm_revised_terms(
+    domain: MarketDomainContract, previous: NegotiationTerms, raw_terms: Any
+) -> NegotiationTerms:
+    """Replace only the shape; lease timing and delivery credentials stay pinned."""
+    envelope = ProvisionTerms.model_validate(raw_terms)
+    if envelope.kind != VM_PROVISION_KIND or envelope.version != VM_PROVISION_VERSION:
+        raise ValueError("unsupported VM revised-terms envelope")
+    shape = canonical_vm_shape(envelope.payload)
+    flat = flatten_vm_shape(shape)
+    wire = dict(previous.wire or {})
+    payload = dict(wire.get("payload", wire))
+    payload["compute_resource"] = {**flat.quantities, **flat.attributes}
+    if "payload" in wire:
+        wire["payload"] = payload
+    else:
+        wire = payload
+    return _decode_vm_terms(domain, wire)
+
+
 def _validate_vm_opening(
     _listing: Any,
-    listing_record: Mapping[str, Any],
-    terms: NegotiationTerms,
+    _listing_record: Mapping[str, Any],
+    _terms: NegotiationTerms,
 ) -> None:
-    decoded = terms.decoded
-    if decoded is None:
-        return
-    requested = getattr(decoded, "compute_resource", None)
-    if not requested:
-        return
-    listing_compute = extract_compute_from_order(dict(listing_record))
-    mismatched = {
-        key: {"requested": requested[key], "listing": listing_compute.get(key)}
-        for key in _DIMENSION_COMPUTE_KEYS
-        if requested.get(key) is not None and requested[key] != listing_compute.get(key)
-    }
-    if mismatched:
-        raise OfferUnfulfillableError(
-            f"resource_shape_not_negotiable: {mismatched}",
-            listing_id=str(listing_record.get("listing_id") or "") or None,
-        )
+    """Requested shapes are checked by the round composition before pricing."""
 
 
 def _proposal_wire(proposal: Any) -> dict[str, Any] | None:
@@ -225,6 +259,10 @@ def _decision_wire(decision: NegotiationDecision) -> dict[str, Any]:
     proposal = payload.get("proposal")
     if not isinstance(proposal, dict):
         return payload
+    # A revision is the buyer's instruction for this counter, not an instruction
+    # to repeat when accepting the seller's quote of the resulting terms.
+    proposal = {key: value for key, value in proposal.items() if key != "provision_terms"}
+    payload["proposal"] = proposal
     fields = proposal.get("fields")
     if not isinstance(fields, dict) or not isinstance(fields.get("amount"), int):
         return payload
@@ -318,18 +356,7 @@ def _accepted_vm_service_terms(
     listing_id = listing.get("listing_id")
     if not isinstance(listing_id, str) or not listing_id:
         raise OfferUnfulfillableError("selected_listing_identity_unavailable")
-    order = dict(listing)
-    listing_resource = order.get("listing_resource")
-    if isinstance(listing_resource, str):
-        try:
-            listing_resource = json.loads(listing_resource)
-        except json.JSONDecodeError as exc:
-            raise OfferUnfulfillableError(
-                "selected_listing_resource_unavailable"
-            ) from exc
-        order["listing_resource"] = listing_resource
-    if not isinstance(listing_resource, dict):
-        raise OfferUnfulfillableError("selected_listing_resource_unavailable")
+    order = agreed_vm_order(dict(listing), provision_terms)
     return {
         "vm.v1": {
             "listing_id": listing_id,
@@ -406,8 +433,11 @@ def _accepted_selection_artifacts(
         )
     except (TypeError, ValueError) as exc:
         raise OfferUnfulfillableError("selected_settlement_option_not_exact") from exc
+    obligation = dict(built.obligation)
     if built.amount is not None:
-        if agreed_amount != built.amount:
+        if has_rate_structure(listing):
+            obligation["amount"] = agreed_amount
+        elif agreed_amount != built.amount:
             raise OfferUnfulfillableError("selected_amount_not_duration_scaled")
     elif agreed_amount:
         raise OfferUnfulfillableError("selection_amount_not_negotiable")
@@ -422,7 +452,7 @@ def _accepted_selection_artifacts(
                     provision_terms=provision_terms,
                 ),
             },
-            obligations=[SettlementObligation.model_validate(built.obligation)],
+            obligations=[SettlementObligation.model_validate(obligation)],
         )
     except (TypeError, ValueError) as exc:
         raise OfferUnfulfillableError("selected_settlement_option_not_exact") from exc
@@ -503,6 +533,12 @@ def _accepted_settlement_artifacts(
         # authorizes and the plan its settlement is verified against: the
         # acceptance is refused before anything is recorded.
         raise OfferUnfulfillableError(str(exc)) from exc
+    plan = artifacts.get("settlement_plan")
+    if isinstance(plan, dict):
+        plan["service_terms"] = {
+            **plan.get("service_terms", {}),
+            **_accepted_vm_service_terms(listing=listing, provision_terms=provision_terms),
+        }
     artifacts["settlement_selection"] = selection.model_dump(mode="json", exclude_none=True)
     artifacts["_agreement_settlement_option"] = dict(option)
     return artifacts
@@ -523,6 +559,7 @@ def _json_compatible(value: Any) -> Any:
 def _with_agreement(
     acceptance: Acceptance,
     artifacts: dict[str, Any],
+    payment_amount: int | None = None,
 ) -> dict[str, Any]:
     settlement_raw = artifacts.pop("_agreement_settlement_option", None)
     settlement = (
@@ -564,7 +601,7 @@ def _with_agreement(
         ).settlement_params
         if artifacts.get("settlement_selection") is not None
         else {},
-        amount=acceptance.agreed_amount,
+        amount=acceptance.agreed_amount if payment_amount is None else payment_amount,
         asset=asset,
         duration_seconds=acceptance.agreement.duration_seconds,
         start_utc=acceptance.agreement.start_utc,
@@ -588,6 +625,19 @@ def _build_response_artifacts(
     # its backing; only capacity effects ask the backing to admit them.
     if not isinstance(acceptance.binding, PublicationBinding):
         raise RuntimeError("VM negotiation has no frozen listing binding")
+    payment_amount = acceptance.agreed_amount
+    if acceptance.uses_scalar_amount and has_rate_structure(acceptance.listing_record):
+        try:
+            if accepted and acceptance.agreed_amount < multiplier_floor(_negotiation_settings()):
+                raise ValueError("multiplier_below_floor")
+            payment_amount = quote_from_multiplier(
+                acceptance.listing_record, acceptance.pinned_proposal,
+                acceptance.agreed_amount, acceptance.agreement.duration_seconds,
+                vm_listing_resource_shape(acceptance.terms.decoded.compute_resource)
+                if getattr(acceptance.terms.decoded, "compute_resource", None) else None,
+            )
+        except ValueError as exc:
+            raise OfferUnfulfillableError(str(exc)) from exc
     if accepted:
         artifacts = _with_agreement(
             acceptance,
@@ -599,14 +649,19 @@ def _build_response_artifacts(
                 domain=domain,
                 proposal=acceptance.pinned_proposal,
                 listing=acceptance.listing_record,
-                agreed_amount=acceptance.agreed_amount,
+                agreed_amount=payment_amount,
                 duration_seconds=acceptance.agreement.duration_seconds,
                 uses_scalar_amount=acceptance.uses_scalar_amount,
                 buyer_principal=acceptance.buyer_principal,
                 seller_principal=acceptance.seller_principal,
                 provision_terms=acceptance.terms.decoded,
             ),
+            payment_amount=payment_amount,
         )
+        if has_rate_structure(acceptance.listing_record):
+            # The policy proposal carries the scalar. A materialized escrow's
+            # monetary proposal must not overwrite it in the terminal response.
+            artifacts.pop("proposal", None)
         agreement = artifacts["agreement"]
         if agreement.settlement is None:
             raise OfferUnfulfillableError("accepted_settlement_unavailable")
@@ -632,7 +687,7 @@ def _build_response_artifacts(
             negotiation_id=acceptance.negotiation_id, listing_id=acceptance.listing_id,
             proposal={"settlement_selection": selection},
             uses_scalar_amount=acceptance.uses_scalar_amount,
-            agreed_amount=acceptance.agreed_amount,
+            agreed_amount=payment_amount,
             duration_seconds=acceptance.agreement.duration_seconds,
             buyer_principal=acceptance.buyer_principal,
             seller_principal=acceptance.seller_principal,
@@ -715,10 +770,6 @@ async def _place_capacity_hold(
     """
 
     from core_storefront.stage_log import stage_event
-    from market_storefront.services.vm_job_spec_service import (
-        compute_capacity_claim_from_order,
-    )
-
     ttl = float(
         getattr(getattr(settings, "capacity", None), "hold_ttl_seconds", 0) or 0
     )
@@ -727,7 +778,8 @@ async def _place_capacity_hold(
     binding = acceptance.binding
 
     async def reserve() -> _HoldAttempt:
-        claim = compute_capacity_claim_from_order(dict(acceptance.listing_record))
+        order = agreed_vm_order(dict(acceptance.listing_record), acceptance.terms.decoded)
+        claim = compute_capacity_claim_from_order(order)
         capped_ttl = capped_hold_seconds(
             ttl,
             lookup_pool_policy_tags(
@@ -953,20 +1005,76 @@ def build_vm_negotiation_runtime(
             binding=capacity_binding,
         )
 
-    async def evaluate(request: RoundRequest) -> RoundEvaluation:
-        policy = seller_round_hook or _default_seller_round_hook(domain)
-        result = await policy(
-            listing=request.listing,
-            history=list(request.history),
-            requested_duration_seconds=request.terms.requested_duration_seconds,
-            listing_source=request.listing_source,
-            **(
-                {"strategy_label": request.strategy_label}
-                if request.strategy_label is not None
-                else {}
-            ),
+    async def prepare_requested_shape(
+        repository: Any,
+        record: Mapping[str, Any],
+        terms: NegotiationTerms,
+        *,
+        partial: bool = False,
+    ) -> tuple[Mapping[str, Mapping[str, Any]] | None, NegotiationTerms]:
+        requested = getattr(terms.decoded, "compute_resource", None)
+        if not requested:
+            return None, terms
+        advertised = extract_compute_from_order(dict(record))
+        # The opening's flat vocabulary permits partial dimensions; grouped
+        # revisions are whole shapes and must never inherit omitted families.
+        if partial:
+            requested = {**advertised, **requested}
+        shape = await check_requested_shape(
+            repository=repository,
+            listing_id=str(record["listing_id"]),
+            listing_resource=advertised,
+            requested_resource=requested,
+            site_projections=site_projections,
         )
-        state = result.intermediate or {}
+        if not record.get("rate_structure") and shape != vm_listing_resource_shape(advertised):
+            raise OfferUnfulfillableError(
+                "shape_commercially_infeasible: flat-priced listing is shape-fixed",
+                listing_id=str(record["listing_id"]),
+            )
+        # Persist the complete effective shape so later rounds do not merge
+        # a partial opening with a republished listing.
+        flat = flatten_vm_shape(shape)
+        wire = dict(terms.wire or {})
+        payload = dict(wire.get("payload", wire))
+        payload["compute_resource"] = {
+            **flat.quantities, **flat.attributes,
+            **({"region": requested["region"]} if requested.get("region") else {}),
+        }
+        wire = {**wire, "payload": payload} if "payload" in wire else payload
+        return shape, _decode_vm_terms(domain, wire)
+
+    async def evaluate(request: RoundRequest) -> RoundEvaluation:
+        shape, terms = await prepare_requested_shape(
+            request.repository, request.listing_record, request.terms,
+            partial=not any(round_.sender == "us" for round_ in request.history),
+        )
+        policy = seller_round_hook or _default_seller_round_hook(domain)
+        try:
+            result = await policy(
+                listing=request.listing_record,
+                history=list(request.history),
+                requested_duration_seconds=terms.requested_duration_seconds,
+                requested_shape=shape,
+                listing_source=request.listing_source,
+                **(
+                    {"strategy_label": request.strategy_label}
+                    if request.strategy_label is not None
+                    else {}
+                ),
+            )
+        except ValueError as exc:
+            if str(exc).startswith(("shape_price_unavailable:", "shape_price_overflow:")):
+                raise OfferUnfulfillableError(str(exc), listing_id=str(request.listing_record["listing_id"])) from exc
+            raise
+        state = {
+            **(result.intermediate or {}),
+            "shape_checks": {
+                "admissibility": "checked" if shape is not None else "not requested",
+                "authoritative_feasibility": "not checked",
+                "commercial_feasibility": "checked" if shape is not None else "not requested",
+            },
+        }
         pinned = state.get("accepted_escrow_proposal")
         return RoundEvaluation(
             our_amount=int(result.our_amount),
@@ -980,19 +1088,32 @@ def build_vm_negotiation_runtime(
                 else None
             ),
             domain_state=state,
+            agreed_terms=terms,
         )
 
     async def listing_is_paused(repository: Any, listing_id: str) -> bool:
         return bool(await repository.is_listing_paused(listing_id=listing_id))
 
     async def validate_continuation(
-        _repository: Any,
+        repository: Any,
         listing: Any,
         listing_record: Mapping[str, Any],
         terms: NegotiationTerms,
-        _thread: Mapping[str, Any],
+        thread: Mapping[str, Any],
+        revised_terms: NegotiationTerms | None,
     ) -> None:
-        _validate_vm_opening(listing, listing_record, terms)
+        pin = await repository.load_domain_artifact(
+            negotiation_id=thread["negotiation_id"],
+            artifact_slot="message:rate-structure-pin",
+            registry=registry,
+        )
+        current_digest = _rate_structure_digest(listing_record)
+        if getattr(pin, "rate_structure_digest", None) != current_digest:
+            raise OfferUnfulfillableError(
+                "rate_structure_changed_reopen",
+                listing_id=str(listing_record["listing_id"]),
+            )
+        await prepare_requested_shape(repository, listing_record, revised_terms or terms)
 
     async def persist_opening(
         repository: Any,
@@ -1010,6 +1131,15 @@ def build_vm_negotiation_runtime(
         require_binding_identity(
             opening.binding,
             site_id=copied.site_id,
+        )
+        await repository.save_domain_artifact(
+            negotiation_id=opening.negotiation_id,
+            artifact_slot="message:rate-structure-pin",
+            value={
+                "duration_seconds": opening.terms.requested_duration_seconds or 3600,
+                "rate_structure_digest": _rate_structure_digest(opening.listing_record),
+            },
+            registry=registry,
         )
 
     def storefront_is_paused() -> bool:
@@ -1042,6 +1172,7 @@ def build_vm_negotiation_runtime(
 
     hooks = NegotiationDomainHooks(
         decode_terms=lambda raw: _decode_vm_terms(domain, raw),
+        decode_revised_terms=lambda previous, raw: _decode_vm_revised_terms(domain, previous, raw),
         validate_opening=_validate_vm_opening,
         validate_continuation=validate_continuation,
         evaluate_round=evaluate,
@@ -1049,7 +1180,13 @@ def build_vm_negotiation_runtime(
             listing
         ),
         reference_amount=lambda _listing, record, terms, scalar, pinned: (
-            seller_reference_amount(record, terms.requested_duration_seconds, pinned)
+            seller_reference_amount(
+                record, terms.requested_duration_seconds, pinned,
+                requested_shape=(
+                    vm_listing_resource_shape(terms.decoded.compute_resource)
+                    if getattr(terms.decoded, "compute_resource", None) else None
+                ),
+            )
             if scalar
             else 0
         ),
