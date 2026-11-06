@@ -33,6 +33,7 @@ from .deal_helpers import (
     make_publisher_trust_resolver,
 )
 from .listing_cli import settlement_clause_error_message
+from .negotiation_amounts import retained_pricing_record
 from .run_log import RunLog
 from .settlement_composition import (
     buyer_stage,
@@ -440,9 +441,7 @@ def register(app: typer.Typer) -> None:
         if selected_stage is not None and listing_dict is not None:
             listing_record = selected_stage.listing_record(listing_dict)
             if listing_dict.get("rate_structure"):
-                listing_record = {**listing_record, **{key: listing_dict[key] for key in (
-                    "listing_id", "listing_resource", "rate_structure", "settlement_options", "accepted_escrows"
-                ) if key in listing_dict}}
+                listing_record = {**listing_record, **retained_pricing_record(listing_dict)}
         elif resume_state is not None:
             listing_record = resume_point.listing_record
         else:

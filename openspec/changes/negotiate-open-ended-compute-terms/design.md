@@ -413,6 +413,35 @@ selected mechanism's accepted-option projection, not a core branch on a mechanis
 schema. The exact projection plumbing is part of 2.1; the frozen behavioral contract
 is D2a's accepted monetary amount and acceptance-bound unit.
 
+## Partial quote implementation (2026-11-07)
+
+The first 2.1 slice defines neutral `PriceBasis` and `AgreedPrice` carriers in core.
+`agreed_price(agreement, listing=None, *, project_billing=None)` reads the accepted
+monetary amount once. For a selected option, it requires an explicitly injected
+mechanism-owned projection; no schema switch, period parser or implicit prepaid
+fallback belongs in core. Absolute Agreements without an option retain `total`.
+A recurring projection carries both exact period text and its validated positive
+whole-second length; a total projection carries neither. The quote refuses amounts
+outside uint256 even though the existing generic decimal-string parser does not
+impose an upper bound. Core's old generic rate helpers remain unchanged.
+
+A supplied listing is an acceptance-bound snapshot: the accessor checks listing
+identity and exact option membership, never recomputes the money from its rates.
+Signature/trust and transcript-price verification belong to the caller before
+recovery or mandate approval. The optional snapshot argument does not claim that
+an arbitrary or current listing authenticates accepted pricing.
+
+For rate-structured listings, both VM recording paths use one deep-copy helper to retain the signed seller
+publication/request and publisher provenance alongside the existing pricing
+fields. A complete raw publication prevents loss of signed fields that a subset
+cannot reconstruct. Missing proof is not manufactured for legacy records. This
+slice retains evidence but does not yet enforce verification or wire the accessor
+into consumers; task 2.1 remains unchecked. That boundary avoids migrating recovery
+readers to an accessor before their evidence checks exist. `price_probe.py` replays
+retention, a historical signature check and explicit injected projections; it does
+not qualify a recurring payment adapter. These choices need the same post-review
+promotion destinations as D2/D2a; no permanent documentation has been promoted.
+
 ## Design promotion record
 
 Destinations are planned, not claims of implemented behavior.

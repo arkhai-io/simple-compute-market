@@ -1,7 +1,8 @@
 # Tasks — open-ended compute terms
 
-Implementation started on the stacked resize and registry branches. No product
-behavior has changed yet. Verification levels follow
+Implementation started on the stacked resize and registry branches. The partial
+2.1 checkpoint adds the quote carrier/accessor and VM pricing-proof retention;
+consumer migration and recurring behavior are not implemented. Verification levels follow
 `docs/development/TESTING.md`. New acceptance test implementation requires the
 maintainer's approval; the scenarios below are the intended contract, not tests
 added by this reconciliation.
@@ -91,6 +92,39 @@ added by this reconciliation.
   amounts; preserve verified acceptance evidence before migrating recovery readers,
   then migrate both domains and install the fail-closed direct-read guard. Work
   through 2.2 onward in order. Promotion and archival remain post-review.
+
+### Partial 2.1 checkpoint (2026-11-07)
+
+- Added core `PriceBasis`, `AgreedPrice` and `agreed_price`. The accessor returns
+  accepted money without recomputing it; selected options require an explicit,
+  mechanism-owned `project_billing` callback. Core never reads a mechanism's period.
+  A supplied acceptance-bound listing must contain the exact selected option and
+  matching listing identity. This correspondence check is not authentication.
+- For rate-structured listings, both VM buyer recording paths now retain seller publication bytes, complete
+  authenticated request, publisher trust/provenance and existing pricing fields
+  together, with a deep copy. Existing logs are not backfilled from current listings.
+  Retention alone does not establish verified accepted pricing evidence.
+- `price_probe.py` exercises the actual VM acceptance-record hook, JSON recovery,
+  historical seller-signature verification and isolation from later source edits.
+  It also drives the core accessor with prepaid and injected sub-hour recurring
+  projections. This is a temporary diagnostic, not a new permanent acceptance test
+  or proof of supported hosted recurring mandates.
+- Focused validation and replay instructions:
+  `docs/attachments/negotiate-open-ended-compute-terms/price-checkpoint.md`.
+  No deployed first use, E2E, promotion, archival or independent review is claimed.
+- **Restart at the remainder of 2.1**, not 2.2: wire billing projection through
+  installed mechanism registrations/compositions (once mechanisms explicitly total;
+  rate projection belongs to its adapter). Verify retained seller publication at its
+  signed timestamp against accepted trust, listing identity/context, rate structure
+  and exact selected option. Bind and verify the transcript multiplier and signed
+  acceptance/Agreement before migrating recovery and buyer mandate readers. Preserve
+  the original accepted snapshot; never use a fresh listing or rewrite old logs.
+  Then migrate both domains' readers/caps/VM checks/rate adapter and add the fail-closed
+  repository guard. The accessor by itself authenticates none of these inputs.
+  Pre-acceptance recurring amount derivation also remains unimplemented.
+- Keep 2.1 unchecked until its consumers and guard are complete. All later tasks
+  remain in their existing order; promotion and archival remain post-review. This
+  is an authorized session checkpoint, not completion of the terms feature.
 
 ## 2. Quote and capacity terms
 
