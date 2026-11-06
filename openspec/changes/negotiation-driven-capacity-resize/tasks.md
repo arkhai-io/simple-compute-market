@@ -31,11 +31,12 @@ deployment boundary.
 
 ### 2a. The revised-terms field
 
-- [ ] 2.1 Re-verify `design.md`'s Context against the tree: the hook
+- [x] 2.1 Re-verify `design.md`'s Context against the tree: the hook
       names in `NegotiationDomainHooks`, that continue/advance carry a typed
       `proposal`, that `hold_ttl_seconds` still defaults to 0, and that
       `build_vm_accepted_artifacts` still derives the order from the listing record.
-- [ ] 2.1a **Decision gate.** Decide where a buyer reads a listing's rate structure,
+- [x] 2.1a **Decision gate resolved: D-a through D-d, webapp owner 2026-11-06, pending maintainer review.** Registry listing-level `rate_structure`, verified by the retained seller proof; depends on `store-registry-listings-as-published`.
+      Original gate: Decide where a buyer reads a listing's rate structure,
       and with what authority, per `design.md`'s "Where a buyer reads the rate
       structure is a decision gate", taking `store-registry-listings-as-published`'s
       accepted carrier policy as an input, and record the decision and reasoning in
@@ -66,6 +67,57 @@ deployment boundary.
       shape is refused at the boundary; each refusal reason surfaces distinctly; a
       round without a revised shape is evaluated against the previously agreed
       shape.
+
+- [x] 2.6a Pin the seller-authenticated rate-structure digest at opening; refuse a
+      later round or acceptance as `rate_structure_changed_reopen` on change
+      (D-e). Focused test: shifted family rates preserve the listing total but
+      change a revised shape's price; continuation and acceptance are refused.
+
+### Section 2 implementation handoff
+
+Checkpoint 2026-11-06 (partial implementation; not deployment-ready):
+
+- Done: 2.1/2.1a reverified and D-a–D-e recorded. Default hold TTL remains
+  zero; lane/example configuration opts into 900 seconds. D-e stores a canonical
+  rate-structure digest in the immutable `message:rate-structure-pin` domain
+  artifact, decoded by `VmMessage`. Continuation, buyer acceptance, and
+  administrative acceptance check it before deciding or materializing artifacts.
+  Exit skips commercial continuation validation and remains available.
+- Focused evidence: 66 passed across the VM seller-hook, escrow-normalization,
+  hold-cap, negotiate-controller and buyer-selection suites; 61 negotiation-runtime
+  unit tests passed; all 60 VM-domain unit tests passed. The authorized
+  shifted-family-rate test covers an unchanged advertised total with a different
+  revised-shape price and refuses both counter and acceptance. Its exit case
+  confirms the buyer can leave after repricing. The pin test uses real SQLite
+  domain-artifact persistence (library integration); the buyer-selection suite
+  exercises the buyer and served storefront over loopback (application integration).
+  No deployed system/e2e run or independent story verification is claimed.
+- Checks: `make check-packaging` passed; `make check-change
+  CHANGE=negotiation-driven-capacity-resize` passed all 12 checks, including
+  comment hygiene and pinned strict OpenSpec validation. No permanent-document
+  promotion has been performed. The full suite is reserved for integration.
+- Corrected attempts: the first change check caught history wording in the new
+  exit-path comment; it was rewritten as a current invariant and the check passed.
+  The first combined test command pointed at a nonexistent VM-domain `tests/unit`
+  directory after its storefront and kit suites passed; rerunning the domain's
+  declared `pytest -q` entry point passed all 60 tests.
+- Remaining: 2.2–2.6, then 2.7–2.11 and their focused/integration evidence. No
+  multiplier, rate rounding, floor, buyer wire conversion, or payment amount
+  semantics have changed yet. 2.12–2.15 remain outside this requested slice unless
+  a concrete dependency requires them. Promotion and archival remain post-review.
+- Consumer work located: `arkhai_vms_negotiation.storefront_round` supplies the
+  absolute reference; `market_policy.scalar_policies` bisects integers but its
+  convergence tolerance can accept below a strict floor. The VM runtime's
+  `_with_agreement`, `_accepted_selection_artifacts`, and settlement-stage context
+  currently treat the scalar as base units. Core buyer acceptance compares the
+  scalar directly to Agreement/obligation amounts, and both the VM client and
+  core orchestration scale per-hour bounds by duration. These are actual
+  consumers to repair, not rename. Shape revisions also need durable per-round
+  terms: current negotiation messages persist scalar amounts, not revised shapes.
+- Not attempted: partial multiplier conversion. Changing only seller reference
+  hooks would send basis points into payments and fail buyer Agreement checks.
+  The registry carrier/proof implementation is a parallel dependency and is not
+  present on this base; this branch does not implement it.
 
 ### 2b. The multiplier
 

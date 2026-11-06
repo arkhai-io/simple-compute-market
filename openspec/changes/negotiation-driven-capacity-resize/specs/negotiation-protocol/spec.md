@@ -29,7 +29,18 @@ round's when the requested capacity shape differs between them. A seller's comme
 floor MUST be expressible once, as a bound on the multiplier, and apply to every
 admissible shape without per-shape restatement. The quote for a round is derived by
 each party from the advertised rate structure and the round's shape and multiplier;
-it is not carried on the wire.
+it is not carried on the wire. At opening, the seller MUST persist the digest of
+the seller-authenticated rate structure. A later round or acceptance MUST be refused
+with the distinct reason `rate_structure_changed_reopen` if the structure changed,
+even when the advertised shape's composed total is unchanged. The buyer may still
+exit the negotiation.
+
+#### Scenario: Family rates change without changing the advertised total
+
+- **WHEN** family rates change after opening so the listing's own total is unchanged
+  but a revised shape would have a different price
+- **THEN** a continuation or acceptance is refused as `rate_structure_changed_reopen`
+  and the buyer must reopen against the new listing
 
 #### Scenario: Requested shape changes between rounds
 
