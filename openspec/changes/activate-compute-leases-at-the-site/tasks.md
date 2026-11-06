@@ -260,7 +260,7 @@ storefront test doubles.
   and `reserve` already checks the same seam.
 - [x] 4.3 Unit tests: `core/storefront/tests/unit/test_aggregation.py` — its fake site
   gains `activate_lease`; activation with `site_id` reaches only that site and is
-  tagged; the aggregate still satisfies `CapacityClient`. 
+  tagged; the aggregate still satisfies `CapacityClient`.
   `kit/capacity-publication/tests/unit/test_capacity.py` — activation reaches only the
   binding's site; an unbacked binding is refused as a conflict before any site call
   (`storefront-publication` scenario "A capacity operation receives an unbacked
