@@ -515,8 +515,22 @@ in `test`, `build-payments-lane-double`, and its place in `build-dev` and the th
   check-packaging`, and `scripts/tests/test_check_secrets.py`'s tree test once committed.
   Not run here: the image build (the merge step has no build target); the validation of
   the merged `HEAD` builds it. The key stays in this branch's earlier commits, so the
-  Public content workflow's commit-range scan of a pull request to `dev` still finds it;
-  how the change lands is the owner's decision at archive cleanup.
+  Public content workflow's commit-range scan of a pull request to `dev` still finds it,
+  and squashing when that pull request merges would not help, since the scan reads its
+  commits first. The change lands from a landing branch (the owner's choice, 83 F1, over
+  rewriting this branch's history or merging with the check failing): once this branch
+  holds `dev`'s tip, the owner cuts a branch from `dev`'s tip whose one commit carries
+  this branch's tree (`git commit-tree <tip>^{tree} -p origin/dev -m <message>`, then `git branch` on
+  the commit it prints), the tree validation
+  and closeout read, and opens the pull request from it. Archive cleanup's pull request
+  description names that branch; its guarded push pushes only this one.
+  Pre-closeout triage 83 also corrected the README's Fixtures sentence, which still
+  called every `tls/` value committed (83 F2), and the integration suite's docstring,
+  which claimed every test goes through `PaymentsClient` (83 F3). Verified: `make
+  test-payments-lane-double` (library integration, 50 passed), `make check-packaging`,
+  `make test` (passed) and `make check-change`. The fresh-context check found the
+  docstring's first wording missed the hand-built deal-mismatch approvals, now named, and
+  the landing command's missing `-m`, now given.
 
 ## 3. Storefront `check-payments` and the VM storefront's unreachable authority
 

@@ -65,8 +65,10 @@ service's ledger, funding or availability.
 
 ## Fixtures
 
-Every value under `fixtures/` and `tls/` is a public development value, committed
-for lanes and local releases. Never use one on a public network.
+Every value under `fixtures/` and `tls/` is a public development value, for lanes
+and local releases. Never use one on a public network. The fixtures and the two
+certificates are committed; the leaf key is generated from the generator's seed
+(see TLS).
 
 - `fixtures/accounts.toml` — the asset and fee policy, the receipt-signing seed and
   the identity it yields (distinct from `FakePaymentsClient`'s), and the buyer,
