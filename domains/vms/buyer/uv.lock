@@ -521,8 +521,10 @@ name = "arkhai-vms-negotiation"
 version = "0.6.0"
 source = { registry = "../../../.dist" }
 dependencies = [
+    { name = "arkhai-core" },
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-policy" },
+    { name = "arkhai-vms" },
     { name = "arkhai-vms-listings" },
 ]
 wheels = [
