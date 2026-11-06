@@ -59,7 +59,11 @@ from .evidence import evidence_store
 from .lifecycle import buyer_lifecycle, run_sync
 from market_arkhai_payments import PaymentApproval
 
-from .settlement_composition import BUYER_STAGES, buyer_lifecycle_disclosure, validate_authority
+from .settlement_composition import (
+    BUYER_STAGES, buyer_compute_disclosure, buyer_lifecycle_disclosure,
+    buyer_settlement_registry, validate_authority,
+)
+from market_settlement_runtime.buyer_terms import option_quote
 from .settlement_stages import purchase_quote, require_quoted_agreement
 
 # The commands build their collaborators through the factories below: a Typer
@@ -422,7 +426,9 @@ def buy_bare_metal(
     listing_id: str,
     option_id: str = typer.Option(...),
     ssh_public_key: str = typer.Option(..., "--ssh-public-key"),
-    duration_seconds: int = typer.Option(3600, min=1),
+    duration_seconds: int | None = typer.Option(
+        None, min=1, help="Required for reserved; optional finite horizon for recurring options.",
+    ),
     allow_unprotected_terms: bool = typer.Option(
         False, "--allow-unprotected-terms",
         help="Explicitly waive default delivery-deadline, penalty and returned-period recommendations. Does not waive codec capabilities or authority acceptance.",
@@ -477,17 +483,28 @@ def buy_bare_metal(
             f"buy requires a supported priced settlement option: {exc}"
         ) from exc
     try:
-        amount = purchase_quote(selected, duration_seconds)
+        registry = buyer_settlement_registry()
+        quote = option_quote(selected, duration_seconds, registry=registry)
+        amount = purchase_quote(selected, duration_seconds, registry=registry)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
-    typer.echo(f"Selected option {selected.option_id}: lifecycle terms", err=True)
-    for name, value in buyer_lifecycle_disclosure(selected):
+    typer.echo(f"Selected option {selected.option_id}: price, horizon and lifecycle terms", err=True)
+    for name, value in buyer_compute_disclosure(
+        selected, listing={
+            "max_duration_seconds": getattr(listing, "max_duration_seconds", None),
+            "available_until_utc": getattr(listing, "available_until_utc", None),
+        }, duration_seconds=duration_seconds,
+    ) + buyer_lifecycle_disclosure(selected):
         typer.echo(f"  {name}: {value}", err=True)
     approval = payment_approval(buyer_config)
 
     def validate_acceptance(accepted: Any) -> None:
         try:
-            require_quoted_agreement(accepted, amount=amount, duration_seconds=duration_seconds)
+            if accepted.agreement is None or accepted.agreement.settlement != selected:
+                raise ValueError("seller Agreement changed the selected option")
+            require_quoted_agreement(
+                accepted, amount=amount, duration_seconds=duration_seconds, quote=quote, registry=registry,
+            )
         except ValueError as exc:
             raise AgreementOffQuote(str(exc), accepted.negotiation_id) from exc
         stage.validate_acceptance(accepted, approval)
@@ -521,14 +538,13 @@ def buy_bare_metal(
             capture=evidence_store().capture,
             listing_id=listing_id,
             resolve_seller_principals=lambda: seller_principals,
-            # The quote is already the whole lease's total, so it is one unit: scaling
-            # it by the lease's hours would charge for the duration twice.
+            # The quote is one total or one period; neither scales by lease hours.
             initial_price=amount,
             max_price=amount,
             unit_count=1,
             provision_terms=BareMetalProvisionTerms(
                 payload={
-                    "duration_seconds": duration_seconds,
+                    **({"duration_seconds": duration_seconds} if duration_seconds is not None else {}),
                     "access_method": "ssh",
                     "ssh_public_key": ssh_public_key,
                 },
@@ -568,8 +584,10 @@ def buy_bare_metal(
             plan=outcome.settlement_plan,
         ),
     )
-    typer.echo("Accepted Agreement: lifecycle terms before approval", err=True)
-    for name, value in buyer_lifecycle_disclosure(outcome.agreement.settlement):
+    typer.echo("Accepted Agreement: price, horizon and lifecycle terms before approval", err=True)
+    for name, value in buyer_compute_disclosure(
+        outcome.agreement.settlement, agreement=outcome.agreement,
+    ) + buyer_lifecycle_disclosure(outcome.agreement.settlement):
         typer.echo(f"  {name}: {value}", err=True)
     transaction, fulfillment = stage.settle(
         outcome=outcome,

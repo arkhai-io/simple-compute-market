@@ -750,6 +750,47 @@ payment fields in a neutral buyer or infer deployed support. D3/D7 permanent hom
 remain settlement-configuration and buyer-orchestration specs/companions after
 code review; none are promoted in this checkpoint.
 
+## Buyer numerical presentation and optional horizon continuation
+
+`MechanismRegistration.present_payment` takes the selected option, optional
+requested duration and optional exact accepted accessor quote. Its typed result
+contains `quote`, `setup_once` and `initial_reserve` in the quote's asset/minor-unit
+scale. Zero states none; null states undetermined, never a guessed zero. The
+registry checks the returned billing basis and asset and forbids changing accepted
+money. Setup/reserve arithmetic and payment-field interpretation belong to the
+mechanism, including for proposed diagnostics. Installed payments and Alkahest
+supply once-only presentation; their billing projections still refuse unsupported
+rate fields. This is an injected disclosure contract, not an adapter capability.
+
+Fresh presentation reads listing bounds and the requested horizon; an omitted
+recurring horizon is explicitly awaiting the seller's finite resolution. After
+acceptance, presentation reads only the Agreement's selected option, money, start,
+duration and resulting maximum accepted end. It does not recover listing maxima
+from a current offer or pretend an accepted horizon can be extended. VM's accepted
+recovery entry renders those retained bytes before dispatching approval effects.
+Bare-metal has no separate reapproval command; its fresh accepted path renders the
+same shared disclosure. Mechanism/policy validation remains independent of display.
+
+VM keeps public price bounds hourly: flat recurring quotes scale by one projected
+period, reserved quotes by the requested lease span, and shape-priced negotiations
+still use the multiplier codec. Core accepts an optional per-match unit-count hook
+without knowing those units. The codec no longer converts an absent recurring
+horizon with `int(None)`; quote derivation requires a positive duration only for a
+whole-term quote. Bare-metal's CLI removes its implicit one-hour default and
+compares accepted amount, asset and billing basis to its exact quoted value, plus
+an explicitly requested duration when one was supplied. No minimum spend is added.
+
+The kept VM CLI regression now checks an explicitly nonpositive duration instead
+of requiring duration before option selection. Two kept schema-opaque negotiation
+fixtures explicitly omit the production mechanism acceptance callback: their
+synthetic Alkahest-tagged options are not real escrow parameters, and their existing
+selection-pin/plan-hook assertions remain unchanged. New permanent acceptance tests
+were not added. The proposed replay and focused results are recorded in
+`docs/attachments/negotiate-open-ended-compute-terms/buyer-presentation-checkpoint.md`.
+D2/D7 permanent destinations remain the negotiation and buyer specifications and
+buyer architecture companion after review; full selection first use is 4.2, not
+claimed by this numerical/horizon continuation.
+
 ## Design promotion record
 
 Destinations are planned, not claims of implemented behavior.

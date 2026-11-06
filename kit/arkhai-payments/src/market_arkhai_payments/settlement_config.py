@@ -12,6 +12,7 @@ from typing import Any
 import httpx
 from market_core.query_dsl import ComparisonOperator, FieldDescriptor, QueryValueType
 from market_core.schemas import (
+    AgreedPrice,
     PriceBasis,
     RateValue,
     SettlementOption,
@@ -35,6 +36,8 @@ from market_settlement_runtime import (
     SettlementRole,
 )
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
+
+from market_settlement_runtime.presentation import PaymentPresentation, amount_rate_quote
 
 from market_arkhai_payments.client import PaymentsClient
 from market_arkhai_payments.mandates import PaymentsOptionParams
@@ -556,6 +559,16 @@ def payments_billing_basis(option: SettlementOption) -> PriceBasis:
     return PriceBasis(unit="total")
 
 
+def payments_payment_presentation(
+    option: SettlementOption, duration_seconds: int | None, quote: AgreedPrice | None,
+) -> PaymentPresentation:
+    """Once-only payments have no separate setup part or recurring reserve."""
+    basis = payments_billing_basis(option)
+    return PaymentPresentation(
+        quote=quote or amount_rate_quote(option, duration_seconds, basis), setup_once=0, initial_reserve=0,
+    )
+
+
 def create_arkhai_payments_registration() -> MechanismRegistration:
     """Register public option construction without escrow servicing hooks."""
     fields = (
@@ -604,6 +617,7 @@ def create_arkhai_payments_registration() -> MechanismRegistration:
         publication_input_validator=validate_arkhai_payments_publication_input,
         negotiates_scalar_amount=True,
         project_billing=payments_billing_basis,
+        present_payment=payments_payment_presentation,
     )
 
 

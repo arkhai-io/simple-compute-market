@@ -13,7 +13,7 @@ from core_buyer.registry_config import registry_descriptors, resolve_indexer_url
 from market_deal_lifecycle.configuration import authorities_by_registry, dispute_config
 from market_deal_lifecycle.selection import AuthoritySelection
 from market_deal_lifecycle.terms import TermContext
-from market_settlement_runtime.buyer_terms import BuyerTermsPolicy, lifecycle_disclosure
+from market_settlement_runtime.buyer_terms import BuyerTermsPolicy, compute_disclosure, lifecycle_disclosure
 from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from core_buyer.settlement import BuyerSettlementPolicy, SelectedSettlementOption
 from market_alkahest import create_alkahest_registration
@@ -96,14 +96,23 @@ def buyer_lifecycle_disclosure(option):
     return lifecycle_disclosure(option, context=buyer_term_context(option.settlement_schema))
 
 
+def buyer_compute_disclosure(option, **kwargs):
+    return compute_disclosure(option, registry=buyer_settlement_registry(), **kwargs)
+
+
+def disclose_accepted_agreement(agreement) -> None:
+    emit_lifecycle_disclosure(
+        buyer_compute_disclosure(agreement.settlement, agreement=agreement)
+        + buyer_lifecycle_disclosure(agreement.settlement),
+        title="Accepted Agreement: price, horizon and lifecycle terms before approval",
+    )
+
+
 def validate_buyer_acceptance(outcome) -> None:
     if outcome.agreement is None or outcome.agreement.settlement is None:
         raise RuntimeError("accepted work has no Agreement settlement option")
     buyer_stage(outcome.agreement.settlement.settlement_schema).validate_acceptance(outcome)
-    emit_lifecycle_disclosure(
-        buyer_lifecycle_disclosure(outcome.agreement.settlement),
-        title="Accepted Agreement: lifecycle terms before approval",
-    )
+    disclose_accepted_agreement(outcome.agreement)
 
 
 def _alkahest_command_group():

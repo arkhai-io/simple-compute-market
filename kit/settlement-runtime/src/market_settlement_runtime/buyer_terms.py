@@ -8,13 +8,15 @@ from a peer's promise.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import datetime, timedelta
 from typing import Any, Literal
 
-from market_core.schemas import SettlementOption
+from market_core.schemas import AgreedPrice, Agreement, SettlementOption
 from market_deal_lifecycle.selection import AuthoritySelection
 from market_deal_lifecycle.terms import PARTIAL_PERIOD, TermContext, decode_terms
 
 from .rate_publication import default_buyer_refusals
+from .configuration import SettlementConfigurationRegistry
 
 
 class BuyerTermsPolicy:
@@ -44,6 +46,75 @@ class BuyerTermsPolicy:
         except ValueError as exc:
             self.authority.report(str(exc))
             return None
+
+
+def option_quote(
+    option: SettlementOption, duration_seconds: int | None, *, registry: SettlementConfigurationRegistry,
+) -> AgreedPrice:
+    """Ask the owner for the selected monetary quote, not its payment fields."""
+    return registry.present_payment(option, duration_seconds=duration_seconds).quote
+
+
+def compute_disclosure(
+    option: SettlementOption, *, registry: SettlementConfigurationRegistry,
+    listing: Mapping[str, Any] | None = None, duration_seconds: int | None = None,
+    agreement: Agreement | None = None,
+) -> tuple[tuple[str, str], ...]:
+    """Show selected asks or exact accepted money, never reprice accepted work.
+
+    The supplied listing is used only for pre-negotiation bounds. Accepted end
+    and horizon come from the retained Agreement, even if offers have changed.
+    """
+    if agreement is None and not option.price_rates:
+        return (("Price", "No scalar amount price; see the selected mechanism's terms."),)
+    if agreement is not None and agreement.settlement != option:
+        raise ValueError("disclosure option differs from accepted Agreement")
+    charges = registry.present_payment(
+        option, duration_seconds=duration_seconds,
+        quote=registry.agreed_price(agreement) if agreement is not None else None,
+    )
+    quote = charges.quote
+    terms = decode_terms(option.lifecycle)
+    early = terms.early_termination if terms else None
+    product = "reserved" if quote.unit == "total" else (
+        "spot" if early and "payee" in early.entitlements else "on-demand"
+    )
+    unit = "total" if quote.unit == "total" else f"per_period ({quote.period}, {quote.period_seconds} seconds)"
+    def money(value: int | None) -> str:
+        return (
+            "Not determined by the mechanism" if value is None
+            else f"{value} minor units of {quote.asset}"
+        )
+    rows = [
+        ("Class", product),
+        ("Accepted price" if agreement else "Selected price", f"{money(quote.amount)} {unit}"),
+        ("Setup once charge", money(charges.setup_once)),
+        ("Initial reserve", money(charges.initial_reserve) + "; reserved funds, not spend or a loss cap."),
+    ]
+    if option.price_rates:
+        rows.append(("Asking rate", "; ".join(
+            f"{rate.value} minor units of {option.price_asset} per {rate.per} ({rate.field})"
+            for rate in option.price_rates
+        )))
+    if agreement is None:
+        bounds = listing or {}
+        relative = bounds.get("max_duration_seconds")
+        absolute = bounds.get("available_until_utc")
+        rows.extend((
+            ("Maximum duration", f"{relative} seconds" if relative is not None else "Not stated"),
+            ("Available until", str(absolute) if absolute is not None else "Not stated"),
+            ("Requested horizon", f"{duration_seconds} seconds (not rounded to periods)" if duration_seconds is not None
+             else "Omitted; seller resolves the finite bound at the agreed start; review the accepted horizon before approval."),
+        ))
+    else:
+        start = datetime.fromisoformat(agreement.start_utc.replace("Z", "+00:00"))
+        rows.extend((
+            ("Accepted start", agreement.start_utc),
+            ("Effective horizon", f"{agreement.duration_seconds} seconds (not rounded to periods)"),
+            ("Maximum accepted end", (start + timedelta(seconds=agreement.duration_seconds)).isoformat()),
+            ("Accepted bounds", "The retained accepted horizon/end is authoritative; current listings are not consulted."),
+        ))
+    return tuple(rows)
 
 
 def lifecycle_disclosure(option: SettlementOption, *, context: TermContext) -> tuple[tuple[str, str], ...]:

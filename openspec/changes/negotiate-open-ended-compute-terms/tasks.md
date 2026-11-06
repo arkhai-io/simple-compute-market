@@ -9,8 +9,9 @@ listing bounds and both storefronts' resolution/persistence/publication carriers
 Task 2.3 adds injected recurring publication. Task 3.1 adds the shared servicing
 declaration and publication/cached-acceptance gates. Tasks 3.2–3.3 add acceptance-time
 horizon checks and qualify the terms-owned declaration doors. Task 4.1a adds shared
-buyer rights policy and lifecycle disclosure; the rest of buyer first use and
-closeout remains pending. Verification levels follow
+buyer rights policy and lifecycle disclosure. Task 4.1b adds mechanism-owned
+numerical presentation, optional recurring horizon plumbing and accepted recovery
+disclosure. Restart at 4.2 for full selection first use, then 4.3 and closeout. Verification levels follow
 `docs/development/TESTING.md`. New acceptance test implementation requires the
 maintainer's approval; the scenarios below are the intended contract, not tests
 added by this reconciliation.
@@ -375,7 +376,8 @@ added by this reconciliation.
   Targeted typing is one shared module, not repository-wide typing. Packaging,
   check-change and pinned strict OpenSpec validation pass. No permanent tests added
   and no assertions weakened.
-- **Restart at 4.1b**, leaving 4.1 unchecked: optional recurring horizons and the
+- At this checkpoint the next slice was **4.1b** (now completed below), leaving
+  4.1 unchecked pending full selection qualification: optional recurring horizons and the
   class/unit-bearing price/setup/reserve/bounds/effective-horizon display remain.
   Inspect VM's early duration requirements, `unit_count` and amount-codec calls,
   plus bare metal's `purchase_quote`/`require_quoted_agreement` total-only paths;
@@ -387,6 +389,44 @@ added by this reconciliation.
 - Then do 4.2 full buyer selection fixtures, 4.3 affected/E2E validation and section 5.
   No E2E lane, final rebase, review/promotion or archival was performed at this
   checkpoint. PR #351 remains draft. No external resources or resident servers remain.
+
+### Buyer numerical-presentation checkpoint (2026-11-07)
+
+- Completed 4.1b: `MechanismRegistration.present_payment` supplies a validated
+  numerical quote, separate setup once charge and initial reserve. The registry
+  checks its asset/billing basis and exact equality to an accepted accessor quote.
+  Neutral buyers do not read payment period/setup/reserve fields. Missing presenters
+  refuse; installed payments remain strictly once-only with zero separate setup/reserve.
+- Both buyers disclose derived class, unit-bearing price, unchanged asking-rate unit,
+  separate setup/reserve, listing bounds and requested horizon. Accepted disclosure
+  uses retained Agreement money/start/unrounded horizon/end, never current listings.
+  VM recovery renders it before dispatch to any approval effects. Bare-metal has no
+  separate resumed-approval command; its fresh accepted stage shows the same rows.
+- Omitted duration reaches recurring selection/provision intent; reserved quotes
+  require an explicit duration rather than inventing an hour. VM's per-match unit
+  count uses one projected period, not recurring lease hours; the multiplier codec
+  accepts an omitted horizon. Bare-metal quote/acceptance checks carry per-period
+  money/unit alongside totals, checking any explicitly requested horizon unchanged.
+- Replay/setup/evidence: `docs/attachments/negotiate-open-ended-compute-terms/buyer-presentation-checkpoint.md`.
+  Proposed ports qualify numerical disclosure/pricing only, not hosted rate execution.
+- Existing regressions: settlement runtime 175 passed; VM buyer 215 passed;
+  bare-metal buyer 32 passed; affected core buyer orchestration/selection 25 passed;
+  Alkahest registration 84 passed; payments configuration/agreement/buyer 51 passed.
+  Both proposed presentation replays pass. Targeted mypy passes for two shared
+  presentation/disclosure modules. Packaging, check-change (including comment/import
+  hygiene and citations) and pinned strict OpenSpec validation pass. No permanent
+  acceptance tests were added; the duration assertion follows the new contract,
+  and two schema-opaque fixture callbacks are explicitly scoped as recorded in design.
+- **Restart at 4.2.** Prepare the full mixed-listing publication/selection fixture in
+  each buyer, including reserved/on-demand/spot, both bounds, omitted and shorter
+  horizons, displayed treatments and cached-option refusal. Inject proposed mechanism
+  pricing/presentation and timing/capability ports at composition; do not add a neutral
+  payment-field parser or enable installed recurring servicing. The committed 4.1b
+  replay is a starting surface, not completion of that full CLI selection exercise.
+- Then 4.3: affected app-integration suites, existing VM listing-shape and both-domain
+  reserved compute E2E scenarios. Use the prescribed Podman provider, readiness-check
+  before driving and record any unobservable lane exactly. Section 5 remains after
+  review; no promotion or archival has occurred. PR #351 stays draft.
 
 ## 2. Quote and capacity terms
 
@@ -483,7 +523,7 @@ option is shown as making no delivery promise, not refused for lacking one (D3).
   - [x] 4.1a Compose the shared default-buyer rights recommendations in both buyer
     policies, provide a run-scoped explicit opt-out and render codec-derived
     lifecycle disclosure at fresh selection/acceptance, including no-adapter promises.
-  - [ ] 4.1b Expose optional recurring/required reserved duration and complete
+  - [x] 4.1b Expose optional recurring/required reserved duration and complete
     class/price-unit/setup/reserve/bounds/effective-horizon display on fresh and
     resumed approval paths. Verify selected/accepted/displayed pricing agreement
     using proposed injected mechanism ports without enabling deployed rate servicing.

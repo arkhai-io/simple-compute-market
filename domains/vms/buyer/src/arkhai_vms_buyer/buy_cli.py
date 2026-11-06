@@ -65,6 +65,7 @@ from .run_log import RunLog
 from .settle_cli import run_settle_from_log
 from .settlement_composition import (
     buyer_stage,
+    buyer_compute_disclosure,
     buyer_lifecycle_disclosure,
     resolve_buyer_settlement_policy,
 )
@@ -111,21 +112,21 @@ def _confirm_settlement_interactive(*, terms, listing: dict, console: Console) -
     no on-chain transaction has been emitted and the seller's /settle
     endpoint hasn't been touched yet. Declining here is a clean exit.
 
-    The installed once mechanisms accept a monetary total, not an hourly
-    asking rate. Show it unchanged alongside the duration, seller and listing
-    so confirmation never scales an already-derived payment a second time.
+    Show the accepted monetary quote unchanged, with its billing unit, alongside
+    the effective horizon. Confirmation must never rescale accepted money.
     """
     duration_hours = terms.duration_seconds / 3600
-    total = terms.agreed_amount
+    quote = getattr(terms, "quote", None)
+    price_unit = f"per_period ({quote.period})" if quote is not None and quote.unit == "per_period" else "total"
     table = Table.grid(padding=(0, 2))
     table.add_column(style="bold")
     table.add_column()
     table.add_row("Seller", str(terms.seller_url))
     table.add_row("Listing", str(terms.listing_id))
     table.add_row("Negotiation", str(terms.negotiation_id))
-    table.add_row("Agreed price", f"{terms.agreed_amount} (total, raw token units)")
+    table.add_row("Agreed price", f"{terms.agreed_amount} ({price_unit}, raw token units)")
     table.add_row("Duration", f"{terms.duration_seconds}s ({duration_hours:.4g}h)")
-    table.add_row("Total payment", f"{total} (raw token units)")
+    table.add_row("Period charge" if price_unit != "total" else "Total payment", f"{terms.agreed_amount} (raw token units)")
     console.print(Panel(table, title="Confirm settlement", border_style="yellow"))
     try:
         return typer.confirm(
@@ -328,7 +329,7 @@ def register(app: typer.Typer) -> None:
             None,
             "--duration-hours",
             "-t",
-            help="Lease duration the buyer wants (hours, fractional ok). Required for fresh runs — sent to the seller's /negotiate/new and validated against the listing's max_duration_seconds. Resumed runs read it from the run-log.",
+            help="Lease duration the buyer wants (hours, fractional ok). Required for reserved selections; optional for recurring selections — sent to the seller's /negotiate/new and validated against the listing's max_duration_seconds. Resumed runs read it from the run-log.",
         ),
         start_utc: str | None = typer.Option(
             None,
@@ -438,15 +439,15 @@ def register(app: typer.Typer) -> None:
                 console=console,
             )
             return
-        if not explain and (duration_hours is None or duration_hours <= 0):
+        if duration_hours is not None and duration_hours <= 0:
             typer.secho(
-                "Fresh `market buy` runs require --duration-hours (the buyer's lease ask).",
+                "--duration-hours must be positive when supplied.",
                 err=True,
                 fg=typer.colors.RED,
             )
             raise typer.Exit(2)
         duration_seconds = (
-            round(duration_hours * 3600) if duration_hours is not None else 0
+            round(duration_hours * 3600) if duration_hours is not None else None
         )
         requested_start_utc = _normalize_start_utc(start_utc)
         explicit_prices = initial_price is not None and max_price is not None
@@ -561,9 +562,15 @@ def register(app: typer.Typer) -> None:
             selected = buyer_stage(
                 selected.selection.settlement_schema
             ).prepare_selection(selected)
+            try:
+                rows = buyer_compute_disclosure(
+                    selected.option, listing=match, duration_seconds=duration_seconds,
+                )
+            except ValueError as exc:
+                raise typer.BadParameter(str(exc)) from exc
             emit_lifecycle_disclosure(
-                buyer_lifecycle_disclosure(selected.option),
-                title=f"Selected option {selected.option.option_id}: lifecycle terms",
+                rows + buyer_lifecycle_disclosure(selected.option),
+                title=f"Selected option {selected.option.option_id}: price, horizon and lifecycle terms",
             )
             normalized = dict(match)
             normalized["_selected_settlement"] = selected
