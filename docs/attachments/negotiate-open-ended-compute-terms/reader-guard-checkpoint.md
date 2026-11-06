@@ -95,6 +95,18 @@ and an amount above payments' 38-digit range; corrected fixtures use the real wi
 shape and valid exact amount. Initial commands guessed nonexistent test files or
 a core `reinit` target; the paths and recipes above are the passing corrections.
 
+## Incidental confirmation repair
+
+The VM confirmation treated accepted monetary totals as hourly rates and scaled
+by duration again. The installed once mechanisms now show that total unchanged;
+resumed escrow display labels it total and reads exact accepted money through the
+projector. This is a small price-display repair, not completion of 4.1's lifecycle
+and recurring disclosure. The consumer probe above now drives the real Rich
+confirmation with a two-hour 5,000,000 total, verifies the displayed payment remains
+5,000,000 and declines without an effect. Existing VM buyer
+`tests/test_buy_orchestrator.py tests/test_buy_pricing_and_filters.py tests/test_resume_helpers.py tests/test_buy_resume_cli.py`
+pass **54 tests**; packaging and change checks pass again.
+
 ## Limits
 
 No deployed E2E, live checkout/approval, hosted recurring mandate, billing stop,

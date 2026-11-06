@@ -50,4 +50,22 @@ except MandatePolicyError:
 else:
     raise AssertionError("once adapter accepted unsupported recurring pricing")
 print("changed Agreement money and unsupported hosted recurring mandate refused: PASS")
+
+# Confirmation receives a total from the installed once mechanisms.
+from io import StringIO
+from rich.console import Console
+from arkhai_vms_buyer import buy_cli
+
+output = StringIO()
+buy_cli.typer.confirm = lambda *args, **kwargs: False
+assert not buy_cli._confirm_settlement_interactive(
+    terms=SimpleNamespace(
+        seller_url="https://seller.example", listing_id="listing", negotiation_id="negotiation",
+        agreed_amount=5000000, duration_seconds=7200,
+    ), listing={}, console=Console(file=output, width=120, color_system=None),
+)
+assert "5000000 (total, raw token units)" in output.getvalue()
+assert "5000000 (raw token units)" in output.getvalue()
+assert "10000000" not in output.getvalue()
+print("two-hour confirmation displays accepted 5000000 total without scaling it again: PASS")
 print("LIMIT: invocation-local fixture, no deployed service, approval or recurring execution")
