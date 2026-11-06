@@ -717,6 +717,7 @@ class ListingService:
             settlement_options=settlement_options,
             demands=demands,
             max_duration_seconds=request.max_duration_seconds,
+            available_until_utc=request.available_until_utc,
             oracle_address=None,
         )
         binding = prepare_vm_listing_binding(
@@ -776,6 +777,7 @@ class ListingService:
                 demands=listing_dict.get("demands"),
                 fulfillment_resource=None,
                 max_duration_seconds=listing_dict.get("max_duration_seconds"),
+                available_until_utc=listing_dict.get("available_until_utc"),
                 storefront_url=listing.storefront_url,
                 seller_principal=listing.seller_principal,
                 oracle_address=listing_dict.get("oracle_address"),

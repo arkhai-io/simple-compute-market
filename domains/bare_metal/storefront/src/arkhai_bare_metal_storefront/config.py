@@ -45,6 +45,7 @@ from market_config.config_loader import storefront_config_files
 from market_config.registry_url import normalize_registry_url
 from market_config.setting_types import PositiveSeconds, positive_seconds
 from market_identity import Identity, Signer, TrustedIdentitySet
+from market_resource_pools_contracts import UtcAvailability
 from pydantic import (
     BaseModel,
     BeforeValidator,
@@ -228,6 +229,7 @@ class PricingSettings(_Section):
 
     settlements: list[dict[str, Any]] = Field(default_factory=list)
     default_max_duration_seconds: StrictInt | None = None
+    default_available_until_utc: UtcAvailability | None = None
 
     @field_validator("settlements", mode="before")
     @classmethod

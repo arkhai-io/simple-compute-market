@@ -110,8 +110,8 @@ class PoolOverrideService:
         mode no market serves, vocabulary its market cannot read, or clauses
         that do not compile (422, with no site call); a site that cannot be
         reached or whose answer is unusable (503, retryable); a pool the live
-        projection does not hold (404). A shape no member is feasible for is
-        reported, not refused.
+        projection does not hold (404); terms incompatible with that projection
+        (422). A shape no member is feasible for is reported, not refused.
         """
         if record.site_id not in self._site_ids():
             raise PoolOverrideRefused(
@@ -141,6 +141,9 @@ class PoolOverrideService:
                 f"(projection revision {revision})",
             )
 
+        problems = list(contribution.projection_problems(site_pools, record=record))
+        if problems:
+            raise PoolOverrideRefused(422, "; ".join(problems))
         feasibility = contribution.judge_shapes(site_pools, record=record)
         stored = await self._store.replace(record)
         await self._after_write(record.site_id)

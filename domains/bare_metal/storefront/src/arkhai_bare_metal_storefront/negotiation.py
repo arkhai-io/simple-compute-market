@@ -12,7 +12,6 @@ counters.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping, Sequence
 from typing import Any, Protocol
 
@@ -140,10 +139,7 @@ def _listing_resource(
 ) -> BareMetalListing:
     if isinstance(listing, BareMetalListing):
         return listing
-    value: Any = listing.get("listing_resource", listing)
-    if isinstance(value, str):
-        value = json.loads(value)
-    return BareMetalListing.model_validate(value)
+    return BareMetalListing.model_validate(listing)
 
 
 def _listing_dict(

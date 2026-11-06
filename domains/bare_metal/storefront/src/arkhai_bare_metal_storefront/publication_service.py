@@ -77,6 +77,12 @@ async def bare_metal_publication_candidate(
         raise CapacityBindingError(
             f"listing {listing_id!r} has no complete durable capacity binding"
         )
+    listing["listing_resource"] = {
+        name: value for name, value in _listing_resource(listing).items()
+        if name not in ("max_duration_seconds", "available_until_utc")
+    }
+    if listing.get("available_until_utc") is not None:
+        listing["publication_terms"] = {"available_until_utc": listing["available_until_utc"]}
     return PublicationCandidate(listing_id, binding, listing)
 
 

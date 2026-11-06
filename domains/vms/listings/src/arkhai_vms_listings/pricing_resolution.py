@@ -42,6 +42,7 @@ from typing import Any, Mapping
 
 from arkhai_vms import VM_PRICING_PROJECTION, vm_family_rate
 from market_resource_pools_contracts.hints import raw_pricing
+from market_resource_pools_contracts import CapacityBounds, capacity_bound_hint, resolve_capacity_bounds
 
 GPU_FAMILY_KEY = "gpu"
 
@@ -60,6 +61,7 @@ KEYED_FAMILIES: frozenset[str] = frozenset(
 
 _FIELD_NAMES = (
     "max_duration_seconds",
+    "available_until_utc",
     "accepted_escrows",
     "settlements",
 )
@@ -74,6 +76,7 @@ class GpuPricingFields:
     """
 
     max_duration_seconds: Any = None
+    available_until_utc: Any = None
     accepted_escrows: Any = None
     settlements: Any = None
 
@@ -95,12 +98,40 @@ def resolve_gpu_pricing(
     otherwise the storefront's per-model config default (if one is
     configured for this model); otherwise the storefront's flat config
     default. A field left unset all the way through every tier stays
-    ``None``.
+    ``None``. Capacity bounds are strict: malformed values raise, and the
+    mode-level ``capacity_bounds.vm`` hint precedes a model-level pricing hint.
+    A nonpositive relative bound masks lower tiers without limiting duration.
     """
     hint_fields = _hint_fields_for_model(policy_tags, gpu_model)
     config_fields = config_defaults_by_model.get(gpu_model) if gpu_model else None
 
+    def bound_tier(fields: Any) -> CapacityBounds:
+        if fields is None:
+            return CapacityBounds()
+        return CapacityBounds(
+            max_duration_seconds=(
+                fields.get("max_duration_seconds")
+                if isinstance(fields, Mapping) else fields.max_duration_seconds
+            ),
+            available_until_utc=(
+                fields.get("available_until_utc")
+                if isinstance(fields, Mapping) else fields.available_until_utc
+            ),
+        )
+
+    # Validate every stated tier, including a masked hint: an unreadable bound
+    # must hold the pool, never silently publish a guessed lower-tier limit.
+    bounds = resolve_capacity_bounds(
+        bound_tier(storefront_override),
+        capacity_bound_hint(policy_tags, "vm"),
+        bound_tier(hint_fields),
+        bound_tier(config_fields),
+        bound_tier(flat_default),
+    )
+
     def _resolve(field_name: str) -> Any:
+        if field_name in CapacityBounds.model_fields:
+            return getattr(bounds, field_name)
         override_value = getattr(storefront_override, field_name)
         if override_value is not None:
             return override_value
@@ -123,12 +154,7 @@ def resolve_gpu_pricing(
     return GpuPricingFields(**{name: _resolve(name) for name in _FIELD_NAMES})
 
 
-def _is_nonnegative_int(value: Any) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
-
-
 _VALID_HINT_FIELD: Mapping[str, Any] = {
-    "max_duration_seconds": _is_nonnegative_int,
     "accepted_escrows": lambda v: isinstance(v, list),
     "settlements": lambda v: isinstance(v, list),
 }

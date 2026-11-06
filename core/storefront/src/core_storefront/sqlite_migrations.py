@@ -161,6 +161,11 @@ def _add_column_if_missing(
     conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")
 
 
+def migrate_listing_availability(conn: sqlite3.Connection) -> None:
+    """Add the optional absolute capacity bound without changing existing listings."""
+    _add_column_if_missing(conn, "listings", "available_until_utc", "TEXT")
+
+
 def migrate_listing_rate_structure(conn: sqlite3.Connection) -> None:
     """Add the listing's rate structure: a domain-owned JSON term of sale.
 
@@ -2111,5 +2116,10 @@ _MIGRATIONS: tuple[Migration, ...] = (
         "20261106_001_negotiation_message_terms",
         migrate_negotiation_message_terms,
         required_tables=("negotiation_messages",),
+    ),
+    Migration(
+        "20261107_001_listing_availability",
+        migrate_listing_availability,
+        required_tables=("listings",),
     ),
 )

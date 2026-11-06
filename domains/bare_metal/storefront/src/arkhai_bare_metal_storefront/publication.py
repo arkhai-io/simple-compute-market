@@ -55,6 +55,7 @@ from arkhai_bare_metal import (
     trusted_bare_metal_projection,
 )
 from core_storefront.domain_registry import StorefrontDomainRegistry
+from market_resource_pools_contracts import CapacityBounds
 from core_storefront.publication_composition import (
     build_storefront_publication_selection,
 )
@@ -91,7 +92,6 @@ from .publication_service import (
 )
 from .pool_overrides import (
     BareMetalPoolOverride,
-    positive_lease_bound,
     read_bare_metal_pool_overrides,
 )
 from .site_reading import SitePoolReading, read_site_pools
@@ -206,13 +206,17 @@ class BareMetalPublicationCycle:
         seller_principal: Identity,
         build_payload: PayloadBuilder,
         default_max_duration_seconds: int | None = None,
+        default_available_until_utc: str | None = None,
         enter_stage: Callable[[str], None] = _no_stage,
         derivation: SiteDerivationLog | None = None,
     ) -> None:
         self._db = sqlite_client
         # A configured bound that is absent or not positive bounds nothing, so
         # a pool relying on it is held rather than published unbounded.
-        self._default_max_duration = positive_lease_bound(default_max_duration_seconds)
+        self._default_bounds = CapacityBounds(
+            max_duration_seconds=default_max_duration_seconds,
+            available_until_utc=default_available_until_utc,
+        )
         self._registry = registry
         self._site_projections = site_projections
         self._site_ids = tuple(site_ids)
@@ -265,7 +269,7 @@ class BareMetalPublicationCycle:
         self._overrides = await asyncio.to_thread(
             read_bare_metal_pool_overrides,
             self._db.db_path,
-            configured_max_duration_seconds=self._default_max_duration,
+            configured_max_duration_seconds=None,
         )
         # Every site's held generation is read together, with nothing awaited
         # between, so one cycle reads one generation of each site.
@@ -347,6 +351,20 @@ class BareMetalPublicationCycle:
                     for pool_id, override in site_overrides.items()
                     if not override.problems and override.asking_rates is not None
                 },
+                override_bounds={
+                    pool_id: CapacityBounds(
+                        max_duration_seconds=override.max_duration_seconds,
+                        available_until_utc=override.available_until_utc,
+                    )
+                    for pool_id, override in site_overrides.items()
+                    if not override.problems and not override.term_conflicts
+                },
+                default_bounds=self._default_bounds,
+                minimum_durations={
+                    pool_id: override.min_duration_seconds
+                    for pool_id, override in site_overrides.items()
+                    if override.min_duration_seconds is not None
+                },
                 override_problems={
                     pool_id: override.problems or override.term_conflicts
                     for pool_id, override in site_overrides.items()
@@ -408,13 +426,16 @@ class BareMetalPublicationCycle:
                     reason="publication_capabilities_ignored",
                 )
         self._report_unpublished_rates(site_id, reading, classification)
-        unpublishable = self._hold_unbounded_pools(site_id, reading, site_overrides)
+        unpublishable = self._hold_unbounded_pools(site_id, reading)
         for candidate in classification.candidates:
             if candidate["pool_id"] in unpublishable:
                 continue
             override = site_overrides.get(candidate["pool_id"])
             if override is not None:
                 _apply_override(candidate, override)
+            bounds = reading.capacity_bounds[candidate["pool_id"]]
+            candidate["max_duration_seconds"] = bounds.positive_max_duration_seconds
+            candidate["available_until_utc"] = bounds.available_until_utc
             candidate["derivation_key"] = self._key(
                 site_id,
                 candidate["pool_id"],
@@ -427,12 +448,11 @@ class BareMetalPublicationCycle:
         self,
         site_id: str,
         reading: SitePoolReading,
-        site_overrides: Mapping[str, BareMetalPoolOverride],
     ) -> set[str]:
         """Hold each admitted pool whose maximum lease duration resolves to nothing.
 
-        A pool's bound is its override's maximum, else the configured default;
-        one that is absent or not positive leaves its listings nothing to
+        A pool's bound is its override's maximum, else its hint, else the
+        configured default; one that is absent or not positive leaves its listings nothing to
         publish as their maximum, so they are held -- neither published,
         refreshed, nor closed -- and the pool is reported.
         """
@@ -440,10 +460,7 @@ class BareMetalPublicationCycle:
         for pool_id, admission in sorted(reading.admission.items()):
             if admission != POOL_ADMITTED:
                 continue
-            override = site_overrides.get(pool_id)
-            stated = override.max_duration_seconds if override is not None else None
-            bound = stated if stated is not None else self._default_max_duration
-            if positive_lease_bound(bound) is not None:
+            if reading.capacity_bounds[pool_id].positive_max_duration_seconds is not None:
                 continue
             unbounded.add(pool_id)
             self._held_pools.add((site_id, pool_id))
@@ -492,6 +509,10 @@ class BareMetalPublicationCycle:
             )
         for pool_id, problems in sorted(reading.unreadable_asking_rates.items()):
             hold(pool_id, "asking_rates_unreadable", problems)
+        for pool_id, problems in sorted(reading.duration_conflicts.items()):
+            hold(pool_id, "pool_override_terms_conflict", problems)
+        for pool_id, problems in sorted(reading.unreadable_capacity_bounds.items()):
+            hold(pool_id, "capacity_bounds_unreadable", problems)
         for pool_id in reading.listing_shapes_stated:
             self.report.record(
                 "report",
@@ -710,7 +731,9 @@ class BareMetalPublicationCycle:
             updated_at=now,
             seller_principal=self._seller_principal,
             storefront_url=self._storefront_url,
-            listing=_listing(listing_resource, max_duration_seconds),
+            listing=_listing(
+                listing_resource, max_duration_seconds, candidate.get("available_until_utc")
+            ),
             accepted_escrows=accepted_escrows,
             settlement_options=settlement_options,
             publication_clauses=publication_clauses,
@@ -788,6 +811,7 @@ class BareMetalPublicationCycle:
             "settlement_options": settlement_options,
             "demands": demands,
             "max_duration_seconds": max_duration_seconds,
+            "available_until_utc": candidate.get("available_until_utc"),
         }
         binding = await bare_metal_listing_binding(self._db, listing_id)
         if binding is None:
@@ -869,6 +893,7 @@ class BareMetalPublicationCycle:
             publication_clauses=publication_clauses,
             demands=demands,
             max_duration_seconds=max_duration_seconds,
+            available_until_utc=candidate.get("available_until_utc"),
         )
         publication = await bare_metal_publication_candidate(self._db, listing_id)
         if is_open:
@@ -912,11 +937,13 @@ def _apply_override(candidate: dict[str, Any], override: BareMetalPoolOverride) 
 
 
 def _listing(
-    listing_resource: Mapping[str, Any], max_duration_seconds: int | None
+    listing_resource: Mapping[str, Any], max_duration_seconds: int | None,
+    available_until_utc: str | None = None,
 ) -> BareMetalListing:
     raw = dict(listing_resource)
     raw.pop("offering_mode", None)
     raw["max_duration_seconds"] = max_duration_seconds
+    raw["available_until_utc"] = available_until_utc
     return BareMetalListing.model_validate(raw)
 
 
@@ -927,6 +954,8 @@ def _persisted_resource(
     resource = _listing(listing_resource, max_duration_seconds).model_dump(
         mode="json", exclude_none=True
     )
+    resource.pop("max_duration_seconds", None)
+    resource.pop("available_until_utc", None)
     resource["offering_mode"] = BARE_METAL_OFFERING_MODE
     return resource
 

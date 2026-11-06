@@ -13,6 +13,7 @@ dependencies = [
     # configured admissibility default admits.
     "arkhai-kit-capability-admissibility>=0.1.0",
     "arkhai-compute>=0.2.0",
+    "arkhai-kit-resource-pools-contracts>=0.3.0",
 ]
 
 [project.optional-dependencies]
