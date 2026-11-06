@@ -102,6 +102,27 @@ its payer/payee notices derive the class rather than storing one. Servicing
 selection now gates this seam through each composition's `rate_servicing` object;
 `RatePresetRequest.servicing` passes the selected declaration to the encoder.
 
+## Acceptance timing handoff
+
+`kit/settlement-runtime/src/market_settlement_runtime/horizon.py` supplies
+`RateTermTiming(period_seconds, approval_window_seconds, context)` and the pure
+`resolve_horizon` bound/runway resolver. Both storefront compositions expose
+`rate_term_projections`, a mechanism-to-callable mapping from the exact selected
+option to those timing/capability facts. Spot supplies its installed mechanism's
+parser and foundation `TermContext`; neutral terms code never guesses payment
+field names or supported partial-period behavior. Missing projections refuse.
+Deployed compositions still supply none. A servicing declaration alone cannot
+make a recurring option acceptable.
+
+The schema-opaque negotiation runtime calls `resolve_acceptance` after fixing the
+acceptance clock and before artifacts/writes. Both domains resolve the original
+requested horizon against that exact instant, preserve option/requested wire,
+and bind the result only in the Agreement (and bare-metal physical artifacts).
+The approval expiry is `floor(accepted_at) + approval_window_seconds`. Foundation
+validation enforces the selected lifecycle's term-end treatment. Spot materializes
+its absolute end from accepted start plus duration and consumes the same selector;
+convergence must not rederive either from current listing edits or new-offer gates.
+
 ## Ownership and implementation sequence
 
 Task 2.1 implements the accessor, accepted snapshot retention and reader guard.

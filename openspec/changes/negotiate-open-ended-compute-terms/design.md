@@ -664,6 +664,54 @@ remain settlement configuration and storefront publication architecture after
 code review. Focused evidence and setup are recorded in
 `docs/attachments/negotiate-open-ended-compute-terms/servicing-declaration-checkpoint.md`.
 
+## Acceptance-horizon implementation choices
+
+Both domains use the pure `resolve_horizon` in settlement runtime. Capacity bounds
+and minimum terms arrive as data; the helper knows no compute package or mechanism.
+The negotiation runtime fixes its acceptance instant and calls an optional opaque
+`resolve_acceptance` domain hook before artifact construction or persistence. All
+four paths (opening acceptance, seller counter acceptance, buyer acceptance and
+administrative acceptance) use it. This avoids inventing an earlier acceptance
+clock or mutating artifacts after the runtime already persisted a different horizon.
+
+An implicit recurring `now` has no buyer-signed instant to preserve, so it resolves
+once to the authority's whole-second precision before signing. Explicit fractional
+recurring starts refuse; once-only fractional handling stays unchanged. An integer
+explicit horizon fits a fractional upper bound exactly without extending it. If
+the omitted default's limiting bound is fractional, refuse and ask for an explicit
+shorter horizon; a fractional non-limiting bound does not change an integer maximum.
+No horizon is rounded to a billing-period multiple. Missing reserved duration is
+refused in negotiation without changing delivery/resume fallbacks.
+
+`rate_term_projections` is a composition-owned mapping of mechanism to a callable
+from the exact selected `SettlementOption` to `RateTermTiming`. The latter contains
+positive whole-second period and approval window plus foundation `TermContext`.
+The installed mechanism owns parsing and supported partial-period treatment, not
+neutral terms code reading payment field names. Missing projection refuses, even
+with a declaration. No deployed projection or rate declaration is supplied. The
+foundation codec validates the selected lifecycle at acceptance, including term-end
+treatment; existing payments derivation already maps it through `partial_period`.
+This port is an implementation handoff, not a newly enabled payments wire revision.
+
+Bare-metal exact pricing/admission uses a provisional horizon without rewriting
+requested wire. Final acceptance repeats resolution with the fixed clock, rebuilds
+its mechanism obligation/service terms and physical duration, and refuses a changed
+exact payment. Agreement-only rate pricing uses a period, not the service horizon.
+VM's final hook binds the same listing bounds before deriving accepted money.
+The selected option and original provision wire remain unchanged in both Agreements.
+
+Task 3.3's two doors are qualified by the replayable declaration fixtures after
+this integration; spot's materialization and convergence's startup/continuation
+remain consumer responsibilities, not archive dependencies. The valid bare-metal
+fixture stops at the runtime's no-write opening plan: its payments-capture consumer
+requires a real mandate and correctly refuses an empty placeholder. The VM fixture
+can commit signed artifacts with an injected accepted-data placeholder, but neither
+fixture is live rate/mandate execution. Detailed evidence and resolved attempts
+are in `docs/attachments/negotiate-open-ended-compute-terms/horizon-acceptance-checkpoint.md`.
+D5's permanent destinations remain negotiation/publication/resource-pool specs and
+publication architecture after code review; the opaque hook also belongs in the
+negotiation specification. No permanent promotion is made at this checkpoint.
+
 ## Design promotion record
 
 Destinations are planned, not claims of implemented behavior.

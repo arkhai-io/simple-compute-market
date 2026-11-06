@@ -7,8 +7,9 @@ Signed-acceptance evidence enforcement, accepted consumer migration and the
 fail-closed direct-read guard are implemented through 2.1c. Task 2.2 adds validated
 listing bounds and both storefronts' resolution/persistence/publication carriers.
 Task 2.3 adds injected recurring publication. Task 3.1 adds the shared servicing
-declaration and publication/cached-acceptance gates; horizon acceptance and later
-terms behavior remain unimplemented. Verification levels follow
+declaration and publication/cached-acceptance gates. Tasks 3.2–3.3 add acceptance-time
+horizon checks and qualify the terms-owned declaration doors; buyer disclosure and
+closeout remain unimplemented. Verification levels follow
 `docs/development/TESTING.md`. New acceptance test implementation requires the
 maintainer's approval; the scenarios below are the intended contract, not tests
 added by this reconciliation.
@@ -311,6 +312,45 @@ added by this reconciliation.
   is claimed. No external resources or resident servers remain. Recreate wheels
   and environments and run both committed probe commands in the evidence packet.
 
+### Horizon-acceptance checkpoint (2026-11-07)
+
+- Completed 3.2: one fixed acceptance clock feeds a domain-owned final terms hook
+  before artifacts/writes on all acceptance paths. Both domains bind the finite
+  default/explicit horizon, both listing bounds, whole-second recurring starts and
+  exact approval-expiry runway. Missing reserved duration is refused; only VM's
+  negotiation/default and rate-pin fallbacks were removed, not delivery/recovery.
+- `kit/settlement-runtime/.../horizon.py` owns the pure bound/runway resolver.
+  Both domains' message/provision codecs permit omission; their storefront runtime,
+  policy/composition files supply selection, timing projection and Agreement/physical
+  artifacts. `kit/negotiation-runtime/.../runtime.py` remains schema-opaque.
+  Foundation validation owns term-end treatments and fails closed on unsupported
+  returned treatment. No deployed timing projection or rate declaration is added.
+- Completed 3.3: the committed proposed/published/absent declaration fixtures
+  requalify publication and cached acceptance after horizon integration. Selector,
+  accessor and timing handoffs are in `dependency-contracts.md`; spot owns the
+  materialization consumer, convergence owns startup/continuation. Neither is
+  required to archive terms, and neither is claimed by these fixtures.
+- Replayable setup, exact targets/results and evidence limits:
+  `docs/attachments/negotiate-open-ended-compute-terms/horizon-acceptance-checkpoint.md`.
+  Kit suites: 62/175 passed; VM/bare domain suites: 60/224 passed; VM storefront
+  selected policy/app suites: 70 passed; bare storefront: 106 passed. Targeted
+  horizon typing, `make check-packaging`, `make check-change
+  CHANGE=negotiate-open-ended-compute-terms` and pinned strict OpenSpec validation
+  pass. No permanent tests added or assertions weakened.
+- The VM fixture commits signed resolved horizon artifacts with an injected data
+  placeholder. Bare metal validates valid Agreement/physical artifacts through the
+  no-write opening plan: its actual rate-mandate capture remains spot-owned and
+  rejects a placeholder. Both typed buyer surfaces prove invalid horizons and
+  cached declaration withdrawals leave negotiation rows unchanged. These are not
+  live hosted rate/mandate/provisioning guarantees.
+- **Restart at 4.1**: both buyer CLIs/policies must expose optional recurring horizons,
+  retain required reserved duration and show D7's codec-derived disclosures. Reuse
+  `default_buyer_refusals` and `RateServicing`; do not duplicate codec or timing
+  parsing. Then 4.2 buyer selection fixtures, 4.3 affected/E2E validation and section 5.
+- PR #351 remains draft. Final rebase/review, deployed E2E, post-review promotion
+  and archival remain pending. No external resources or resident servers remain.
+  Recreate wheels/environments and run both committed `--acceptance` probe commands.
+
 ## 2. Quote and capacity terms
 
 - [x] 2.1 In `core/src/market_core/schemas.py` implement the unit-bearing accessor;
@@ -361,7 +401,7 @@ added by this reconciliation.
   covers published/proposed contract selection and lane-only opt-in; app integration
   uses each storefront's typed client and real persistence to prove the cached-option
   refusal has no acceptance side effect.
-- [ ] 3.2 In both negotiation runtimes/policies, resolve start/bounds before final
+- [x] 3.2 In both negotiation runtimes/policies, resolve start/bounds before final
   signature per D5, resolving the horizon into `duration_seconds`; require whole-second recurring starts,
   refusing fractional values without rewriting accepted bytes; bind equal duration/max term
   without rounding, require at least one whole period for recurring horizons, refuse a
@@ -375,7 +415,7 @@ added by this reconciliation.
   app integration: `domains/vms/storefront/tests/integration/test_buyer_selection_negotiation.py`
   and bare-metal negotiation tests. `unify-compute-delivery-path` gates using the same
   accepted start/end on resume and provisioning; do not duplicate its window logic.
-- [ ] 3.3 Verify this change's declaration seam using injected published/proposed/absent
+- [x] 3.3 Verify this change's declaration seam using injected published/proposed/absent
   declarations and stable lane identity: publication omits and cached acceptance refuses
   undeclared servicing before persistence. Commit reproducible fixtures for those two gates.
   Handoff declaration/accessor contracts after 1.3, 2.1 and 3.1 to spot materialization;

@@ -340,6 +340,10 @@ class BareMetalStorefrontRuntime:
                     self.settlement_composition.rate_servicing
                     if self.settlement_composition is not None else None
                 ),
+                rate_term_projections=(
+                    self.settlement_composition.rate_term_projections
+                    if self.settlement_composition is not None else None
+                ),
             ),
         )
         object.__setattr__(self, "lifecycle", BareMetalLifecycle(self))

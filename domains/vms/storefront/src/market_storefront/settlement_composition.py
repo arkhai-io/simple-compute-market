@@ -18,6 +18,7 @@ from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from market_core.schemas import settlement_option_schema
 from market_deal_lifecycle.terms import LifecycleTerms
 from market_settlement_runtime.rate_servicing import RateServicing, RateServicingUnavailable
+from market_settlement_runtime.horizon import RateTermProjections
 from market_settlement_runtime.rate_publication import (
     RatePresetHelper, RatePresetRefusal, default_buyer_refusals,
     derive_rate_preset, effective_delivery_deadline,
@@ -107,6 +108,7 @@ class VmSettlementComposition:
 
     rate_servicing: RateServicing = field(default_factory=RateServicing, repr=False)
     rate_preset_helpers: Mapping[str, RatePresetHelper] = field(default_factory=dict, repr=False)
+    rate_term_projections: RateTermProjections = field(default_factory=dict, repr=False)
     delivery_deadline_for_pool: Callable[[str, str | None], int | None] = field(
         default=lambda _site, _pool: None, repr=False,
     )

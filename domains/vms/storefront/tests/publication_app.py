@@ -220,6 +220,7 @@ class SettlementCompositionDouble:
 
     def __init__(self, mechanism_fulfillment: Mapping[str, bool]) -> None:
         self.rate_servicing = RateServicing()
+        self.rate_term_projections = {}
         self.configuration_registry = build_storefront_settlement_registry()
         self.settlement_config = self.configuration_registry.resolve(
             storefront_config.settlement_config_mapping(), role="seller"
@@ -588,6 +589,7 @@ async def publication_app(
     *,
     mechanism_fulfillment: Mapping[str, bool] | None = None,
     negotiation: bool = False,
+    negotiation_options: Mapping[str, Any] | None = None,
     second_site: bool = False,
     contacts: Mapping[str, Mapping[str, str]] | None = None,
     admissibility_default: Mapping[str, Any] | None = None,
@@ -771,11 +773,14 @@ async def publication_app(
                     capacity_runtime=capacity,
                     site_projections=site_projections,
                     rate_servicing=composition.rate_servicing,
-                    accepted_obligation_dispatch=(
-                        composition.accepted_obligation_dispatch()
-                        if contacts is not None
-                        else None
-                    ),
+                    rate_term_projections=composition.rate_term_projections,
+                    **{
+                        "accepted_obligation_dispatch": (
+                            composition.accepted_obligation_dispatch()
+                            if contacts is not None else None
+                        ),
+                        **(negotiation_options or {}),
+                    },
                 )
             )
             routers = (negotiate_router,)

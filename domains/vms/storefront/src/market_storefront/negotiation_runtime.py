@@ -7,7 +7,7 @@ import hashlib
 import json
 import logging
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
 
@@ -59,6 +59,7 @@ from market_core.schemas import (
     settlement_option_schema,
 )
 from market_settlement_runtime.rate_servicing import RateServicing, RateServicingUnavailable
+from market_settlement_runtime.horizon import RateTermProjections, resolve_horizon
 from market_identity import Identity
 from market_negotiation_runtime import (
     Acceptance,
@@ -287,11 +288,7 @@ def _agreement(
     terms: NegotiationTerms,
 ) -> AgreementTerms:
     return AgreementTerms(
-        duration_seconds=int(
-            terms.requested_duration_seconds
-            or listing_record.get("max_duration_seconds")
-            or 3600
-        ),
+        duration_seconds=int(terms.requested_duration_seconds or 0),
         start_utc=terms.requested_start_utc,
     )
 
@@ -664,14 +661,18 @@ def _build_response_artifacts(
         try:
             if accepted and acceptance.agreed_amount < multiplier_floor(_negotiation_settings()):
                 raise ValueError("multiplier_below_floor")
+            basis = selected_billing_basis(
+                acceptance.listing_record, acceptance.pinned_proposal, project_billing,
+            )
+            # A counter quotes one recurring period, not a made-up service term.
+            pricing_seconds = (basis.period_seconds if basis.unit == "per_period"
+                               else acceptance.agreement.duration_seconds)
             payment_amount = quote_from_multiplier(
                 acceptance.listing_record, acceptance.pinned_proposal,
-                acceptance.agreed_amount, acceptance.agreement.duration_seconds,
+                acceptance.agreed_amount, pricing_seconds,
                 vm_listing_resource_shape(acceptance.terms.decoded.compute_resource)
                 if getattr(acceptance.terms.decoded, "compute_resource", None) else None,
-                price_basis=selected_billing_basis(
-                    acceptance.listing_record, acceptance.pinned_proposal, project_billing,
-                ),
+                price_basis=basis,
             )
         except ValueError as exc:
             raise OfferUnfulfillableError(str(exc)) from exc
@@ -920,6 +921,7 @@ def build_vm_negotiation_runtime(
     listing_source_check: ListingSourceCheckHook | None = None,
     source_confirmation_clock: Callable[[], datetime] | None = None,
     rate_servicing: RateServicing | None = None,
+    rate_term_projections: RateTermProjections | None = None,
 ) -> NegotiationRuntime:
     """Compose the shared lifecycle with the exact registered VM contract.
 
@@ -1111,6 +1113,12 @@ def build_vm_negotiation_runtime(
             request.repository, request.listing_record, request.terms,
             partial=not any(round_.sender == "us" for round_ in request.history),
         )
+        if terms.requested_duration_seconds is None:
+            selected = vm_storefront_round._selected_option(request.listing_record, proposal)
+            if selected is None or selected_billing_basis(
+                request.listing_record, proposal, project_billing,
+            ).unit != "per_period":
+                raise OfferUnfulfillableError("reserved duration_seconds is required")
         policy = seller_round_hook or _default_seller_round_hook(domain, project_billing)
         try:
             result = await policy(
@@ -1198,11 +1206,34 @@ def build_vm_negotiation_runtime(
             negotiation_id=opening.negotiation_id,
             artifact_slot="message:rate-structure-pin",
             value={
-                "duration_seconds": opening.terms.requested_duration_seconds or 3600,
+                "duration_seconds": opening.terms.requested_duration_seconds,
                 "rate_structure_digest": _rate_structure_digest(opening.listing_record),
             },
             registry=registry,
         )
+
+    def resolve_acceptance(acceptance: Acceptance) -> Acceptance:
+        option = vm_storefront_round._selected_option(
+            acceptance.listing_record, acceptance.pinned_proposal,
+        )
+        assert acceptance.accepted_at is not None
+        try:
+            horizon = resolve_horizon(
+                requested_duration_seconds=acceptance.terms.requested_duration_seconds,
+                requested_start_utc=acceptance.terms.requested_start_utc,
+                accepted_at=acceptance.accepted_at,
+                max_duration_seconds=acceptance.listing_record.get("max_duration_seconds"),
+                available_until_utc=acceptance.listing_record.get("available_until_utc"),
+                option=(SettlementOption.model_validate(option)
+                        if option is not None and acceptance.pinned_proposal is not None
+                        and "settlement_selection" in acceptance.pinned_proposal else None),
+                rate_terms=rate_term_projections or {},
+            )
+        except ValueError as exc:
+            raise OfferUnfulfillableError(str(exc), listing_id=acceptance.listing_id) from exc
+        return replace(acceptance, agreement=AgreementTerms(
+            duration_seconds=horizon.duration_seconds, start_utc=horizon.start_utc,
+        ))
 
     def storefront_is_paused() -> bool:
         return trading_pause().paused
@@ -1256,6 +1287,7 @@ def build_vm_negotiation_runtime(
         amount_from_proposal=_amount,
         proposal_from_amount=_proposal_from_amount,
         agreement_terms=_agreement,
+        resolve_acceptance=resolve_acceptance,
         build_artifacts=lambda acceptance, accepted: _build_response_artifacts(
             domain,
             acceptance,
