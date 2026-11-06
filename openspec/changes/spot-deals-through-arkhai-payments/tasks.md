@@ -196,6 +196,15 @@ not kit library behavior. Verify no mechanism import of kit/deal-servicing
 or either domain with make check-architecture. Do not replicate the foundation's
 cryptographic proof test matrix.
 
+## Sections 1–3 implementation result and restart
+
+- Delivered `mandates.py`, `agreement.py`, `presets.py`, `settlement_config.py`, `operations.py` and `rate_adapter.py` in the payments kit; buyer/seller gates and both compute `settlement_composition.py` integrations. No installed recurring servicing declaration was enabled.
+- Reused the shared DeliveryEvidence, lifecycle codec, snapshot verifier, foundation dispute filing and authority fixture. Rate descriptors require caller-persisted digests; disclosure can consume the journaled start outcome with its operation identity. Neutral per-part observations distinguish stop requests from winning final stops; watch observes notice maturity independently of its event cursor and retains the first observation on replay.
+- Focused evidence: payments 221, lifecycle servicing 63, mediation 77, VM publication/payment integration 104, bare-metal publication/payment integration 21 existing tests pass. Published vector/generated checks and kit typing pass. Composition-file typechecks pass (bare-metal skips untyped-import diagnostics for existing unmarked dependencies). No permanent tests added; existing projection expectations follow the new public fields.
+- `make check-packaging`, comment hygiene, amount-read inventory, change index and pinned OpenSpec strict validation pass. The durable packet and exact commands are in `docs/attachments/spot-deals-sections-1-3/index.md`; `make dist-ci && make -C kit/arkhai-payments first-use-rate` reproduces the prepared fixture with no secrets or resident services.
+- E2E is **unobservable**, not passed: with the required Podman Compose provider set, the invocation-owned VM lane failed before setup with `/bin/sh: 1: docker: not found`, Makefile:240 Error 127. No stack, readiness or scenario result is claimed; no SCM containers were started.
+- Resume at section 4 after maintainer code/design review; sections 4–6, full qualification and section 7 closeout are untouched. Post-review promotion remains the owning permanent specs/companions, architecture/configuration docs, roadmap and campaign index named below; this slice updates the kit README but does not archive or promote unimplemented behavior.
+
 ## 4. Seller notice command and operator first use
 
 Files: kit/deal-lifecycle-contracts command/outcome models and route contracts,
