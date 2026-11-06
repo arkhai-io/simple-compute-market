@@ -2485,3 +2485,14 @@ committed, so a prospective-tree scan is required before commit and that test is
 rerun afterward. Other scanner31tests pass; double50tests and certificate
 reproduction pass; packaging passes. Current policy is promoted to secret-scanning
 documentation; the earlier forward allowance remains only in Git history.
+
+Postcommit validation atf029f2d7f passes all32scanner tests and all24Tests jobs
+(run42203088211), plus Public content42202912657. The rebuilt double has identical
+served source, fixtures, TLS bytes, installed dependency versions and UID; its
+default HTTPS startup verifies the CA at UID10001. Current actual Helm passes
+14served tests, mounted credential typing/comparison and payments podexit0/ok,
+then scaleszero without changing other namespace replicas. Prior Compose
+run42197679703 remains explicitly reused unchanged-flow proof; no fresh current
+image Compose run is claimed. Both independent axes accept the bounded reuse
+conditions, all of which are met. Imported history and strict new-key refusal
+remain intact.
