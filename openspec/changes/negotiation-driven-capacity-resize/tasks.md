@@ -373,9 +373,15 @@ Slice C plan (2026-11-06):
 - [x] 2.14 Focused tests: a negotiation agreeing a shape smaller than the listing's
       reserves the smaller shape; the committed reservation's dimensions match the
       agreed shape; the fulfillment request derives from the reservation.
-- [ ] 2.15 One e2e run with a shape agreed below the listing's, asserting the VM
-      built has the agreed shape. Treat this as the deployment boundary: in-flight
-      negotiations carry a multiplier after it.
+- [ ] 2.15 **Unobservable after a genuine VM-lane attempt; owner-authorized disposition.**
+      One e2e run with a shape agreed below the listing's, asserting the VM
+      built has the agreed shape. Fresh rebased images built with Podman 5.7.0 and
+      the explicit native Compose 1.6.0 provider, but startup failed before readiness
+      because included registry environment-file paths resolved against the wrong
+      directory. No deployed assertion ran. Exact command, failure and cleanup:
+      `docs/attachments/resize-shape-pricing/final-validation.md`.
+      Treat this as the deployment boundary: incompatible in-flight negotiations
+      must drain before upgrading or rolling back.
 - [x] 2.16 **Comment hygiene and import placement, before the pre-closeout review.** Run
       `make check-comment-hygiene` and read the comments this change added for any that
       narrate the review or migration that introduced them; move each import the change
@@ -420,6 +426,27 @@ Slice C plan (2026-11-06):
   open with Decisions to review: D-d, D-e, and draining incompatible in-flight
   negotiations at deploy; cite dependency PR #349. No PR has been opened and no
   release/deployment or independent acceptance is claimed.
+
+### Final section 2 handoff (2026-11-06)
+
+- Rebased all eight implementation/checkpoint commits cleanly onto `origin/dev`
+  at `20aa47dfe`. Section 2 implementation is ready for review; 2.15 remains
+  explicitly unobservable, not passed, under the owner's fallback instruction.
+- Fresh suffixed VM-lane images built successfully. With the explicit native
+  Podman Compose provider, startup failed on included registry environment-file
+  path resolution before readiness. No scenario ran against the unready stack;
+  the isolated project and the build's leftover Anvil process were cleaned up.
+- Final validation and prepared first-use setup are recorded in
+  `docs/attachments/resize-shape-pricing/final-validation.md`; packaging,
+  all twelve change checks, architecture-exception ownership, 144 focused VM,
+  62 runtime, 25 core-buyer, 69 VM-buyer, 52 provider-sizing, 14 core-storefront,
+  97 policy and 18 legacy rate-helper cases pass (481 total). Explicit pinned
+  `openspec validate negotiation-driven-capacity-resize --strict` also passes.
+- PR #349 remains the registry carrier/seller-proof dependency. D-d, D-e,
+  the hosted-payment fix (`cb5c8c83e`, rebased as `30d370e4e`), and the requirement
+  to drain incompatible negotiations are explicit PR review items. Promotion
+  and archival remain post-review; none of the closeout items below is ticked
+  by these implementation checks alone.
 
 ## 3. Closeout
 
