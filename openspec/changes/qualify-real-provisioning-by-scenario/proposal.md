@@ -34,6 +34,11 @@ no VM scenario buys through `market buy` in `arkhai.payments.v1`.
   while the bare-metal purchase runs its own buyer-teardown stage. Each set supplies the
   shared stages' inputs from its own earlier stages, such as the expected host from the
   Alkahest preview or the buyer purchase's declared host, so their bodies stay one.
+- **One settle-wait resolution for every storefront.** The settlement runtime kit's
+  settle wait resolves a reference by its settlement reference, then its negotiation,
+  for any mechanism, and owns its terminal states. The VM, bare-metal and API-credit
+  storefronts supply only their settlement-evidence lookups and delivery status. Today
+  the bare-metal storefront's wait cannot see an `arkhai.payments.v1` deal at all.
 - **External-topology qualification scenarios** extend those purchases against a
   configured real-provisioning target and payments target, adding only the real-host
   observations:
@@ -75,7 +80,8 @@ no VM scenario buys through `market buy` in `arkhai.payments.v1`.
   evidence is supplied.
 
 No new settlement mechanism, funding call, default lane for the external scenarios,
-host-specific configuration or LIVE-money test is introduced. Funding the buyer, and any
+host-specific configuration or LIVE-money test is introduced, and no buyer-facing settle
+status route or settlement evidence store changes. Funding the buyer, and any
 setup needing knowledge this repository lacks, is the deployment's topology. External
 evidence is supplied free-form by the deployment's operator; no record format is defined.
 
@@ -91,6 +97,8 @@ None.
   buyer-purchase and post-settlement stages; the qualification scenarios and their
   target fields; one listing per real resource.
 - `physical-provisioning`: the host diagnostics VM operator job.
+- `settlement-servicing`: the settle wait resolves a settlement by its reference or its
+  negotiation, for any mechanism.
 
 ## Dependencies
 
@@ -113,7 +121,11 @@ unanswerable dispute authority, and the storefronts' payments check.
 - `domains/vms/provisioning`: the host diagnostics action, its playbook, mock default
   output, and the operator client's `diagnose_host` and `HostDiagnostics`, with tests at
   the levels that own them.
-- No chart, kit, or database migration change.
+- `kit/settlement-runtime`: the settle wait's resolution and terminality, and its
+  resolver as a public operation; a breaking minor version, every exact pin on it raised.
+- The VM, bare-metal and API-credit storefronts' settle-wait hooks, moved onto the kit's
+  lookups, with tests at the levels that own them and version bumps.
+- No chart or database migration change.
 
 ## Permanent documentation impact
 
@@ -137,6 +149,7 @@ unanswerable dispute authority, and the storefronts' payments check.
   example.
 - The host diagnostics job: `openspec/specs/physical-provisioning/spec.md` and the VM
   IaC README.
+- The settle wait's resolution: `openspec/specs/settlement-servicing/spec.md`.
 - Goal 1's qualification row and the new unowned gaps: `docs/development/ROADMAP.md`.
 
 Each decision's destination:
@@ -178,3 +191,6 @@ Each decision's destination:
   wait on events, never on durations").
 - D22: no permanent destination — an implementation cadence, recorded in the change's
   history.
+- D23: `openspec/specs/settlement-servicing/spec.md` (delta);
+  `docs/development/ROADMAP.md`, the buyer settle status route and shared evidence store
+  gaps.

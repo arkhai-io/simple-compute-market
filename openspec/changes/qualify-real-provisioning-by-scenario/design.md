@@ -24,7 +24,8 @@ Facts the decisions rest on:
 - **The bare-metal lane already buys through the shipped buyer.**
   `test_bare_metal_payment_deal.py` buys through `market bare-metal buy` in
   `arkhai.payments.v1` against the double. Its steps are module test functions, not
-  shared stage classes. It re-drives the run's commit, then the seller refunds, then it
+  shared stage classes. It reads readiness by polling the buyer's fulfillment status on
+  the wall clock, never through the administrator's settle wait. It re-drives the run's commit, then the seller refunds, then it
   tears the host down through `BareMetalFulfillmentTransport.teardown` rather than the
   buyer's `market bare-metal teardown`. It is governed by "A configured bare-metal
   payment purchase is qualified end to end".
@@ -32,6 +33,21 @@ Facts the decisions rest on:
   `test_vm_payment_deal.py` negotiates, approves and commits through typed clients and
   ends by an administrator interruption; its case and refund stages report a blocked
   skip without `MEDIATION.SERVICE_URL`. The VM buyer supports the mechanism.
+- **Each storefront's settle wait resolves a reference its own way.** Every storefront
+  binds the settlement runtime kit's `SettlementAdminRouteService` with an opaque
+  `settle_status(ref)` hook. VM's finds a delivery record by negotiation, then an escrow
+  row, then refunded evidence (`payment_repository.py:462-479`); API credits' finds its
+  issuance progress by negotiation or `public_ref` (`settlement_repository.py:83-89`);
+  bare metal's reads only the `escrows` table (`deal_controls.py:133-136`), which only
+  Alkahest verification writes (`settlement_stages.py:495`). So a bare-metal
+  `arkhai.payments.v1` deal is invisible to the administrator's settle wait, by its
+  negotiation or its transaction, although its settlement record exists from acceptance
+  (`negotiation_runtime.py:856-862`) and the buyer status route finds it
+  (`api.py:913-915`). Every domain records the same shape of settlement evidence — one
+  row per negotiation with its mechanism, a unique `settlement_ref` and a status
+  (`vm_settlement_evidence`, `bare_metal_settlement_records`), the shape of
+  `market_core.SettlementEvidence` — and all three hooks share the terminal vocabulary
+  `ready` and `failed`.
 - **A listing's binding to its resource outlives the listing**, so each scenario on a
   shared stack lists its own resource. A backed declaration whose provider needs a host
   is offered only while it names a registered, enabled host (`helpers/hosts.py`).
@@ -69,6 +85,8 @@ Facts the decisions rest on:
 - The reads those observations need, with a preference for this repository's typed
   clients.
 - The configuration a deployment supplies to run them.
+- A settle wait that resolves any mechanism's settlement the same way in every
+  storefront, which the shared readiness stage relies on (D23).
 
 **Non-Goals:**
 
@@ -77,6 +95,8 @@ Facts the decisions rest on:
 - Observations 1 and 3, and GPU work.
 - A default pipeline lane for the external scenarios.
 - Changing payment or provisioning behaviour.
+- A buyer-facing settle status route change, or a settlement evidence store shared across
+  domains (D23).
 - A format for externally supplied evidence.
 - Chart or kit changes for in-cluster payments: the storefront charts' CA option and the
   kit's transport rule already serve a deployment.
@@ -388,7 +408,10 @@ A hosted, controllable dispute authority remains an unowned roadmap gap.
   - a paid purchase with checked GPU work for each GPU offer;
   - no pushed operator notification for a cleanup refusal or held teardown;
   - a payer-scoped debit listing at the payments service, as future work outside this
-    repository.
+    repository;
+  - each storefront's buyer-facing settle status route resolving through the
+    settlement runtime kit's resolver, as the settle wait does (D23);
+  - one settlement evidence store owned by a kit, in place of each domain's table (D23).
 - **The real modules' first run.** The row recording that the real modules have never run
   against a target stays unowned. The deployment may run the Alkahest real modules on the
   candidate, but that is not a commitment of this change.
@@ -397,8 +420,9 @@ A hosted, controllable dispute authority remains an unowned roadmap gap.
 
 `Stage09b` (settlement readiness), `09c` (the lease record) and `11b` (release, with
 capacity restored) are keyed on the deal's settlement reference rather than
-`real_escrow_uid`: the Alkahest escrow, or the payments negotiation that
-`wait_for_settlement` already accepts. Each driver supplies its reference. So the
+`real_escrow_uid`: the Alkahest escrow, or the payments negotiation, each of which every
+storefront's settle wait resolves (D23). An earlier stage writes the reference: `07`
+for the Alkahest set, the purchase stages for the buyer purchases. So the
 Alkahest set and the buyer-purchase set run one definition of each, and a compute
 scenario settling another way keeps only its own pre-settlement stages.
 
@@ -589,24 +613,109 @@ step to" on its own, which would state the rule twice in one document.
 
 ### D22. Implementation cadence
 
-- **Round 1, local and product, three sessions:**
-  - Session 1: the shared post-settlement stages keyed on the settlement reference (D15);
-    the buyer-purchase stage set and its source check; the bare-metal payment module
-    restructured onto it, with the buyer-teardown ending (D16).
-  - Session 2: the VM `market buy` module with its own resource, host and pool, ending
+- **Round 1, local and product, five sessions:**
+  - Session 1, implemented: the shared post-settlement stages keyed on the settlement
+    reference (D15).
+  - Session 2: the settle wait's resolution in the settlement runtime kit, the three
+    storefronts' hooks onto it, and their versions and locks (D23).
+  - Session 3: the buyer-purchase stage set and its source check; the bare-metal payment
+    module restructured onto it, with the buyer-teardown ending (D16).
+  - Session 4: the VM `market buy` module with its own resource, host and pool, ending
     by the shared expiry stages (D17); the D2 listing helper and adoption checks.
-  - Session 3: the host diagnostics job, with its playbook, action, mock default output,
+  - Session 5: the host diagnostics job, with its playbook, action, mock default output,
     `diagnose_host`, `HostDiagnostics` and tests (D5).
 - **Round 2, the external extension, one session:** the three qualification modules, the
   `management_unit` and `admission_log` target fields, and the admission-log check (D8,
   D9).
 
-Round 1 is reviewed before round 2 builds on it. Then validation, pre-closeout review,
-the merge, and the operator's run on the post-merge candidate (D7, D19).
+Round 1 is reviewed as a whole before round 2 builds on it. Then validation, pre-closeout
+review, the merge, and the operator's run on the post-merge candidate (D7, D19).
 
-Session 1 keeps the cross-lane refactor with the scenario that first proves it, and
-session 2 proves the expiry ending on a payments deal. If planning finds session 1 small,
-sessions 1 and 2 may be one.
+The kit work is a session of its own, with its own verification checkpoint, because it is
+product code across four packages; it sits in round 1 so it is reviewed beside session 3's
+bare-metal purchase, the scenario that first proves it end to end. Session 4 proves the
+expiry ending on a payments deal.
+
+**Rejected:** folding the kit work into session 3, the largest session already, which
+mixes a product change with the e2e restructure in one handoff; a round of its own
+reviewed before the purchase stages, which costs a review and validation cycle before any
+scenario proves it.
+
+### D23. The settle wait's resolution is the settlement runtime kit's
+
+The settle wait (`GET /api/v1/admin/settle/{ref}/wait`) is a kit-owned control
+(`market-composition`, "Storefront deal controls are kit-owned route services"), but
+what a reference names is decided in each storefront's opaque `settle_status` hook, and
+the three decide differently (Context). The kit takes that decision over for every
+binder:
+
+- **The kit owns resolution:** a reference names a settlement by its `settlement_ref`,
+  then by its negotiation, whatever the mechanism. A reference that resolves to nothing
+  is a poll that found nothing terminal, and the wait polls to its deadline as now.
+- **The kit owns terminality:** `ready` and `failed` end the wait. Polling, the failed-read
+  rule and the deadline are unchanged.
+- **The domain supplies what is its own:** two lookups returning
+  `market_core.SettlementEvidence` or nothing — by settlement reference and by
+  negotiation — and its delivery status for a resolved settlement.
+
+```python
+SettlementAdminRouteService(
+    verify=verify, preview_fulfillment=preview,
+    settlements=SettlementLookup(
+        by_reference=db.load_vm_settlement_evidence_by_ref,   # str -> SettlementEvidence | None
+        by_negotiation=db.load_vm_settlement_evidence,        # str -> SettlementEvidence | None
+    ),
+    delivery_status=vm_delivery_status,  # SettlementEvidence -> {"status": "ready"|"failed"|..., ...}
+)
+```
+
+The names are illustrative; planning fixes them. The resolver is a public kit operation,
+so a later caller resolves a reference the same way without the wait.
+
+All three binders move, and the opaque `settle_status`/`is_terminal` form is removed:
+
+- **VM:** its evidence lookups, a by-reference query added. Its delivery status reads the
+  delivery record by the evidence's negotiation, and reports refunding or refunded
+  evidence when there is none. The escrow-row fallback goes: Alkahest evidence carries
+  the escrow as its `settlement_ref`, and a delivery record exists only for a negotiation
+  with evidence.
+- **Bare metal:** its settlement records, both queries existing. Its delivery status
+  keeps the live fulfillment read, its mapping to `ready` and `failed`, and the
+  servicing-obligation wake, which now runs only for evidence whose source names an
+  `obligation_ref`: the Alkahest path, since a payments deal adopts no settlement-runtime
+  obligation.
+- **API credits:** its evidence by reference and by negotiation, its delivery status its
+  issuance progress. Planning confirms which record supplies an Alkahest deal's escrow.
+
+Wire paths and responses are unchanged, as are schemas and migrations; every storefront
+answers for a superset of the references it answered before. An older bare-metal
+storefront still times out on a payments deal, which fails a new harness visibly. The kit
+takes a breaking minor version, the storefronts are bumped, and every exact pin on the
+kit is raised with its locks.
+
+So `09b` keeps one body for every compute scenario (D15), the bare-metal purchase reads
+readiness through the settle wait rather than a wall-clock poll of the buyer's status, and
+an operator can settle-wait a bare-metal payments deal.
+
+**Rejected:**
+
+- **Patching only the bare-metal hook.** It fixes the scenario's case and leaves three
+  domain-local resolutions of one kit-owned control.
+- **Moving VM and bare metal only, API credits keeping the opaque hook.** Two constructor
+  forms, and a domain-local lookup kept in the third binder.
+- **Also resolving each buyer-facing settle status route through the kit** in this
+  change. Those routes carry their own authentication and replay semantics that no
+  scenario here exercises; once the resolver exists it is a call-site change, recorded as
+  an unowned gap (D12).
+- **A kit-owned settlement evidence store** replacing the domains' tables. It is a data
+  migration across two status vocabularies and needs a design of its own; recorded as an
+  unowned gap (D12).
+- **`09b`'s readiness read as a driver part, or a bare-metal readiness stage of its
+  own.** Either takes the readiness oracle out of the shared body, against D15, needs a
+  wait that is not a poll, and leaves the operator-facing defect.
+- **Splitting the kit work into a prerequisite change.** It halts sections 3 onwards for a
+  whole change's cycle, for an understood fix whose first end-to-end proof is this
+  change's bare-metal purchase.
 
 ## Principles stated for promotion
 
@@ -629,3 +738,7 @@ These go to the new `TESTING.md` section, with the repository-wide rule in
   structure the process would benefit from.
 - **Host diagnostics for bare metal.** It is VM-only now. Revisit, and lift it to the
   compute family, when bare metal needs it.
+- **A rule for unifying a behaviour that differs between domains binding one kit-owned
+  control.** D23 applies it, but as stated it is not yet actionable upon review, so it is
+  not promoted. Revisit at a guidance review, or when another such difference is found,
+  once it is refined into a rule a reviewer can apply.

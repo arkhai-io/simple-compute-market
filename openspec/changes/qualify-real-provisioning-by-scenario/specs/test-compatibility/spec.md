@@ -11,7 +11,7 @@ body differs between lanes is not shared.
 
 The stages from fulfillment onwards — convergence to active, settlement readiness, the
 lease record, the lease's ending and teardown completion — MUST be keyed on the deal's
-settlement reference, which the driver supplies, rather than on an Alkahest escrow, so
+settlement reference, which an earlier stage writes, rather than on an Alkahest escrow, so
 the buyer purchase settled through `arkhai.payments.v1` runs the same definitions. How a
 lease ends is not shared across endings: the lease-watchdog expiry and the teardown
 dispatch it starts are shared by every scenario whose lease ends by expiry, and a
