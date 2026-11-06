@@ -786,7 +786,7 @@ class NegotiationRuntime:
                 decoded_terms,
                 uses_scalar_amount,
                 pinned_proposal,
-            ),
+            ) if validate else 0,
             agreement=hooks.agreement_terms(
                 resolved.listing,
                 resolved.listing_record,
