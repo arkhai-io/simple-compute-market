@@ -11,7 +11,7 @@ declaration and publication/cached-acceptance gates. Tasks 3.2–3.3 add accepta
 horizon checks and qualify the terms-owned declaration doors. Task 4.1a adds shared
 buyer rights policy and lifecycle disclosure. Task 4.1b adds mechanism-owned
 numerical presentation, optional recurring horizon plumbing and accepted recovery
-disclosure. Restart at 4.2 for full selection first use, then 4.3 and closeout. Verification levels follow
+disclosure. Task 4.2 adds mixed-publication first use through both buyer commands. Task 4.3 runs focused application regressions and records failed E2E readiness as unobservable. Restart at section 5 for review-gated closeout after final rebase/validation. Verification levels follow
 `docs/development/TESTING.md`. New acceptance test implementation requires the
 maintainer's approval; the scenarios below are the intended contract, not tests
 added by this reconciliation.
@@ -507,7 +507,7 @@ First use includes one mixed listing per domain with a hosted on-demand option c
 selected by a default buyer: the hosted option is checked for the term and the Alkahest
 option is shown as making no delivery promise, not refused for lacking one (D3).
 
-- [ ] 4.1 Update both buyer CLIs and policies: optional recurring horizon, required
+- [x] 4.1 Update both buyer CLIs and policies: optional recurring horizon, required
   reserved duration and D7's display of class/price unit/setup/reserve/terms, including
   per-stopper and term-end `settles_through`, premature-stop penalty amount/asset/cap,
   the delivery deadline as seconds after approval, recommended default acceptance refusal of
@@ -527,19 +527,27 @@ option is shown as making no delivery promise, not refused for lacking one (D3).
     class/price-unit/setup/reserve/bounds/effective-horizon display on fresh and
     resumed approval paths. Verify selected/accepted/displayed pricing agreement
     using proposed injected mechanism ports without enabling deployed rate servicing.
-- [ ] 4.2 Prepare committed publication/selection fixtures with reserved/on-demand/spot
+- [x] 4.2 Prepare committed publication/selection fixtures with reserved/on-demand/spot
   candidate options and both bounds in each domain, using injected proposed declarations
   rather than requiring runnable rate or mediation services. Start at each buyer's selection
   surface and observe omitted/shorter horizon, displayed treatments and cached-option refusal.
   Consumer lane qualification of all three doors belongs to spot/convergence/activation,
   not a prerequisite to this terms archive. Keep proposed fixture evidence distinct from
   runtime rate/live-hosted evidence; readiness-check any actual lane before driving it.
-- [ ] 4.3 Run affected package unit/app-integration suites, existing VM listing-shape
+- [x] 4.3 Run affected package unit/app-integration suites, existing VM listing-shape
   scenarios in `e2e-tests/tests/e2e/roles/scenarios/vms/test_listing_shapes.py` and
   existing reserved compute deal scenarios in both domains (rate consumer scenarios are not
   this archive's gate). Record exact targets/results and disclose
   dependency-gated runs. Run `make check-change CHANGE=negotiate-open-ended-compute-terms`
   and pinned strict OpenSpec validation before pre-closeout review.
+
+### Mixed-selection and integration checkpoint (2026-11-07)
+
+- 4.1/4.2: both actual buyer commands select a mixed publication's reserved/on-demand/spot peers, with both bounds, omitted/2401-second horizons and default rights/disclosure. VM additionally selects Alkahest and shows no delivery promise. Bare metal's installed payment buy command has no Alkahest purchase stage; its shared rights/disclosure admits the option without inventing a stage. Proposed mechanism ports remain diagnostic only. Cached signed refusals and acceptance artifacts replay alongside publication.
+- Committed setup, exact entry points/results and limits: `docs/attachments/negotiate-open-ended-compute-terms/mixed-selection-checkpoint.md`. No new permanent acceptance tests. The kept bare-metal reserved buyer integration now explicitly requests its intended 3600 seconds; assertions unchanged.
+- 4.3: VM storefront application targets 140 passed; VM buyer 215 passed; bare-metal buyer 32 passed. Bare-metal targets initially found the missing-duration fixture; repaired payment-client target 16 passed, final combined rerun **185 passed**. Packaging, check-change and pinned strict OpenSpec validation pass.
+- E2E readiness with the required Podman provider fails before any service starts: VM included env file resolves outside the checkout; bare metal raises `RuntimeError: volume [domains/bare_metal/../../shared-env] not defined in top level`. The packet preserves exact commands/errors (host prefix redacted under public-content rules). Listing-shape and both reserved-deal scenarios are **unobservable/unrun**, not passed. The existing campaign Compose-assembly gap records the reproduction. No resources remain.
+- Restart at section 5 after final rebase/validation: review and then promotion/archive remain gated. Task 4.3 is checked for the required attempt/disclosure, not as E2E success. 5.8 must retain that explicit pipeline blocker. Keep installed recurring servicing disabled.
 
 ## 5. Closeout
 
