@@ -73,3 +73,36 @@ connection requires for execution.
 - **THEN** the Ansible readiness component receives the protected envelope through the host
   authority's internal read, the `ssh` codec decrypts the key in memory only, nothing is
   written to storage, and the component's detail carries no plaintext or ciphertext
+
+### Requirement: Execution readiness is reported in system status
+
+The provisioning service's system status MUST report whether execution is mocked, as a
+boolean for the deployment and per composed executor by offering mode, derived from the
+composed executors rather than from deployment profiles, together with each contributed
+readiness component's readiness and a versioned detail. A component that is not ready MUST
+degrade the status. The status MUST NOT disclose a database URL or any credential.
+Readiness MUST have no route of its own, and an execution implementation MUST contribute
+its readiness rather than serve it. Once any Ansible executor is real, the Ansible
+readiness component MUST refuse an enabled host's `ssh` connection exactly as execution
+refuses it, reporting itself not ready with a reason naming the host, and MUST report
+every other host as it would without it; it MUST skip a host of another connection kind.
+
+#### Scenario: Every executor is mocked
+
+- **WHEN** the service runs with every composed executor mocked
+- **THEN** status reports execution as mocked, and lists each offering mode's executor as
+  mocked
+
+#### Scenario: A domain's playbook is missing
+
+- **WHEN** the Ansible executor for one offering mode names a playbook that does not exist
+- **THEN** the Ansible component reports that playbook and is not ready, and the status is
+  degraded
+
+#### Scenario: An enabled host is stored at an unserved connection version
+
+- **WHEN** system status is read while an enabled host is stored at `ssh` version 1 and an
+  Ansible executor is real, whether its key is a file that exists or a protected key that
+  decrypts
+- **THEN** the Ansible component is not ready, its reasons naming the host and the version
+  served, and every other enabled host is reported as it would be without it

@@ -189,8 +189,20 @@ from each envelope's public fields, and embedded keys from its protected values.
   that host's entry `exists: false` with a reason naming the host; every other
   host is reported as it would be without it.
 - An enabled-host list that is empty is ready when the other checks pass.
-- Connection validation already requires an embedded host to hold a
-  `private_key` protected value, so a host with neither key cannot occur.
+- A host of a connection kind other than `ssh` is skipped: no Ansible executor
+  reaches it.
+- Each `ssh` host is read through the runner's `inventory_target`, the function
+  execution renders a host from, so readiness refuses exactly the connections
+  execution refuses (19 F1). The specification keeps a host stored at a version
+  the codec no longer serves, such as `ssh` version 1, until it is submitted
+  again, and execution refuses it before any inventory is written; validation at
+  submission does not reach it. A host `inventory_target` refuses adds a
+  not-ready reason naming the host and carrying the refusal, and is left out of
+  `ssh_keys`, since its key reference was never read at a served version. This
+  holds for a key file as for an embedded key: a version-1 host whose key file
+  exists reads ready today while every job against it is refused.
+- A served `ssh` connection names a key file or holds a `private_key` protected
+  value, since `inventory_target` refuses one naming neither.
 
 Readiness exists to say whether a job can run, and it already reads key files
 from disk to say so; the plaintext stays within the codec and memory for the
@@ -201,7 +213,11 @@ internal reads (D8).
 
 Rejected: composing `lookup` with the public listing at the composition root,
 which leaves the authority's interface unchanged but reads each embedded host
-twice and must define a host that disappears between the reads; leaving
+twice and must define a host that disappears between the reads; checking only
+that keys decrypt and recording that a stored connection at an unserved version
+can leave the component ready, narrower but ready while jobs against that host
+are refused; checking the version in readiness with a rule of its own, which
+can drift from the one execution applies; leaving
 embedded keys reported present without trying them, which
 misstates the one thing readiness answers for this case; verifying without
 decrypting, impossible because Fernet carries no key id and a stored key
@@ -250,7 +266,7 @@ readiness.
 
 Rejected: rewriting the row as a narrower gap, since none remains; leaving it.
 
-### D8 — The specification gains two requirements, modifies one, and drops the change's earlier ones
+### D8 — The specification gains two requirements, modifies two, and drops the change's earlier ones
 
 The change's earlier requirements are dropped: decrypted key material's lifetime
 is already "Connection secrets stay protected", and the inventory-placeholder
@@ -271,6 +287,13 @@ for execution and readiness, never on an API read, log, or error surface. Every
 other guarantee and both existing scenarios stand, and a scenario is added for
 the readiness check.
 
+"Execution readiness is reported in system status" is modified too (19 F1): the
+Ansible component refuses an enabled `ssh` host's stored connection exactly as
+execution refuses it, reporting itself not ready naming the host once any
+Ansible executor is real, and skips a host of another connection kind. Its text
+otherwise stands, both existing scenarios with it, and a scenario is added for a
+host stored at an unserved version.
+
 Rejected: adding the new requirements beside the old one unmodified, which
 leaves two normative rules that disagree on when a key may be decrypted.
 
@@ -282,7 +305,9 @@ typed error, and its unit tests for every cause, including that no ciphertext
 reaches the message; the probe's handling of it, and the redaction of its result
 with a unit test planting a secret in Ansible's output; the host authority's
 `execution_hosts` read and its test; readiness's switch to that read, its
-decryption check, its per-host failure reporting, and its wiring at the
+reading of each `ssh` host through `inventory_target` with a unit test for a
+host stored at version 1, its decryption check, its per-host failure
+reporting, and its wiring at the
 composition root; and one integration test through the canonical client in
 which a host protected under another key fails its job unretried with the
 message, answers its connectivity check unreachable with the reason, and makes
@@ -298,6 +323,9 @@ promotion.
   Fernet decryption per host, with plaintext in memory briefly.
 - One host whose key cannot be decrypted makes the `ansible` component not
   ready, as one missing key file already does.
+- An enabled host still stored at `ssh` version 1 makes the `ansible`
+  component not ready where it read ready; jobs against it were already
+  refused, and the reason says to submit it again at version 2.
 
 ## Open Questions
 

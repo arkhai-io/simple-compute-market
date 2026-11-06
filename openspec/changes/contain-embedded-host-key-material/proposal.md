@@ -47,8 +47,10 @@ Two gaps remain.
   of the enabled hosts with their protected envelopes, which readiness takes in
   place of the public listing. The Ansible readiness component decrypts each
   enabled host's protected key in memory, and reports a key that fails as not
-  ready, naming the host. "Connection secrets stay protected" is modified to
-  admit this check.
+  ready, naming the host. It reads each `ssh` host as execution does, so a
+  host whose stored connection execution refuses, such as one still at `ssh`
+  version 1, is reported not ready too. "Connection secrets stay protected" is
+  modified to admit this check.
 - **The documents describing per-host keys as missing are corrected**: the
   roadmap's gap row, and the relay campaign's prerequisite edge, paragraph, and
   the relay row's note. The relay change's task 2A.7, its design paragraph on
@@ -67,7 +69,9 @@ None.
   operator configures otherwise, and a protected key that cannot be decrypted is
   named at dispatch, at the connectivity check, and in readiness. "Connection
   secrets stay protected" admits in-memory decryption for readiness and the host
-  authority's internal reads for execution and readiness.
+  authority's internal reads for execution and readiness. "Execution readiness
+  is reported in system status" has the Ansible component refuse a stored
+  connection exactly as execution refuses it.
 
 ## Non-Goals
 
@@ -89,7 +93,8 @@ configuration; a profile naming its own `ansible_cfg` is unaffected. A job
 against a host whose key cannot be decrypted already failed unretried; its error
 now names the cause. A connectivity check of such a host answers a result rather
 than a server error. The `ansible` status component reports not ready for such a
-host where it reported ready.
+host where it reported ready, and for an enabled host still stored at an `ssh`
+version execution refuses.
 
 **Wire.** The readiness detail keeps its fields and schema version 1; `exists`
 may now be `false` for an embedded key, as it already may for a key file. No API
@@ -142,7 +147,7 @@ removes it.
 - D2: the packaged configuration names no log file, an operator's own configuration is not overridden, and the connectivity check's result is redacted → `openspec/specs/physical-provisioning/spec.md`; configuring a log and what it receives → `docs/operator-handbook.md`
 - D3: no permanent destination — it keeps the existing layout, which "Connection secrets stay protected" already governs; its revisit trigger stays in this change's design.
 - D4: a protected key that cannot be decrypted is named at dispatch and at the connectivity check, unretried → `openspec/specs/physical-provisioning/spec.md`; recovering from it → `docs/operator-handbook.md`
-- D5: readiness checks that each enabled host's embedded key decrypts, through the host authority's internal `execution_hosts` read → `openspec/specs/physical-provisioning/spec.md`
+- D5: readiness checks that each enabled host's embedded key decrypts, through the host authority's internal `execution_hosts` read, and refuses a stored connection exactly as execution does → `openspec/specs/physical-provisioning/spec.md`
 - D6: task 2A.7's requirement met by the existing variables-file handling; no prerequisite edge → `openspec/changes/README.md` (the relay row and campaign) and `openspec/changes/relay-vm-access-without-a-dashboard/` (2A.7, its design paragraph, and its handoff note)
 - D7: per-host keys are registered through the host API and diagnosed when unusable → `docs/development/ROADMAP.md` (Goal 1)
-- D8: the two added requirements and the modified "Connection secrets stay protected" → `openspec/specs/physical-provisioning/spec.md`
+- D8: the two added requirements and the modified "Connection secrets stay protected" and "Execution readiness is reported in system status" → `openspec/specs/physical-provisioning/spec.md`
