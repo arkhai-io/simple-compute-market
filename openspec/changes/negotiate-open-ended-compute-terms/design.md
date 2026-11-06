@@ -492,6 +492,35 @@ not authenticate seller database snapshots. The existing Agreement hash mismatch
 is retained as a maintainer follow-up, with no change to its semantics here.
 Implementation and focused evidence belong to 2.1b before reader migration in 2.1c.
 
+## Accepted-reader and guard continuation (2026-11-07)
+
+Accepted financial reads now use the unit-bearing accessor: payments mandate
+policy and buyer/stored-mandate checks, bare-metal quote/recovery checks and exact
+escrow recovery. An escrow requires a total quote; selected mechanisms require
+an explicit installed projection. Exact escrow callers in VM and API-credit
+compositions supply Alkahest's projection. No accepted money is recomputed from
+a current listing, and hosted recurring parameters remain unsupported.
+
+The Alkahest projector recognizes both existing acceptance carriers: published
+accepted-escrow selections and explicit negotiated EscrowProposal parameters.
+This is an installed mechanism decision, not schema interpretation in core.
+Lifecycle terms and unknown parameter shapes are still refused.
+
+The guard avoids Python type/name inference for amount reads: it inventories all
+production amount attribute, literal/aliased-key mapping and reflective/getter
+reads, including wrapper bodies. Exact path/function/expression/count entries
+classify quote/resource/obligation/authority/proposal reads and their reason;
+unknown reads, changed counts and stale entries fail closed. Generic negotiation
+retains one raw Agreement equality check against codec-derived expected money,
+not a billing or spending decision. This syntactic rule is not a proof about
+runtime-generated Python or an authentication boundary. Its positive/negative
+fixtures are a temporary committed change probe rather than new permanent tests,
+following the standing test instruction. Both packaging and change checks run it.
+
+Post-review destinations remain D2's negotiation specification and repository
+architecture; UI disclosure remains in 4.1. Replay and focused validation are in
+`docs/attachments/negotiate-open-ended-compute-terms/reader-guard-checkpoint.md`.
+
 ## Design promotion record
 
 Destinations are planned, not claims of implemented behavior.

@@ -56,6 +56,7 @@ def checks(change: str, base: str) -> list[tuple[str, list[str]]]:
     lands_on = f"CHANGE_BASE={base}"
     return [
         ("comment hygiene", [*make, "check-comment-hygiene"]),
+        ("Agreement amount reads", [*make, "check-agreement-amount-reads"]),
         ("documentation citations", [*make, "check-doc-citations", f"CHANGE={change}"]),
         ("specification index", [*make, "check-spec-index", f"CHANGE={change}"]),
         ("decision destinations", [*make, "check-decision-destinations", f"CHANGE={change}"]),
