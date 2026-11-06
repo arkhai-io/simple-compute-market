@@ -60,8 +60,8 @@ per-period monetary amount is written to the Agreement. `agreed_price(agreement,
 listing)` returns the accepted amount, with `total` or `per_period` determined by
 the selected option's billing kind bound in acceptance. Recovery and buyer mandate
 checks still verify the amount against the acceptance-bound rate structure and
-multiplier, never a current listing. Revisit if a consumer needs the multiplier
-from signed evidence rather than the transcript.
+multiplier, never a current listing. D2b supplies signed acceptance evidence for
+the transcript multiplier without changing this monetary carrier.
 
 Core's `agreed_price(agreement, listing)` returns price and unit `total` or
 `per_period` (with the actual period for presentation), never an unlabelled integer.
@@ -79,6 +79,28 @@ entry records why it negotiates the scalar instead of spending it.
 Recommendation: an AST-based guard using the existing architecture-check pattern,
 with positive/negative fixtures in its owning script tests; use the smallest
 implementation that rejects every repository reader found during migration.
+
+#### D2b. Signed-acceptance pricing pin
+
+Status: decided by webapp owner 2026-11-06, pending maintainer review.
+
+The seller-signed acceptance binds the agreed multiplier and the rate-structure
+digest: the same digest D-e pins at opening, computed over `rate_structure` as
+published (D-b) and seller-signed in the registry's retained publication (D-c).
+Opening, every round and acceptance refer to this one rate identity. The buyer
+verifies it against the retained seller-signed registry publication, never a
+snapshot supplied by the seller. Historical publication verification, exact option
+and listing context, and transcript/Agreement verification precede accepted reads.
+Legacy records missing bound evidence fail closed; fresh listings cannot repair them.
+
+Rejected: returning the full seller database snapshot under the existing hash.
+That would turn a private storage shape into a public contract.
+`Agreement.listing_hash` remains unchanged: it commits the seller's database
+listing rather than the published document. This known mismatch must be revisited
+with the maintainer, not repaired by this change.
+
+Permanent destinations after review: `openspec/specs/negotiation-protocol/spec.md`
+and the authority description in `docs/development/ARCHITECTURE.md`.
 
 ### D3. One shared codec, no interruption object
 
@@ -461,40 +483,14 @@ Injected proposed projections qualify period arithmetic, not hosted rate executi
 Absolute/flat pricing retains its existing truncation path. Proof enforcement and
 reader migration remain unfinished, so this does not qualify accepted recovery.
 
-## Acceptance-evidence binding question (2026-11-07)
+## Acceptance-evidence binding resolution (2026-11-07)
 
-D2a's required verification has an unresolved carrier seam, not a new scalar/money
-choice. `negotiation_runtime._with_agreement` hashes the complete seller-side
-`acceptance.listing_record`. `core_storefront.SQLiteClient.load_listing` includes
-seller bookkeeping (`paused`, `closed_by`, timestamps, publication clauses and
-fulfillment fields) and some serialized resource fields. That representation is
-neither the signed registry publication nor the retained buyer pricing subset.
-The buyer cannot reconstruct and verify `Agreement.listing_hash` from its record.
-Resize's `message:rate-structure-pin` is persisted only on the seller; the response
-models expose no acceptance-bound pricing pin. A historical seller publication
-signature plus option equality proves advertised inputs, not which such publication
-this acceptance used. No fresh listing may fill that gap.
-
-The owner must choose the verifiable carrier before 2.1b proceeds:
-
-- **Recommended:** add an additive pricing-evidence object to the seller's signed
-  acceptance response, binding the negotiated multiplier and a canonical digest
-  of the exact pricing inputs (listing identity, advertised shape, rate structure
-  and selected option). Retain it with the existing exact acceptance/Agreement
-  bytes and publication proof. Verify the pin against the historical publication
-  before deriving or recovering money. This preserves `Agreement.amount`, the
-  existing `listing_hash` meaning and D-a–D-e, without exposing seller bookkeeping.
-- **Alternative:** retain and return the exact seller listing snapshot whose bytes
-  `Agreement.listing_hash` already commits. Verify that hash, then verify its pricing
-  projection against the retained publication. This avoids a new pin semantics but
-  expands the acceptance's data exposure/size and needs an explicit public snapshot
-  contract for fields the buyer currently never sees.
-
-Neither is implemented or silently selected. In either case legacy records lacking
-required bound evidence fail closed rather than being backfilled. Recovery/mandate
-reader migration and the direct-read guard wait for the choice; the independently
-verified billing projection slice is safe to checkpoint first. Its durable design
-belongs with D2/D2a at the existing promotion destinations, after review.
+D2b resolves the carrier gap: the signed acceptance carries the agreed multiplier
+and D-e's rate-structure digest. The digest uses the published rate structure;
+verification uses D-c's retained seller-signed registry publication. The buyer does
+not authenticate seller database snapshots. The existing Agreement hash mismatch
+is retained as a maintainer follow-up, with no change to its semantics here.
+Implementation and focused evidence belong to 2.1b before reader migration in 2.1c.
 
 ## Design promotion record
 
@@ -502,7 +498,7 @@ Destinations are planned, not claims of implemented behavior.
 
 | Accepted decision | Permanent location |
 |---|---|
-| D1, D2/D2a classes and monetary quote unit | `docs/development/ARCHITECTURE.md`; `openspec/specs/negotiation-protocol/spec.md` |
+| D1, D2/D2a/D2b classes, monetary quote unit and acceptance pricing pin | `docs/development/ARCHITECTURE.md`; `openspec/specs/negotiation-protocol/spec.md` |
 | D3 penalty preset default (24 periods) and buyer acceptance recommendations; D4 placement result | `openspec/specs/settlement-configuration/spec.md`; foundation-owned lifecycle contract |
 | D5 the horizon as the Agreement's, listing bounds and omission | `openspec/specs/negotiation-protocol/spec.md`; `openspec/specs/storefront-publication/spec.md`; `openspec/specs/storefront-publication/architecture.md`; `openspec/specs/resource-pool-management/spec.md` |
 | D6 servicing doors | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/storefront-publication/architecture.md` |

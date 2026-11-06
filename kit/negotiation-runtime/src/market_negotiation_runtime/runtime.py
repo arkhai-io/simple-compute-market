@@ -1024,6 +1024,8 @@ class NegotiationRuntime:
         if accepted:
             acceptance = self._fix_acceptance_time(acceptance)
             artifacts = self._accepted_artifacts(hooks, acceptance)
+        elif decision.action == "counter":
+            artifacts = dict(hooks.build_artifacts(acceptance, False))
         else:
             artifacts = {}
 

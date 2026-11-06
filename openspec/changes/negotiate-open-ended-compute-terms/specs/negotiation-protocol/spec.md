@@ -33,6 +33,32 @@ explicit raw negotiation hooks MUST fail the repository check.
 - **WHEN** a price consumer directly reads Agreement amount outside a declared raw negotiation hook
 - **THEN** the repository check fails rather than accepting an unclassified reader
 
+### Requirement: Acceptance pins the published rate identity
+
+A multiplier-priced compute acceptance MUST bind the agreed multiplier and the same
+rate-structure digest pinned at opening in the seller-signed response. Every round
+MUST refer to that digest. The buyer MUST verify it against the as-published rate
+structure in the registry's retained seller-signed publication, with historical
+signature/context, listing identity, exact selected option and transcript-price
+checks before accepted recovery or mandate use. Missing evidence MUST fail closed.
+
+#### Scenario: Opening, rounds and acceptance use one publication
+
+- **WHEN** a buyer negotiates a rate-structured listing
+- **THEN** opening, every round and acceptance carry the same digest of the published rate structure
+- **AND** acceptance binds that digest and the agreed multiplier in its signed response
+
+#### Scenario: A signed acceptance substitutes its rate identity
+
+- **WHEN** the accepted digest differs from the retained seller-signed registry publication or the pin differs from the transcript multiplier
+- **THEN** the buyer refuses the acceptance before persistence or funding
+
+#### Scenario: Historical evidence is incomplete
+
+- **WHEN** recovery lacks retained publication proof or the signed acceptance pricing pin
+- **THEN** it fails closed rather than substituting a current listing or a seller-returned snapshot
+- **AND** Agreement.listing_hash keeps its existing database-listing meaning
+
 ### Requirement: Compute horizons bind both seller bounds
 
 Reserved duration MUST be positive and fit both bounds.

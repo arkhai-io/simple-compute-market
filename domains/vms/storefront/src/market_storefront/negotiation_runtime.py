@@ -30,7 +30,8 @@ from arkhai_vms_listings.models import Listing
 from arkhai_vms_negotiation import storefront_round as vm_storefront_round
 from arkhai_vms_negotiation.policies import _amount_from_proposal
 from arkhai_vms_negotiation.amounts import (
-    has_rate_structure, multiplier_floor, quote_from_multiplier, selected_billing_basis,
+    has_rate_structure, multiplier_floor, quote_from_multiplier, rate_structure_digest,
+    selected_billing_basis,
 )
 from arkhai_vms_negotiation.storefront_round import SellerRoundHook
 from arkhai_vms_settlement.proposals import accepted_escrow_artifacts_from_proposal
@@ -97,14 +98,7 @@ AcceptedObligationDispatch = Mapping[
 ]
 
 
-def _rate_structure_digest(listing: Mapping[str, Any]) -> str | None:
-    structure = listing.get("rate_structure")
-    if structure is None:
-        return None
-    encoded = json.dumps(
-        structure, sort_keys=True, separators=(",", ":"), allow_nan=False
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+_rate_structure_digest = rate_structure_digest
 
 
 def _negotiation_settings() -> Any:
@@ -640,6 +634,7 @@ def _build_response_artifacts(
     if not isinstance(acceptance.binding, PublicationBinding):
         raise RuntimeError("VM negotiation has no frozen listing binding")
     project_billing = project_billing or build_storefront_settlement_registry().project_billing
+    rate_identity = {"rate_structure_digest": rate_structure_digest(acceptance.listing_record)}
     payment_amount = acceptance.agreed_amount
     if acceptance.uses_scalar_amount and has_rate_structure(acceptance.listing_record):
         try:
@@ -690,13 +685,18 @@ def _build_response_artifacts(
             raise OfferUnfulfillableError(str(exc)) from exc
         if data:
             artifacts["settlement_data"] = data
-        return artifacts
+        if acceptance.uses_scalar_amount and has_rate_structure(acceptance.listing_record):
+            artifacts["pricing_pin"] = {
+                "multiplier": str(acceptance.agreed_amount),
+                **rate_identity,
+            }
+        return {**artifacts, **rate_identity}
     state = acceptance.policy_state
     if not isinstance(state, Mapping):
-        return {}
+        return rate_identity
     proposal = state.get("accepted_escrow_proposal")
     if isinstance(proposal, Mapping):
-        return {"accepted_escrow_proposal": dict(proposal)}
+        return {"accepted_escrow_proposal": dict(proposal), **rate_identity}
     selection = state.get("accepted_settlement_selection")
     option = state.get("accepted_settlement_option")
     if isinstance(selection, Mapping) and isinstance(option, Mapping):
@@ -712,8 +712,8 @@ def _build_response_artifacts(
             listing=acceptance.listing_record,
             provision_terms=acceptance.terms.decoded,
         )
-        return {"settlement_selection": artifacts["settlement_selection"]}
-    return {}
+        return {"settlement_selection": artifacts["settlement_selection"], **rate_identity}
+    return rate_identity
 
 
 async def _persist_artifacts(
