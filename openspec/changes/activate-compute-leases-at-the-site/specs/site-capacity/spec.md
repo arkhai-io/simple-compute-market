@@ -2,12 +2,13 @@
 
 ### Requirement: A lease records when it was activated
 
-A reservation MUST carry a nullable `activated_at_utc`, written only by activation as an ISO-8601 UTC instant from the site's clock. Whether a lease is activated MUST be derived from it and stored nowhere else. Every service hosting the site ledger MUST add it in its migration chain, leaving it null on every existing reservation.
+A reservation MUST carry a nullable `activated_at_utc`, written only by activation as an ISO-8601 UTC instant from the site's clock. Whether the site has recorded a lease's activation MUST be derived from it and stored nowhere else. Null MUST mean only that no activation is recorded: on a reservation that predates the column it says nothing about whether the resource was delivered, and no consumer may treat it as evidence that it was not. Every service hosting the site ledger MUST add it in its migration chain, leaving it null on every existing reservation, with no backfill.
 
-#### Scenario: Existing reservations migrate unactivated
+#### Scenario: Existing reservations migrate with no activation recorded
 
 - **WHEN** a compute provisioning or API-credits database holding leased reservations is migrated
 - **THEN** every reservation has a null `activated_at_utc`, and its state, window and expiry are unchanged
+- **AND** nothing records whether a lease that predates the migration was delivered
 
 #### Scenario: The instant is read
 
@@ -16,7 +17,7 @@ A reservation MUST carry a nullable `activated_at_utc`, written only by activati
 
 ### Requirement: Activation records its instant once and changes nothing else
 
-Activation MUST be admissible only for a `leased` reservation. Where `activated_at_utc` is null it MUST write it in one transaction; where set, it MUST return the reservation unchanged. From any other state it MUST be refused with nothing written. It MUST NOT change state or window, record a capacity event, or alter admission. It MUST answer 200 with the recorded reservation, 404 for an unknown one, and 409 naming the state when refused.
+Activation MUST be admissible only for a lease: a `leased` reservation with a lease end. Where `activated_at_utc` is null it MUST write it in one transaction; where set, it MUST return the reservation unchanged. From any other state, and on a `leased` reservation with no lease end, it MUST be refused with nothing written. It MUST NOT change state or window, record a capacity event, or alter admission. It MUST answer 200 with the recorded reservation, 404 for an unknown one, and 409 when refused, naming the state, or for a reservation with no lease end saying that it has no lease tail.
 
 #### Scenario: A leased reservation is activated
 
@@ -48,6 +49,11 @@ Activation MUST be admissible only for a `leased` reservation. Where `activated_
 
 - **WHEN** activation is requested for a `reserved` reservation
 - **THEN** the site answers 409 and the hold stays uncommitted and unactivated
+
+#### Scenario: An open-ended hold is activated
+
+- **WHEN** activation is requested for a `leased` reservation committed with no lease end
+- **THEN** the site answers 409 saying it has no lease tail, and the reservation's `activated_at_utc` stays null
 
 #### Scenario: An unknown reservation is activated
 

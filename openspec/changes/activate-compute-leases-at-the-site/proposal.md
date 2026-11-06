@@ -19,19 +19,22 @@ port.
 
 - Add one nullable column, `activated_at_utc`, to the site's reservation row, with an
   ordered migration in each service that hosts the ledger — compute provisioning and
-  API credits — leaving every existing row null. Whether a lease is activated is
-  derived from it; no phase is stored.
-- Add one conditional activation transition, admissible only from `leased`: it writes
-  `activated_at_utc` from the site's clock where it is null, in one transaction, and
-  never updates it. A retry on an activated lease returns it unchanged; from any other
-  state activation is refused with nothing written. The request names the reservation
+  API credits — leaving every existing row null. Whether the site has recorded a
+  lease's activation is derived from it; no phase is stored. Null means no activation
+  recorded, never that a lease predating the column was not delivered.
+- Add one conditional activation transition, admissible only on a lease — a `leased`
+  reservation with a lease end: it writes `activated_at_utc` from the site's clock
+  where it is null, in one transaction, and never updates it. A retry on an activated
+  lease returns it unchanged; from any other state, and on an open-ended hold,
+  activation is refused with nothing written. The request names the reservation
   and carries no payment fact, no target time and no instant. Activation never changes
   the lease's window, so an earlier truncation is adopted, never extended.
 - Expose activation through the storefront's guarded capacity path, beside commit and
   truncation: the site's ledger and capacity router, the site client, core's
   `SiteCapacityAuthority` protocol and `AggregateCapacityClient`, and the kit's
   `CapacityEffects` and `CapacityRuntime`. It answers 200 with the recorded
-  reservation, 404 for an unknown reservation and 409 from any state but `leased`.
+  reservation, 404 for an unknown reservation, and 409 from any state but `leased` and
+  for a reservation with no lease end.
 - Show `activated_at_utc` on both views of the lease: the site's reservation view and
   the compute provisioning contract's `LeaseView`. The compute contract gains no
   activation route.
@@ -77,6 +80,10 @@ None.
 - Both, and `lapse-billing-with-the-site-lease`, describe the columns and the legacy
   no-op this design replaced; `design.md` names each difference for their own design
   work to reconcile.
+- The site ledger keeps a compute lease's tail on the same row as API credits' quota
+  grants, so API credits takes this change's migration though it has no leases.
+  Separating the two is unowned work recorded in `openspec/changes/README.md`; this
+  change does not depend on it.
 
 ## Impact and acceptance boundary
 
@@ -85,7 +92,7 @@ client, core's capacity protocol and aggregate, the kit's capacity effects, and 
 compute contract's lease view. Exercised through the site API with a real embedded
 database and no storefront, payment authority or deadline: activation of a leased
 lease, an idempotent retry returning the same instant, refusal with no write from
-every other state, adoption of an earlier truncation before activation and between a
+every other state and on an open-ended hold, adoption of an earlier truncation before activation and between a
 lost acknowledgement and its retry, the instant surviving restart and truncation, and
 existing rows migrating with null in both services; and through the client chain:
 activation routed to the binding's site and refused for an unbacked listing, and the

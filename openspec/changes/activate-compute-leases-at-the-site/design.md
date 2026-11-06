@@ -45,26 +45,38 @@ extension, payment or refund operations, and wiring the delivery callers.
 
 The reservation row gains one nullable column, `activated_at_utc`. Activation is the
 conditional transition that writes it where it is null, in one transaction, from the
-site's clock; nothing updates it afterwards. It is admissible only from `leased`:
+site's clock; nothing updates it afterwards. It is admissible only on a lease: a
+`leased` reservation with a lease end.
 
-- In `leased` with `activated_at_utc` null, activation writes the instant and returns
-  the reservation.
+- In `leased` with a lease end and `activated_at_utc` null, activation writes the
+  instant and returns the reservation.
 - In `leased` with `activated_at_utc` set, a retry returns the reservation unchanged,
   with the same instant.
 - From `reserved`, `releasing`, `release_failed`, `unmanaged`, `released` and
   `force_released` it is refused and writes nothing: activation cannot commit a hold,
   resurrect a lease, or undo a release an expiry or an operator claimed first.
+- On a `leased` reservation with no lease end — an open-ended hold, which the ledger
+  records with no lease tail — it is refused and writes nothing.
 
 The request names the reservation and carries nothing else: no payment fact, no
 billing kind, no target time and no instant. Activation never changes the lease's
 window. A truncation before activation, or between a lost acknowledgement and its
 retry, is simply the current end the response carries: activation neither extends it
-nor restores the commit end. A lease committed with no end activates like any other,
-since activation records only its instant. Admission is untouched: it accounts the
-full agreed window before and after activation.
+nor restores the commit end. Admission is untouched: it accounts the full agreed
+window before and after activation.
 
-Whether a lease is activated is derived, not stored: it is activated exactly when
-`activated_at_utc` is set. The deadline change adds its own deadline column, under a
+Activation is a fact of a lease's tail, so a reservation committed with no end is not
+activated. Every compute commit carries a finite end — the VM and bare-metal commits,
+and the open-ended compute terms, which resolve their horizon into the agreement's
+duration at acceptance — and the only open-ended commits are API credits' quota grants,
+which no caller activates. Refusing the open-ended hold keeps every activated
+reservation one the compute contract classifies as a lease, so D3's `LeaseView` can
+always show it; admitting it would make a quota grant activatable and put the
+compute contract's view out of reach of a reservation it had activated (design review
+08, F1).
+
+Whether the site has recorded a lease's activation is derived, not stored: it has
+exactly when `activated_at_utc` is set. The deadline change adds its own deadline column, under a
 name it chooses, and derives "awaiting activation" as a deadline set on a lease not
 yet activated; its due instant is the end for an activated lease and otherwise the
 earlier of deadline and end, and its expiry claim compares the observed end, deadline
@@ -80,7 +92,11 @@ the accepted deadline
 D8). No other value in the row can stand in for it: the lease start is the agreed
 window, the row's update time moves with every write, provider readiness is
 fulfillment's checkpoint, and a retry's request time is later than the fact.
-Existing rows migrate with null, an honest unknown rather than a guess.
+Existing rows migrate with null, an honest unknown rather than a guess. Null therefore
+means only that no activation is recorded: on a reservation that predates the column
+it says nothing about whether the resource was delivered, and no consumer reads it as
+evidence that it was not (design review 08, F3). The deadline change tells its own
+newly committed leases apart by the deadline it writes at commit.
 
 Rejected:
 
@@ -128,8 +144,8 @@ the same binding and passes the backing delegate's guard before any site call.
 Rejected:
 
 - **An activation route on the compute provisioning contract's lease routes** — it
-  would bypass `CapacityEffects`' guard, and its `LeaseView` response requires a lease
-  end, so a lease committed with none could not be answered.
+  would bypass `CapacityEffects`' guard, and give the compute contract a writer on a
+  row the site's capacity API owns.
 - **Both routes** — one transition with two writers.
 - **Calling the site client directly from the delivery path** — skips the aggregate's
   routing and the binding guard.
@@ -199,7 +215,8 @@ shape the repository never produces.
 - **200** with the reservation as the site recorded it, on the first activation and
   on every retry of an activated lease;
 - **404** for an unknown reservation;
-- **409** from any state but `leased`, naming the state, with nothing written.
+- **409** from any state but `leased`, naming the state, and from a `leased`
+  reservation with no lease end, saying it has no lease tail; nothing is written.
 
 Commit is the precedent; truncation's `reservation: null` for both unknown and refused
 would merge the two outcomes a caller must tell apart — a release or expiry that
@@ -212,7 +229,14 @@ Compute provisioning and API credits each gain one ordered migration adding the
 nullable `activated_at_utc` column to `capacity_reservations`, leaving every existing
 row null, as each added `release_requested_at`. No backfill: a lease start or commit
 time would be a guess. Without API credits' migration its reads of the mapped table
-fail. Migrations are ordered by their dated identifiers, so this change needs no
+fail.
+
+API credits takes the migration only because it hosts the whole site ledger as its
+quota ledger, and that ledger keeps a compute lease's tail on the same row as every
+quota grant; nothing in API credits reads or writes the column. Separating the lease
+tail from the reservation, so lease migrations stop landing in a service with no
+leases, is recorded as unowned work in `openspec/changes/README.md` (design review 08,
+F1). Migrations are ordered by their dated identifiers, so this change needs no
 coordination with `capacity-reservation-lifecycle-hardening`'s later migrations on the
 same table.
 

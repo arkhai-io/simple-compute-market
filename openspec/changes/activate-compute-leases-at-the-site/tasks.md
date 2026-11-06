@@ -1,8 +1,16 @@
 # Tasks — compute lease activation at the site
 
-Design-stage plan; no implementation is claimed. Decisions are in `design.md`. The
-deadline, the pool tag, the expiry claim and the lapse cause are
-`renewable-compute-lease-deadlines`' tasks, not these.
+**Every unchecked task below predates the settled design (D1–D9) and is replaced at
+planning** (design review 08, F2). The rewrite carries: one `activated_at_utc` column,
+no `renewal_phase`, `renew_by_utc` or stored phase; activation only on a `leased`
+reservation with a lease end, an open-ended hold refused with 409 (08 F1); null as "no
+activation recorded" (08 F3); no compatibility path for a site without the route (D4);
+migrations in both compute provisioning and API credits (D6); the caller chain through
+`CapacityEffects`, `CapacityRuntime`, core's protocol and aggregate, and the site client
+(D2); all four spec deltas; the design's full promotion table; and no
+maintainer-approval condition on the migration tests. The deadline, the pool tag, the
+expiry claim and the lapse cause are `renewable-compute-lease-deadlines`' tasks, not
+these.
 
 ## 1. Schema and migration
 
