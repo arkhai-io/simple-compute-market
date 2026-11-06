@@ -3,7 +3,9 @@
 Sections 1–3 are the configuration contract in the engine; sections 4–6 replace the
 engine's held values with the configuration or a derivation and give this repository
 its configuration and targets; sections 7–9 move the callers — the skills, the
-closing checks, the step table, the guide. Section 10 is the closeout. Every script
+closing checks, the step table, the guide. Section 10 is the closeout; section 11,
+placed before it, is the module-list fix closeout's task 10.1 returned the change
+for. Every script
 suite named below runs under `make test-release-tooling` (`pytest -q scripts/tests`),
 which `make test` reaches through `test-deployment-packaging`. Levels are
 `docs/development/TESTING.md`'s: a test over fakes is unit; one over a real Git
@@ -1250,6 +1252,40 @@ names removed targets or variables.
     D3's example configuration names `scripts/openspec`, the command
     `.agents/workflow.toml` holds since the owner chose a runner script over
     8.5's handoff options.
+
+## 11. The engine package's module list (D1; CW-r3ka's Evidence)
+
+Appended after closeout's task 10.1 found the package's module list stale, and placed
+before the closeout it returns to; numbered 11 so that the closeout's tasks, already
+noted, keep their numbers. Brings the docstring of `scripts/change_workflow/__init__.py`,
+which `change-workflow`'s `spec.md` Evidence names as where the engine's modules are
+listed with their roles, to the package as it stands. Touches that docstring alone:
+no code, test, or other document. The owner directed (log seq 82) that once this fix
+is done its implementation review and validation are waived and the change returns
+to closeout.
+
+- [ ] 11.1 In the docstring of `scripts/change_workflow/__init__.py`, list every
+  module of `scripts/change_workflow/` once, each with its role as its own module
+  docstring states it: add `config` — the repository's workflow configuration,
+  `.agents/workflow.toml`, read and checked whole, and the subcommands that read it;
+  `hooks` — running the repository's hooks and validation's parts through `run`,
+  with the closing line and the kept markers; and `wait` — blocking until a file holds
+  a line matching a pattern, which the merge of `dev` brought without a list entry.
+  Say that `steps` holds each step's skill and permission rules, not its models,
+  which the configuration names; and that `running` also keeps a session's
+  invocations through `run` and the guarded push until its log line records them.
+  Leave every other entry, the fragment's paragraph, and the `Contract:` line as they
+  are, unless one no longer holds. Verify: each of `ls scripts/change_workflow/*.py`
+  but `__init__.py` is named in the list exactly once, and no name in the list lacks
+  its file; `make check-comment-hygiene` passes; the docstring names no change, task,
+  or review.
+- [ ] 11.2 Verification: `scripts/change-workflow run pre-commit
+  add-workflow-capability-contract --base dev` (this change's clone records no
+  landing branch, being older than the record), whose functional tier runs, since `scripts/` is
+  outside the inert paths, fails on nothing but the specification index entries task
+  10.9 writes; `pytest -q scripts/tests/test_change_workflow_cli.py` (unit) passes.
+  End-to-end: none; no scenario exercises the workflow tooling, and a docstring
+  changes no behaviour.
 
 ## 10. Closeout
 
