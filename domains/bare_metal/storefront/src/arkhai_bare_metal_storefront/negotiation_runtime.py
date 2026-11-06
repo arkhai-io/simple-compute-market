@@ -67,6 +67,7 @@ from market_negotiation_runtime import (
 from market_policy.listing_source import ListingSourceVerdict
 from market_policy.negotiation_middleware import NegotiationDecision
 from market_settlement_runtime import AcceptedObligationArtifacts
+from market_settlement_runtime.rate_servicing import RateServicing, RateServicingUnavailable
 from market_storefront_kit import TradingPause
 
 from .listing_source_check import ListingSourceCheck
@@ -386,6 +387,7 @@ def build_bare_metal_negotiation_runtime(
     chain_config_paths: Mapping[str, str | None] | None = None,
     settlement_data_dispatch: Mapping[str, AcceptedAgreementBuilder] | None = None,
     seller_stages: SettlementStageTable[Any] = SELLER_STAGES,
+    rate_servicing: RateServicing | None = None,
 ) -> NegotiationRuntime:
     """Compose bare metal's hooks onto the kit's negotiation runtime.
 
@@ -397,6 +399,13 @@ def build_bare_metal_negotiation_runtime(
 
     chain_paths = dict(chain_config_paths or {})
     data_dispatch = dict(settlement_data_dispatch or {})
+    servicing = rate_servicing or RateServicing()
+
+    def require_rate_servicing(option: SettlementOption) -> None:
+        try:
+            servicing.require_option(option)
+        except RateServicingUnavailable as exc:
+            raise BareMetalNegotiationRefusal(str(exc), status_code=409) from exc
 
     def require_domain(binding: Any) -> None:
         if str(binding.domain_identity) != str(domain.identity):
@@ -626,6 +635,7 @@ def build_bare_metal_negotiation_runtime(
                 "selection does not exact-match one trusted listing option",
                 status_code=400,
             )
+        require_rate_servicing(selected_option)
         # A deal that provisions the listed machine is held to the same
         # admission rules and records the same terms however it settles.
         provisions = seller_stages[selection.settlement_schema].fulfils_through_capacity
@@ -768,6 +778,7 @@ def build_bare_metal_negotiation_runtime(
         state = acceptance.policy_state if isinstance(acceptance.policy_state, Mapping) else {}
         exact = state.get("exact_selection")
         if isinstance(exact, Mapping):
+            require_rate_servicing(SettlementOption.model_validate(exact["settlement_option"]))
             response: dict[str, Any] = {
                 "settlement_selection": exact["settlement_selection"],
             }

@@ -44,6 +44,7 @@ from market_core.schemas import RateValue, derive_settlement_option_id
 from core_storefront.service_peers import ServicePeerTrust
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_policy.identity import Identity as PolicyIdentity
+from market_settlement_runtime.rate_servicing import RateServicing
 from market_settlement_runtime import (
     MechanismReadiness,
     ReadinessBlocker,
@@ -218,6 +219,7 @@ class SettlementCompositionDouble:
     alkahest_blockers: tuple[ReadinessBlocker, ...] = ()
 
     def __init__(self, mechanism_fulfillment: Mapping[str, bool]) -> None:
+        self.rate_servicing = RateServicing()
         self.configuration_registry = build_storefront_settlement_registry()
         self.settlement_config = self.configuration_registry.resolve(
             storefront_config.settlement_config_mapping(), role="seller"
@@ -768,6 +770,7 @@ async def publication_app(
                     binding=registration.binding,
                     capacity_runtime=capacity,
                     site_projections=site_projections,
+                    rate_servicing=composition.rate_servicing,
                     accepted_obligation_dispatch=(
                         composition.accepted_obligation_dispatch()
                         if contacts is not None

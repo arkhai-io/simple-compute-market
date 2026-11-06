@@ -58,6 +58,7 @@ from market_core.schemas import (
     SettlementSelection,
     settlement_option_schema,
 )
+from market_settlement_runtime.rate_servicing import RateServicing, RateServicingUnavailable
 from market_identity import Identity
 from market_negotiation_runtime import (
     Acceptance,
@@ -621,6 +622,25 @@ def _with_agreement(
     return artifacts
 
 
+def _require_selected_rate_servicing(
+    listing: Mapping[str, Any], proposal: Mapping[str, Any] | None,
+    servicing: RateServicing | None,
+) -> None:
+    if proposal is None or "settlement_selection" not in proposal:
+        return
+    selection = SettlementSelection.model_validate(proposal["settlement_selection"])
+    options = listing.get("settlement_options") or []
+    if isinstance(options, str):
+        options = json.loads(options)
+    for option in options:
+        if option.get("option_id") == selection.option_id and settlement_option_schema(option) == selection.settlement_schema:
+            try:
+                (servicing or RateServicing()).require_option(option)
+            except RateServicingUnavailable as exc:
+                raise OfferUnfulfillableError(str(exc), listing_id=str(listing["listing_id"])) from exc
+            return
+
+
 def _build_response_artifacts(
     domain: MarketDomainContract,
     acceptance: Acceptance,
@@ -628,11 +648,15 @@ def _build_response_artifacts(
     dispatch: AcceptedObligationDispatch,
     payments_stage: PaymentSellerStage | None = None,
     project_billing: BillingProjection | None = None,
+    rate_servicing: RateServicing | None = None,
 ) -> Mapping[str, Any]:
     # Settlement artifacts carry the listing's site, mode, and source whatever
     # its backing; only capacity effects ask the backing to admit them.
     if not isinstance(acceptance.binding, PublicationBinding):
         raise RuntimeError("VM negotiation has no frozen listing binding")
+    _require_selected_rate_servicing(
+        acceptance.listing_record, acceptance.pinned_proposal, rate_servicing,
+    )
     project_billing = project_billing or build_storefront_settlement_registry().project_billing
     rate_identity = {"rate_structure_digest": rate_structure_digest(acceptance.listing_record)}
     payment_amount = acceptance.agreed_amount
@@ -895,6 +919,7 @@ def build_vm_negotiation_runtime(
     arkhai_payments_stage: PaymentSellerStage | None = None,
     listing_source_check: ListingSourceCheckHook | None = None,
     source_confirmation_clock: Callable[[], datetime] | None = None,
+    rate_servicing: RateServicing | None = None,
 ) -> NegotiationRuntime:
     """Compose the shared lifecycle with the exact registered VM contract.
 
@@ -1079,6 +1104,9 @@ def build_vm_negotiation_runtime(
         return shape, _decode_vm_terms(domain, wire)
 
     async def evaluate(request: RoundRequest) -> RoundEvaluation:
+        proposal = next((round_.proposal for round_ in request.history
+                         if round_.proposal and "settlement_selection" in round_.proposal), None)
+        _require_selected_rate_servicing(request.listing_record, proposal, rate_servicing)
         shape, terms = await prepare_requested_shape(
             request.repository, request.listing_record, request.terms,
             partial=not any(round_.sender == "us" for round_ in request.history),
@@ -1235,6 +1263,7 @@ def build_vm_negotiation_runtime(
             dispatch,
             arkhai_payments_stage,
             project_billing,
+            rate_servicing,
         ),
         decision_wire=_decision_wire,
         listing_is_live=lambda record: (

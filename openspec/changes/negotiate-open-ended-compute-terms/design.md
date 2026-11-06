@@ -625,6 +625,45 @@ unchanged, so that recurring default is refused instead of rounded. Acceptance
 remains responsible for checking the later actual start and approval expiry.
 Permanent destinations remain D3/D5's publication and settlement homes, post-review.
 
+## Servicing-declaration implementation choices
+
+Task 3.1 implements the neutral contract in
+`kit/settlement-runtime/src/market_settlement_runtime/rate_servicing.py`.
+`RateServicing` holds adapter-required revisions, current composition declarations
+and an optional explicit proposed-lane identity. Selection requires the exact
+mechanism and revision. A proposed declaration must name a stable lane matching
+that opt-in; neither a proposed flag alone nor an arbitrary test-mode setting
+makes it deployable. Revision values come from the installed adapter, not a
+listing, buyer or implicit default. No deployed adapter/revision is supplied on
+this base. The diagnostic uses an explicitly fictional `fixture-rate-v1` contract.
+
+Both storefronts hand their composition's exact selector object to publication
+and negotiation. The preset request includes its selected declaration for the
+encoder. Publication checks both recurring clauses and final option envelopes,
+so an ordinary builder cannot leak a rate outside the clause gate. Either of
+the flat period/reserve markers requires servicing, even if the other is missing
+or invalid; this is a conservative admission guard, not another period parser.
+The installed mechanism still validates the wire and projects the billing unit.
+
+Acceptance checks the selected cached option before policy/pricing effects and
+again during final artifact construction before the shared runtime persists
+acceptance. Withdrawn contracts report `settlement_option_withdrawn_refetch` as a
+409, including revision/lane mismatch; the listing's retained rate terms do not
+supply the missing declaration. This admission object is not read by accepted-deal
+continuation: disabling offers cannot disable work already owed. Spot's
+materialization consumer must call this same selector; convergence owns startup
+and continuation. This checkpoint qualifies only the terms-owned two doors.
+
+The replayable publication diagnostic now drives typed buyer refusals and checks
+real SQLite negotiation rows remain unchanged. Its injected published/proposed
+fixtures do not implement a live rate service. A kept shape-priced buyer
+integration scenario additionally needed its captured as-published body and real
+seller signature/trust: local storefront rows cannot substitute for the proof
+required by D2b. No verification assertion was relaxed. D6's permanent homes
+remain settlement configuration and storefront publication architecture after
+code review. Focused evidence and setup are recorded in
+`docs/attachments/negotiate-open-ended-compute-terms/servicing-declaration-checkpoint.md`.
+
 ## Design promotion record
 
 Destinations are planned, not claims of implemented behavior.
