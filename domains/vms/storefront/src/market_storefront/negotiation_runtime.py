@@ -29,7 +29,9 @@ from arkhai_vms_listings import (
 from arkhai_vms_listings.models import Listing
 from arkhai_vms_negotiation import storefront_round as vm_storefront_round
 from arkhai_vms_negotiation.policies import _amount_from_proposal
-from arkhai_vms_negotiation.amounts import has_rate_structure, multiplier_floor, quote_from_multiplier
+from arkhai_vms_negotiation.amounts import (
+    has_rate_structure, multiplier_floor, quote_from_multiplier, selected_billing_basis,
+)
 from arkhai_vms_negotiation.storefront_round import SellerRoundHook
 from arkhai_vms_settlement.proposals import accepted_escrow_artifacts_from_proposal
 from market_alkahest.proposals import (
@@ -44,8 +46,10 @@ from market_capacity_publication import (
 )
 from market_core import MarketDomainContract
 from market_storefront.settlement_stages import resolve_proposal_stage
+from market_storefront.settlement_registry import build_storefront_settlement_registry
 from market_core.schemas import (
     Agreement,
+    BillingProjection,
     ProvisionTerms,
     SettlementObligation,
     SettlementOption,
@@ -135,17 +139,23 @@ def seller_reference_amount(
     duration_seconds: int | None,
     proposal: Mapping[str, Any] | None = None,
     requested_shape: Mapping[str, Mapping[str, Any]] | None = None,
+    *,
+    project_billing: BillingProjection | None = None,
 ) -> int:
     """The seller's reference amount from the option ``proposal`` selects."""
     try:
         if has_rate_structure(listing):
             return multiplier_floor(_negotiation_settings())
+        projection = project_billing or build_storefront_settlement_registry().project_billing
+        selected = vm_storefront_round._selected_option(listing, proposal)
+        basis = selected_billing_basis(listing, proposal, projection) if selected is not None else None
         return vm_storefront_round._seller_reference_amount(
             listing,
             duration_seconds,
             default_min_price=_default_min_price(),
             proposal=proposal,
             requested_shape=requested_shape,
+            **({"price_basis": basis} if basis is not None else {}),
         )
     except ValueError as exc:
         if str(exc).startswith("shape_price_unavailable:"):
@@ -153,7 +163,9 @@ def seller_reference_amount(
         raise
 
 
-def _default_seller_round_hook(domain: MarketDomainContract) -> SellerRoundHook:
+def _default_seller_round_hook(
+    domain: MarketDomainContract, project_billing: BillingProjection | None = None,
+) -> SellerRoundHook:
     """Build the default seller policy for a round.
 
     Built for each round so it reads the current negotiation settings. The
@@ -170,6 +182,7 @@ def _default_seller_round_hook(domain: MarketDomainContract) -> SellerRoundHook:
         chain_config_paths=_chain_config_paths(),
         extra_policy_paths=_extra_policy_paths(),
         default_min_price=_default_min_price(),
+        project_billing=project_billing or build_storefront_settlement_registry().project_billing,
     )
 
 
@@ -620,11 +633,13 @@ def _build_response_artifacts(
     accepted: bool,
     dispatch: AcceptedObligationDispatch,
     payments_stage: PaymentSellerStage | None = None,
+    project_billing: BillingProjection | None = None,
 ) -> Mapping[str, Any]:
     # Settlement artifacts carry the listing's site, mode, and source whatever
     # its backing; only capacity effects ask the backing to admit them.
     if not isinstance(acceptance.binding, PublicationBinding):
         raise RuntimeError("VM negotiation has no frozen listing binding")
+    project_billing = project_billing or build_storefront_settlement_registry().project_billing
     payment_amount = acceptance.agreed_amount
     if acceptance.uses_scalar_amount and has_rate_structure(acceptance.listing_record):
         try:
@@ -635,6 +650,9 @@ def _build_response_artifacts(
                 acceptance.agreed_amount, acceptance.agreement.duration_seconds,
                 vm_listing_resource_shape(acceptance.terms.decoded.compute_resource)
                 if getattr(acceptance.terms.decoded, "compute_resource", None) else None,
+                price_basis=selected_billing_basis(
+                    acceptance.listing_record, acceptance.pinned_proposal, project_billing,
+                ),
             )
         except ValueError as exc:
             raise OfferUnfulfillableError(str(exc)) from exc
@@ -872,6 +890,7 @@ def build_vm_negotiation_runtime(
     capacity_runtime: CapacityRuntime,
     site_projections: SiteProjectionState,
     seller_round_hook: SellerRoundHook | None = None,
+    project_billing: BillingProjection | None = None,
     accepted_obligation_dispatch: AcceptedObligationDispatch | None = None,
     arkhai_payments_stage: PaymentSellerStage | None = None,
     listing_source_check: ListingSourceCheckHook | None = None,
@@ -887,6 +906,7 @@ def build_vm_negotiation_runtime(
     (the current UTC time unless given).
     """
 
+    project_billing = project_billing or build_storefront_settlement_registry().project_billing
     dispatch = (
         {mechanism: build for mechanism, build in accepted_obligation_dispatch.items()
          if mechanism in domain.settlement.seller_stages}
@@ -1063,7 +1083,7 @@ def build_vm_negotiation_runtime(
             request.repository, request.listing_record, request.terms,
             partial=not any(round_.sender == "us" for round_ in request.history),
         )
-        policy = seller_round_hook or _default_seller_round_hook(domain)
+        policy = seller_round_hook or _default_seller_round_hook(domain, project_billing)
         try:
             result = await policy(
                 listing=request.listing_record,
@@ -1200,6 +1220,7 @@ def build_vm_negotiation_runtime(
                     vm_listing_resource_shape(terms.decoded.compute_resource)
                     if getattr(terms.decoded, "compute_resource", None) else None
                 ),
+                project_billing=project_billing,
             )
             if scalar
             else 0
@@ -1213,6 +1234,7 @@ def build_vm_negotiation_runtime(
             accepted,
             dispatch,
             arkhai_payments_stage,
+            project_billing,
         ),
         decision_wire=_decision_wire,
         listing_is_live=lambda record: (

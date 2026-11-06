@@ -29,7 +29,10 @@ from pydantic import (
 )
 
 from market_core.query_dsl import FieldDescriptor, field_reference_json
-from market_core.schemas import SettlementOption, settlement_option_rates
+from market_core.schemas import (
+    AgreedPrice, Agreement, BillingProjection, PriceBasis, SettlementOption,
+    agreed_price, settlement_option_rates,
+)
 from market_deal_lifecycle.projections import LIFECYCLE_QUERY_FIELDS
 from .ports import ConditionalEscrowClient
 
@@ -274,6 +277,9 @@ class MechanismRegistration:
     # surface — but its ownership lives here so domains resolve it from
     # the registration instead of importing a mechanism function.
     settlement_verifier: Callable[..., Any] | None = None
+    # Accepted billing interpretation is independent of offer enablement:
+    # disabling new offers must not prevent reading an existing commitment.
+    project_billing: BillingProjection | None = None
     command_group: Any | None = None
     public_detail_keys: frozenset[str] = frozenset()
 
@@ -421,6 +427,23 @@ class SettlementConfigurationRegistry:
             raise SettlementConfigurationError(
                 f"uninstalled settlement mechanism {mechanism_id!r}"
             ) from exc
+
+    def project_billing(self, option: SettlementOption) -> PriceBasis:
+        """Resolve an accepted option's billing unit through its installed owner."""
+        registration = self.registration(option.settlement_schema)
+        if registration.project_billing is None:
+            raise SettlementConfigurationError(
+                f"settlement mechanism {registration.mechanism_id!r} has no billing projection"
+            )
+        return PriceBasis.model_validate(registration.project_billing(option))
+
+    def agreed_price(
+        self,
+        agreement: Agreement | Mapping[str, Any],
+        listing: Mapping[str, Any] | None = None,
+    ) -> AgreedPrice:
+        """Label accepted money without consulting current offer configuration."""
+        return agreed_price(agreement, listing, project_billing=self.project_billing)
 
     def canonical_mechanism_id(
         self,

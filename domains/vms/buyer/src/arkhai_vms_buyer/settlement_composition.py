@@ -32,7 +32,7 @@ from market_settlement_runtime import (
 from .chain_cli import chain_app
 from .common import refuse_retired_address_book_keys
 from .escrow_cli import escrow_app
-from .negotiation_amounts import retained_pricing_record
+from .pricing_record import retained_pricing_record
 from .settlement_stages import AlkahestBuyerStage, PaymentsBuyerStage
 
 
