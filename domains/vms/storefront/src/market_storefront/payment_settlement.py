@@ -47,6 +47,7 @@ from market_identity import Identity
 from market_arkhai_payments.models import SignedReceipt
 
 from market_storefront.payment_repository import VmSettlementEvidenceConflict
+from market_storefront.services.vm_job_spec_service import settlement_vm_order
 from market_storefront.delivery_records import DeliveryEnded
 from market_storefront.services.fulfillment_resume_runtime import (
     resume_incomplete_fulfillments_once,
@@ -161,8 +162,10 @@ class VmPaymentsCoordinator:
         listing = await self.db.load_listing(listing_id=agreement["listing_id"])
         if not isinstance(listing, dict):
             raise PaymentSettlementError(409, "accepted listing is unavailable")
+        thread = await self.db.load_negotiation_thread_row(negotiation_id=negotiation_id)
+        order = settlement_vm_order(thread, listing, agreement["provision_terms"])
         record = self._entry(agreement).verified_evidence(
-            raw=raw, order=listing, receipt=receipt, data=data
+            raw=raw, order=order, receipt=receipt, data=data
         )
         await self._save(record)
         if self.lifecycle is not None:

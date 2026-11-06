@@ -76,6 +76,10 @@ from market_storefront.services.listing_source_check import check_listing_source
 from market_capacity_publication import PublicationBinding
 from market_storefront.services.capacity_client import capacity_binding_for_listing
 from market_storefront.services.negotiation_shapes import check_requested_shape
+from market_storefront.services.vm_job_spec_service import (
+    agreed_vm_order,
+    compute_capacity_claim_from_order,
+)
 from market_storefront.utils.config import (
     chain_address_books,
     get_evm_wallet_address,
@@ -352,18 +356,7 @@ def _accepted_vm_service_terms(
     listing_id = listing.get("listing_id")
     if not isinstance(listing_id, str) or not listing_id:
         raise OfferUnfulfillableError("selected_listing_identity_unavailable")
-    order = dict(listing)
-    listing_resource = order.get("listing_resource")
-    if isinstance(listing_resource, str):
-        try:
-            listing_resource = json.loads(listing_resource)
-        except json.JSONDecodeError as exc:
-            raise OfferUnfulfillableError(
-                "selected_listing_resource_unavailable"
-            ) from exc
-        order["listing_resource"] = listing_resource
-    if not isinstance(listing_resource, dict):
-        raise OfferUnfulfillableError("selected_listing_resource_unavailable")
+    order = agreed_vm_order(dict(listing), provision_terms)
     return {
         "vm.v1": {
             "listing_id": listing_id,
@@ -540,6 +533,12 @@ def _accepted_settlement_artifacts(
         # authorizes and the plan its settlement is verified against: the
         # acceptance is refused before anything is recorded.
         raise OfferUnfulfillableError(str(exc)) from exc
+    plan = artifacts.get("settlement_plan")
+    if isinstance(plan, dict):
+        plan["service_terms"] = {
+            **plan.get("service_terms", {}),
+            **_accepted_vm_service_terms(listing=listing, provision_terms=provision_terms),
+        }
     artifacts["settlement_selection"] = selection.model_dump(mode="json", exclude_none=True)
     artifacts["_agreement_settlement_option"] = dict(option)
     return artifacts
@@ -771,10 +770,6 @@ async def _place_capacity_hold(
     """
 
     from core_storefront.stage_log import stage_event
-    from market_storefront.services.vm_job_spec_service import (
-        compute_capacity_claim_from_order,
-    )
-
     ttl = float(
         getattr(getattr(settings, "capacity", None), "hold_ttl_seconds", 0) or 0
     )
@@ -783,7 +778,8 @@ async def _place_capacity_hold(
     binding = acceptance.binding
 
     async def reserve() -> _HoldAttempt:
-        claim = compute_capacity_claim_from_order(dict(acceptance.listing_record))
+        order = agreed_vm_order(dict(acceptance.listing_record), acceptance.terms.decoded)
+        claim = compute_capacity_claim_from_order(order)
         capped_ttl = capped_hold_seconds(
             ttl,
             lookup_pool_policy_tags(
