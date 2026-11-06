@@ -47,6 +47,7 @@ from .buy_orchestrator import (
 from .buyer_client import ResumeState, negotiate_with_seller
 from .cli_helpers import (
     emit_buyer_explanation,
+    emit_lifecycle_disclosure,
 )
 from .cli_helpers import (
     resolve_prices_from_matches as _resolve_prices_from_matches,
@@ -64,6 +65,7 @@ from .run_log import RunLog
 from .settle_cli import run_settle_from_log
 from .settlement_composition import (
     buyer_stage,
+    buyer_lifecycle_disclosure,
     resolve_buyer_settlement_policy,
 )
 
@@ -360,6 +362,10 @@ def register(app: typer.Typer) -> None:
             "--settlement",
             help="Repeatable typed settlement alternative, for example 'mechanism=alkahest.v1'.",
         ),
+        allow_unprotected_terms: bool = typer.Option(
+            False, "--allow-unprotected-terms",
+            help="Explicitly waive default delivery-deadline, penalty and returned-period recommendations. Does not waive codec capabilities or authority acceptance.",
+        ),
         explain: bool = typer.Option(
             False,
             "--explain",
@@ -468,6 +474,7 @@ def register(app: typer.Typer) -> None:
         try:
             settlement_policy = resolve_buyer_settlement_policy(
                 identity=identity, registry_urls=registry_urls,
+                allow_unprotected_terms=allow_unprotected_terms,
             )
         except ValueError as exc:
             typer.secho(str(exc), err=True, fg=typer.colors.RED)
@@ -554,6 +561,10 @@ def register(app: typer.Typer) -> None:
             selected = buyer_stage(
                 selected.selection.settlement_schema
             ).prepare_selection(selected)
+            emit_lifecycle_disclosure(
+                buyer_lifecycle_disclosure(selected.option),
+                title=f"Selected option {selected.option.option_id}: lifecycle terms",
+            )
             normalized = dict(match)
             normalized["_selected_settlement"] = selected
             normalized["settlement_options"] = [selected.option.model_dump(mode="json")]
@@ -679,6 +690,7 @@ def register(app: typer.Typer) -> None:
 
         run_log = RunLog.start(
             command="market buy",
+            allow_unprotected_compute_terms=allow_unprotected_terms,
             profile_id=identity.profile_id,
             principal=identity.principal,
             registry_urls=reg_urls,

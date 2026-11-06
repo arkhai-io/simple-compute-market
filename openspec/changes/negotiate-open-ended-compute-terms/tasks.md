@@ -8,8 +8,9 @@ fail-closed direct-read guard are implemented through 2.1c. Task 2.2 adds valida
 listing bounds and both storefronts' resolution/persistence/publication carriers.
 Task 2.3 adds injected recurring publication. Task 3.1 adds the shared servicing
 declaration and publication/cached-acceptance gates. Tasks 3.2–3.3 add acceptance-time
-horizon checks and qualify the terms-owned declaration doors; buyer disclosure and
-closeout remain unimplemented. Verification levels follow
+horizon checks and qualify the terms-owned declaration doors. Task 4.1a adds shared
+buyer rights policy and lifecycle disclosure; the rest of buyer first use and
+closeout remains pending. Verification levels follow
 `docs/development/TESTING.md`. New acceptance test implementation requires the
 maintainer's approval; the scenarios below are the intended contract, not tests
 added by this reconciliation.
@@ -351,6 +352,42 @@ added by this reconciliation.
   and archival remain pending. No external resources or resident servers remain.
   Recreate wheels/environments and run both committed `--acceptance` probe commands.
 
+### Buyer-rights/disclosure checkpoint (2026-11-07)
+
+- Completed 4.1a: both buyers compose `BuyerTermsPolicy` over foundation authority
+  selection and the same `default_buyer_refusals` used by publication diagnostics.
+  `--allow-unprotected-terms` explicitly waives the recommendations for one fresh
+  buy/negotiation, never malformed terms, unaccepted authorities or unsupported
+  mechanism capabilities. The choice is recorded in fresh run metadata.
+- Shared `lifecycle_disclosure` decodes exact selected/accepted lifecycle values.
+  Fresh selection and acceptance output names delivery promises, each stopper's
+  notice/treatment, term-end treatment, penalty ceiling/asset/collectibility,
+  authority/window/hold cap, evidence retention and stop-then-hint semantics.
+  No-adapter options are shown as making no lifecycle delivery promise. Output is
+  visible without a confirmation prompt and goes to stderr, preserving JSON stdout.
+- Reproducible proposed rights fixture and exact results/limits:
+  `docs/attachments/negotiate-open-ended-compute-terms/buyer-rights-checkpoint.md`.
+  The fixture consumes each buyer's actual context factory, injecting proposed
+  rate capabilities only for shared rights-policy/disclosure qualification. It is
+  not a full CLI rate buy, mandate or hosted service readiness claim.
+- Existing suites: settlement runtime 175 passed, VM buyer 215 passed (including
+  18 focused buy/explain/standalone-dispatch tests), bare-metal buyer 32 passed.
+  Targeted typing is one shared module, not repository-wide typing. Packaging,
+  check-change and pinned strict OpenSpec validation pass. No permanent tests added
+  and no assertions weakened.
+- **Restart at 4.1b**, leaving 4.1 unchecked: optional recurring horizons and the
+  class/unit-bearing price/setup/reserve/bounds/effective-horizon display remain.
+  Inspect VM's early duration requirements, `unit_count` and amount-codec calls,
+  plus bare metal's `purchase_quote`/`require_quoted_agreement` total-only paths;
+  carry omission through without inventing a reserved duration. Payment projections
+  deliberately remain once-only. Any proposed recurring presentation/pricing port
+  must be mechanism-owned and injected, not a storefront/buyer parser of payment
+  fields or a claim that hosted rate support has landed. Complete recovery's
+  pre-approval disclosure in the same price/horizon continuation.
+- Then do 4.2 full buyer selection fixtures, 4.3 affected/E2E validation and section 5.
+  No E2E lane, final rebase, review/promotion or archival was performed at this
+  checkpoint. PR #351 remains draft. No external resources or resident servers remain.
+
 ## 2. Quote and capacity terms
 
 - [x] 2.1 In `core/src/market_core/schemas.py` implement the unit-bearing accessor;
@@ -443,6 +480,13 @@ option is shown as making no delivery promise, not refused for lacking one (D3).
   `domains/bare_metal/buyer/tests`. Integration verifies displayed/approved values
   agree with selected terms and the fixture-derived expected mandate; live rate
   materialization evidence belongs to spot and does not gate this task.
+  - [x] 4.1a Compose the shared default-buyer rights recommendations in both buyer
+    policies, provide a run-scoped explicit opt-out and render codec-derived
+    lifecycle disclosure at fresh selection/acceptance, including no-adapter promises.
+  - [ ] 4.1b Expose optional recurring/required reserved duration and complete
+    class/price-unit/setup/reserve/bounds/effective-horizon display on fresh and
+    resumed approval paths. Verify selected/accepted/displayed pricing agreement
+    using proposed injected mechanism ports without enabling deployed rate servicing.
 - [ ] 4.2 Prepare committed publication/selection fixtures with reserved/on-demand/spot
   candidate options and both bounds in each domain, using injected proposed declarations
   rather than requiring runnable rate or mediation services. Start at each buyer's selection

@@ -712,6 +712,44 @@ D5's permanent destinations remain negotiation/publication/resource-pool specs a
 publication architecture after code review; the opaque hook also belongs in the
 negotiation specification. No permanent promotion is made at this checkpoint.
 
+## Buyer-rights policy and lifecycle disclosure continuation
+
+`kit/settlement-runtime/buyer_terms.py` composes the existing publication diagnostic
+policy with foundation `AuthoritySelection`. Recommendation refusal precedes
+ranking, so missing deadline/penalty and non-returned payee/term-end treatments
+have the same explanation on both sides. The explicit run-scoped
+`--allow-unprotected-terms` switch waives these recommendations together; it does
+not waive the codec, installed payment capabilities or authority acceptance.
+The foundation's missing-deadline opt-out is set only for that explicit switch.
+No hidden profile default or new payments wire capability is introduced.
+
+Both compositions declare adapter contexts and render shared codec-derived
+lifecycle rows. Selected terms precede fresh negotiation; exact accepted terms
+precede fresh approval. Disclosure goes to stderr even in noninteractive mode,
+keeping bare-metal JSON stdout usable. No-adapter options make no lifecycle
+promise and are not refused for lacking a deadline. Penalty prose states the
+asset/minor-unit ceiling and earned-held cap, not an available seller stake;
+setup prose is explicitly conditional until the separate mechanism-owned pricing
+presentation supplies its actual amount. Foundation authority identity, evidence,
+retention and stop/end semantics remain owned there, not duplicated codecs here.
+
+The committed `buyer_terms_probe.py` consumes either buyer's context factory and
+injects proposed charged/returned rate capabilities for shared policy/disclosure
+qualification. It is not a rate-capable CLI or hosted service. Its initial wrong
+fixture interface and an entitlement-key typing error were corrected; both domain
+replays and targeted typing pass. Existing buyer and settlement suites remain
+unchanged. Exact setup and evidence limits are in
+`docs/attachments/negotiate-open-ended-compute-terms/buyer-rights-checkpoint.md`.
+
+This is task 4.1a, not completion of 4.1. Optional recurring horizon plumbing,
+class/unit-bearing monetary/setup/reserve/bounds display, recovery pre-approval
+disclosure, full selection first use, E2E and closeout remain. Billing projections
+are deliberately once-only in the installed payment adapter. The continuation
+must inject mechanism-owned proposed rate pricing/presentation rather than parse
+payment fields in a neutral buyer or infer deployed support. D3/D7 permanent homes
+remain settlement-configuration and buyer-orchestration specs/companions after
+code review; none are promoted in this checkpoint.
+
 ## Design promotion record
 
 Destinations are planned, not claims of implemented behavior.
