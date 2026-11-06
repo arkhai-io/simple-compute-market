@@ -42,11 +42,11 @@ Verified against the tree at planning time; re-verify before implementing.
   shape-fixed by construction. `capacity-shape-envelope` supplies an
   admissibility predicate and `negotiation-capacity-feasibility-probe` a
   non-consuming authoritative probe, where a domain composes them.
-- `NegotiateContinueRequest` and `AdvanceRequest` in `core_storefront` carry
-  no `extra="forbid"`; an undeclared top-level field is dropped. A core-level
-  guard against that was tried and reverted: the risk is not a stray key but an
-  unexamined nested field, and the check belongs in the domain that understands
-  the content.
+- Reverified 2026-11-06: `NegotiateContinueRequest` and `AdvanceRequest` now
+  carry `extra="forbid"`; their `proposal` remains a dictionary, not a typed
+  revised-terms carrier. The Section 1 revert remains historical; this section
+  does not undo subsequent request-model strictness. Nested content still needs
+  the domain codec that understands it.
 
 ## Goals / Non-Goals
 
@@ -133,11 +133,52 @@ structure; the floor is still expressed once and applies to every shape.
 
 **Wire.** The round carries the multiplier and, when it changes, the shape; the
 quote is derived by both sides from the listing's advertised rate structure,
-which is authoritative for both. It is not carried per round. Revisit trigger:
-the advertised structure ceasing to be authoritative for both parties (a seller
-repricing mid-negotiation), at which point the quote would have to travel.
+which is authoritative for both. It is not carried per round. At opening the
+seller pins the rate-structure digest; a changed structure refuses a later round
+or acceptance distinctly, requiring the buyer to reopen (D-e below). Revisit
+condition: sellers needing to reprice live negotiations.
 
-### Where a buyer reads the rate structure is a decision gate
+### Registry carrier and authority: D-a through D-d
+
+Each decision below is **decided by webapp owner 2026-11-06, pending maintainer review**.
+
+- **D-a — keep what the schema admits.** `store-registry-listings-as-published`
+  stores and serves each accepted listing as published. Listing-level terms need
+  not accumulate inside `listing_resource`; the schema describes the whole
+  accepted listing. Revisit if the registry's admitted schema becomes deliberately
+  narrower. Registry storage and verification are owned by that change, not here.
+- **D-b — listing-level rates.** Read `rate_structure` from the registry listing's
+  top level. Rates describe sale terms for multiple shapes, not the advertised
+  resource's shape. `asking_rate` stays in `listing_resource`; moving it is not
+  required by quote derivation. Revisit if the published pricing vocabulary changes.
+- **D-c — seller authority.** The registry retains the publisher's signed request
+  bytes and signature beside its own signed response. A buyer verifies the seller's
+  commitment, rather than treating the registry's copy as seller authority.
+  Revisit if the signed-listing proof contract changes.
+- **D-d — buyer rate access.** A buyer derives quotes from D-b's registry carrier,
+  verified with D-c's retained seller signature under D-a. This avoids an unsigned
+  storefront read or an additional negotiation commitment carrier. The registry
+  change is an implementation/deployment dependency. Revisit if discovery no
+  longer supplies the seller-authenticated rate structure.
+
+### D-e — a rate structure is pinned for the negotiation
+
+**Decided by webapp owner 2026-11-06, pending maintainer review.**
+
+At opening, persist the digest of the seller-signed rate structure. On a later
+round or acceptance, refuse distinctly as `rate_structure_changed_reopen` if the
+current structure differs, even if the advertised shape's composed total and
+settlement option identity are unchanged. A missing pin on a shape-priced thread
+also fails closed: in-flight absolute-amount negotiations must drain at upgrade.
+
+Publication updates terms in place and continuation resolves the current listing.
+The existing pinned-option guard already refuses withdrawn options; this rule
+extends that boundary to changes that only affect other shapes. Honoring the old
+snapshot would bind the seller to withdrawn rates, a new pricing commitment;
+explicit repricing would change the wire. Neither is implicit in a multiplier.
+Revisit condition: sellers needing to reprice live negotiations.
+
+### Carrier alternatives considered before D-a through D-d
 
 The quote for a revised shape is derived from the listing's rate structure, so a
 buyer must be able to read that structure with the authority the quote needs. Three
@@ -153,10 +194,9 @@ carriers are possible:
 The third depends on `store-registry-listings-as-published`, and that change's
 accepted carrier policy bears on the second as well: its review decides whether
 listing-level terms keep accumulating in `listing_resource`. This is therefore an
-explicit decision gate (task 2.1a), taken with that change's accepted design as an
-input. Whether any buyer needs the structure at discovery time, rather than once a
-negotiation opens, is part of the same decision. A storefront-served structure does
-not wait on the registry change's implementation.
+decision gate resolved by D-a through D-d above: the listing-level registry
+carrier is selected, including availability at discovery, and depends on the
+registry change's implementation.
 
 ### Evaluation order inside the seller's round
 
@@ -253,3 +293,5 @@ drain.
 | A requested shape's feasibility, quantitative and categorical, is evaluated before pricing | `openspec/specs/negotiation-protocol/spec.md` — "Seller feasibility precedes pricing" |
 | The agreed shape is what the claim reserves | `openspec/specs/vm-storefront-fulfillment/spec.md` — "The agreed shape is reserved" |
 | No core-level extra-field guard; content validation lives in the domain codec | This change's `design.md` |
+| D-a through D-d: registry listing-level rate carrier and retained seller proof | `openspec/specs/negotiation-protocol/spec.md` — "Rate-multiplier negotiation"; registry storage/proof promotion belongs to `store-registry-listings-as-published` |
+| D-e: rate-structure pin and distinct refusal on repricing | `openspec/specs/negotiation-protocol/spec.md` — "Rate-multiplier negotiation" |
