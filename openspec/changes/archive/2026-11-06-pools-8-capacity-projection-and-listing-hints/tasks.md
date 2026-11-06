@@ -152,102 +152,34 @@ Listed in an earlier order; closeout works the parts in `openspec/README.md`'s o
 
 `openspec/README.md`'s closeout requirement had five parts when this section was written, in order: comment hygiene, import placement, documentation compliance, narrative compression, promotion. This section originally implemented only four, omitting import placement as its own task -- corrected below, found and fixed during a second closeout pass (2026-08-05) after the first pass's own omission was caught. A sixth part, roadmap currency, was added 2026-08-06 by `add-development-roadmap` and is appended as task 7.6. This document's promotion table also originally used a heading and column shape that didn't match the README's own template -- corrected in `design.md` as part of this section's own scope.
 
-### Closeout run (2026-11-06): returned to implementation
+### Closeout return and fix round (2026-11-06)
 
-The closeout run re-confirmed parts 1–3 against today's tree and stopped at part 2. Closeout
-never edits code, so the edits below need a fix round in implementation. Closeout resumes
-after that round and a validation of its `HEAD`; parts 7–11 (7.8–7.11 here) wait for it.
+A closeout run stopped at part 2 and returned the change to implementation; the owner
+waived validation, review and triage of the fix round, and closeout resumed at `4e9cd63c7`.
 
-- **Comment hygiene.** `make check-comment-hygiene` passes. Reading the comments this
-  change added in `domains/vms/listings/src/arkhai_vms_listings/` turned up three that
-  need rewriting:
-  - The `resolve_vm_listing_cardinality_mode` docstring (`listing_cardinality_mode.py`,
-    lines 53–64) narrates history: "the mode this pool would have gotten before the hint
-    existed", "pre-existing `member_count == 1` heuristic", "the moment this resolver is
-    wired in". State the invariant instead: an untagged pool with one enabled member
-    defaults to `specific_resource` and any other untagged pool to `fungible`, so that a
-    single-member pool keeps its resource-keyed derivation identity.
-  - Three module docstrings name the hints module as `kit/resource-pools.hints`
-    (`listing_cardinality_mode.py`, `pool_descriptors.py`, and `pricing_resolution.py`,
-    each at line 3). It is `market_resource_pools_contracts.hints`, in
-    `kit/resource-pools-contracts`.
-  - `listing_cardinality_mode.py` line 13 cites
-    `storefront-publication/spec.md#domain-owned-publication-and-hold-hints`. The heading's
-    anchor is `#requirement-domain-owned-publication-and-hold-hints`.
-- **Import placement: four local imports should move.**
-  - The four imports are `listing_cardinality_mode.py:77`, `pool_descriptors.py:35` and
-    `:70`, and `pricing_resolution.py:140`. Each imports
-    `market_resource_pools_contracts.hints` inside a function.
-  - Each gives the same reason: to keep `market_resource_pools` out of the buyer
-    distribution. That reason no longer holds. The imports now name the contracts
-    distribution, which `domains/vms/listings/pyproject.toml` declares as a required
-    dependency so that the buyer stays free of the pool authority. The package already
-    imports it at module level in `models.py:20`, `reconciler.py:20`, and
-    `listing_comparison.py:31`.
-  - The fix: move the four imports to module level and delete their comments. Attempt each
-    move against the suites to confirm there is no circular import.
-    `domains/vms/buyer/tests/test_no_resource_pools_dependency.py` still guards the buyer
-    boundary.
-- **Documentation compliance.** Fixed in this run:
-  - Every anchor in `design.md`'s promotion record now resolves. Requirement headings take
-    the `#requirement-` prefix. The `#pool-identity` and
-    `#storefronts-cache-independent-site-projections` rows now point at the requirements
-    that hold those rules today.
-  - The rows that later changes superseded say so.
-  - The two findings handed to this change (bare-metal host identity, and a region declared
-    only as a tag) are recorded as resolved elsewhere, each with its evidence, under their
-    own headings in `design.md`.
+- **What the fix round changed** (`4e9cd63c7`, comments and imports only, no behaviour). In
+  `domains/vms/listings/src/arkhai_vms_listings/`: the four
+  `market_resource_pools_contracts.hints` imports in `listing_cardinality_mode.py`,
+  `pool_descriptors.py` and `pricing_resolution.py` moved to module level, since the
+  contracts distribution is a required dependency and holds no pool authority
+  (`domains/vms/buyer/tests/test_no_resource_pools_dependency.py` still guards the buyer);
+  `resolve_vm_listing_cardinality_mode`'s docstring states the member-count default as an
+  invariant rather than history; three module docstrings name the hints module where it
+  lives; one spec citation takes its `#requirement-` anchor.
+- **Its evidence**, on wheels rebuilt by `make dist-domains` (the suites install internal
+  wheels from `.dist`, which `make test` does not rebuild): `make test-storefront` 1215 unit
+  passed, 1 skipped, 527 integration passed; `make test-vms-buyer` 215 passed; full
+  `make test`, `make check-packaging` and `make check-change` passed.
+- **The documentation compliance fixes that run made** are in `design.md`: every
+  promotion-record anchor resolves, superseded rows say so, and the two findings handed to
+  this change are recorded as resolved elsewhere, each with its evidence.
 
-### Fix round (2026-11-06)
-
-Implementation made the code and comment edits listed above, and no others. Outside the code,
-it set this change's row in `openspec/changes/README.md` back to `in implementation`.
-
-- **Comments.** `resolve_vm_listing_cardinality_mode`'s docstring now states the invariant. A
-  pool that declares no value, or one the domain does not recognize, takes a default that
-  follows its member count, because a single-member pool's listing is keyed on its resource's
-  identity. The three module docstrings name
-  `market_resource_pools_contracts.hints`, in `kit/resource-pools-contracts`. The citation
-  takes the `#requirement-` anchor.
-- **Imports.** The four `market_resource_pools_contracts.hints` imports are now at module level
-  in `listing_cardinality_mode.py`, `pool_descriptors.py`, and `pricing_resolution.py`, and
-  their comments are gone. No circular import appeared. No test patches these names where they
-  were looked up.
-- **Evidence.** Each suite ran after `make dist-domains` rebuilt `.dist`, and each environment's
-  installed `arkhai_vms_listings` was confirmed to hold the edited code.
-  - `make test` is the trap here. A suite reinstalls internal wheels from `.dist`, and
-    `make test` does not rebuild them. So an edit to `arkhai_vms_listings` is tested only once
-    `.dist` is rebuilt; the first full run here used the old wheel.
-  - `make test-storefront` passed: 1215 unit tests passed and 1 was skipped; 527 integration
-    tests passed. The resolvers' own tests are among them: `test_listing_cardinality_mode.py`,
-    `test_pool_descriptors.py`, and `test_pricing_resolution.py` (unit), and
-    `test_reconciler_projection.py`, which calls the reconciler directly (library
-    integration).
-  - `make test-vms-buyer` passed 215 tests. They include `test_no_resource_pools_dependency.py`,
-    which guards the buyer boundary. Buyer code calls none of these resolvers, so this suite
-    proves the module-level imports load without a cycle, and nothing more.
-  - The full `make test` then passed, exit 0, and `make check-packaging` passed, exit 0.
-    Both ran before a final edit that only re-wrapped and completed docstrings. After that
-    edit, `make test-storefront` was rerun on a rebuilt wheel, with the same counts.
-  - `make check-change` passed every check after the final edit, including comment hygiene
-    and local imports.
-  - The edits change no behaviour, so no end-to-end scenario is newly evidence for them, and no
-    `Owed by validation:` line is added.
-- **Left alone.** `listing_shapes.py:217–222` has a local import of the same kind with the
-  same stale reason ("buyers install this package without the resource-pool kit"). It came in
-  from `dev` through other changes, not this one, and this round's instruction was to make
-  only the listed edits. It is recorded here for the owner and closeout to decide on.
-  `pricing_resolution.py:108` says "this domain, not `kit/resource-pools`, owns validating
-  the shape it accepts". The shared hint reads now live in `kit/resource-pools-contracts`, so
-  this may be the same naming slip as the module docstrings. It was not on closeout's list, so
-  it was left as it is for closeout to judge.
-
-- [x] 7.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve every match; separately, direct-read every touched file for `AGENTS.md`'s fuzzier provenance-narration rule the tool can't catch mechanically. **Done:** ran the real tool (not the manual greps every earlier section relied on) -- found and fixed two genuine violations in very recent test docstrings; re-ran clean across the entire repository. A second pass, prompted by external review, found and fixed one further fuzzy violation the mechanical tool structurally can't catch (a test docstring narrating how a bug was originally found, not just its literal change-ID text) -- confirming the mechanical/fuzzy distinction this task's own text already warned about. **Correction (closeout, 2026-11-06):** three comments in `arkhai_vms_listings` still need rewriting; see "Closeout run (2026-11-06)" above. Rewritten in the fix round; see "Fix round (2026-11-06)".
-- [x] 7.2 **Import placement.** Migrate local imports to module level wherever safe; verify each candidate move against the real test suite. **Done:** audited every local import touched by this section's own work (test files only -- this section made no production-code changes). One local import in the new buyer regression test (`import domains.vms.listings`, after a `sys.modules` clear) has a genuine, documented reason to stay local: it is the test's own subject, and cannot be imported at file scope without defeating the `sys.modules`-clearing setup the test depends on. Recorded with an inline comment rather than left unexplained. **Correction (closeout, 2026-11-06):** that audit covered only Section 7's own test files. Four production local imports this change added in Sections 5–6 now have a reason that no longer holds, and should move; see "Closeout run (2026-11-06)" above. Moved to module level in the fix round; see "Fix round (2026-11-06)".
-- [x] 7.3 **Documentation compliance.** Re-check every accepted decision against `openspec/README.md`'s placement rules directly. **Done:** see 7.5's own audit findings below -- four stale/nonexistent-anchor promotion-table rows found and corrected; one permanent-spec evidence line found depending on an active change document for its own rationale (`design.md`'s "External review round," referenced by name) and corrected to be self-contained, per this same rule.
-- [x] 7.4 **Narrative compression.** Shorten completed-task notes to final behavior, material evidence, deferred work, and permanent destinations; move debugging narratives into `design.md` first. **Done, in two passes:** the first took this document from 415 lines to roughly 160, confirming `design.md` already carried the full rationale for every section before trimming. A second pass, prompted by external review, found this section's own closeout notes hadn't been held to the same standard -- still carrying which review found which problem and in what order, rather than final behavior and evidence. Trimmed further; the debugging-sequence detail that prompted this (a mechanical edit briefly deleting a section heading, later manual sweeps proving insufficient) has no lasting design value once the fix is verified, so it was cut rather than relocated.
+- [x] 7.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve every match; separately, direct-read every touched file for `AGENTS.md`'s fuzzier provenance-narration rule the tool can't catch mechanically. **Done:** ran the real tool (not the manual greps every earlier section relied on) -- found and fixed two genuine violations in very recent test docstrings; re-ran clean across the entire repository. A second pass, prompted by external review, found and fixed one further fuzzy violation the mechanical tool structurally can't catch (a test docstring narrating how a bug was originally found, not just its literal change-ID text) -- confirming the mechanical/fuzzy distinction this task's own text already warned about. **Correction (closeout, 2026-11-06):** three comments in `arkhai_vms_listings` still needed rewriting, and were rewritten in the fix round; see "Closeout return and fix round (2026-11-06)" above. **Confirmed (closeout, 2026-11-06, at `4e9cd63c7`):** `make check-comment-hygiene` passes. `pricing_resolution.py:110`'s "this domain, not `kit/resource-pools`, owns validating the shape it accepts" is accurate, not a naming slip: the pool authority's write path validates only `pricing`'s rate lists (`validate_pricing_rates`) and leaves the listing-term fields to their reader, so no edit is owed.
+- [x] 7.2 **Import placement.** Migrate local imports to module level wherever safe; verify each candidate move against the real test suite. **Done:** audited every local import touched by this section's own work (test files only -- this section made no production-code changes). One local import in the new buyer regression test (`import domains.vms.listings`, after a `sys.modules` clear) has a genuine, documented reason to stay local: it is the test's own subject, and cannot be imported at file scope without defeating the `sys.modules`-clearing setup the test depends on. Recorded with an inline comment rather than left unexplained. **Correction (closeout, 2026-11-06):** that audit covered only Section 7's own test files. Four production local imports this change added in Sections 5–6 had a reason that no longer held, and moved to module level in the fix round; see "Closeout return and fix round (2026-11-06)" above. **Confirmed (closeout, 2026-11-06, at `4e9cd63c7`):** no import this change added is still local without a reason. `listing_shapes.py:219`'s local import, with the same stale reason, came from `dev` (`9f095518c`, through other changes), so it is outside this part's scope, which is the imports the change added; it is left for whoever next changes that module.
+- [x] 7.3 **Documentation compliance.** Re-check every accepted decision against `openspec/README.md`'s placement rules directly. **Done:** see 7.5's own audit findings below -- four stale/nonexistent-anchor promotion-table rows found and corrected; one permanent-spec evidence line found depending on an active change document for its own rationale (`design.md`'s "External review round," referenced by name) and corrected to be self-contained, per this same rule. **Confirmed (closeout, 2026-11-06):** the 2026-11-06 closeout run's anchor and finding fixes stand; the fix round changed only comments and import placement, so no permanent document's description of the code changed.
+- [x] 7.4 **Narrative compression.** Shorten completed-task notes to final behavior, material evidence, deferred work, and permanent destinations; move debugging narratives into `design.md` first. **Done, in two passes:** the first took this document from 415 lines to roughly 160, confirming `design.md` already carried the full rationale for every section before trimming. A second pass, prompted by external review, found this section's own closeout notes hadn't been held to the same standard -- still carrying which review found which problem and in what order, rather than final behavior and evidence. Trimmed further; the debugging-sequence detail that prompted this (a mechanical edit briefly deleting a section heading, later manual sweeps proving insufficient) has no lasting design value once the fix is verified, so it was cut rather than relocated. **Third pass (closeout, 2026-11-06):** the closeout run's list of required edits and the fix round's evidence, about ninety lines, compressed into "Closeout return and fix round (2026-11-06)": what changed, its evidence, and where the documentation fixes are. Nothing moved to `design.md`: the edits were comment and import corrections with no design content, and the stale-wheel trap the fix round hit is recorded in the change's orchestrator observations.
 - [x] 7.5 **Promotion.** Complete the design-promotion record. **Done:**
-  Archival uses `--skip-specs`: this task synchronized the specification by hand.
+  Archival uses `--skip-specs`: this task synchronized the specification by hand. **Re-checked (closeout, 2026-11-06):** every delta's rule is in the permanent specs under the names they use now (`site-capacity`'s "Per-site projection load-state visibility" and "Resource-pool projection metadata"; `storefront-publication`'s "Commercial mapping identity", "Site-pinned claim routing" and "Domain-owned publication and hold hints"; `resource-pool-management`'s "Domain-neutral publication and hold hints" and "Reservation hold and SLA preference validation"), so merging the deltas would duplicate or collide with them. None of the three capabilities has an `index.md`. The design-promotion record gained the roadmap, campaign-index and `--skip-specs` rows; no companion or `ARCHITECTURE.md` edit is owed.
   - [x] 7.5.1 Projection load-state visibility and resource-pool projection metadata: already promoted incrementally through Sections 2-4; `architecture.md` confirmed not needing a change (7.5.4).
   - [x] 7.5.2 Commercial mapping, claim routing, and the projection-becomes-default decision, to `openspec/specs/storefront-publication/spec.md`. **Corrected:** the original wording named "the local-physical-authority retirement boundary" as something this change promotes -- wrong, since Section 6 re-scoped the actual retirement out of this change entirely (task 6.4, now homed at `pools-9-retire-local-physical-authority`). What this change genuinely promotes instead: the projection path becomes the storefront's *default* once it has parity with a local-table path it still retains. Found and fixed a real gap: four promotion-table rows pointed at `#local-physical-authority`, a heading never actually created -- two moved out of this change's own promotion record entirely (re-scoped-away content, now belonging to `pools-9`), one struck as superseded by later rows, one given a real destination (`openspec/specs/storefront-publication/spec.md#requirement-projection-backed-listing-candidate-derivation`, under its current heading, extended with a new scenario). Two further early rows removed for pointing at pre-rename anchors no longer in use.
   - [x] 7.5.3 Domain-neutral hint keys, domain-owned values, and pool-identity site-scoping, to `openspec/specs/resource-pool-management/spec.md`: already promoted incrementally through Sections 1, 5, and 6.
@@ -255,8 +187,8 @@ it set this change's row in `openspec/changes/README.md` back to `in implementat
   - [x] 7.5.5 Strict `openspec` validation, run for real: `change/pools-8-capacity-projection-and-listing-hints`, `spec/resource-pool-management`, `spec/storefront-publication`, and `spec/site-capacity` each validate clean individually. Archival itself is a separate, later action once every task in this change is genuinely complete.
 
 - [x] 7.6 **Roadmap currency.** Update the affected goal's current state and gap mapping in `docs/development/ROADMAP.md`, or record that no goal is affected. Expected: this change's completed work is already reflected in Goal 1's current-state paragraph — projection-backed listing derivation being the default path, and storefronts consuming physical facts through the resource-pool and capacity-bucket projections — so no gap row is owed; confirm that remains accurate and record the disposition. **Done (closeout, 2026-11-06): no edit owed.** Goal 1's current state already says storefronts consume physical facts through both projections and derive every listing from them. Since `pools-9-retire-local-physical-authority`, that is the only path rather than the default. No gap row names this change.
-- [ ] 7.7 **Campaign index currency.** Update this change's row, and its campaign's dependency graph, in `openspec/changes/README.md`, or record that both are unchanged. Other rows' `Depends on` are left alone: archive cleanup releases dependents after the closeout gate.
-- [ ] 7.8 **Documentation citations.** After promotion, run `make check-doc-citations CHANGE=pools-8-capacity-projection-and-listing-hints` and resolve every match, then `openspec validate pools-8-capacity-projection-and-listing-hints --strict`.
-- [ ] 7.9 **End-to-end pipeline.** Record the passing run the latest validation names, its result, and the scenarios that exercise this change, or an explicit blocker naming its cause and the change that owns it, with the validations it gates treated as unrun.
-- [ ] 7.10 **Packaging.** Run `make check-packaging` and resolve every failure it reports (a failure needing a code or lock change returns the change to implementation).
-- [ ] 7.11 **Archival.** Last, once every other part is checked: `openspec archive pools-8-capacity-projection-and-listing-hints --skip-specs -y` moves the change under `openspec/changes/archive/` without merging its deltas, which 7.5 synchronized by hand; point the index row at the archived directory, and run `openspec validate --specs --strict`.
+- [x] 7.7 **Campaign index currency.** Update this change's row, and its campaign's dependency graph, in `openspec/changes/README.md`, or record that both are unchanged. Other rows' `Depends on` are left alone: archive cleanup releases dependents after the closeout gate. **Done (closeout, 2026-11-06):** the row is `in closeout`, its notes rewritten to say it closes out after the waived fix round and archives with `--skip-specs`, and after archival it links the archive directory. The campaign's graph (`POOLS-7 ──► POOLS-8 projection consumption`) still holds and is unchanged. No row lists this change in `Depends on`. `scripts/change-workflow check index` passes.
+- [x] 7.8 **Documentation citations.** After promotion, run `make check-doc-citations CHANGE=pools-8-capacity-projection-and-listing-hints` and resolve every match, then `openspec validate pools-8-capacity-projection-and-listing-hints --strict`. **Done (closeout, 2026-11-06):** `make check-change CHANGE=pools-8-capacity-projection-and-listing-hints` passed every check, documentation citations and the pinned `openspec validate --strict` among them.
+- [x] 7.9 **End-to-end pipeline.** Record the passing run the latest validation names, its result, and the scenarios that exercise this change, or an explicit blocker naming its cause and the change that owns it, with the validations it gates treated as unrun. **Done (closeout, 2026-11-06):** the latest validation, `reviews/03-validation.md`, passed at `f39af1197`: pipeline run 42226002048 of `e2e.yml` succeeded (e2e-vm 153 passed, 2 skipped; e2e-bare-metal 70 passed; e2e-apicredits 4 passed), and its local and Helm parts passed. The scenarios exercising this change's surfaces are `test_compute_dynamic_listings` and `test_listing_shapes` (vms lane) and `test_bare_metal_publication` (bare-metal lane), named by the files' content; the change's behaviour is proven chiefly by its unit and integration tests. No CI was owed: no section carries an `Owed by validation:` line. The run names `f39af1197`, not the commit closeout carries: the owner waived validation of the fix round at `4e9cd63c7` (workflow log seq 15), whose edits are comments and import placement only.
+- [x] 7.10 **Packaging.** Run `make check-packaging` and resolve every failure it reports (a failure needing a code or lock change returns the change to implementation). **Done (closeout, 2026-11-06, at `4e9cd63c7`):** `make check-packaging` passed (locks, Python version, layout, and the layers, scope, dependencies and kinds rules). `make check-architecture-change` reports the change owns no architecture row. The change touched nothing under `.agents/`, `.claude/` or `.codex/`, so `make check-agent-skills` is not owed.
+- [x] 7.11 **Archival.** Last, once every other part is checked: `openspec archive pools-8-capacity-projection-and-listing-hints --skip-specs -y` moves the change under `openspec/changes/archive/` without merging its deltas, which 7.5 synchronized by hand; point the index row at the archived directory, and run `openspec validate --specs --strict`.
