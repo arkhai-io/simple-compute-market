@@ -1,45 +1,34 @@
 ## ADDED Requirements
 
-### Requirement: Decrypted host key material does not outlive its operation
+### Requirement: Ansible output is kept only redacted unless an operator configures otherwise
 
-A host registered with embedded key material stores that material encrypted, and the provisioner MUST decrypt it to a file for the duration of an operation because the execution tool authenticates with a key file. That file MUST NOT survive the operation.
+The provisioning service's packaged Ansible configuration MUST NOT name a log file. The output of a playbook run and of a connectivity check MUST be kept only as the job's logs or the check's result, redacted. An operator whose `ansible_cfg` names a configuration stating a log file receives Ansible's unredacted output there, and the service MUST NOT override that configuration.
 
-Every path that writes decrypted key material MUST remove it, including paths that fail. A failed authentication is the case most likely to leave material behind and the case most likely to be retried, so cleanup MUST NOT depend on an operation succeeding.
+#### Scenario: A playbook runs under the packaged configuration
 
-Decrypted material and the inventory naming it MUST be written into a location owned by the operation that created it, so that removal is a single action that cannot omit a file and cannot remove another operation's material. Concurrent operations against one host MUST NOT share or remove each other's key files.
+- **WHEN** a real playbook runs and the profile names no `ansible_cfg`
+- **THEN** no Ansible log file is written, and the job's logs hold its redacted output
 
-#### Scenario: An operation against an embedded host succeeds
+#### Scenario: An operator configures a log file
 
-- **WHEN** a connectivity check or job completes against a host holding embedded key material
-- **THEN** the decrypted key file existed for the operation and no decrypted key material remains afterwards
+- **WHEN** the profile's `ansible_cfg` names a configuration stating `log_path`
+- **THEN** the service runs Ansible under that configuration unchanged
 
-#### Scenario: An operation against an embedded host fails
+### Requirement: A protected key that cannot be decrypted is named, not hidden
 
-- **WHEN** the operation raises before completing
-- **THEN** no decrypted key material remains afterwards
+When an `ssh` connection's protected private key cannot be decrypted with the configured key, because it was protected under another key or no key is configured, the codec MUST raise an error naming the host and how to recover, carrying no ciphertext or key material. A job MUST fail with that message and MUST NOT be retried, since a retry meets the same configuration. A connectivity check MUST answer the host unreachable with that message as its detail. Once any Ansible executor is real, the Ansible readiness component MUST report itself not ready, naming the host, and MUST check a protected key only by decrypting it in memory.
 
-#### Scenario: Two operations run against one host
+#### Scenario: A job runs against a host whose key was protected under another key
 
-- **WHEN** two operations against the same embedded host overlap
-- **THEN** neither reads nor removes the other's key material
+- **WHEN** a job is dispatched against a host whose protected key does not decrypt under the configured key
+- **THEN** it fails, unretried, with an error naming the host and carrying no ciphertext, and no key file remains
 
-#### Scenario: A host is registered with a key path
+#### Scenario: A connectivity check meets such a host
 
-- **WHEN** an operation runs against a host registered with a key path rather than embedded material
-- **THEN** the rendered inventory names that path and no key material is written
+- **WHEN** an operator checks that host's connectivity
+- **THEN** the result is unreachable, with the same reason as its detail
 
-### Requirement: Rendered inventories name a usable key location
+#### Scenario: System status is read with such a host enabled
 
-Every rendered inventory MUST name a key location that an execution tool can authenticate with, or MUST state that it cannot represent the host. An inventory naming a placeholder that no component resolves MUST NOT be produced, because it fails authentication against a host that is reachable and resembles a network fault rather than a malformed inventory.
-
-Where two components render inventories for the same registry rows, neither may rely on the other to substitute a value it did not write.
-
-#### Scenario: An inventory is rendered for an embedded host
-
-- **WHEN** an inventory is produced for a host holding embedded key material
-- **THEN** it either names a key file that exists for the consumer's use, or the request is refused with the reason stated
-
-#### Scenario: An inventory is rendered for a key-path host
-
-- **WHEN** an inventory is produced for a host registered with a key path
-- **THEN** it names that path and is usable by any consumer without further substitution
+- **WHEN** system status is read while that host is enabled and an Ansible executor is real
+- **THEN** the `ansible` component is not ready, its reasons naming the host, and its key is reported as not existing
