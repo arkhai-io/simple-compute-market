@@ -270,7 +270,7 @@ class TestStage08a_EvaluateSettle(Stage08a_EvaluateSettle):
 class TestStage08a2_SettlementPreviewChoseTheTarget:
     def test_08a2_preview_selected_target(self, deal_driver, deal_state):
         require_state(deal_state, "_evaluate_settle_passed")
-        assert deal_state._evaluate_settle_host_id == deal_driver.target.host_id, (
+        assert deal_state.expected_host_id == deal_driver.target.host_id, (
             "settlement preview selected another host; settlement is not submitted"
         )
         deal_driver.assert_management_connected()

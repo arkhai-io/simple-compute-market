@@ -416,7 +416,7 @@ def test_a_failed_list_job_fails():
 # ---------------------------------------------------------------------------
 
 def _preflight(chosen: str) -> RealVmDealState:
-    state = RealVmDealState(_evaluate_settle_passed=True, _evaluate_settle_host_id=chosen)
+    state = RealVmDealState(_evaluate_settle_passed=True, expected_host_id=chosen)
     real_lane.TestStage08a2_SettlementPreviewChoseTheTarget().test_08a2_the_settlement_preview_chose_the_target_host(
         TARGET, MagicMock(spec=RealVmComputeDealDriver), state
     )
@@ -428,7 +428,7 @@ def test_the_preflight_passes_when_the_preview_chose_the_target():
 
 
 def test_the_preflight_fails_and_settlement_stays_blocked_when_another_host_was_chosen():
-    state = RealVmDealState(_evaluate_settle_passed=True, _evaluate_settle_host_id="kvm-other")
+    state = RealVmDealState(_evaluate_settle_passed=True, expected_host_id="kvm-other")
     with pytest.raises(AssertionError, match="chose host 'kvm-other', not the target"):
         real_lane.TestStage08a2_SettlementPreviewChoseTheTarget().test_08a2_the_settlement_preview_chose_the_target_host(
             TARGET, MagicMock(spec=RealVmComputeDealDriver), state
@@ -918,7 +918,7 @@ def test_shared_ready_stage_checks_each_lanes_actual_capacity_expectation(expect
     admin.wait_for_settlement.return_value = SimpleNamespace(ready=True, status="ready")
     admin.get_listing.return_value = SimpleNamespace(status=observed)
     driver = SimpleNamespace(listing_status_after_first_fulfillment=expected, assert_delivery=MagicMock())
-    state = RealVmDealState(real_escrow_uid="escrow", provisioning_result_injected=True,
+    state = RealVmDealState(settlement_ref="escrow", provisioning_result_injected=True,
                             seller_listing_id="listing", negotiation_id="negotiation", _listing_reconciled=True)
     call = lambda: Stage09b_SettlementReadyAndCredentials().test_09b_settlement_ready_credentials_and_listing_closed(admin, driver, state)
     if expected == observed:

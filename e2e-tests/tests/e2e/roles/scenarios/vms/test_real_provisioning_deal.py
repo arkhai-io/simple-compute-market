@@ -440,7 +440,7 @@ class TestStage08a2_SettlementPreviewChoseTheTarget:
         submits settlement only once this passes.
         """
         require_state(deal_state, "_evaluate_settle_passed")
-        chosen = deal_state._evaluate_settle_host_id
+        chosen = deal_state.expected_host_id
         assert chosen == real_vm_target.host_id, (
             f"the settlement preview chose host {chosen!r}, not the target "
             f"{real_vm_target.host_id!r}; settlement is not submitted"

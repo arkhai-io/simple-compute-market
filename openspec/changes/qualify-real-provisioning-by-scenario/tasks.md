@@ -49,7 +49,7 @@ test_real_provisioning_deal.py, real_compute_deal_driver.py, compute_deal_driver
 real_compute_deal_driver.py, compute_deal_driver.py}`; `e2e-tests/tests/unit/{test_compute_deal_stages.py,
 stage_sources.py, test_real_vm_lane.py, test_real_bare_metal_lane.py}`.
 
-- [ ] 1.1 The settlement reference (D15). `ComputeDealState` gains `settlement_ref`, the
+- [x] 1.1 The settlement reference (D15). `ComputeDealState` gains `settlement_ref`, the
   reference the shared stages from fulfillment onwards read: `Stage07_OnChainEscrow`
   writes it beside `real_escrow_uid` (the escrow), and section 2's purchase stages write
   the payments negotiation. `09b` waits on it (`wait_for_settlement`), `09c`, `09c2`,
@@ -57,13 +57,34 @@ stage_sources.py, test_real_vm_lane.py, test_real_bare_metal_lane.py}`.
   `f"{settlement_ref}-reuse"`. The Alkahest-only stages (`07a`–`08b2`) keep reading
   `real_escrow_uid`. Unit, in `test_compute_deal_stages.py`: no stage from `09a` onwards
   requires or reads `real_escrow_uid`.
-- [ ] 1.2 The expected host (D15's table). `_evaluate_settle_host_id` becomes
+  Done. `11b` also requires `settlement_ref`, and `10a`, `10b`, `11a` and `11b` gained a
+  log line naming the deal identifiers they read (none had one; no test reads a log
+  line). Unit (source check):
+  `test_no_stage_from_fulfillment_onwards_reads_the_escrow` passes; the 09b case in
+  `test_real_vm_lane.py` constructs `settlement_ref`. The Alkahest drivers
+  (`vms/compute_deal_driver.py`, both `real_compute_deal_driver.py`) still read
+  `real_escrow_uid` in `settle_dispatched`, `assert_delivery` (VM: settle status and the
+  primary escrow), bare metal's `lease_view` and both real drivers' recovery: those are
+  the Alkahest set's driver parts, which a purchase driver replaces, not stage bodies, so
+  only the stage bodies' own source is escrow-free, which is what the check reads. The
+  reference is written by a stage (07), as this task says, where D15 and the delta say
+  "the driver supplies" it: an unreconciled wording for triage, not a behaviour gap.
+- [x] 1.2 The expected host (D15's table). `_evaluate_settle_host_id` becomes
   `expected_host_id` for every writer and reader: `08a` writes it, `08c`, `09c`, the VM
   real module's previewed-host check (`test_real_provisioning_deal.py:443`) and the
   bare-metal real module's (`:273`) read it, and `test_real_vm_lane.py` and
   `test_real_bare_metal_lane.py` construct it. Unit: the renamed cases pass, and a
   source check finds no remaining `_evaluate_settle_host_id`.
-- [ ] 1.3 The handoff is checked from source (delta: each shared input written
+  Done; `09c` now also requires `expected_host_id`, and its failure message names the
+  expected host rather than 08a's preview. Unit: the renamed preflight cases in
+  `test_real_vm_lane.py` and `test_real_bare_metal_lane.py` pass. Differed from the plan:
+  no source check for the former name was kept. One was written, and the fresh-context
+  check rightly read it as a tombstone (it guards a rename, and had to split the name to
+  miss itself). The existing checks hold the invariant instead:
+  `test_the_stages_use_only_declared_fields` and `test_a_lane_stage_uses_only_its_states_fields`
+  refuse an undeclared field in a stage, and a dataclass refuses one at construction; a
+  search of `e2e-tests` at commit time found the former name nowhere.
+- [x] 1.3 The handoff is checked from source (delta: each shared input written
   independently of the lease under check). `test_compute_deal_stages.py` asserts, per
   lane row, that every state field a shared stage from `09a` onwards requires is written
   by an earlier stage of that lane — the table's `fulfillment_id`,
@@ -71,7 +92,25 @@ stage_sources.py, test_real_vm_lane.py, test_real_bare_metal_lane.py}`.
   `_teardown_job_completed` and `settlement_ref` — and by no stage that reads the lease
   it is compared with. Unit: a lane row whose only writer of `expected_host_id` reads the
   lease fails the check (a constructed source in the test).
-- [ ] 1.4 **Verification checkpoint.** Unit: `make test-e2e-unit`, with
+  Done as `handoff_faults` over a lane's running stages, with `HANDOFF` (the table's six
+  fields) and `COMPARED_WITH_THE_LEASE`. Only `expected_host_id` is compared with the
+  lease (`09c`, against its `host_id`), so only its writers are held to not reading the
+  lease; `teardown_fulfillment_id` is *read from* the lease by expiry's `10b`, as D15's
+  table says, and `11b` advances it rather than comparing it, so holding it to the rule
+  would fail the Alkahest set it describes. "Reads the lease" is read from the writer's
+  own source, as the mock-gate check is: an attribute named `lease_view`, `deal_lease`,
+  `get_lease`, `backdate` or `truncate_lease` anywhere in it. A lease reached through a
+  helper the writer calls is not seen, and a writer naming one of those for another
+  purpose is refused. The "written by an earlier stage" half overlaps
+  `test_every_prerequisite_is_produced_by_an_earlier_stage`; it is kept so the handoff
+  rows read as one check. Unit (source checks):
+  `test_the_handoff_is_what_the_stages_from_fulfillment_onwards_read` keeps the table
+  honest; `test_each_handoff_is_written_earlier_and_independently_of_the_lease` passes
+  for the four rows (`vms`, `bare_metal`, `vms_real`, `bare_metal_real`); the
+  constructed-source case fails for a writer reading the host through the driver's
+  lease view or the provisioning service's `get_lease`, and passes for one reading the
+  driver's declared host. Section 2 adds the bare-metal purchase as a row.
+- [x] 1.4 **Verification checkpoint.** Unit: `make test-e2e-unit`, with
   `test_compute_deal_stages.py`, `test_real_vm_lane.py`, `test_real_bare_metal_lane.py`
   and the other stage-source suites. Run `make test` and `make check-comment-hygiene`.
   End-to-end: `e2e_deal` and `e2e_deal_buyer_cli` (VM lane) and `e2e_bare_metal_mock_deal`
@@ -80,6 +119,27 @@ stage_sources.py, test_real_vm_lane.py, test_real_bare_metal_lane.py}`.
   suites are this section's evidence for the real lanes.
   Owed by validation: `tests.yml`, job `test · test-e2e-unit` — passes with the re-keyed
   source checks.
+  Unit: `make test-e2e-unit`, 563 passed (unit, including the stage-source checks). The
+  first run failed 23 cases in `test_payments_helper.py` (`ca_bundle_path` refused as an
+  unknown field): a stale `.dist` payments-kit wheel, unrelated to this section; `make
+  dist-ci` rebuilt the wheelhouse and the rerun passed. `make test` passed (every unit
+  and integration suite); `make check-comment-hygiene` passed.
+  End-to-end scenarios, corrected: `e2e_deal` (VM lane, `test_full_deal.py`) and
+  `e2e_bare_metal_mock_deal` (bare-metal lane) run every re-keyed shared stage.
+  `e2e_deal_buyer_cli` does not: `test_full_deal_buyer_cli.py` declares its own stage
+  classes rather than subclassing the shared ones, so it is no evidence for this section.
+  The real modules are in no lane, as planned.
+  Owed by validation: `tests.yml`, job `test · test-e2e-unit` — passes with the re-keyed
+  source checks (confirmed).
+
+Handoff from section 1: `ComputeDealDriver.reserve_released_capacity` keeps its
+`escrow_uid` keyword, the storefront's `admin_reserve_capacity` field it forwards; `11b`
+passes it `f"{settlement_ref}-reuse"`. `HANDOFF_LANES` was not introduced: the handoff
+check is parametrized over `ALL_LANES`, so section 2 adds its purchase row there or
+parametrizes `handoff_faults` over a row list of its own, passing the purchase stages'
+classes to `running_stages` beside `STAGES`. The 1.3 lease rule binds only
+`expected_host_id`, so a purchase writer of `teardown_fulfillment_id` from delivery
+status needs no exception.
 
 ## 2. The buyer-purchase stage set and the bare-metal lane purchase
 

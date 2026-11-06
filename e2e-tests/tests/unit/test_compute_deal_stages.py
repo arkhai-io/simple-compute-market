@@ -164,6 +164,33 @@ COMPUTE_FIELDS = fields(class_named(STAGES_TREE, "ComputeDealState"))
 DOMAIN_DEAL_FIELDS = fields(class_named(tree(DOMAIN_DEAL), "DomainDealState"))
 STAGES_USE = state_use(STAGES, state=STATE)
 
+#: The first stage of fulfillment. It and every stage defined after it take no
+#: escrow from the deal's state, and those naming the deal's settlement read its
+#: settlement reference, so a deal settled other than through an Alkahest escrow
+#: runs their bodies unchanged.
+FIRST_FULFILLMENT_STAGE = "Stage09a_FulfillmentConvergesToActive"
+FULFILLMENT_STAGES = STAGES[STAGE_NAMES.index(FIRST_FULFILLMENT_STAGE):]
+#: What the stages from fulfillment onwards are handed by a lane's earlier
+#: stages: which stage writes each differs between ways of settling and ending a
+#: deal, and the stage reading it is one body.
+HANDOFF = (
+    "fulfillment_id",
+    "_create_job_completed",
+    "expected_host_id",
+    "teardown_fulfillment_id",
+    "_teardown_job_completed",
+    "settlement_ref",
+)
+#: Each handoff a stage compares with the deal's lease, by that stage: its
+#: writer must not have read it from the lease, or the comparison cannot fail.
+COMPARED_WITH_THE_LEASE = {"expected_host_id": "Stage09c_LeaseRecorded"}
+#: What a stage reads the deal's lease through, in its own source: the driver's
+#: lease view, the view a stage recorded, the provisioning service's lease read,
+#: and the lease writes that return the lease. Matched as attribute names, so a
+#: writer that names one for any purpose counts as reading the lease, which
+#: errs towards refusing a handoff.
+LEASE_READS = {"lease_view", "deal_lease", "get_lease", "backdate", "truncate_lease"}
+
 
 def _members(protocol: str) -> set[str]:
     node = class_named(STAGES_TREE, protocol)
@@ -412,6 +439,116 @@ def test_every_real_lane_reuses_all_shared_stages_without_mock_gates(lane):
             assert len(node.body) == 1 and isinstance(node.body[0], ast.Pass)
             declared.append(name)
     assert declared == SHARED_NAMES
+
+
+def _reads_the_lease(stage: ast.ClassDef) -> bool:
+    return any(
+        isinstance(node, ast.Attribute) and node.attr in LEASE_READS
+        for node in ast.walk(stage)
+    )
+
+
+def handoff_faults(running: list[tuple[str, ast.ClassDef]]) -> list[str]:
+    """Each handoff a stage from fulfillment onwards reads that no earlier stage
+    of the lane writes, or that its writer read from the lease it is compared
+    with.
+
+    ``running`` is a lane's stages in run order, each with the body that runs
+    (``running_stages``). Read from each stage's own source, as the mock-gate
+    check is: a lease reached through a helper the writer calls is beyond what
+    this sees.
+    """
+    faults = []
+    for index, (name, body) in enumerate(running):
+        if body not in FULFILLMENT_STAGES:
+            continue
+        use = state_use([body], state=STATE)
+        for field_name in HANDOFF:
+            if field_name not in use.read | use.required:
+                continue
+            writers = [
+                (writer, writer_body) for writer, writer_body in running[:index]
+                if field_name in state_use([writer_body], state=STATE).written
+            ]
+            if not writers:
+                faults.append(f"{name} reads {field_name}, which no earlier stage writes")
+            if COMPARED_WITH_THE_LEASE.get(field_name) == body.name:
+                faults += [
+                    f"{name} compares {field_name} with the lease {writer} read it from"
+                    for writer, writer_body in writers if _reads_the_lease(writer_body)
+                ]
+    return faults
+
+
+def test_no_stage_from_fulfillment_onwards_reads_the_escrow():
+    assert FULFILLMENT_STAGES and FULFILLMENT_STAGES[0].name == FIRST_FULFILLMENT_STAGE
+    reading = [
+        stage.name
+        for stage in FULFILLMENT_STAGES
+        for use in [state_use([stage], state=STATE)]
+        if "real_escrow_uid" in use.read | use.required
+    ]
+    assert reading == [], reading
+
+
+def test_the_handoff_is_what_the_stages_from_fulfillment_onwards_read():
+    use = state_use(FULFILLMENT_STAGES, state=STATE)
+    assert set(HANDOFF) <= use.read | use.required, sorted(set(HANDOFF) - use.read - use.required)
+    for field_name, reader in COMPARED_WITH_THE_LEASE.items():
+        stage = class_named(STAGES_TREE, reader)
+        assert stage in FULFILLMENT_STAGES and _reads_the_lease(stage), reader
+        assert field_name in state_use([stage], state=STATE).read, (field_name, reader)
+
+
+@pytest.mark.parametrize("lane", ALL_LANES, ids=lambda lane: lane.name)
+def test_each_handoff_is_written_earlier_and_independently_of_the_lease(lane: Lane):
+    running = running_stages(lane.scenario, [*STAGES, *BARE_METAL_STAGES])
+    assert handoff_faults(running) == []
+
+
+_CONSTRUCTED_LANE = '''
+from tests.e2e.roles.helpers.compute_deal_stages import Stage09c_LeaseRecorded
+
+
+class TestStage08z_Settled:
+    def test_08z_settled(self, deal_driver, deal_state):
+        deal_state.settlement_ref = "negotiation"
+        deal_state.settlement_status = "ready"
+        deal_state.fulfillment_id = "fulfillment"
+        deal_state._create_job_completed = True
+
+
+class TestStage08y_ExpectedHost:
+    def test_08y_expected_host(self, deal_driver, deal_state):
+        deal_state.expected_host_id = {source}
+
+
+class TestStage09c_LeaseRecorded(Stage09c_LeaseRecorded):
+    pass
+'''
+
+
+@pytest.mark.parametrize(
+    ("source", "faults"),
+    [
+        ("deal_driver.declared_host_id", []),
+        (
+            'deal_driver.lease_view(deal_state).refresh()["host_id"]',
+            ["TestStage09c_LeaseRecorded compares expected_host_id with the lease "
+             "TestStage08y_ExpectedHost read it from"],
+        ),
+        (
+            'deal_driver.provisioning_client.get_lease("reservation").host_id',
+            ["TestStage09c_LeaseRecorded compares expected_host_id with the lease "
+             "TestStage08y_ExpectedHost read it from"],
+        ),
+    ],
+    ids=["declared host", "host from the lease view", "host from the lease read"],
+)
+def test_an_expected_host_read_from_the_lease_fails_the_handoff_check(tmp_path, source, faults):
+    scenario = tmp_path / "test_constructed_lane.py"
+    scenario.write_text(_CONSTRUCTED_LANE.format(source=source))
+    assert handoff_faults(running_stages(scenario, STAGES)) == faults
 
 
 def test_real_bare_metal_orders_physical_effects_and_observations():
