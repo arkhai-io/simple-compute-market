@@ -2985,12 +2985,41 @@ returns the change to implementation.
   the Compose files, profiles and secret overlays and the lane targets; the helper; the
   charts' values and templates. Each states current behaviour and every fixture value's
   label is present. A needed correction returns to implementation.
-- [ ] 13.2 **Import placement — confirm.** Every import sections 1–12 added is at module
+  Closeout, first session (2026-11-06): `make check-comment-hygiene` passes (no change-ID,
+  task-number or change-name reference). A scan of every comment and docstring the branch
+  adds (`git diff -U0 origin/dev...HEAD`, outside `openspec/` and `docs/`) for review,
+  triage, migration or history wording found none; the matches ("replaces", "legacy",
+  "retired key Secret") describe current behaviour or name a delta scenario. One comment
+  needs a code edit, so this part is open and the change returns to implementation:
+  - `.github/workflows/e2e.yml`, the lane list (lines 22–28), which section 10 edited:
+    each lane's entry names what its stack runs and none names the payments double every
+    lane now runs (`compose.payments-double.yml`), as section 4's handoff recorded. Fix:
+    add the double to each lane's entry, or say once that every lane runs it.
+- [x] 13.2 **Import placement — confirm.** Every import sections 1–12 added is at module
   level unless a verified cycle or recorded lazy-load reason keeps it local. A needed move
   returns to implementation.
+  Confirmed: the branch's diff adds two function-local imports, both of
+  `settlement_config_mapping` in a storefront CLI's `payments_section`
+  (`domains/vms/storefront/src/market_storefront/cli.py`,
+  `domains/apicredits/storefront/src/apicredits_storefront/cli.py`), each with the reason
+  beside it: the storefront's settings resolve when its config module is first imported,
+  which must follow the root `--config` option. Every other added import is at module
+  level.
 - [ ] 13.3 **Documentation compliance.** Check D1–D23 against `openspec/README.md`'s
   placement rules and the promotion record below, recording a disposition per decision,
   and check every promoted statement against the code.
+  Closeout, first session: open. 12.7's handoff lists, among the seller documents still
+  configuring a storefront's payments key by variable, a comment in package code, which
+  closeout may not edit:
+  - `domains/apicredits/storefront/src/apicredits_storefront/settings.toml:59`, under
+    `[Settlement.arkhai_payments]`, offers `# api_key_env = "ARKHAI_PAYMENTS_API_KEY"`.
+    D19 and the settlement-configuration delta put a storefront's payments key in its
+    secret layer as `api_key`, keeping `api_key_env` for the buyer. Fix: the comment says
+    the key is `api_key` in the storefront's secret layer, never in this file.
+  The other items of 12.7's handoff (`docs/seller-quickstart.md`,
+  `domains/vms/storefront/examples/README.md`, `e2e-tests/README.md`,
+  `DEPLOYMENT_AND_CONFIG.md`, and the deployment-state MODIFIED delta) are documents
+  and change files, closeout's when it resumes, as is every 13.4–13.11 part.
 - [ ] 13.4 **Narrative compression.** Compress section notes to final behaviour,
   validation evidence, deferred work, and destinations, moving durable rationale into
   `design.md` first.
