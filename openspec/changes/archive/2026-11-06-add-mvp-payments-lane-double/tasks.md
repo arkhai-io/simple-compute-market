@@ -2351,3 +2351,17 @@ confirms zero duplicate keys across all three schemas. No credential-validation
 bypass was observed. Stale-candidate CI was cancelled so full validation targets
 the corrected generated artifacts. Packaging evidence remains applicable: only
 generated duplicate removal and this task note changed after the passing check.
+
+Subsequent validation at1744c3384 completed: Tests42193268247 passed all24jobs
+and all21root make-test constituents; E2E42193268445 passed all3lanes.
+Bare-metal70passed and credits4passed include all three payment stages each;
+VM153passed with only the two designed mediation skips includes payment stages1–2.
+Every authenticated payments setup passed. Actual local Helm passed14served tests,
+verified the mounted dispute entries against the committed overlay with typed
+validation, and ran the payments-check pod to exit0/outcome=ok. The release was
+scaledzero and other namespace replica counts were unchanged. Canonical build and
+render evidence was reused after source and all11image IDs were checked; two
+local tool/storage retries are retained as environmental failures, not passes.
+Independent integration review's duplicate JSON-key finding was corrected by
+canonical regeneration and confirmed independently. Hosted funding, accepting
+mediation and physical-machine qualification remain outside this source proof.
