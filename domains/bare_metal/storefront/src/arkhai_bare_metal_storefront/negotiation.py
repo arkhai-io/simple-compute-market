@@ -180,12 +180,14 @@ def bare_metal_admission_refusal(
     """
 
     if (
-        listing.min_duration_seconds is not None
+        requested.duration_seconds is not None
+        and listing.min_duration_seconds is not None
         and requested.duration_seconds < listing.min_duration_seconds
     ):
         return "bare_metal_duration_below_listing_min"
     if (
-        listing.max_duration_seconds is not None
+        requested.duration_seconds is not None
+        and listing.max_duration_seconds is not None
         and requested.duration_seconds > listing.max_duration_seconds
     ):
         return "bare_metal_duration_above_listing_max"
@@ -231,6 +233,13 @@ class _DefaultBareMetalSellerRoundHook:
                 message=requested,
             )
 
+        if requested.duration_seconds is None:
+            return _rejected_result(
+                reason="reserved duration_seconds is required",
+                seller_reference_amount=seller_reference_amount,
+                strategy_label=strategy,
+                message=requested,
+            )
         terms = BareMetalTerms(
             host_id=listing_resource.host_id,
             physical_host_id=listing_resource.physical_host_id,

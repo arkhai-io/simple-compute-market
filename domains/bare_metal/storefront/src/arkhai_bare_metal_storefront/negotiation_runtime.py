@@ -28,6 +28,8 @@ import base64
 import hashlib
 import json
 from collections.abc import Callable, Mapping
+from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Any
 
 from arkhai_bare_metal import BareMetalMessage, BareMetalTerms
@@ -68,6 +70,7 @@ from market_policy.listing_source import ListingSourceVerdict
 from market_policy.negotiation_middleware import NegotiationDecision
 from market_settlement_runtime import AcceptedObligationArtifacts
 from market_settlement_runtime.rate_servicing import RateServicing, RateServicingUnavailable
+from market_settlement_runtime.horizon import RateTermProjections, ResolvedHorizon, resolve_horizon
 from market_storefront_kit import TradingPause
 
 from .listing_source_check import ListingSourceCheck
@@ -388,6 +391,7 @@ def build_bare_metal_negotiation_runtime(
     settlement_data_dispatch: Mapping[str, AcceptedAgreementBuilder] | None = None,
     seller_stages: SettlementStageTable[Any] = SELLER_STAGES,
     rate_servicing: RateServicing | None = None,
+    rate_term_projections: RateTermProjections | None = None,
 ) -> NegotiationRuntime:
     """Compose bare metal's hooks onto the kit's negotiation runtime.
 
@@ -428,6 +432,7 @@ def build_bare_metal_negotiation_runtime(
             decoded=message,
             wire=dict(envelope),
             requested_duration_seconds=message.duration_seconds,
+            requested_start_utc=message.start_utc,
         )
 
     def listing_of(record: Mapping[str, Any]) -> Any:
@@ -534,6 +539,8 @@ def build_bare_metal_negotiation_runtime(
             proposal.get("settlement_selection") is not None
         ):
             return await evaluate_exact_selection(request, message, listing_id, proposal)
+        if message.duration_seconds is None:
+            raise BareMetalNegotiationRefusal("reserved duration_seconds is required", status_code=400)
         opening = _escrow_proposal(request.history[0].proposal)
         if not (request.listing_record.get("accepted_escrows") or []):
             raise BareMetalNegotiationRefusal(
@@ -636,6 +643,16 @@ def build_bare_metal_negotiation_runtime(
                 status_code=400,
             )
         require_rate_servicing(selected_option)
+        # This preview is for the exact price/build and admission only. The
+        # final acceptance hook repeats it with the runtime's fixed clock and
+        # rebuilds the plan from that horizon before anything is persisted.
+        preview = horizon_for(request.listing_record, message, selected_option, datetime.now(UTC))
+        message = message.model_copy(update={"duration_seconds": preview.duration_seconds})
+        pricing_seconds = (
+            (rate_term_projections or {})[selected_option.settlement_schema](selected_option).period_seconds
+            if any(key in selected_option.settlement for key in ("period", "reserve_ahead_seconds"))
+            else preview.duration_seconds
+        )
         # A deal that provisions the listed machine is held to the same
         # admission rules and records the same terms however it settles.
         provisions = seller_stages[selection.settlement_schema].fulfils_through_capacity
@@ -696,7 +713,7 @@ def build_bare_metal_negotiation_runtime(
                     "selected option advertises more than one amount rate",
                     status_code=400,
                 )
-            trusted_amount = _time_scaled_total(selected_option, message.duration_seconds)
+            trusted_amount = _time_scaled_total(selected_option, pricing_seconds)
             if trusted_amount is not None:
                 if trusted_amount < 1:
                     raise BareMetalNegotiationRefusal(
@@ -726,7 +743,7 @@ def build_bare_metal_negotiation_runtime(
             if built is not None and built.amount is not None
             else proposed_amount
             if proposed_amount is not None
-            else _time_scaled_total(selected_option, message.duration_seconds) or 0
+            else _time_scaled_total(selected_option, pricing_seconds) or 0
         )
         accepted_proposal = {
             "settlement_selection": selection.model_dump(mode="json"),
@@ -770,6 +787,63 @@ def build_bare_metal_negotiation_runtime(
             _matching_acceptance(record, _escrow_proposal(pinned)),
             duration_seconds=int(terms.requested_duration_seconds or 0),
             buyer_amount=None,
+        )
+
+    def horizon_for(
+        record: Mapping[str, Any], message: BareMetalMessage,
+        option: SettlementOption | None, accepted_at: datetime,
+    ) -> ResolvedHorizon:
+        listing = listing_of(record)
+        try:
+            return resolve_horizon(
+                requested_duration_seconds=message.duration_seconds,
+                requested_start_utc=message.start_utc,
+                accepted_at=accepted_at,
+                max_duration_seconds=listing.max_duration_seconds,
+                available_until_utc=listing.available_until_utc,
+                min_duration_seconds=listing.min_duration_seconds,
+                option=option, rate_terms=rate_term_projections or {},
+            )
+        except ValueError as exc:
+            raise BareMetalNegotiationRefusal(str(exc), status_code=400) from exc
+
+    def resolve_acceptance(acceptance: Acceptance) -> Acceptance:
+        state = dict(acceptance.policy_state or {})
+        exact = state.get("exact_selection")
+        option = SettlementOption.model_validate(exact["settlement_option"]) if isinstance(exact, Mapping) else None
+        assert acceptance.accepted_at is not None
+        horizon = horizon_for(acceptance.listing_record, acceptance.terms.decoded, option, acceptance.accepted_at)
+        message = acceptance.terms.decoded.model_copy(update={"duration_seconds": horizon.duration_seconds})
+        if isinstance(exact, Mapping):
+            assert option is not None
+            exact = dict(exact)
+            if exact.get("bare_metal_terms") is not None:
+                exact["bare_metal_terms"] = {**exact["bare_metal_terms"], "duration_seconds": horizon.duration_seconds}
+            build = accepted_obligation_dispatch[option.settlement_schema]
+            if build is not None:
+                selection = SettlementSelection.model_validate(exact["settlement_selection"])
+                try:
+                    built = build(option.model_dump(mode="json"), {
+                        "buyer_principal": acceptance.buyer_principal.model_dump(mode="json"),
+                        "seller_principal": seller_principal.model_dump(mode="json"),
+                        "expiration_unix": selection.expiration_unix,
+                        "duration_seconds": horizon.duration_seconds,
+                        "domain_param_keys": (), "listing_id": acceptance.listing_id,
+                    })
+                    if built.amount is not None and built.amount != acceptance.agreed_amount:
+                        raise ValueError("resolved horizon changed the exact accepted price")
+                    exact["settlement_plan"] = SettlementPlan(
+                        buyer_principal=acceptance.buyer_principal.model_dump(mode="json"),
+                        seller_principal=seller_principal.model_dump(mode="json"),
+                        service_terms=dict(built.service_terms),
+                        obligations=[SettlementObligation.model_validate(built.obligation)],
+                    ).model_dump(mode="json")
+                except (TypeError, ValueError) as exc:
+                    raise BareMetalNegotiationRefusal(str(exc)) from exc
+            state["exact_selection"] = exact
+        return replace(acceptance,
+            agreement=AgreementTerms(duration_seconds=horizon.duration_seconds, start_utc=horizon.start_utc),
+            terms=replace(acceptance.terms, decoded=message), policy_state=state,
         )
 
     def build_artifacts(acceptance: Acceptance, accepted: bool) -> Mapping[str, Any]:
@@ -898,8 +972,10 @@ def build_bare_metal_negotiation_runtime(
         amount_from_proposal=_proposal_amount,
         proposal_from_amount=_proposal_from_amount,
         agreement_terms=lambda _listing, _record, terms: AgreementTerms(
-            duration_seconds=int(terms.requested_duration_seconds or 0)
+            duration_seconds=int(terms.requested_duration_seconds or 0),
+            start_utc=terms.requested_start_utc,
         ),
+        resolve_acceptance=resolve_acceptance,
         build_artifacts=build_artifacts,
         decision_wire=_decision_wire,
         listing_is_live=lambda record: str(record.get("status") or "") == "open",

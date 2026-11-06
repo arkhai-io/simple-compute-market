@@ -171,6 +171,7 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
         accepted_obligation_dispatch: object = None,
         arkhai_payments_stage: object = None,
         rate_servicing: object = None,
+        rate_term_projections: object = None,
     ):
         registration = registry.resolve_registration(binding)
         assert registry is built["registry"]
@@ -211,6 +212,7 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
             accepted_obligation_dispatch=lambda: {},
             arkhai_payments_stage=None,
             rate_servicing=RateServicing(),
+            rate_term_projections={},
             payments_coordinator=None,
             settlement_config=SimpleNamespace(priority=()),
             disputes=SimpleNamespace(refresh=AsyncMock()),

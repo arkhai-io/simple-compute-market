@@ -47,6 +47,7 @@ PAYEE = "22222222-2222-4222-8222-222222222222"
 DISPUTE = "33333333-3333-4333-8333-333333333333"
 SERVICE = Ed25519Signer(bytes(range(1, 33)))
 END = "2035-01-01T00:00:00Z"
+ACCEPTANCE = False
 ENTRY = DisputeEntry.model_validate({
     **dispute_lifecycle(DISPUTE)["adjudication"]["dispute"],
     "interface": MEDIATION_INTERFACE,
@@ -212,6 +213,11 @@ async def exercise(admin, state, *, buyer, db, mode, clauses, address):
     assert state["helper"].requests[-1].default_horizon_seconds == 7200
     print(mode, "typed publication: one capacity identity, reserved + hosted once + independently priced on-demand/spot: PASS")
 
+    if ACCEPTANCE:
+        from horizon_probe import exercise as horizons  # Lazy: optional acceptance diagnostic.
+        reserved = next(item for item in hosted if "period" not in item["settlement"])
+        await horizons(buyer, db, identity, on_demand, mode, state.get("preview"), reserved)
+
     declaration = state["declarations"][MECHANISM]
     for invalid in (None, replace(declaration, contract_revision="different"),
                     replace(declaration, lane_identity="another-lane")):
@@ -317,6 +323,7 @@ async def vm(path):
     from market_storefront.utils import config  # Lazy: VM configuration only.
     from tests._settings_overrides import replaced_setting  # Lazy: VM environment only.
 
+    from horizon_probe import timing, billing, ProposedPayments  # Lazy: selected VM diagnostic.
     helper = ProposedHelper()
     declarations = {MECHANISM: RateServicingDeclaration(MECHANISM, "fixture-rate-v1", "proposed", "terms-probe")}
     state = {"helper": helper, "helpers": {MECHANISM: helper}, "deadline": 1200,
@@ -336,12 +343,18 @@ async def vm(path):
             disputes=RegistryDisputePolicy(DisputeConfig(entries=[ENTRY])),
             rate_servicing=state["servicing"],
             rate_preset_helpers=state["helpers"],
+            rate_term_projections={MECHANISM: timing},
             delivery_deadline_for_pool=lambda site, pool: state["deadline"],
         )
 
     with patch.dict("os.environ", {"XDG_CACHE_HOME": seed_token_cache(path, 31337)}), \
          replaced_setting("pricing.defaults", {}):
-        async with publication_app(path, negotiation=True, settlement_configuration=raw, settlement_composition_factory=factory) as app:
+        async with publication_app(
+            path, negotiation=True, settlement_configuration=raw, settlement_composition_factory=factory,
+            negotiation_options={"project_billing": billing,
+                                 "arkhai_payments_stage": ProposedPayments(),
+                                 "accepted_obligation_dispatch": {MECHANISM: None}},
+        ) as app:
             clauses = [settlement_clause("1"), *presets()]
             app.set_settlement_clauses(clauses)
             projected = pool("bounded", backing="backed", capacity_bounds={"vm": {
@@ -361,6 +374,8 @@ async def bare(path):
     from test_http_publication_rates import _Sites  # Lazy: bare-metal site facade only.
     from arkhai_bare_metal_storefront.settlement_composition import build_bare_metal_settlement_registry  # Lazy: bare-metal environment only.
 
+    from horizon_probe import timing, ProposedSellerStage  # Lazy: selected bare-metal diagnostic.
+    from market_core import SettlementStageTable  # Lazy: bare-metal fixture composition.
     helper = ProposedHelper()
     declarations = {MECHANISM: RateServicingDeclaration(MECHANISM, "fixture-rate-v1", "proposed", "terms-probe")}
     state = {"helper": helper, "helpers": {MECHANISM: helper}, "deadline": 1200,
@@ -382,12 +397,33 @@ async def bare(path):
             disputes=RegistryDisputePolicy(DisputeConfig(entries=[ENTRY])),
             rate_servicing=state["servicing"],
             rate_preset_helpers=state["helpers"],
+            rate_term_projections={MECHANISM: timing},
+            seller_stages=SettlementStageTable({**original.seller_stages,
+                MECHANISM: ProposedSellerStage(original.seller_stages[MECHANISM])}),
             delivery_deadline_for_pool=lambda site, pool: state["deadline"],
         )
         clauses = [item.model_dump(mode="json", exclude_none=True) for item in runtime.publication_clauses] + presets()
         runtime = replace(runtime, settlement_composition=composition, publication_clauses=tuple(
             SettlementPublicationClause.model_validate(item) for item in clauses
         ))
+        async def preview(identity, option, duration):
+            payload = {"ssh_public_key": "ssh-ed25519 fixture", "access_method": "ssh"}
+            if duration is not None:
+                payload["duration_seconds"] = duration
+            plan = await runtime.negotiation_runtime._plan_opening(
+                repository=runtime.db, listing_id=identity,
+                buyer_principal=SERVICE.identity, seller_principal=runtime.seller_principal,
+                proposal={"fields": {"amount": "625000"}, "settlement_selection": {
+                    "option_id": option["option_id"], "expiration_unix": 2147483647,
+                    "settlement": {"schema": MECHANISM, "payer_account": PAYEE},
+                }},
+                terms={"kind": "bare_metal.v2", "version": 1, "payload": payload},
+                negotiation_id="preview",
+            )
+            assert plan.accepted
+            assert plan.acceptance.policy_state["exact_selection"]["bare_metal_terms"]["duration_seconds"] == plan.acceptance.agreement.duration_seconds
+            return {"agreement": plan.artifacts["agreement"].model_dump(mode="json", exclude_none=True)}
+        state["preview"] = preview
         app = _app(runtime)
         async with app.router.lifespan_context(app):
             async with _admin_client(app) as admin, StorefrontClient(
@@ -402,8 +438,10 @@ async def bare(path):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("surface", choices=("vm", "bare"))
+    parser.add_argument("--acceptance", action="store_true")
     args = parser.parse_args()
+    ACCEPTANCE = args.acceptance
     qualify_selector()
     with TemporaryDirectory(prefix="recurring-publication-") as directory:
         asyncio.run((vm if args.surface == "vm" else bare)(Path(directory)))
-    print("LIMIT: proposed injected encoder; no rate authority, approval, materialization, deployed site deadline or acceptance guarantee.")
+    print("LIMIT: proposed injected encoder/timing/data fixtures; no hosted rate authority, approval, mandate, materialization or deployed site deadline.")

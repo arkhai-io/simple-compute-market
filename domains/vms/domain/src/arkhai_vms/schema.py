@@ -54,7 +54,7 @@ class VmMessage(BaseModel):
     """VM-domain negotiation message payload."""
 
     kind: Literal["compute.v1"] = VM_PROVISION_KIND
-    duration_seconds: int
+    duration_seconds: int | None = None
     ssh_public_key: str = Field(default="")
     start_utc: str | None = None
     compute_resource: dict[str, Any] | None = None

@@ -261,10 +261,11 @@ class BareMetalMessage(BaseModel):
     """Bare-metal negotiation message payload."""
 
     kind: Literal["bare_metal.v2"] = BARE_METAL_SCHEMA_KIND
-    duration_seconds: int = Field(
-        ge=1,
-        description="Requested bare-metal lease duration.",
+    duration_seconds: int | None = Field(
+        default=None, ge=1,
+        description="Requested horizon; omission is valid only for recurring options.",
     )
+    start_utc: str | None = None
     access_method: str = Field(
         default=SSH_ACCESS_METHOD,
         description="Requested access method.",
