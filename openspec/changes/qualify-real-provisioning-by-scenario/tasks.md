@@ -1196,7 +1196,7 @@ Files: `e2e-tests/src/e2e_harness/real_provisioning_target.py`; the target examp
 `e2e-tests/tests/unit/test_real_provisioning_target.py` and a new unit test module for the
 helper.
 
-- [ ] 7.1 Target fields (D5, D9). `VmHost.management_unit: str | None`, a systemd service
+- [x] 7.1 Target fields (D5, D9). `VmHost.management_unit: str | None`, a systemd service
   unit name checked by the operator client's `check_service_unit_name` (review 55 F1
   restricted it to services); `RelayAccess.admission_log: str | None`, an absolute
   harness-local path validated as `CleanupOperator.key_path` is. Both join version 2
@@ -1204,7 +1204,16 @@ helper.
   example shows both, commented as optional. Unit (`test_real_provisioning_target.py`): a
   valid unit and path accepted; an invalid unit and a relative or `..` path refused before
   any stage, naming the field.
-- [ ] 7.2 The admission-log reader (D9). It reads the file's lines as the plugin's
+  Done. `_harness_local_path` now serves both `admission_log` and `key_path`. `e2e-tests`
+  raises its bound on `arkhai-vms-provisioning-operator-client` to `>=0.12.0`, the release
+  with `check_service_unit_name`; `make lock` moved only that specifier in
+  `e2e-tests/uv.lock`. Unit (`test_real_provisioning_target.py`): both fields absent by
+  default; both accepted; the example's two commented lines valid once uncommented;
+  `agent`, `agent.socket`, `../agent.service`, a name with a space and the empty name
+  refused, naming `hosts.0.vm.management_unit`; a relative, `./`, `..` and empty path
+  refused, naming `hosts.1.bare_metal.access.relay.admission_log`; each field refused on
+  the other domain's host or the other access mode.
+- [x] 7.2 The admission-log reader (D9). It reads the file's lines as the plugin's
   documented log contract (`tools/frp-grant-admission/README.md#the-log`) and, for one
   delivered lease, finds an `admit` line with `verified` true, `jti` equal to the
   reservation, `remote_port` equal to the lease record's `remote_port`, and `kid` equal to
@@ -1213,19 +1222,96 @@ helper.
   relay's newer active key but not the lease's recorded key refused; an earlier `admit`
   under a retired key ignored when the latest grant's line is present; a missing, unverified
   or mismatched line failing naming the lease.
-- [ ] 7.3 Per-observation outcome (D8). Each qualification stage declares the observations
+  Done in a new `helpers/qualification.py`: `relay_lease_record` (the reservation's one
+  unreleased `fulfillment` row), `require_admitted` (the matching rule, `remote_port`
+  required an integer) and `check_admission(target, provisioning_client, reservation)`.
+  The grant's `jti` is the lease's `owner_id`, the reservation
+  (`compute_provisioning/relays/grants.py`). Beyond the plan, each found needed:
+  - **A direct target** delivers no relayed lease, so the check returns `None` and
+    passes; only a relayed target without `admission_log` skips, naming
+    `REAL_PROVISIONING_TARGET.hosts.<domain>.access.admission_log`.
+  - **The copy may trail the relay's log.** The check re-reads it within a bound (60s,
+    injectable clock and sleep) before failing; a file that cannot be read fails at once,
+    naming the field and the path.
+  - **Lines that are not decisions are skipped**: a load line, or a partial last line.
+  Unit (`test_qualification_helper.py`): the latest grant's admit found; an admit under
+  the newer active key refused; an earlier retired-key admit ignored beside the latest;
+  missing, unverified, refused, other reservation, other port, port as text and other key
+  each failing naming the lease, its reservation, port and grant key; a lease with no
+  signed grant; the record lookup (released and other rows passed over, none found named);
+  the check against a file, its skip naming the field, a direct target, the re-read
+  finding a line that arrives, the bound reached, and an unreadable file.
+- [x] 7.3 Per-observation outcome (D8). Each qualification stage declares the observations
   that require it; at module end a hook logs each observation's outcome by D8's rule —
   made when every requiring stage passed, failed when one failed, unproven when none failed
   and one skipped, naming the skip's prerequisite — writing no file. Unit: observation 2
   recorded unproven naming `management_unit` when its diagnostics stage skipped and every
   other stage passed; observations 4 and 5 resolved independently in one module; a failure
   outranking a skip.
-- [ ] 7.4 **Verification checkpoint.** Unit: `make test-e2e-unit`. Run `make test` and
+  Done in `helpers/qualification.py`. A module names its `OBSERVATIONS` (the runbook's
+  numbers, as strings) and each stage class its `observations`. The roles conftest's
+  `pytest_runtest_makereport` wrapper keeps each declared stage's reports in its item's
+  stash (`record_report`), and once the module's last item has reported its teardown it
+  logs the module's outcomes: made at INFO, failed at ERROR, unproven at WARNING with each
+  skip's reason. The conftest's `pytest_sessionfinish` logs a module a stopped run (`-x`)
+  left unlogged; each module is logged once. A module needs no fixture. Decided here:
+  - **Stages are read from the module's classes**, not the run's items, so a stage the
+    run deselected or never collected reads "did not run", and its observations unproven.
+  - **Any failed phase fails the stage**, its teardown's included. The last item's
+    teardown finalizes the module's fixtures, so a failure in the module's cleanup fails
+    that item's stage when it is a declared one: conservative, and stated in
+    `record_report`'s docstring.
+  - **An observation no stage of the module declares** is unproven, "no stage requiring
+    it ran".
+  Unit (`test_qualification_helper.py`): the three planned cases on `observation_outcomes`;
+  an observation with no stage; each phase's outcome (passed, failed, setup error, setup
+  and call skips, teardown failure, not run); reports kept only for declared stages; a
+  declared stage not collected reads not run. Two further cases run pytest in a
+  subprocess over a constructed module with the roles conftest's two hooks, no stack or
+  service involved, as `test_scenario_cleanup_order.py` runs `--setup-plan`. With `-k`
+  deselecting one stage, the log shows observation 2 unproven naming the skip's reason, 4
+  failed at the last stage, whose teardown failed, 5 made, and 6 unproven at the
+  deselected stage, each once. With `-x` after a first failing stage, the session's end
+  logs 2 failed and 5 unproven, its stage not run.
+- [x] 7.4 **Verification checkpoint.** Unit: `make test-e2e-unit`. Run `make test` and
   `make check-comment-hygiene`.
   End-to-end: none; the fields and the reader are read by section 8's modules, in no
   lane. None is owed in the pipeline.
   Owed by validation: `tests.yml`, job `test · test-e2e-unit` — passes with the target and
   helper cases.
+  Unit: `make test-e2e-unit`, 659 passed, after both fresh-context passes' fixes.
+  `make lock` rewrote `e2e-tests/uv.lock` only; `make check-packaging` passed after it.
+  `make check-change` passed all 12 checks, comment hygiene among them. `make test` is
+  deferred to section 8's checkpoint, by the owner's direction given in this round's
+  implementation invocation: focused suites and packaging before each intermediate commit,
+  one full `make test` for the round's frozen implementation. This section touched only
+  `e2e-tests`, whose unit suite is the one above; section 8's note records the full run.
+  End-to-end scenarios, confirmed: none; section 8's modules, in no lane, are the first
+  callers. None is owed in the pipeline.
+  Owed by validation: `tests.yml`, job `test · test-e2e-unit` — passes with the target and
+  helper cases (confirmed).
+
+Handoff from section 7:
+
+- **For section 8.** A qualification module sets `OBSERVATIONS = ("2",)` (or `("4", "5")`,
+  `("6",)`) and gives each stage class an `observations` tuple; the roles conftest does the
+  rest. A check an observation needs is a stage, not a fixture's teardown. Admission:
+  `check_admission(target, provisioning_client, reservation)`, the reservation the first
+  element of the driver's `reservation_of(fulfillment_id)`; it skips naming
+  `admission_log` itself. The management unit is `target.management_unit` (VM host); the
+  stage reading it skips naming `REAL_PROVISIONING_TARGET.hosts.vm.management_unit` when it
+  is `None`, which section 8 writes.
+- **Fresh-context check.** First pass, fixed: stages read from the module rather than the
+  run's items (a deselected stage had read as made); a teardown failure counted; the hook
+  run under pytest in a unit case; an unreadable log named; a trailing copy re-read within
+  a bound; the example's optional lines loaded, not only searched. Second pass, fixed: the
+  outcomes logged from the report hook after the last item's teardown report, not a
+  fixture inside it (a last stage's failed teardown had read as made), with a session-end
+  fallback; a lease with no grant failing without the re-read; non-callable `test*`
+  attributes; the runbook's heading cited; the management unit's comments describing only
+  the field until section 8 reads it; this section's note on `make test`. Declined:
+  `pytester` for the subprocess cases, which needs a root-conftest plugin, where the suite
+  already runs pytest in a subprocess for `--setup-plan`.
 
 ## 8. The qualification modules
 
