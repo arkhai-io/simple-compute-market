@@ -17,6 +17,7 @@ plain rename.
 from __future__ import annotations
 
 from alembic import op
+import sqlalchemy as sa
 
 revision = "018_listing_resource_column"
 down_revision = "017_publisher_replay_leases"
@@ -25,6 +26,13 @@ depends_on = None
 
 
 def upgrade() -> None:
+    columns = {column["name"] for column in sa.inspect(op.get_bind()).get_columns("listings")}
+    # Both fresh-chain schemas and deployed schemas must reach the same head;
+    # a schema carrying both names is ambiguous and cannot be renamed safely.
+    if "listing_resource" in columns:
+        if "offer_resource" in columns:
+            raise RuntimeError("listings has both listing_resource and offer_resource")
+        return
     with op.batch_alter_table("listings") as batch_op:
         batch_op.alter_column("offer_resource", new_column_name="listing_resource")
 

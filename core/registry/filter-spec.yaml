@@ -12,7 +12,7 @@
 # registries whose declared id matches; registries without the header match
 # any domain for compatibility with pre-identity deployments.
 
-version: 8
+version: 9
 
 schema:
   id: compute.market
@@ -228,6 +228,19 @@ listing_shape:
     max_duration_seconds:
       type: [integer, "null"]
       minimum: 1
+    rate_structure:
+      description: Resolved domain family rates, independent of the advertised capacity shape.
+      type: [object, "null"]
+      additionalProperties:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required: [asset, rate, per]
+          properties:
+            asset: {type: string, minLength: 1}
+            rate: {type: string, pattern: '^[0-9]+([.][0-9]+)?$'}
+            per: {type: string, minLength: 1}
     oracle_address:
       type: [string, "null"]
 

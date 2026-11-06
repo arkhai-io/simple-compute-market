@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from core_registry.api.api_key_auth import require_read_access, require_write_access
 from core_registry.api.filter_eval import FilterParamError, build_criteria, evaluate_all
 from core_registry.api.filter_spec import compute_etag, get_loaded_spec
-from core_registry.api.validate_routes import reject_retired_listing_shape
+from core_registry.api.validate_routes import validate_listing_publication
 from core_registry.api.publisher_auth import (
     authenticate_publisher_request,
     cached_response,
@@ -22,6 +22,7 @@ from core_registry.api.publisher_auth import (
     normalize_if_match,
     complete_authenticated_request,
     registry_authority_signer,
+    retained_request_evidence,
     signed_response,
 )
 from core_registry.api.utils import (
@@ -55,16 +56,18 @@ async def publish_listing(
         body=body,
     )
     require_write_access(request, db)
-    reject_retired_listing_shape(body)
     signer = registry_authority_signer(request)
     replay = cached_response(authenticated, signer=signer)
     if replay is not None:
         return replay
 
+    validate_listing_publication(body)
+    evidence = await retained_request_evidence(request, authenticated)
     listing_id = body.get("listing_id")
     if not isinstance(listing_id, str) or not listing_id:
         raise HTTPException(status_code=400, detail="listing_id is required")
 
+    status = validate_order_status(body.get("status", "open"))
     publisher = ensure_publisher_for_identity(
         db,
         authenticated.principal,
@@ -77,32 +80,25 @@ async def publish_listing(
                 status_code=403,
                 detail="Listing is owned by another publisher",
             )
-        update_fields = {
-            "listing_resource": body.get("listing_resource"),
-            "accepted_escrows": body.get("accepted_escrows"),
-            "settlement_options": body.get("settlement_options"),
-            "demands": body.get("demands"),
-            "max_duration_seconds": body.get("max_duration_seconds"),
-            "oracle_address": body.get("oracle_address"),
-        }
-        for field, value in update_fields.items():
-            if value is not None:
-                setattr(existing, field, value)
+        existing.published_document = dict(body)
+        existing.publisher_publication = evidence
+        updates = dict(existing.publisher_updates or {})
+        updates.pop("oracle_address", None)
         if "status" in body:
-            existing.status = validate_order_status(body["status"])
+            existing.status = status
+            updates.pop("status", None)
+        existing.publisher_updates = updates
         existing.updated_at = datetime.utcnow()
         listing = existing
     else:
         listing = Listing(
             listing_id=listing_id,
             publisher_id=publisher.publisher_id,
-            listing_resource=body.get("listing_resource", {}),
-            accepted_escrows=body.get("accepted_escrows", []),
-            settlement_options=body.get("settlement_options", []),
-            demands=body.get("demands", []),
-            max_duration_seconds=body.get("max_duration_seconds"),
-            oracle_address=body.get("oracle_address"),
-            status=validate_order_status(body.get("status", "open")),
+            published_document=dict(body),
+            publisher_publication=evidence,
+            publisher_updates={},
+            listing_resource={},
+            status=status,
         )
         db.add(listing)
     db.flush()
@@ -268,6 +264,14 @@ async def update_listing(
     if not publisher_accepts_identity(listing.publisher, authenticated.principal):
         raise HTTPException(status_code=403, detail="Publisher principal does not own listing")
 
+    unsupported = sorted(set(body) - {"status", "oracle_address"})
+    if unsupported:
+        raise HTTPException(status_code=422, detail={"unsupported_update_fields": unsupported})
+    evidence = await retained_request_evidence(request, authenticated)
+    listing.publisher_updates = {
+        **(listing.publisher_updates or {}),
+        **{name: evidence for name in body},
+    }
     if "status" in body:
         listing.status = validate_order_status(body["status"])
     if "oracle_address" in body:
