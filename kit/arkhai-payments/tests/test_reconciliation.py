@@ -44,6 +44,9 @@ def test_the_loop_waits_skips_held_passes_and_survives_a_failure():
             if waits > 3:
                 raise asyncio.CancelledError
 
+        async def held_poll(seconds: float) -> None:
+            held_polls.append(seconds)
+
         with pytest.raises(asyncio.CancelledError):
             await run_payment_reconciliation(
                 reconcile_once,
@@ -51,12 +54,15 @@ def test_the_loop_waits_skips_held_passes_and_survives_a_failure():
                 logger=_LOGGER,
                 paused=lambda: next(held),
                 wait=wait,
+                sleep=held_poll,
             )
 
+    held_polls: list[float] = []
     asyncio.run(run())
 
     # Three intervals: the first pass fails, the second is held, the third runs.
     assert passes == [0, 1]
+    assert len(held_polls) == 1
 
 
 def test_a_gate_requires_an_interruptible_wait():

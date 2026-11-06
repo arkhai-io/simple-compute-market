@@ -47,7 +47,7 @@ import logging
 import threading
 import urllib.error
 import urllib.request
-from collections.abc import Callable, Iterable, Mapping, MutableMapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping, MutableMapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -197,13 +197,21 @@ def required_contract_addresses(chain: ProbedChain) -> dict[str, str]:
     return addresses
 
 
+async def _wait_bounded(pending: asyncio.Future[Any], timeout: float) -> None:
+    # ``wait`` leaves the construction running on timeout, where ``wait_for``
+    # would cancel the future the next probe adopts.
+    await asyncio.wait((pending,), timeout=timeout)
+
+
 class AlkahestChainProbe:
     """Each configured chain's last probe result and the live chain-client map.
 
     ``build_client`` constructs one chain's client by name and raises when it
     cannot; ``clients`` is the map every consumer is handed, which the probe
-    owns and fills in place. ``json_rpc`` and ``clock`` are the
-    boundaries a test replaces.
+    owns and fills in place. ``json_rpc``, ``clock`` and ``wait_for_construction``
+    are the boundaries a test replaces; the last bounds a step's wait for a
+    client still being constructed, and returns, without cancelling it, once
+    the construction is done or the bound has passed.
     """
 
     def __init__(
@@ -219,6 +227,9 @@ class AlkahestChainProbe:
             required_contract_addresses
         ),
         clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        wait_for_construction: Callable[
+            [asyncio.Future[Any], float], Awaitable[None]
+        ] = _wait_bounded,
     ) -> None:
         self._chains = {chain.name: chain for chain in chains}
         self._build_client = build_client
@@ -228,6 +239,7 @@ class AlkahestChainProbe:
         self._json_rpc = json_rpc
         self._required_addresses = required_addresses
         self._clock = clock
+        self._wait_for_construction = wait_for_construction
         self._results: dict[str, ChainProbeResult] = {}
         self._constructions: dict[str, asyncio.Future[Any]] = {}
 
@@ -300,9 +312,7 @@ class AlkahestChainProbe:
         if pending is None or pending.get_loop() is not asyncio.get_running_loop():
             pending = self._start_construction(chain_name)
             self._constructions[chain_name] = pending
-        # ``wait`` leaves the construction running on timeout, where
-        # ``wait_for`` would cancel the future the next probe adopts.
-        await asyncio.wait((pending,), timeout=self._timeout)
+        await self._wait_for_construction(pending, self._timeout)
         if not pending.done():
             logger.warning(
                 "[ALKAHEST] client for chain %s is still being constructed", chain_name

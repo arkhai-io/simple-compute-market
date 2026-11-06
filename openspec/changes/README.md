@@ -664,6 +664,14 @@ Changes with no campaign; each stands alone.
 | [`deduplicate-dynaconf-bootstrap`](deduplicate-dynaconf-bootstrap/) | ready for closeout | — | Review follow-up 5.1–5.4 complete; re-validation (5.5) and closeout (Section 6) remain. Its design carries a question gating the `kit/config` extraction: `settlement_migration.py` moves to the settlement runtime | Parameterized kit/config construction with exact provisioning and e2e parity; storefront loader excluded. Useful precedent for the kit-composition extractions |
 | [`check-storefront-environment-reads`](check-storefront-environment-reads/) | ready for design | — | Proposal only; opened 2026-10-15 from `share-site-projection-state`'s design review 02 (§8.1), whose triage took the inventory `design.md` records. That change, which states the rule this one checks in `deployment-state`, archived 2026-10-19 | A mechanical check, run in CI and from `make check-packaging`, that every storefront configuration value reaches it through its configuration system: source and charts supply outside it only meta-configuration (the configuration directory and profiles) and values kept from the loader (the signing credential), and a chart knows a value only where the deployment needs it; other reads (platform metadata, a subprocess's environment, migration diagnostics) are declared per package with their reason. The check is never a runtime refusal |
 
+### Unowned work with no campaign
+
+No change owns these yet.
+
+| Item | Origin |
+|---|---|
+| A storefront database is opened by about 125 raw `sqlite3.connect` calls across `core/storefront`, `kit/pool-overrides` and other kits, and each storefront domain, each with Python's default 5-second busy timeout. One connection helper in a kit every one of them can import, taking the database as a value that carries its connection settings, would put those settings in one place. It would also let the two bare-metal storefront tests of a locked database meet the lock without a busy timeout, instead of each waiting 5 seconds (`TESTING.md`, "Tests wait on events, never on durations") | Found while removing timed waits from `make test` |
+
 ## Archived and superseded
 
 `settle-through-arkhai-payments` was archived on 2026-10-08 as delivered: Arkhai payments is a peer settlement mechanism in all three domains, hosted Stripe settlement is gone, and the change merged with the development branch. Live payment qualification remains with the payments service's own end-to-end tests.

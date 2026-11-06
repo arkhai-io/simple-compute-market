@@ -269,7 +269,9 @@ class Echo:
         self._server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Handler)
         self._server.daemon_threads = True
         self.port = self._server.server_address[1]
-        threading.Thread(target=self._server.serve_forever, daemon=True).start()
+        # shutdown() returns only at serve_forever's next poll, and the library
+        # has no way to wake it, so the poll is short rather than the default 0.5s.
+        threading.Thread(target=lambda: self._server.serve_forever(poll_interval=0.01), daemon=True).start()
 
     def close(self) -> None:
         self._server.shutdown()

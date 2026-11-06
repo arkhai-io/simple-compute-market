@@ -1971,6 +1971,29 @@ def _pause_after_the_obligation_check(ledger, monkeypatch):
     return checked, release
 
 
+class _ReportingLock:
+    """The ledger's lock, reporting through ``reached`` when the thread named
+    ``reporter`` tries to take it: the moment that thread is serialized, which
+    a test can wait on instead of a duration."""
+
+    def __init__(self, lock, reporter: str, reached: threading.Event) -> None:
+        self._inner, self._reporter, self._reached = lock, reporter, reached
+
+    def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:
+        if threading.current_thread().name == self._reporter:
+            self._reached.set()
+        return self._inner.acquire(blocking, timeout)
+
+    def release(self) -> None:
+        self._inner.release()
+
+    def __enter__(self) -> bool:
+        return self.acquire()
+
+    def __exit__(self, *_exc) -> None:
+        self.release()
+
+
 def _move_in_one_transaction(ledger, resource_id: str, pool_id: str) -> None:
     """A caller composing a pool move into its own transaction, as the
     document importer does: serialized through its commit."""
@@ -2034,6 +2057,10 @@ def test_a_reservation_racing_a_pool_move_never_survives_against_the_moved_resou
     ledger.register_resource(resource_id="r1", pool_id="default", total_units=4)
     checked, release = _pause_after_the_obligation_check(ledger, monkeypatch)
     outcomes: dict[str, object] = {}
+    # Set when the reserve reaches the ledger's lock or finishes, whichever
+    # comes first.
+    reached = threading.Event()
+    monkeypatch.setattr(ledger, "_lock", _ReportingLock(ledger._lock, "reserver", reached))
 
     def reserve():
         try:
@@ -2043,18 +2070,19 @@ def test_a_reservation_racing_a_pool_move_never_survives_against_the_moved_resou
             )
         except Exception as exc:  # the refusal is an acceptable outcome
             outcomes["reserve"] = exc
+        finally:
+            reached.set()
 
     mover = threading.Thread(target=_move_in_one_transaction, args=(ledger, "r1", "pool-b"))
-    reserver = threading.Thread(target=reserve)
+    reserver = threading.Thread(target=reserve, name="reserver")
     mover.start()
     assert checked.wait(timeout=10)
     reserver.start()
-    # Give the reserve the whole pause to run in. Serialized, it cannot
-    # finish while the move holds the lock, so this wait expires and the
-    # move resumes; unserialized, it would finish here and commit against
-    # the old pool before the move writes. The assertion below does not
-    # depend on this wait, only whether the counterfactual is exercised.
-    reserver.join(timeout=1)
+    # Resume the move only once the reserve has run as far as it can inside
+    # the pause. Serialized, it is blocked on the lock the move holds;
+    # unserialized, it has finished and committed against the old pool before
+    # the move writes, the counterfactual the assertion below would catch.
+    assert reached.wait(timeout=10), "the reserve never ran"
     release.set()
     mover.join(timeout=10)
     reserver.join(timeout=10)

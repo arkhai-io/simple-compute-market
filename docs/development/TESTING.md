@@ -173,6 +173,21 @@ the callback, and `await asyncio.wait_for(event.wait(), timeout=...)`
 before proceeding. If no such seam exists yet where a test needs one,
 adding it is the correct fix, not a sleep.
 
+**Tests wait on events, never on durations:** a test does not spend the
+time a scenario passes through. An interval, timeout, or deadline the code
+under test waits out is driven in fake time, through the injected clock and
+sleep or wait the code already takes or a seam added for it. A state the
+test needs is signalled by the code reaching it, such as a thread arriving
+at a lock, not assumed after a pause. A deadline the scenario is defined
+by is asked as a deadline of now, and a lock the code must find held is
+met with no busy timeout. Real time is spent only to prove a real
+operating-system timeout, such as a subprocess killed at its limit, by one
+test per boundary. The one standing exception is a real server a test
+cannot replace with an in-process transport, whose library stops only at
+its next poll: `socketserver`'s `serve_forever` is run with
+`poll_interval=0.01`, and the storefronts' loopback uvicorn servers stop on
+an event rather than at uvicorn's poll.
+
 **Leave nothing held:** a test that holds a job at a mock rule's gate
 (`pause_before_result`) ends that hold itself, by resuming the rule or by
 cancelling the job, so the test is idempotent: it leaves no execution
