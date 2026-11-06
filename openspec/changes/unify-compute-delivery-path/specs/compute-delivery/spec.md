@@ -127,6 +127,8 @@ After activation and a `start` authorization the path MUST call `begin_billing` 
 
 Available MUST mean readiness, activation, billing start and disclose authorization are durable, without any buyer read. Converged MUST additionally mean the domain's continuation — an Alkahest claim or evidence publication — is acknowledged, or that the domain has none.
 
+An end due after availability MUST NOT stop the continuation, which settles service already delivered. Every drive of an available deal MUST run the continuation and then reconcile a due end: while the continuation is unacknowledged and an end is due, `drive` MUST return `pending`; once it is acknowledged, or the domain has none, it MUST return `ended`, never `available` or `converged`.
+
 #### Scenario: A buyer never reads
 
 - **WHEN** a deal's ready evidence, activation, billing start and disclose authorization complete
@@ -136,6 +138,12 @@ Available MUST mean readiness, activation, billing start and disclose authorizat
 
 - **WHEN** a deal is available but publishing its Alkahest evidence failed
 - **THEN** `drive` returns `available`, not `converged`, and retries the publication without another fulfillment
+
+#### Scenario: A buyer ends an available deal before its claim is acknowledged
+
+- **WHEN** a buyer's end falls due for an available Alkahest deal whose claim is not yet acknowledged
+- **THEN** the next drive runs the claim again and returns `pending`
+- **AND** the drive after the claim is acknowledged returns `ended`, with no delivery failure recorded beside the buyer's end
 
 ### Requirement: Every step recovers the same resource
 

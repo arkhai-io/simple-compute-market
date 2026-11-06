@@ -169,6 +169,8 @@ class FakeFulfillment:
         self.result: dict[str, Any] = {"endpoint": "vm-1.example:22", "ready_at": "fixed"}
         self.lose_begin = 0
         self.reads: list[str] = []
+        #: Fields an answer is rewritten with, by read: ``status`` or ``lease``.
+        self.rewrite: dict[str, dict[str, Any]] = {}
 
     async def begin_fulfillment(self, body, *, site_id):
         self.begins.append(body)
@@ -186,7 +188,7 @@ class FakeFulfillment:
         return FulfillmentStatusResponse(
             fulfillment_id=fulfillment_id, capacity_reservation_id=capacity_reservation_id,
             state=self.state, failure_reason="create_failed" if self.state == "failed" else None,
-        )
+        ).model_copy(update=self.rewrite.get("status", {}))
 
     async def get_fulfillment_result(self, fulfillment_id, *, capacity_reservation_id, site_id):
         self.reads.append("result")
@@ -198,7 +200,7 @@ class FakeFulfillment:
             capacity_reservation_id=capacity_reservation_id, deal_ref=row["deal_ref"], offering_mode="vm",
             executor_target="host-1", lease_start_utc=row["lease_start_utc"],
             lease_end_utc=row["lease_end_utc"], status=lease_state_for_reservation_state(row["state"]),
-        )
+        ).model_copy(update=self.rewrite.get("lease", {}))
 
 
 class FakeProgress:

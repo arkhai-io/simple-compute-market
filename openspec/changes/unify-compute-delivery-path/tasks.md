@@ -536,6 +536,45 @@ refusal scenario.
       exercise servicing, not the path; the tests assert the journaled filing
       instead. The payments kit returns to the dev group for the hosted adapter test.
 
+      Round 1 triage fixes (review 22; validation 24 passed with no failures; the
+      owner's notes had none):
+      - 22 F1, identities on authority reads: `_ready` acts on a fulfillment status
+        only when it is a `FulfillmentStatusResponse` naming the recorded fulfillment
+        and reservation, else `site_unanswered`; `_activation_refused` explains a 409
+        from the lease only when it is a `LeaseView` naming the recorded reservation,
+        else `activation_unexplained` with no hand-off. Both keep the recorded
+        identities and end nothing.
+      - 22 F2, an end after availability (the owner chose option B, recorded in D11
+        and the delta's availability requirement): every drive of an available deal
+        runs the continuation, then reconciles a due end — `pending` while the
+        continuation is unacknowledged, `ended` through `_ended` once it is
+        acknowledged or the domain has none; with no end due, `available` or
+        `converged` as before. So 4.3's "later drives go straight to the continuation"
+        now means they go to the continuation and then reconcile the end. A
+        continuation answer that is not a `ContinuationState` is now
+        `domain_result_invalid`: the earlier membership test read the string
+        `"acknowledged"` as converged.
+      - Tests (library integration, `test_drive_delivery.py`, with a `rewrite` hook on
+        the fake fulfillment's status and lease reads): a status naming another
+        fulfillment while `active`, and another reservation while `failed`; a status
+        and a lease answer of the wrong kind; a lease view naming another reservation
+        after a 409; an available Alkahest deal whose claim is pending when the
+        buyer's end falls due (`pending`, then `ended` once acknowledged, with no
+        delivery failure recorded); an available deal with no continuation ended by
+        the buyer; one past its term (`ended`, no hand-off); an end recorded for later
+        leaving the deal `converged`; and a continuation answer of the wrong kind.
+      - Evidence: `make -C domains test-compute-delivery` 126 passed (library
+        integration and unit); `make test` passed; `make check-packaging` passes;
+        `make check-comment-hygiene` passes; `make check-change` fails only on the
+        closeout citation of `openspec/specs/compute-delivery/architecture.md`, as
+        before. The fresh-context check found nothing that must be fixed. Taken from
+        it: a test for a lease answer of the wrong kind; the 2×2 status case reduced
+        to two, per `TESTING.md`'s one representative case; and D11's residual
+        widened to the `pending`-then-`ended` path a hook can see. Noted, no change:
+        while the continuation is pending the path does not drive the physical end,
+        because the route that records an end already does. End-to-end: none, as
+        before; owed by validation: none.
+
 ## 5. VM on the family path
 
 Delivers VM's port implementations, its hook and recovery running `drive`, the window

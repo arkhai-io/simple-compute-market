@@ -117,6 +117,55 @@ async def test_pending_evidence_publication_is_available_not_converged_and_retri
     assert len(rig.fulfillment.reads) == reads
 
 
+async def test_an_end_after_availability_lets_a_pending_continuation_land_and_then_ends(rig):
+    rig.domain.continuation_state = ContinuationState.PENDING
+    assert (await rig.drive()).kind is OutcomeKind.AVAILABLE
+    rig.clock[0] += 60
+    record_buyer_end(rig, at=rig.clock[0])
+    rig.clock[0] += 60
+    pending = await rig.drive()
+    assert pending.kind is OutcomeKind.PENDING and "ended" in pending.detail
+    assert rig.domain.continuations == 2 and rig.end_port.calls == []
+    rig.domain.continuation_state = ContinuationState.ACKNOWLEDGED
+    ended = await rig.drive()
+    assert ended.kind is OutcomeKind.ENDED and ended.evidence_ref == "buyer-end"
+    assert rig.domain.continuations == 3
+    assert rig.end_port.calls and rig.end_port.calls[0][0] is True
+    # The end is the buyer's, after delivery: no delivery failure is recorded beside it.
+    assert [request.source_ref for request in requests(rig)] == ["buyer-end"]
+    assert len(rig.fulfillment.begins) == 1
+
+
+async def test_an_end_after_availability_ends_a_deal_with_no_continuation(rig):
+    assert (await rig.drive()).kind is OutcomeKind.CONVERGED
+    record_buyer_end(rig, at=rig.clock[0])
+    ended = await rig.drive()
+    assert ended.kind is OutcomeKind.ENDED and ended.evidence_ref == "buyer-end"
+    assert rig.domain.continuations == 2
+    assert [request.source_ref for request in requests(rig)] == ["buyer-end"]
+
+
+async def test_an_available_deal_past_its_term_is_ended_without_a_delivery_failure(rig):
+    assert (await rig.drive()).kind is OutcomeKind.CONVERGED
+    rig.clock[0] = rig.start + 7200
+    ended = await rig.drive()
+    assert ended.kind is OutcomeKind.ENDED and ended.evidence_ref == "servicing_delivery:deal"
+    assert requests(rig) == []
+
+
+async def test_an_end_recorded_for_later_leaves_an_available_deal_converged(rig):
+    assert (await rig.drive()).kind is OutcomeKind.CONVERGED
+    record_buyer_end(rig, at=rig.clock[0] + 600)
+    assert (await rig.drive()).kind is OutcomeKind.CONVERGED
+
+
+async def test_a_continuation_answer_of_the_wrong_kind_is_domain_result_invalid(rig):
+    rig.domain.continuation_state = "acknowledged"
+    outcome = await rig.drive()
+    assert (outcome.kind, outcome.reason) == (OutcomeKind.REPAIR_REQUIRED, RepairReason.DOMAIN_RESULT_INVALID)
+    assert outcome.evidence_ref == "continuation:deal"
+
+
 async def test_a_truncation_before_activation_is_kept_and_activation_records_the_sites_instant(rig):
     await dispatched(rig)
     record_buyer_end(rig, at=rig.start + 3600)
@@ -216,6 +265,61 @@ async def test_a_failed_provisioning_is_handed_to_the_end_operation_and_adopted(
     assert len(rig.fulfillment.begins) == 1
     # The dispatched work is ended through the domain's end port, never replaced.
     assert rig.end_port.calls[0][0] is True and rig.site.rows["res-1"]["state"] == "leased"
+
+
+@pytest.mark.parametrize(("rewrite", "state"), [
+    # Acted on, the first would activate the deal and the second end it.
+    ({"fulfillment_id": "ful-other"}, "active"),
+    ({"capacity_reservation_id": "res-other"}, "failed"),
+])
+async def test_a_status_naming_another_fulfillment_or_reservation_is_site_unanswered(rig, rewrite, state):
+    await dispatched(rig)
+    rig.fulfillment.state = state
+    rig.fulfillment.rewrite["status"] = rewrite
+    outcome = await rig.drive()
+    assert (outcome.kind, outcome.reason) == (OutcomeKind.REPAIR_REQUIRED, RepairReason.SITE_UNANSWERED)
+    assert outcome.evidence_ref == "fulfillment:ful-1"
+    assert outcome.capacity_reservation_id == "res-1" and outcome.fulfillment_id == "ful-1"
+    assert rig.site.calls.count("activate") == 0 and rig.end_port.calls == []
+    assert requests(rig) == [] and rig.record().available_at is None
+
+
+async def test_a_status_answer_of_the_wrong_kind_is_site_unanswered(rig):
+    await dispatched(rig)
+
+    async def untyped(fulfillment_id, *, capacity_reservation_id, site_id):
+        return {"fulfillment_id": fulfillment_id, "capacity_reservation_id": capacity_reservation_id,
+                "state": "active"}
+
+    rig.fulfillment.get_fulfillment_status = untyped
+    outcome = await rig.drive()
+    assert (outcome.kind, outcome.reason) == (OutcomeKind.REPAIR_REQUIRED, RepairReason.SITE_UNANSWERED)
+    assert rig.site.calls.count("activate") == 0
+
+
+async def test_a_refused_activation_explained_by_another_leases_view_is_unexplained(rig):
+    await dispatched(rig)
+    rig.site.rows["res-1"]["state"] = "released"
+    rig.fulfillment.rewrite["lease"] = {"capacity_reservation_id": "res-other"}
+    outcome = await rig.drive()
+    assert (outcome.kind, outcome.reason) == (OutcomeKind.REPAIR_REQUIRED, RepairReason.ACTIVATION_UNEXPLAINED)
+    assert outcome.evidence_ref == "lease:res-1"
+    assert outcome.capacity_reservation_id == "res-1" and outcome.fulfillment_id == "ful-1"
+    assert requests(rig) == [] and rig.end_port.calls == []
+    assert [intent for intent in intents(rig) if intent.kind in ("billing", "filing")] == []
+
+
+async def test_a_refused_activation_with_a_lease_answer_of_the_wrong_kind_is_unexplained(rig):
+    await dispatched(rig)
+    rig.site.rows["res-1"]["state"] = "released"
+
+    async def untyped(capacity_reservation_id, *, site_id):
+        return {"capacity_reservation_id": capacity_reservation_id, "status": "released"}
+
+    rig.fulfillment.get_lease = untyped
+    outcome = await rig.drive()
+    assert (outcome.kind, outcome.reason) == (OutcomeKind.REPAIR_REQUIRED, RepairReason.ACTIVATION_UNEXPLAINED)
+    assert requests(rig) == [] and rig.end_port.calls == []
 
 
 async def test_a_fulfillment_in_an_unknown_state_is_site_unanswered(rig):

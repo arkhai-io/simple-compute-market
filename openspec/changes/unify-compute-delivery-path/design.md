@@ -432,6 +432,25 @@ the pool's policy is `renewable-compute-lease-deadlines`' to produce, consuming 
 classification. Dispatched work is adopted and ended, never replaced; the site's
 end report is intent and evidence, not proof of release.
 
+**An end after availability (22 F2, settled in the triage of implementation round
+1).** An end due after availability does not stop the domain's continuation, which
+settles service already delivered: an Alkahest seller's claim stopped by an end
+would leave the escrow to the buyer's reclaim, a refund the once-only mechanism does
+not grant. Every drive of an available deal runs the continuation, then reconciles a
+due end: `pending` while the continuation is unacknowledged, so the domain's worker
+keeps driving, then `ended` through end service's physical end once it is
+acknowledged or the domain has none; with no end due, `available` or `converged` as
+before. No delivery failure is recorded beside such an end. Rejected: the end
+skipping the continuation (the reviewer's first alternative), which loses the claim;
+keeping `available` and `converged` for an ended deal and documenting it, which
+leaves `drive` misreporting where the deal stands. A drive whose own call reaches
+availability with an end already due returns `ended`, or `pending` and then `ended`
+on the hook's retry while the continuation is unacknowledged, which a hook maps to
+failed for a deal that was delivered; that needs an end falling due between the
+disclose authorization and the continuation in one call, and the end is durable by
+then. While the continuation is pending the path does not drive the physical end;
+the route that records an end already drives it.
+
 ### D12 — The specification deltas
 
 - `compute-delivery` (new): D1, D4, D5's access check, D6's use, D7, D8, D9's use and

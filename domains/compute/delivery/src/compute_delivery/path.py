@@ -23,7 +23,9 @@ from typing import Any, TypeVar
 from compute_provisioning_contracts import (
     FulfillmentAcceptanceResponse,
     FulfillmentRequestBody,
+    FulfillmentStatusResponse,
     LeaseState,
+    LeaseView,
 )
 from market_capacity_publication import CapacityEffects
 from market_core import VersionedEnvelope
@@ -603,6 +605,18 @@ class ComputeDeliveryPath:
         status = await self._fulfillment.get_fulfillment_status(
             fulfillment_id, capacity_reservation_id=reservation_id, site_id=deal.site_id,
         )
+        # A status for another fulfillment or reservation proves nothing about
+        # this deal's: acting on it could make this deal available on another's
+        # readiness, or end it for another's failure.
+        if (
+            not isinstance(status, FulfillmentStatusResponse)
+            or status.fulfillment_id != fulfillment_id
+            or status.capacity_reservation_id != reservation_id
+        ):
+            return self._repair_deal(
+                deal, RepairReason.SITE_UNANSWERED, f"fulfillment:{fulfillment_id}",
+                "provisioning's status answer names another fulfillment or reservation",
+            )
         if status.state in _SETTLING_STATES:
             return self._outcome(OutcomeKind.PENDING, deal, detail=f"fulfillment is {status.state}")
         if status.state in _UNDELIVERED_STATES:
@@ -689,6 +703,12 @@ class ComputeDeliveryPath:
     ) -> DeliveryOutcome:
         """Explain a refused activation from the lease as the site records it."""
         lease = await self._fulfillment.get_lease(reservation_id, site_id=deal.site_id)
+        if not isinstance(lease, LeaseView) or lease.capacity_reservation_id != reservation_id:
+            # Another lease's state cannot explain this one's refusal.
+            return self._repair_deal(
+                deal, RepairReason.ACTIVATION_UNEXPLAINED, f"lease:{reservation_id}",
+                f"the site refused activation ({refusal}) and its lease read names another reservation",
+            )
         if lease.status in _ENDING_LEASE_STATES:
             return await self._hand_off(deal, _Failure(
                 kind="activation_lapse", cause="activation_lapsed",
@@ -764,16 +784,32 @@ class ComputeDeliveryPath:
         return await self._authorized(deal, DeliveryPhase.DISCLOSE, ready=ready, apply=record_available)
 
     async def _converge(self, deal: _Deal) -> DeliveryOutcome:
-        """Converged once the domain's continuation is acknowledged, or it has none."""
-        state = await self._domain.continuation(deal.negotiation_id)
+        """Converged once the domain's continuation is acknowledged, or it has none.
+
+        The continuation runs even when an end is due after availability: it
+        settles service already delivered, such as the seller's claim of an
+        Alkahest escrow, which a buyer's reclaim would take back if an end
+        stopped it. The end is still reconciled on every drive: while the
+        continuation is unacknowledged the deal is pending, so its worker keeps
+        driving it, and once nothing is left the deal is ended.
+        """
+        nid = deal.negotiation_id
+        state = await self._domain.continuation(nid)
+        if not isinstance(state, ContinuationState):
+            return self._repair_deal(
+                deal, RepairReason.DOMAIN_RESULT_INVALID, f"continuation:{nid}",
+                f"continuation returned {state!r}",
+            )
+        end_due = await self._transaction(lambda conn: self._end_due(conn, nid))
         if state is ContinuationState.PENDING:
+            if end_due:
+                return self._outcome(
+                    OutcomeKind.PENDING, deal, detail="delivery has ended; its continuation is pending",
+                )
             return self._outcome(OutcomeKind.AVAILABLE, deal)
-        if state in (ContinuationState.NONE, ContinuationState.ACKNOWLEDGED):
-            return self._outcome(OutcomeKind.CONVERGED, deal)
-        return self._repair_deal(
-            deal, RepairReason.DOMAIN_RESULT_INVALID, f"continuation:{deal.negotiation_id}",
-            f"continuation returned {state!r}",
-        )
+        if end_due:
+            return await self._ended(deal)
+        return self._outcome(OutcomeKind.CONVERGED, deal)
 
     # -- access ------------------------------------------------------------
 
