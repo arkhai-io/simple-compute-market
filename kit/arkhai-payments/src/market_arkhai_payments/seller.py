@@ -13,9 +13,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from market_deal_lifecycle.operations import OperationKeys
+from market_settlement_runtime.rate_servicing import RateServicing
 from market_deal_lifecycle_contracts.models import Accepted, LifecycleCommand, Pending, Rejected, Unknown
 
 from market_arkhai_payments.adapter import PaymentAdapter
+from market_arkhai_payments.rate_adapter import RatePaymentAdapter
 from market_arkhai_payments.agreement import (
     PaymentSettlementData,
     agreement_from_bytes,
@@ -176,6 +178,7 @@ class PaymentSellerStage:
         config: ArkhaiPaymentsConfig,
         *,
         client_for_owner: ClientForOwner | None = None,
+        rate_servicing: RateServicing | None = None,
         snapshot_verifier: Callable[[Mapping[str, Any], PaymentSettlementData], SnapshotVerifier] | None = None,
     ) -> None:
         if config.service_url is None or config.service_identity is None:
@@ -183,6 +186,7 @@ class PaymentSellerStage:
                 "payments service URL and receipt identity are required for servicing"
             )
         self.config = config
+        self.rate_servicing = rate_servicing or RateServicing()
         self._snapshot_verifier = snapshot_verifier or self._verifier_for
         self._client_for_owner: ClientForOwner = client_for_owner or (
             lambda owner: payments_client_for_owner(config, owner)
@@ -200,7 +204,7 @@ class PaymentSellerStage:
     def settlement_data(self, agreement: Mapping[str, Any]) -> PaymentSettlementData:
         """Derive the acceptance artifact returned to the buyer and stored with the thread."""
 
-        return PaymentSettlementData.for_agreement(agreement, self.config)
+        return PaymentSettlementData.for_agreement(agreement, self.config, rate_servicing=self.rate_servicing)
 
     def accepted(
         self, agreement_bytes: bytes | str, stored: Any
@@ -285,7 +289,8 @@ class PaymentSellerStage:
     ) -> PaymentAdapter:
         """Bind the payee's lifecycle port without taking ownership of its watch cursor."""
 
-        return PaymentAdapter(
+        adapter = RatePaymentAdapter if any(part.root.kind == "rate" for part in data.mandate.parts) else PaymentAdapter
+        return adapter(
             agreement, data, account=selected_payment_option(agreement).payee_account,
             client_for_owner=self._client_for_owner,
             verify_snapshot=self._snapshot_verifier(agreement, data), minimum_sequence=minimum_sequence,

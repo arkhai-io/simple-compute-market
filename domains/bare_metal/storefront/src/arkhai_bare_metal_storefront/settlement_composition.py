@@ -11,6 +11,7 @@ from typing import Any
 
 from market_deal_lifecycle.terms import LifecycleTerms
 from market_settlement_runtime.rate_servicing import RateServicing, RateServicingUnavailable
+from market_arkhai_payments.presets import PaymentsRatePresetHelper, rate_term_timing
 from market_settlement_runtime.horizon import RateTermProjections
 from market_settlement_runtime.rate_publication import (
     RatePresetHelper, RatePresetRefusal, default_buyer_refusals,
@@ -132,7 +133,9 @@ class BareMetalStorefrontSettlementComposition:
     disputes: RegistryDisputePolicy = field(default_factory=lambda: RegistryDisputePolicy.from_document({}), repr=False)
     seller_stages: SettlementStageTable[Any] = SELLER_STAGES
     rate_servicing: RateServicing = field(default_factory=RateServicing, repr=False)
-    rate_preset_helpers: Mapping[str, RatePresetHelper] = field(default_factory=dict, repr=False)
+    rate_preset_helpers: Mapping[str, RatePresetHelper] = field(
+        default_factory=lambda: {ARKHAI_PAYMENTS_MECHANISM: PaymentsRatePresetHelper()}, repr=False,
+    )
     rate_term_projections: RateTermProjections = field(default_factory=dict, repr=False)
     delivery_deadline_for_pool: Callable[[str, str | None], int | None] = field(
         default=lambda _site, _pool: None, repr=False,
@@ -156,7 +159,15 @@ class BareMetalStorefrontSettlementComposition:
             self.config.mechanisms.get(ARKHAI_PAYMENTS_CONFIG_KEY),
             client_for_owner=self.payments_client_for_owner,
         )
+        if stage is not None:
+            stage.rate_servicing = self.rate_servicing
         object.__setattr__(self, "payments_stage", stage)
+        if not self.rate_term_projections:
+            object.__setattr__(self, "rate_term_projections", {
+                ARKHAI_PAYMENTS_MECHANISM: lambda option: rate_term_timing(
+                    option, authorities=self.disputes.for_publication(),
+                ),
+            })
 
     @classmethod
     def from_raw_config(
