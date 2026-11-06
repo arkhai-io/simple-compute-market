@@ -370,7 +370,9 @@ the change to implementation. The eleven parts of
     (amended at section 4's implementation);
   - `docs/development/ARCHITECTURE.md`, "Capacity reservation": activation between
     fulfillment and expiry in the flow, recorded by the site and not delivery
-    evidence (D1);
+    evidence (D1); the closeout review's triage (32 F1) moved it out of the numbered
+    flow into the paragraph after it, as an operation the site offers, since no
+    delivery path performs it yet;
   - `docs/development/ARCHITECTURE.md`, "Operators": it already states that one business
     deploys and upgrades sites and storefronts together; add that, accordingly, a
     storefront calling an operation its site lacks is unsupported and no compatibility
