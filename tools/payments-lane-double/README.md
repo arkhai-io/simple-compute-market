@@ -93,8 +93,10 @@ releases. `make check-tls`, part of `make test`, regenerates
 into a temporary directory and fails unless the committed files are identical;
 `make tls` rewrites them.
 
-Callers trust the lane CA alone, through `SSL_CERT_FILE`; the kit's client keeps
-its production transport rules — HTTPS outside loopback, no verification bypass.
+Callers trust the lane CA through their payments configuration's
+`ca_bundle_path`, which the kit's client verifies the double against alone; it
+keeps its production transport rules — HTTPS outside loopback, no verification
+bypass — and no process trust store changes.
 
 ## Running it
 
@@ -107,20 +109,26 @@ there. Outside the image, `python -m payments_lane_double` reads
 `PAYMENTS_LANE_DOUBLE_HOST` and `PAYMENTS_LANE_DOUBLE_PORT`.
 
 - The VM, bare-metal and API-credit lanes run the image as the Compose service in
-  `compose.payments-double.yml`, with no host port, and each lane's overlay points
-  its payment storefront at it. `scripts/lane_env.py` prints the values a lane
-  needs from the committed fixtures: `compose` for the lane's Compose files (the
-  lane CA file, the seller's token, and the pinned dispute authority as the
-  registries' JSON recommendation), `runner` for the test runner's `PAYMENTS`
-  settings and the buyer's token, `seller-account` for the account a
-  storefront's payments check reads, and `seller-token` for the seller's token
-  alone. The root `Makefile` runs it with the host's
-  `python3 -I`, which must be 3.11 or newer, so it imports only the standard
-  library; it is not part of the package the image runs. The lane storefronts'
-  configuration files are static and repeat the receipt identity, fee, service
-  URL, the seller's account and the pinned authority;
-  `e2e-tests/tests/unit/test_domain_stack_configuration.py` holds those copies to
-  the fixtures.
+  `compose.payments-double.yml`, with no host port. Each lane's overlay mounts its
+  payment storefront's lane configuration, which points at the double and names
+  the lane CA as its `ca_bundle_path`, and binds the CA there; the storefront's
+  key is `[Settlement.arkhai_payments].api_key` in its secret overlay under
+  `dev-env/identities/`, and its registries layer the shared
+  `dev-env/registry/config-payments-lane.env`, recommending the pinned dispute
+  authority. The test runner reads the lane's payments settings from committed
+  profiles, `e2e-tests/config/config-payments-lane.yml` and the lane's
+  `config-<lane>-lane.yml`, with the lane CA mounted where they name it.
+  Every one of those files restates a value here: the storefront configurations
+  the receipt identity, fee, service URL and the seller's account
+  (`e2e-tests/tests/unit/test_domain_stack_configuration.py`), the secret
+  overlays the seller's token and the registry profile the pinned authority
+  (`scripts/tests/test_committed_stack_values.py`), and the runner profiles the
+  accounts, tokens, identity and fee (`tests/integration/test_lane_env.py`),
+  each test holding the copy to the fixture. `scripts/lane_env.py` prints the two
+  values read at run time: `seller-account`, which each lane target passes to its
+  storefront's payments check, and `seller-token`. Its callers run it with the
+  host's `python3 -I`, which must be 3.11 or newer, so it imports only the
+  standard library; it is not part of the package the image runs.
 - The local Helm release runs the image through the `payments-lane-double`
   subchart (`helm/charts/payments-lane-double`), which `helm/local-values.yaml`
   enables and no release values do, behind a Service named `payments-double` in

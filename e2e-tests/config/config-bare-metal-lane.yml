@@ -1,0 +1,18 @@
+# ---------------------------------------------------------------------------
+# Profile: bare-metal-lane
+#
+# The bare-metal end-to-end lane's own payments settings, over
+# config-payments-lane.yml: the seller credential the bare-metal payment
+# scenario refunds with, the bare-metal storefront's key in its own scheme,
+# eip191 (Anvil 2), and its whole-host fixture's hourly price in USD/6 minor
+# units and its mandate's authorization window. Public deterministic
+# development values, never for a public network; the credential restates
+# dev-env/identities/bob.identity.env, and
+# tools/payments-lane-double/tests/integration/test_lane_env.py holds the two
+# equal.
+# ---------------------------------------------------------------------------
+
+payments:
+  seller_marketplace_credential: "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
+  compute_hourly_gross: 1000000
+  dispute_window: "P7D"

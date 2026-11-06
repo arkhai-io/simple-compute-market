@@ -2224,14 +2224,27 @@ test_domain_stack_configuration.py}`; `e2e-tests/Makefile`; the root `Makefile`;
 `docs/development/VALIDATION_RUNBOOK.md` (§6's mock-profile note, §8's full stack);
 `e2e-tests/README.md`; `tools/payments-lane-double/README.md`.
 
-- [ ] 10.1 Runner profiles (D14). `config-payments-lane.yml` holds the shared `payments`
+- [x] 10.1 Runner profiles (D14). `config-payments-lane.yml` holds the shared `payments`
   section — service URL and identity, fee, livemode, `lane_owned`, `ca_bundle_path`,
   `api_key_env`, `buyer_api_key`, the buyer and seller accounts and the buyer's marketplace
   seed — and each `config-<lane>-lane.yml` only its seller marketplace credential, the
   bare-metal one adding `compute_hourly_gross` and `dispute_window`. Each file carries the
   public-development label. `e2e-tests/settings.toml` documents `ca_bundle_path` and
   `buyer_api_key` with empty defaults.
-- [ ] 10.2 The helper (D14, D6). The payments helper writes `PAYMENTS.BUYER_API_KEY` into
+  Done: `e2e-tests/config/config-{payments-lane, vms-lane, apicredits-lane,
+  bare-metal-lane}.yml`, every value a quoted string but the numbers and booleans, so
+  no `@str` is needed. `settings.toml`'s `[default.payments]` header now says the lanes
+  set the section in these profiles and an external run states its token in a secret
+  profile. Unit (`tools/payments-lane-double/tests/integration/test_lane_env.py`, pass):
+  10.5's profile cases, which read each file with `yaml.safe_load`; and, through the
+  runner's own loader (`e2e_harness.settings`' bootstrap over the committed config
+  directory), `test_a_lane_runner_loads_a_complete_payments_section` (each lane's
+  `docker,payments-lane,<lane>-lane` merges into every setting the payment scenarios
+  require, the lane's seller key its storefront's identity file) and
+  `test_a_runner_without_the_lane_profiles_has_no_payments_target`, both in
+  `e2e-tests/tests/unit/test_domain_stack_configuration.py`. System (10.7): each lane's runner loaded
+  `docker,payments-lane,<lane>-lane` and its payment scenario reached the double.
+- [x] 10.2 The helper (D14, D6). The payments helper writes `PAYMENTS.BUYER_API_KEY` into
   the `market` subprocess's environment under the variable `PAYMENTS.API_KEY_ENV` names,
   as provisioning writes `ANSIBLE_CONFIG` from its settings; the readiness probe trusts
   `PAYMENTS.CA_BUNDLE_PATH` with proxies still disabled; the shared buyer-configuration
@@ -2239,27 +2252,98 @@ test_domain_stack_configuration.py}`; `e2e-tests/Makefile`; the root `Makefile`;
   no longer reads `SSL_CERT_FILE`. Unit cases in `test_payments_helper.py`: the token
   reaches the subprocess environment and no other; the probe trusts the configured bundle
   and fails on a missing one; the buyer configuration carries `ca_bundle_path`.
-- [ ] 10.3 Lane targets (D18, D20, D14). In `e2e-tests/Makefile`: each `test-e2e-<lane>`,
+  Done, with one difference from the plan's wording, which named the `market`
+  subprocess only: the payment scenarios also approve, snapshot and read refunds with
+  in-process payments clients, which resolved the key from the runner's own environment.
+  The helper hands the key to both kinds of buyer and writes it into no process
+  environment: `buyer_payments_environment(config)` returns `{API_KEY_ENV: BUYER_API_KEY}`
+  (empty with development authentication or no key), which `create_profiled_buyer_cli`
+  takes as a new `credential_environment` and merges into the `market` process's
+  environment, and `buyer_payments_client(config, owner)` builds the kit's client with
+  that mapping over `os.environ` as the environment its key resolution reads. The VM,
+  API-credit and bare-metal payment scenarios use them (the VM scenario's
+  `PaymentApproval` through its `client_for_owner`), files beyond the plan's list.
+  Provisioning's `ANSIBLE_CONFIG` writes `os.environ` once; doing that here would put
+  the token in the runner's environment, which the delta forbids. `configured_payments`
+  reads `CA_BUNDLE_PATH` into the config, and its default readiness probe is
+  `target_ready(url, ca_bundle=config.ca_bundle_path)`; `target_ready` lost its `environ`
+  seam. `payment_config_toml` writes `ca_bundle_path` when set. Unit
+  (`e2e-tests/tests/unit/test_payments_helper.py`, in `make test-e2e-unit`, 551 passed):
+  the probe trusts exactly the configured bundle with proxies off, ignores a process
+  `SSL_CERT_FILE`, and is unready on a missing or malformed bundle; the default probe gets
+  the configured bundle; through the default probe answering healthy, a lane-owned target
+  is ready under the lane CA and fails by name under a missing bundle, the probe never
+  asked; the key is handed over under `API_KEY_ENV`, never written into `os.environ`; it
+  reaches the `BuyerCli`'s `credential_env` through `create_profiled_buyer_cli` (that
+  `BuyerCli.run` merges `credential_env` into the subprocess environment is read from
+  the code, not tested; no subprocess is started); no key is handed over without one or
+  with development
+  authentication; an in-process client sends `Bearer <key>` with no variable set (the
+  real client over `httpx.MockTransport` at a loopback origin); the serialized buyer
+  table carries `ca_bundle_path` and `api_key_env`. System (10.7): the three payment
+  scenarios approved and read at the double under these profiles.
+- [x] 10.3 Lane targets (D18, D20, D14). In `e2e-tests/Makefile`: each `test-e2e-<lane>`,
   `e2e-<lane>-down` and `e2e-<lane>-logs` names its Compose files and project only, with
   `PROVISIONING_MODE` exported to Compose; `test-buyer-machine` takes `RUNNER_PROFILES`
   (each lane target sets `docker,payments-lane,<lane>-lane`; unset, `docker` alone) and one
   literal lane-CA mount, and passes no environment file; `e2e_env_if_missing`, the
   environment-file variables and the stale "deadlines" comment go. `check-payments` at
   setup keeps `lane_env.py seller-account`.
-- [ ] 10.4 Retire the environment targets (D18, D20). In the root `Makefile`: remove
+  Done. The `mock`/`real` check 10.4 keeps moved here, as
+  `E2E_REQUIRE_PROVISIONING_MODE`, the first step of each `test-e2e-<lane>`: these are
+  the targets that bring a stack up, and no root target does now. `PROVISIONING_MODE`
+  defaults to `mock` and is exported, so a lane run and the pipeline's `e2e.yml`, which
+  sets it, reach Compose the same way. `e2e_up` and `e2e_check_payments` lost their
+  environment-file argument. The lane CA mount is always present in
+  `test-buyer-machine`, unused by a run without the lane profiles. Unit
+  (`scripts/tests/test_lane_compose.py`, `make -n` with `MAKE=:`, so a recursive call is
+  printed and not made, in `make test-release-tooling`, 2226 passed):
+  `PROVISIONING_MODE=hosted` fails each lane target naming the rule; each lane target,
+  and its `-down` and `-logs`, prints no `--env-file`, and the lane target hands
+  `RUNNER_PROFILES=docker,payments-lane,<lane>-lane` to `test-buyer-machine`, which
+  runs the runner with `-e ACTIVE_PROFILES=` those profiles (`docker` when unset) and
+  mounts the lane CA at the `ca_bundle_path` `config-payments-lane.yml` names. That the
+  mode reaches Compose through `export` is shown only by the lane runs. System (10.7):
+  the three lane targets ran as written.
+- [x] 10.4 Retire the environment targets (D18, D20). In the root `Makefile`: remove
   `e2e-vms-dev-env`, `e2e-apicredits-dev-env`, `e2e-bare-metal-dev-env`, both
   `e2e-*-stack-env` helpers, `e2e-dev-identities`, `e2e-dev-identities-env`, the three
   `e2e-<lane>-payments-env`, their variables, the buyer seed and the `sed` read, and their
   `.PHONY` entries; keep the `PROVISIONING_MODE` `mock`/`real` check for the targets that
   bring a stack up. `.gitignore` drops the generated environment files and keeps
   `.e2e-buyer/`. `.github/workflows/e2e.yml`'s `PROVISIONING_MODE` keeps working unchanged.
-- [ ] 10.5 `lane_env.py` (D21). It keeps only `seller-account` and `seller-token`; the
+  Done; the mode check lives in `e2e-tests/Makefile` (10.3). `e2e.yml`'s value is
+  unchanged; its comment, which said the environment targets read it, now says the lane
+  targets hand it to Compose. A search finds no reader of the retired targets but the
+  permanent documents closeout owns (`DEPLOYMENT_AND_CONFIG.md`'s "Per-domain stack
+  composition", by name, and `TESTING.md`'s lane paragraph on `PROVISIONING_MODE`, by
+  description: "each lane's environment target, which prints the stack's provisioning
+  profiles") and dated records under `docs/attachments/`; the runbook's §0 bullet, also
+  by description, is corrected here. Correction to the plan, found by the fresh-context
+  check: `.gitignore` keeps one pattern, `.e2e-*.env`, rather than none, since a local
+  environment file an earlier run wrote holds paths from the contributor's machine and
+  must never be committed. Unit: 10.3's dry-run cases; the old environment-target mode
+  case is gone with the targets.
+- [x] 10.5 `lane_env.py` (D21). It keeps only `seller-account` and `seller-token`; the
   `compose` and `runner` modes, `CA_MOUNT`, `BUYER_API_KEY_ENV` and `_setting` go.
   `test_lane_env.py` follows, and gains the runner half of D21: the runner profiles' tokens,
   accounts, receipt identity and fee equal `accounts.toml`, and each lane profile's seller
   key equals the `ARKHAI_IDENTITY_CREDENTIAL` of the identity file its storefront signs
   with (`bob.identity.env`, `api-credits.identity.env`).
-- [ ] 10.6 Documents the targets named (D18). `docker-compose.yml`'s header and
+  Done; `SERVICE_URL` stays, which `helm/tests/test_release_topology.py` reads.
+  The double's dev group gains `pyyaml>=6` for the profiles, relocked (`make lock`; only
+  the double's lock changed). Beyond the plan: `helm/tests/test_release_topology.py`
+  compared the e2e-tests chart's profile with `lane_env.runner_lines` and
+  `BUYER_API_KEY_ENV`, which are gone; it now compares it with the fixtures and with
+  `config-payments-lane.yml`, read as the flat mapping of JSON scalars it is, since that
+  suite has no YAML parser. Unit and library integration (`make test-payments-lane-double`,
+  `check-tls` and 49 passed): the script's standard-library imports; run isolated, its two
+  modes print the fixture's seller account and token; the shared profile's service URL
+  and identity, fee, livemode, `lane_owned`, both accounts, buyer token and CA path equal
+  the fixtures and constants, and its `api_key_env` carries no `ARKHAI_` prefix; each lane
+  profile's seller key equals its storefront's identity file and states nothing the shared
+  profile does. Chart render (`make -C helm test-render`): pass.
+- [x] 10.6 Documents the targets named (D18). `docker-compose.yml`'s header and
   `VALIDATION_RUNBOOK.md` §8 give the full stack's `docker compose -f docker-compose.yml -f
   compose.vms-local.yml -f compose.apicredits-local.yml up -d`, the runbook's buyer step
   creating `.e2e-buyer/…` first and §6's note naming `PROVISIONING_MODE`;
@@ -2268,7 +2352,13 @@ test_domain_stack_configuration.py}`; `e2e-tests/Makefile`; the root `Makefile`;
   `e2e-tests/README.md`'s "Shared payment-scenario configuration" and lane passages and
   `tools/payments-lane-double/README.md` describe the profiles and secret overlays. Dated
   records under `docs/attachments/` keep their wording.
-- [ ] 10.7 **Verification checkpoint.** Unit: `make test-e2e-unit`,
+  Done. The runbook has no step that runs a buyer by hand; §8 gains the note that a
+  buyer service's `.e2e-buyer/` directories must be created first. `dev-env/identities/README.md`'s
+  table and fixture statements were rewritten in section 9; here its runner paragraph
+  now names the runner profiles. The double's README's Helm passage, which still
+  describes the `seller-payments-key` Secret, is section 12's (12.2). Also corrected:
+  `e2e-tests/config/config-docker.yml`'s bare-metal comment named the retired target.
+- [x] 10.7 **Verification checkpoint.** Unit: `make test-e2e-unit`,
   `make test-payments-lane-double`, `make test-release-tooling`. System:
   `make -C e2e-tests test-e2e-vm`, `test-e2e-bare-metal` and `test-e2e-apicredits` from
   this checkout, each lane's markers green as before; `make test`.
@@ -2278,6 +2368,75 @@ test_domain_stack_configuration.py}`; `e2e-tests/Makefile`; the root `Makefile`;
   marker in the three lanes' module lists stays green.
   Owed by validation: `tests.yml`, jobs `test · test-e2e-unit`,
   `test · test-payments-lane-double` and `test · test-deployment-packaging` — each passes.
+
+  Evidence, local:
+  - Unit: `make test-e2e-unit` 551 passed; `make test-release-tooling` 2226 passed, none
+    skipped; `make test-payments-lane-double`, `check-tls` and 49 passed, after `make
+    lock` (only the double's lock changed); `make -C helm test-render` passes, with the
+    reworked runner-profile comparison.
+  - `make test`: exit 0, every suite. It ran before the fresh-context fixes, which
+    touched tests (`test_lane_compose.py`, `test_payments_helper.py`,
+    `test_domain_stack_configuration.py`), comments, `.gitignore`, the runbook and the
+    README, and these notes; the three unit suites above were rerun after them.
+  - `make check-packaging`: all checks OK. `make check-change`: every check passes,
+    documentation citations included, now that the runner profiles exist.
+  - System, through the lane targets as rewritten, before the fresh-context fixes (none
+    touches a file a lane run reads but the e2e Makefile's comment order):
+    - `make -C e2e-tests test-e2e-apicredits`: `check-payments` ok; the runner ran under
+      `ACTIVE_PROFILES=docker,payments-lane,apicredits-lane`; 4 passed, all three
+      `e2e_credits_payment_deal` stages among them, no skips.
+    - `make -C e2e-tests test-e2e-bare-metal`: `check-payments` ok; 64 passed, 2 failed,
+      2 skipped; the three `e2e_bare_metal_payment_deal` stages pass. The failures and
+      skips are the two introduction cases' `KeyError: 'mechanism'` (`dev`'s #314, 4.9).
+    - `make -C e2e-tests test-e2e-vm`: `check-payments` ok; 152 passed, 1 failed, 2
+      skipped; `e2e_vm_payment_deal`'s stages 1–2 pass, approving at the double with the
+      key the harness handed its in-process client, and stages 3–4 skip. The failure is
+      `e2e_vm_introduction`'s same #314 case.
+    No environment file was written or read in these runs.
+
+  End-to-end confirmed: `e2e_bare_metal_payment_deal` and `e2e_credits_payment_deal` pass
+  without skips, `e2e_vm_payment_deal`'s stages 1–2 pass and 3–4 skip (their only skip
+  path is the `mediation_target` fixture; the run printed no reasons), each lane's
+  `check-payments` passed at setup, and every other lane marker passed but the three
+  introduction cases that fail on `dev` already.
+  Owed by validation, confirmed: `tests.yml`, jobs `test · test-e2e-unit`,
+  `test · test-payments-lane-double` (with the relocked environment) and
+  `test · test-deployment-packaging` (release tooling's dry-run and render cases, and
+  `make -C helm test-render`'s topology comparison) — each passes.
+
+  Fresh-context check. Fixed:
+  - `.gitignore` would have exposed this checkout's leftover `.e2e-*.env` files, which
+    hold local paths, to a blanket `git add`; it keeps `.e2e-*.env` (10.4).
+  - The Makefile dry-run tests walked the whole build chain, since `make -n` runs
+    `$(MAKE)` lines; they pass `MAKE=:` now, and assert the runner's `ACTIVE_PROFILES`,
+    the CA mount against the shared profile, and `-down`/`-logs` (10.3).
+  - The missing-bundle case could not fail (a closed port is unready anyway); it now
+    runs the default probe answering healthy, with the lane CA as control (10.2).
+  - A test through the runner's own loader that the profiles merge into a complete
+    section (10.1).
+  - The runbook's §0 bullet; a profile comment calling every value quoted; the
+    Makefile's mode lines under the wrong paragraph; a README sentence; overstated notes.
+  Declined:
+  - Moving the runner-profile cases out of the double's `tests/integration/`: the plan
+    and D21 put them in `test_lane_env.py`, beside the script's cases.
+  - Replacing `test_payments_helper.py`'s patch of the module's `target_ready` with the
+    `ready` seam: the case exists to show what the default probe receives.
+  - Hardening the mode check against a multi-word value; `filter` reads `mock real` as
+    allowed, and a run passing that has asked for both.
+
+  Handoff to sections 11–12 and closeout:
+  - The local Helm release's e2e-tests chart profile has no `ca_bundle_path` and no
+    buyer key; it serves no payment scenario (D11). `helm/tests/test_release_topology.py`
+    now holds its public keys to `config-payments-lane.yml` as well as the fixtures.
+  - The double's README Helm passage still describes the `seller-payments-key` Secret;
+    12.2 retires it.
+  - Closeout destinations this section made false: `DEPLOYMENT_AND_CONFIG.md`'s
+    "Per-domain stack composition" (the environment targets and
+    `*_PROVISIONING_ACTIVE_PROFILES`) and "Bare-metal role configuration" (section 9's
+    handoff), `TESTING.md`'s lane paragraph on `PROVISIONING_MODE` and its "Private
+    Service Dependencies" account of the runner's payments settings.
+  - The session is large: two sections, six lane runs and two fresh-context checks.
+    Sections 11 and 12 should start in a fresh session.
 
 ## 11. The registry chart's env-file profile
 

@@ -123,9 +123,10 @@ storefront_url  = ""   # credits seller storefront
 # means no target, and the scenarios report blocked and skip, as they do for an
 # unready external one. With it set, service_identity, buyer_account
 # and both marketplace credentials are required; a missing one fails the
-# scenario, naming it. Each end-to-end lane sets this section itself, through
-# ARKHAI_PAYMENTS__ variables from the payments double's fixtures, and marks the
-# target its own with lane_owned.
+# scenario, naming it. Each end-to-end lane sets this section in committed
+# profiles, config-payments-lane.yml and its config-<lane>-lane.yml, which mark
+# the target its own with lane_owned; an external run supplies its buyer token in
+# a secret profile.
 # ---------------------------------------------------------------------------
 [default.payments]
 service_url                   = ""   # payments service origin
@@ -133,7 +134,9 @@ service_identity              = ""   # Ed25519 receipt-signing identifier pinned
 fee_bps                       = 250
 livemode                      = false # sandbox receipts only by default
 development_auth              = false
-api_key_env                   = ""   # buyer bearer-key variable when development_auth is false
+ca_bundle_path                = ""   # PEM bundle the probe and payments clients alone trust; blank, the system store
+api_key_env                   = ""   # variable the buyer process reads its bearer key from, when development_auth is false
+buyer_api_key                 = ""   # the buyer's bearer key, from a lane profile or an external run's secret profile; the harness hands it to the buyer under api_key_env
 buyer_account                 = ""   # buyer's Arkhai payer account
 buyer_marketplace_credential  = ""   # wallet-free Ed25519 buyer marketplace seed, unpadded base64url
 seller_marketplace_credential = ""   # the lane storefront's own key, in its scheme, for refunds

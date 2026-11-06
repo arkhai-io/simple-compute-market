@@ -1,0 +1,14 @@
+# ---------------------------------------------------------------------------
+# Profile: apicredits-lane
+#
+# The API-credit end-to-end lane's own payments settings, over
+# config-payments-lane.yml: the seller credential the credits payment scenario
+# refunds with, the credits storefront's key in its own scheme, eip191 (Anvil 3).
+# A public deterministic development value, never for a public network; it
+# restates dev-env/identities/api-credits.identity.env, and
+# tools/payments-lane-double/tests/integration/test_lane_env.py holds the two
+# equal.
+# ---------------------------------------------------------------------------
+
+payments:
+  seller_marketplace_credential: "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6"

@@ -239,18 +239,20 @@ each restatement to its fixture:
 | the pinned dispute authority | `dev-env/registry/config-payments-lane.env` | the lanes' registries' recommended dispute authorities, one JSON line |
 | the lane CA's path | `ca_bundle_path` in each lane storefront configuration | where each lane overlay binds `tools/payments-lane-double/tls/lane-ca.pem` |
 
-`tools/payments-lane-double/scripts/lane_env.py` reads the double's fixtures for
-the root `Makefile`, with the host's Python 3.11 or newer: each
-`e2e-<lane>-payments-env` target prints the test runner's `PAYMENTS` settings
-and the buyer's token, which `e2e-tests/Makefile` passes to the runner as an
-environment file.
+The test runner reads the lanes' payments settings from committed profiles,
+which restate the double's values too: `e2e-tests/config/config-payments-lane.yml`
+the target, the accounts, the CA path and the buyer's token, and each
+`config-<lane>-lane.yml` the seller credential of the lane's storefront, its key
+in `bob.identity.env` or `api-credits.identity.env`.
+`tools/payments-lane-double/tests/integration/test_lane_env.py` holds each to its
+source.
 
 The lane values that are not the double's:
 
 | Value | Where | Role |
 |---|---|---|
-| 32 bytes of `0xb1`, as unpadded base64url | `E2E_PAYMENTS_BUYER_SEED` in the root `Makefile` | the payment scenarios' wallet-free Ed25519 buyer marketplace seed |
-| `bob.identity.env`, `api-credits.identity.env` | this directory | the seller credential a payment scenario refunds with: each lane storefront's own key, in its own scheme |
+| 32 bytes of `0xb1`, as unpadded base64url | `buyer_marketplace_credential` in `e2e-tests/config/config-payments-lane.yml` | the payment scenarios' wallet-free Ed25519 buyer marketplace seed |
+| `bob.identity.env`, `api-credits.identity.env` | this directory, restated in each `config-<lane>-lane.yml` | the seller credential a payment scenario refunds with: each lane storefront's own key, in its own scheme |
 | `vm-lane-dispute-public-development-credential` | `[[DisputeCredential]]` in `bob.storefront.secrets.toml` | Bob's credential toward the pinned dispute authority; nothing at its `.invalid` origin ever reads it |
 
 The full local stack mounts the same secret overlays. There the storefront

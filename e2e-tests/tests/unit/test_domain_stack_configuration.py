@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from e2e_harness import settings as settings_module
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _DOUBLE = _REPO_ROOT / "tools/payments-lane-double"
 _PAYMENTS = "arkhai.payments.v1"
@@ -290,6 +292,52 @@ def test_the_api_credit_lane_listing_pays_the_double_seller_account():
 
     assert clause["asset"] == clause["mechanism_input"]["asset"] == accounts["asset"]
     assert clause["mechanism_input"]["payee_account"] == accounts["accounts"]["seller"]["account"]
+
+
+# Each lane's runner profile, the identity file its storefront signs with, and
+# what only that lane's payment scenario reads.
+_RUNNER_LANES = {
+    "vms-lane": ("bob.identity.env", set()),
+    "apicredits-lane": ("api-credits.identity.env", set()),
+    "bare-metal-lane": ("bob.identity.env", {"COMPUTE_HOURLY_GROSS", "DISPUTE_WINDOW"}),
+}
+
+
+def _runner_payments(profiles: str) -> dict:
+    """The runner's PAYMENTS section as its own loader resolves `profiles` from
+    the committed config directory."""
+    loaded = settings_module._load_bootstrap({
+        "CONFIG_DIRECTORY": str(_REPO_ROOT / "e2e-tests/config"), "ACTIVE_PROFILES": profiles,
+    }).settings
+    return {str(key).upper(): value for key, value in loaded.get("PAYMENTS", {}).items()}
+
+
+@pytest.mark.parametrize("lane", sorted(_RUNNER_LANES))
+def test_a_lane_runner_loads_a_complete_payments_section(lane):
+    """The shared profile and the lane's merge key by key over the defaults into
+    every setting the payment scenarios require, with the lane's own seller."""
+    identity, extras = _RUNNER_LANES[lane]
+    payments = _runner_payments(f"docker,payments-lane,{lane}")
+    required = {
+        "SERVICE_URL", "SERVICE_IDENTITY", "BUYER_ACCOUNT", "SELLER_ACCOUNT",
+        "BUYER_MARKETPLACE_CREDENTIAL", "SELLER_MARKETPLACE_CREDENTIAL", "API_KEY_ENV",
+        "BUYER_API_KEY", "CA_BUNDLE_PATH", *extras,
+    }
+    assert all(payments.get(key) not in (None, "") for key in required), payments
+    assert payments["LANE_OWNED"] is True and payments["LIVEMODE"] is False
+    credential = dict(
+        line.split("=", 1)
+        for line in (_REPO_ROOT / "dev-env/identities" / identity).read_text().splitlines()
+        if line and not line.startswith("#")
+    )["ARKHAI_IDENTITY_CREDENTIAL"]
+    assert payments["SELLER_MARKETPLACE_CREDENTIAL"] == credential
+
+
+def test_a_runner_without_the_lane_profiles_has_no_payments_target():
+    payments = _runner_payments("docker")
+    assert not payments.get("SERVICE_URL")
+    assert not payments.get("BUYER_API_KEY")
+    assert not payments.get("LANE_OWNED")
 
 
 def test_the_double_runs_only_in_the_lanes_and_publishes_no_host_port():

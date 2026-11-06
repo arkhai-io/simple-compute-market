@@ -9,13 +9,18 @@ below is a development fixture, never used on any network.
 
 from __future__ import annotations
 
+import os
 import ssl
+import tomllib
+from functools import partial
 from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
+from market_identity import IdentityScheme
 
+from tests.e2e.roles.buyer_cli import create_profiled_buyer_cli
 from tests.e2e.roles.helpers import payments
 
 # The payments lane double's CA, a public development certificate.
@@ -163,10 +168,10 @@ def _healthy() -> httpx.Response:
     return httpx.Response(200, json={"status": "ok"})
 
 
-def test_the_probe_trusts_the_ca_ssl_cert_file_names_and_no_proxy() -> None:
+def test_the_probe_trusts_the_configured_bundle_alone_and_no_proxy() -> None:
     probe = _Probe(_healthy())
     assert payments.target_ready(
-        "https://payments-double:8443", get=probe, environ={"SSL_CERT_FILE": str(_LANE_CA)},
+        "https://payments-double:8443", ca_bundle=str(_LANE_CA), get=probe,
     )
     ((url, kwargs),) = probe.calls
     assert url == "https://payments-double:8443/health"
@@ -177,11 +182,126 @@ def test_the_probe_trusts_the_ca_ssl_cert_file_names_and_no_proxy() -> None:
     assert context.get_ca_certs() == lane_ca and lane_ca
 
 
-def test_without_ssl_cert_file_the_probe_keeps_default_verification() -> None:
+def test_without_a_bundle_the_probe_keeps_default_verification(monkeypatch) -> None:
+    # The process's SSL_CERT_FILE is not the probe's configuration.
+    monkeypatch.setenv("SSL_CERT_FILE", str(_LANE_CA))
     probe = _Probe(_healthy())
-    assert payments.target_ready("https://payments.example", get=probe, environ={})
+    assert payments.target_ready("https://payments.example", get=probe)
     ((_, kwargs),) = probe.calls
     assert kwargs["verify"] is True and kwargs["trust_env"] is False
+
+
+def test_the_default_readiness_probe_trusts_the_configured_bundle(configure, monkeypatch) -> None:
+    asked: list[tuple[str, str | None]] = []
+
+    def probe(url: str, *, ca_bundle: str | None = None) -> bool:
+        asked.append((url, ca_bundle))
+        return True
+
+    monkeypatch.setattr(payments, "target_ready", probe)
+    configure(**_COMPLETE, CA_BUNDLE_PATH=str(_LANE_CA))
+    config = payments.configured_payments()
+    assert config.ca_bundle_path == str(_LANE_CA)
+    assert asked == [("http://127.0.0.1:9", str(_LANE_CA))]
+
+
+@pytest.mark.parametrize("bundle", ["lane CA", "missing"])
+def test_a_lane_owned_target_is_ready_only_under_a_bundle_that_loads(
+    configure, monkeypatch, tmp_path, bundle,
+) -> None:
+    """The default probe, answering healthy, over the configured bundle: the
+    lane CA lets the target be ready, and a missing bundle fails it by name."""
+    path = _LANE_CA if bundle == "lane CA" else tmp_path / "missing.pem"
+    probe = _Probe(_healthy())
+    monkeypatch.setattr(payments, "target_ready", partial(payments.target_ready, get=probe))
+    configure(**_COMPLETE, LANE_OWNED=True, CA_BUNDLE_PATH=str(path))
+    if bundle == "lane CA":
+        assert payments.configured_payments().ca_bundle_path == str(_LANE_CA)
+        assert len(probe.calls) == 1
+        return
+    outcome = _outcome()
+    assert isinstance(outcome, Failed)
+    assert "the lane's own payments service at http://127.0.0.1:9 is not ready" in str(outcome)
+    assert probe.calls == []
+
+
+# The buyer's bearer key, a development fixture value.
+_BUYER_KEY = "payments-helper-test-buyer-key"
+_KEYED = {**_COMPLETE, "DEVELOPMENT_AUTH": False, "API_KEY_ENV": "PAYMENTS_BUYER_API_KEY",
+          "BUYER_API_KEY": _BUYER_KEY}
+
+
+def test_the_buyer_key_is_handed_over_under_the_variable_the_configuration_names(
+    configure, monkeypatch,
+) -> None:
+    monkeypatch.delenv("PAYMENTS_BUYER_API_KEY", raising=False)
+    configure(**_KEYED)
+    config = payments.configured_payments(ready=lambda _url: True)
+    assert payments.buyer_payments_environment(config) == {"PAYMENTS_BUYER_API_KEY": _BUYER_KEY}
+    # Handed to the buyer, never written into the runner's own environment.
+    assert "PAYMENTS_BUYER_API_KEY" not in os.environ
+    assert _BUYER_KEY not in os.environ.values()
+
+
+def test_the_buyer_key_reaches_the_market_process_environment(configure, tmp_path) -> None:
+    configure(**_KEYED)
+    config = payments.configured_payments(ready=lambda _url: True)
+    cli = create_profiled_buyer_cli(
+        binary=tmp_path / "market",
+        base=tmp_path,
+        domain_identity="api_credits.v1",
+        marketplace_scheme=IdentityScheme.ED25519,
+        marketplace_credential="sbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbE",
+        registries=("http://registry:8080",),
+        credential_variable="ARKHAI_E2E_PAYMENT_BUYER_MARKETPLACE_CREDENTIAL",
+        credential_environment=payments.buyer_payments_environment(config),
+        toml_sections=payments.payment_config_toml(config),
+    )
+    assert cli.credential_env["PAYMENTS_BUYER_API_KEY"] == _BUYER_KEY
+    assert set(cli.credential_env) == {
+        "PAYMENTS_BUYER_API_KEY", "ARKHAI_E2E_PAYMENT_BUYER_MARKETPLACE_CREDENTIAL",
+    }
+
+
+@pytest.mark.parametrize("values", [
+    {"BUYER_API_KEY": ""},
+    {"DEVELOPMENT_AUTH": True, "API_KEY_ENV": ""},
+])
+def test_no_key_is_handed_over_without_one_or_with_development_authentication(
+    configure, values,
+) -> None:
+    configure(**{**_KEYED, **values})
+    config = payments.configured_payments(ready=lambda _url: True)
+    assert payments.buyer_payments_environment(config) == {}
+
+
+def test_an_in_process_buyer_client_authenticates_with_the_handed_over_key(
+    configure, monkeypatch,
+) -> None:
+    monkeypatch.delenv("PAYMENTS_BUYER_API_KEY", raising=False)
+    # A loopback origin, so no ambient proxy is mounted ahead of the mock.
+    configure(**{**_KEYED, "SERVICE_URL": "https://127.0.0.1"})
+    config = payments.configured_payments(ready=lambda _url: True)
+    seen: list[str | None] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers.get("Authorization"))
+        return httpx.Response(200, json={"available": {}, "held": []})
+
+    account = _COMPLETE["BUYER_ACCOUNT"]
+    with payments.buyer_payments_client(
+        config, account, transport=httpx.MockTransport(answer)
+    ) as client:
+        client.get_balance(account)
+    assert seen == [f"Bearer {_BUYER_KEY}"]
+
+
+def test_the_buyer_configuration_trusts_the_configured_bundle(configure) -> None:
+    configure(**_KEYED, CA_BUNDLE_PATH=str(_LANE_CA))
+    config = payments.configured_payments(ready=lambda _url: True)
+    section = tomllib.loads("\n".join(payments.payment_config_toml(config)))
+    assert section["Settlement"]["arkhai_payments"]["ca_bundle_path"] == str(_LANE_CA)
+    assert section["Settlement"]["arkhai_payments"]["api_key_env"] == "PAYMENTS_BUYER_API_KEY"
 
 
 @pytest.mark.parametrize(
@@ -194,7 +314,7 @@ def test_without_ssl_cert_file_the_probe_keeps_default_verification() -> None:
     ],
 )
 def test_the_probe_reports_an_unhealthy_or_unreachable_target_unready(response) -> None:
-    assert not payments.target_ready("https://payments-double:8443", get=_Probe(response), environ={})
+    assert not payments.target_ready("https://payments-double:8443", get=_Probe(response))
 
 
 @pytest.mark.parametrize("bundle", ["missing", "malformed"])
@@ -204,7 +324,7 @@ def test_a_trust_bundle_that_cannot_be_loaded_leaves_the_target_unready(tmp_path
         path.write_text("-----BEGIN CERTIFICATE-----\nnot a certificate\n", "utf-8")
     probe = _Probe(_healthy())
     assert not payments.target_ready(
-        "https://payments-double:8443", get=probe, environ={"SSL_CERT_FILE": str(path)},
+        "https://payments-double:8443", ca_bundle=str(path), get=probe,
     )
     assert probe.calls == []
 

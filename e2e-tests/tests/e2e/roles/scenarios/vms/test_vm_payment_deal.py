@@ -18,7 +18,7 @@ import dataclasses
 import time
 
 import pytest
-from market_arkhai_payments import PaymentApproval, PaymentSettlementData, payments_client_for_owner
+from market_arkhai_payments import PaymentApproval, PaymentSettlementData
 from market_deal_lifecycle_client import LifecycleClient
 from market_deal_lifecycle_contracts.models import CommitMessage
 
@@ -27,7 +27,11 @@ from tests.e2e.roles.helpers.compute_deal import (
     DealLease, advance_fulfillment_to, advance_storefront, wait_for_stage_event,
 )
 from tests.e2e.roles.helpers.mediation import configured_mediation
-from tests.e2e.roles.helpers.payments import configured_payments, payment_setting
+from tests.e2e.roles.helpers.payments import (
+    buyer_payments_client,
+    configured_payments,
+    payment_setting,
+)
 from tests.e2e.roles.scenarios.vms.conftest import (
     _publisher_trust, _signer, capacity_source_for,
 )
@@ -113,7 +117,7 @@ def _commit(negotiation_id, transaction):
 
 
 def _snapshot(config, transaction):
-    with payments_client_for_owner(config, str(payment_setting("BUYER_ACCOUNT"))) as client:
+    with buyer_payments_client(config, str(payment_setting("BUYER_ACCOUNT"))) as client:
         return client.get_transaction(transaction).snapshot
 
 
@@ -156,7 +160,10 @@ def test_hosted_commit_delivers_after_a_verified_receipt(
     assert accepted["action"] == "accept", accepted
     raw = base64.b64decode(accepted["agreement_bytes"], validate=True)
     data = PaymentSettlementData.parse(accepted["settlement_data"])
-    approval = PaymentApproval(payments_config, str(payment_setting("BUYER_ACCOUNT")))
+    approval = PaymentApproval(
+        payments_config, str(payment_setting("BUYER_ACCOUNT")),
+        client_for_owner=lambda owner: buyer_payments_client(payments_config, owner),
+    )
     assert storefront_client.settle_agreement(negotiation_id).status == "pending"
     assert approval.approve(raw, data.to_wire()) == data.transaction_id
     deal_driver.arm_create_gate()

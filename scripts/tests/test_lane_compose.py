@@ -10,6 +10,7 @@ import subprocess
 import tomllib
 
 import pytest
+import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -277,14 +278,54 @@ def test_a_base_file_renders_alone_with_no_development_bind(files: str) -> None:
             assert path.suffix not in {".toml", ".env", ".eip191", ".ed25519"}, (name, source)
 
 
-@pytest.mark.parametrize(
-    "target", ["e2e-vms-dev-env", "e2e-bare-metal-dev-env", "e2e-dev-identities-env"]
-)
-def test_an_unknown_provisioning_mode_fails_the_environment_target(target: str) -> None:
-    env = {**os.environ, "PROVISIONING_MODE": "hosted"}
-    produced = subprocess.run(
-        ["make", "-s", "--no-print-directory", target],
+LANE_TARGETS = ("test-e2e-vm", "test-e2e-bare-metal", "test-e2e-apicredits")
+
+
+def _dry_run(target: str, **variables: str) -> subprocess.CompletedProcess:
+    """``make -n`` of an e2e-tests target: the commands it would run. A recipe
+    line naming ``$(MAKE)`` runs even under ``-n``, so ``MAKE`` is the no-op
+    ``:``, and a recursive call is printed, never made."""
+    env = {key: value for key, value in os.environ.items() if key != "PROVISIONING_MODE"}
+    return subprocess.run(
+        ["make", "-n", "-s", "--no-print-directory", "-C", "e2e-tests", target, "MAKE=:",
+         *(f"{name}={value}" for name, value in variables.items())],
         cwd=REPO_ROOT, capture_output=True, text=True, env=env,
     )
+
+
+@pytest.mark.parametrize("target", LANE_TARGETS)
+def test_an_unknown_provisioning_mode_fails_a_lane_target(target: str) -> None:
+    produced = _dry_run(target, PROVISIONING_MODE="hosted")
     assert produced.returncode != 0
     assert "PROVISIONING_MODE must be mock or real" in produced.stderr
+
+
+@pytest.mark.parametrize("target", LANE_TARGETS)
+def test_a_lane_target_names_only_its_files_and_runner_profiles(target: str) -> None:
+    """A lane brings its stack up from its Compose files alone, with no
+    environment file, and runs the runner under its committed profiles."""
+    lane = target.removeprefix("test-e2e-")
+    produced = _dry_run(target)
+    assert produced.returncode == 0, produced.stderr
+    assert "--env-file" not in produced.stdout
+    profiles = f"RUNNER_PROFILES=docker,payments-lane,{lane.replace('vm', 'vms')}-lane"
+    assert ": test-buyer-machine " in produced.stdout and profiles in produced.stdout
+    for operation in ("down", "logs"):
+        stopped = _dry_run(f"e2e-{lane}-{operation}")
+        assert stopped.returncode == 0, stopped.stderr
+        assert "docker compose -p simple-market-" in stopped.stdout
+        assert "--env-file" not in stopped.stdout
+
+
+def test_the_runner_reads_its_profiles_and_the_lane_ca_where_they_name_it() -> None:
+    """test-buyer-machine selects the profiles it is given, and mounts the lane
+    CA at the path the shared payments profile trusts."""
+    payments = yaml.safe_load(
+        (REPO_ROOT / "e2e-tests/config/config-payments-lane.yml").read_text(encoding="utf-8")
+    )["payments"]
+    produced = _dry_run("test-buyer-machine", RUNNER_PROFILES="docker,payments-lane,vms-lane")
+    assert produced.returncode == 0, produced.stderr
+    assert "-e ACTIVE_PROFILES=docker,payments-lane,vms-lane " in produced.stdout
+    assert f"{LANE_CA}:{payments['ca_bundle_path']}:ro" in produced.stdout
+    assert "--env-file" not in produced.stdout
+    assert "-e ACTIVE_PROFILES=docker " in _dry_run("test-buyer-machine").stdout

@@ -20,7 +20,7 @@ from typing import Any
 
 import httpx
 import pytest
-from market_arkhai_payments import ArkhaiPaymentsConfig, payments_client_for_owner
+from market_arkhai_payments import ArkhaiPaymentsConfig
 from market_identity import Identity, IdentityScheme, TrustedIdentitySet, create_signer
 from storefront_client import SyncStorefrontClient
 
@@ -33,6 +33,8 @@ from tests.e2e.roles.helpers.domain_deal import (
     require_state,
 )
 from tests.e2e.roles.helpers.payments import (
+    buyer_payments_client,
+    buyer_payments_environment,
     configured_payments,
     payment_config_toml,
     payment_setting,
@@ -94,6 +96,7 @@ def payment_buyer_cli(payments_config, buyer_cli_binary, tmp_path_factory) -> Bu
         registries=(compute_registry, credits_registry),
         registry_authorities={compute_registry: compute_pin, credits_registry: credits_pin},
         credential_variable="ARKHAI_E2E_PAYMENT_BUYER_MARKETPLACE_CREDENTIAL",
+        credential_environment=buyer_payments_environment(payments_config),
         toml_sections=tuple(section),
     )
 
@@ -203,7 +206,7 @@ def test_the_seller_refund_reverses_the_held_payment(
     assert refunded.status == "refunded"
     assert refunded.settlement_ref == payment_deal_state.settlement_id
 
-    with payments_client_for_owner(payments_config, str(payment_setting("BUYER_ACCOUNT"))) as client:
+    with buyer_payments_client(payments_config, str(payment_setting("BUYER_ACCOUNT"))) as client:
         snapshot = client.get_transaction(payment_deal_state.settlement_id).snapshot
     assert {part.status.value for part in snapshot.parts} == {"reversed"}
     payment_deal_state.complete(

@@ -75,40 +75,46 @@ recommendations.
 
 Each end-to-end lane configures its own target, the payments lane double
 ([`tools/payments-lane-double`](../tools/payments-lane-double/README.md)), which
-the lane runs beside its storefronts at `https://payments-double:8443`. The lane
-target writes the runner's `PAYMENTS` overrides from the double's committed
-fixtures into `.e2e-<lane>-payments.env` at the repository root (`make
-e2e-<lane>-payments-env`), with the buyer's bearer token under the variable
-API_KEY_ENV names and SSL_CERT_FILE naming the lane CA, and passes the file and
-the CA to `test-buyer-machine` as PAYMENTS_ENV_FILE; rerunning markers against a
-lane's stack passes the same file. Every lane also passes SELLER_ACCOUNT, the
-seller's payee account, and the bare-metal lane its whole-host fixture's
-COMPUTE_HOURLY_GROSS and DISPUTE_WINDOW. The lane's settings mark the
-target LANE_OWNED, so an unready one fails the scenario naming it rather than
-skipping; LANE_OWNED with no SERVICE_URL fails too. `config-docker.yml` carries no
-`PAYMENTS` section, so no other run selecting the `docker` profile inherits a
-lane's target.
+the lane runs beside its storefronts at `https://payments-double:8443`, and
+states its settings in committed runner profiles. A lane target runs the runner with
+`RUNNER_PROFILES=docker,payments-lane,<lane>-lane`: `config/config-payments-lane.yml`
+holds what every lane shares — the target and its identity, the fee, LANE_OWNED,
+CA_BUNDLE_PATH, API_KEY_ENV and BUYER_API_KEY, both accounts and the buyer's
+marketplace seed — and `config/config-<lane>-lane.yml` only what differs, the
+seller's marketplace credential and, for bare metal, its whole-host fixture's
+COMPUTE_HOURLY_GROSS and DISPUTE_WINDOW. Dynaconf merges the section key by key.
+`test-buyer-machine` mounts the lane CA where CA_BUNDLE_PATH names it, and passes
+the runner nothing else; rerunning markers against a lane's stack passes the
+lane's RUNNER_PROFILES. The lane's settings mark the target LANE_OWNED, so an
+unready one fails the scenario naming it rather than skipping; LANE_OWNED with no
+SERVICE_URL fails too. `config-docker.yml` carries no `PAYMENTS` section, so a run
+selecting the `docker` profile alone has no payments target.
 
 FEE_BPS defaults to 250. LIVEMODE, DEVELOPMENT_AUTH and LANE_OWNED default to
 false and must be `true` or `false`; generated buyer tables explicitly pin the
 receipt mode. Choose either DEVELOPMENT_AUTH=true (literal loopback service URL
-only) or API_KEY_ENV naming the buyer's bearer-key environment variable, never
-both. Against an external target, forward the named variable into the test
-runner yourself, as a lane's environment file does; host environment variables
-are not inherited by the buyer-machine container.
+only) or API_KEY_ENV naming the variable the buyer reads its bearer key from,
+never both. The key is the setting BUYER_API_KEY, never a variable of the
+runner's environment: the harness hands it to each buyer it runs under the name
+API_KEY_ENV gives, to a `market` process in its environment and to an in-process
+payments client as the environment it resolves the key from. An external run
+states BUYER_API_KEY in a secret profile.
 
 An unreachable or unready external `/health` also reports `blocked` and skips.
-The readiness probe disables environment proxies and, when SSL_CERT_FILE is set,
-trusts the CA bundle it names, as the payments client does. Invalid policy fails
+The readiness probe disables environment proxies and trusts the CA_BUNDLE_PATH
+bundle alone when one is configured, as the payments client does; a bundle it
+cannot load leaves the target unready. Invalid policy fails
 rather than selecting another settlement mechanism. The shared serializer writes
 only a named payments table — `Settlement.arkhai_payments`, or
-`bare_metal.arkhai_payments`, which it supports for a bare-metal buyer — and the
-scenario supplies domain settings and payer.
+`bare_metal.arkhai_payments`, which it supports for a bare-metal buyer — with the
+configured CA bundle as its `ca_bundle_path`, and the scenario supplies domain
+settings and payer.
 
 Before any scenario runs, each lane target runs its payment storefront's
 `check-payments --account <the seller's account>` in the storefront's own
 container (`docker compose exec`), an authenticated read of the seller's balance
-at the double through the storefront's configuration, CA mount and token, and
+at the double through the storefront's configuration, its `ca_bundle_path` and
+CA mount, and the key in its secret overlay, and
 fails the lane on a nonzero exit; the command's one JSON line names the step that
 failed.
 See [Private Service Dependencies](../docs/development/TESTING.md#private-service-dependencies)
@@ -380,18 +386,18 @@ prove tunnel coexistence and require no GPU.
 The bare-metal lane includes marker `e2e_bare_metal_payment_deal`, which runs
 against the lane's payments double: `make test-e2e-bare-metal` runs it with the
 rest of the lane. To rerun its three ordered calls against the lane's running
-stack, pass the lane's payments settings:
+stack, select the lane's runner profiles:
 
 ```sh
 make test-buyer-machine \
   NETWORK=simple-market-bare-metal_default \
   BUYER_MODULE=e2e_bare_metal_payment_deal \
-  PAYMENTS_ENV_FILE="$PWD/../.e2e-bare-metal-payments.env"
+  RUNNER_PROFILES=docker,payments-lane,bare-metal-lane
 ```
 
-The lane supplies the shared PAYMENTS settings, plus SELLER_ACCOUNT,
-COMPUTE_HOURLY_GROSS=1000000 and DISPUTE_WINDOW=P7D; another target supplies them
-in the runner's config directory. The seller — the lane's
+The lane's profiles supply the shared PAYMENTS settings, SELLER_ACCOUNT among
+them, plus COMPUTE_HOURLY_GROSS=1000000 and DISPUTE_WINDOW=P7D; another target
+supplies them in the runner's config directory. The seller — the lane's
 `domains/bare_metal/storefront/storefront.dev.toml` — enables the same payments
 policy and trusts the double's service identity. SELLER_MARKETPLACE_CREDENTIAL
 must resolve to the lane's pinned seller scheme; the purchase buyer is a separate

@@ -582,6 +582,19 @@ def _fixture(name: str) -> dict:
         return tomllib.load(handle)
 
 
+def _lane_runner_payments() -> dict:
+    """The lanes' shared runner profile's `payments` mapping. The file is one
+    flat mapping of JSON scalars, quoted strings, numbers and booleans, read
+    here line by line because this suite has no YAML parser."""
+    path = UMBRELLA.parent / "e2e-tests" / "config" / "config-payments-lane.yml"
+    values = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        match = re.fullmatch(r"  ([a-z_]+): (.+)", line)
+        if match:
+            values[match[1]] = json.loads(match[2])
+    return values
+
+
 def _bob_document(manifest: str) -> dict:
     return json.loads(_block(_source(manifest, "storefront/templates/configmap.yaml"), "storefront.json"))
 
@@ -637,17 +650,22 @@ def test_the_local_payments_values_are_the_payments_doubles_committed_fixtures()
     registry = _source(release_one, "charts/registry/templates/deployment.yaml")
     assert _recommended_dispute_authorities(registry) == [authority]
 
-    runner = dict(line.split("=", 1) for line in lane_env.runner_lines(accounts))
-    assert _smoke_profile(release_one)["payments"] == {
+    # The release's runner profile states the lanes' public payments settings, as
+    # the lanes' committed runner profile does, which test_lane_env.py holds to
+    # the same fixtures.
+    profile = _smoke_profile(release_one)["payments"]
+    assert profile == {
         "service_url": lane_env.SERVICE_URL,
         "service_identity": accounts["receipt_identity"]["identifier"],
         "fee_bps": accounts["fee_bps"],
-        "livemode": runner["ARKHAI_PAYMENTS__LIVEMODE"] == "true",
-        "lane_owned": runner["ARKHAI_PAYMENTS__LANE_OWNED"] == "true",
-        "api_key_env": lane_env.BUYER_API_KEY_ENV,
+        "livemode": False,
+        "lane_owned": True,
+        "api_key_env": _lane_runner_payments()["api_key_env"],
         "buyer_account": accounts["accounts"]["buyer"]["account"],
         "seller_account": seller,
     }
+    lane = _lane_runner_payments()
+    assert {key: lane[key] for key in profile} == profile
     assert "payments" not in _smoke_profile(release_two)
 
 

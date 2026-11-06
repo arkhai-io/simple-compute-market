@@ -22,6 +22,9 @@ dev = [
     "cryptography>=43",
     "httpx>=0.27,<1",
     "pytest>=8.3.4,<9",
+    # The lane runner profiles, which tests/integration/test_lane_env.py holds
+    # to the fixtures, are YAML.
+    "pyyaml>=6",
 ]
 
 [build-system]
