@@ -791,6 +791,12 @@ D2/D7 permanent destinations remain the negotiation and buyer specifications and
 buyer architecture companion after review; full selection first use is 4.2, not
 claimed by this numerical/horizon continuation.
 
+## Mixed-selection first-use boundary
+
+Both command surfaces consume actual mixed published options using proposed mechanism billing/presentation/capability ports. Reserved hosted, on-demand and spot display both bounds and preserve omitted/shorter requests. VM also selects Alkahest with no lifecycle and shows no delivery promise. Bare metal's installed purchase command remains payments-only; no Alkahest buyer stage is fabricated merely to display the common no-adapter rights result. Its shared rights/disclosure accepts the Alkahest peer, while its CLI exercises the hosted reserved peer. The selection replay stops before protected effects; signed cached refusals and horizon artifacts use the existing application diagnostic separately. This preserves the distinction between terms qualification and rate mandate/capture execution.
+
+Both prescribed-provider E2E setups fail before readiness. The existing Compose-assembly gap carries the reproductions; this does not qualify deployed rate servicing or permanent live capabilities. Full setup/results are in `docs/attachments/negotiate-open-ended-compute-terms/mixed-selection-checkpoint.md`.
+
 ## Design promotion record
 
 Destinations are planned, not claims of implemented behavior.
