@@ -110,7 +110,7 @@ allow = [
   "Bash(mkdir -p ../*-proposal/openspec/changes/*)",
   "Read(../*-proposal/**)",
   "Edit(../*-proposal/openspec/**)", "Edit(../*-proposal/docs/development/ROADMAP.md)",
-  "Bash(helm version*)",
+  "Bash(helm version*)", "Bash(make helm-values-schema)",
   "Bash(git add *)", "Bash(git commit *)", "Bash(scripts/change-workflow push)",
 ]
 
@@ -123,6 +123,7 @@ allow = [
   "Edit(openspec/**)", "Edit(docs/**)",
   "Bash(bunx @fission-ai/openspec@1.14.0 *)",
   "Bash(npx --yes @fission-ai/openspec@1.14.0 *)", "Bash(npx -y @fission-ai/openspec@1.14.0 *)", "Bash(make check-*)",
+  "Bash(make helm-values-schema)",
   "Bash(git add *)", "Bash(git commit *)", "Bash(scripts/change-workflow push)",
 ]
 
@@ -141,7 +142,7 @@ allow = [
   "Bash(git add *)", "Bash(git commit *)", "Bash(git rm *)", "Bash(scripts/change-workflow push)",
   "Bash(git pull --ff-only workspace *)",
   "Bash(make -C * dist*)", "Bash(make init*)", "Bash(make -C * init*)", "Bash(make validate-*)",
-  "Bash(helm version*)",
+  "Bash(helm version*)", "Bash(make helm-values-schema)",
 ]
 # Triage fixes and re-checks one change; running two changes' validations
 # side by side deploys into another change's namespace.
@@ -174,7 +175,7 @@ allow = [
   "Bash(make check-uv-version)",
   "Bash(scripts/change-workflow push)",
   "Bash(make run-e2e)", "Bash(make run-ci *)", "Bash(make fetch-e2e-logs*)",
-  "Bash(make dist-clean)",
+  "Bash(make dist-clean)", "Bash(make helm-values-schema)",
   "Bash(gh run list*)", "Bash(gh run view *)", "Bash(gh auth status*)",
   "Bash(docker *)", "Bash(kubectl *)", "Bash(helm *)",
 ]
@@ -214,6 +215,7 @@ allow = [
   "Bash(bunx @fission-ai/openspec@1.14.0 *)",
   "Bash(npx --yes @fission-ai/openspec@1.14.0 *)", "Bash(npx -y @fission-ai/openspec@1.14.0 *)", "Bash(openspec archive *)",
   "Bash(make check-*)", "Bash(python3 scripts/check_*)", "Bash(scripts/change-workflow check *)",
+  "Bash(make helm-values-schema)",
   "Bash(git add *)", "Bash(git commit *)", "Bash(scripts/change-workflow push)",
 ]
 
@@ -228,6 +230,6 @@ allow = [
   "Bash(make check-*)", "Bash(git add *)", "Bash(git commit *)", "Bash(scripts/change-workflow push)",
   "Bash(scripts/change-workflow history*)",
   "Bash(make -C helm teardown*)",
-  "Bash(make record-capacity*)",
+  "Bash(make record-capacity*)", "Bash(make helm-values-schema)",
 ]
 deny = ["Bash(gh pr create*)"]
