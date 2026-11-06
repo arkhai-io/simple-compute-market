@@ -53,7 +53,7 @@ user-scoped API key. A storefront's key is `api_key` under
 which its values schema keeps out of public configuration. For loopback
 development only, replace the key with
 `development_auth = true` and use the development service origin. Never put an
-API key value in TOML. Choose dispute authorities separately through root
+API key value in public TOML. Choose dispute authorities separately through root
 `[[Dispute]]` entries or signed registry recommendations; the buyer must opt into
 recommendations explicitly. The accepted option carries the selected authority
 in `lifecycle.adjudication.dispute`, and the retired payments `dispute_authority`

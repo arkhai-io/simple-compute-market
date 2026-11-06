@@ -15,12 +15,15 @@ in place when practice changes, not layered with historical commentary.
 
 ## Profile-based configuration
 
-Every service in this repository uses the same configuration shape,
-built on [Dynaconf](https://www.dynaconf.com/): a committed
-`settings.toml` supplies base defaults, one or more profile-specific
-`config-<profile>.yml` files layer overrides on top, and environment
-variables under a service-specific prefix are the highest-priority
-override.
+Every service in this repository but the registry uses the same
+configuration shape, built on [Dynaconf](https://www.dynaconf.com/): a
+committed `settings.toml` supplies base defaults, one or more
+profile-specific `config-<profile>.yml` files layer overrides on top, and
+environment variables under a service-specific prefix are the
+highest-priority override. The registry is a Pydantic-settings service
+that reads profile-shaped env files instead; see
+[Registry descriptor configuration](#registry-descriptor-configuration).
+The rest of this section describes the Dynaconf services.
 
 **Resolution order, highest priority first:**
 
