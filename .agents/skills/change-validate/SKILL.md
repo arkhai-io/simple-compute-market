@@ -240,7 +240,9 @@ the wrapper a turn's end is an outcome, so a turn ended with a part in flight is
 logged as a stop. The wait returns that line as soon as it is in the file, even if
 it was written before the wait began, and gives up after nine minutes, inside one
 call's ten-minute limit, so give its call that limit; the pipeline can take longer,
-so when the wait gives up, run it again, still without ending the turn. No step
+so when the wait gives up, run it again, still without ending the turn. When the
+command has ended with no line matching, the wait says so at once, exit 3: read the
+output, since nothing more will come, rather than waiting again. No step
 follows a file with `tail -f`: it hangs when the line waited for is the last one
 written, and no rule allows it. Never a shell loop: `bash -c` has no allow rule
 unattended and will not get one, since no rule admits a loop without admitting any

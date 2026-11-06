@@ -112,7 +112,8 @@ the session, and every turn ends with an outcome matching
   closing line of `pre-commit`, its last hook, `[change-workflow] pre-commit at`
   (the pattern a regular expression, so its brackets escaped:
   `'^\[change-workflow\] pre-commit at|^ERROR:'`), or an `ERROR:` line when it
-  refuses — repeated when the wait gives up — never
+  refuses — repeated when the wait gives up, and, when it says the command ended
+  with no line matching, the output read rather than waited on again — never
   with `tail -f`, which hangs when that line is the last, Monitor, a wake-up, or a
   shell loop.
 - **The end is an outcome.** Each discussed finding you present (step 3) and, when

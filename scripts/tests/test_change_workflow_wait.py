@@ -1,6 +1,7 @@
 """`change-workflow wait` returns as soon as a matching line is in the file, including
-one written before it began or the file's unterminated last line, and gives up at its
-bound. Time is an injected clock whose sleep advances it, so no test waits."""
+one written before it began or the file's unterminated last line, stops at the
+harness's exit line when nothing matched, and gives up at its bound. Time is an
+injected clock whose sleep advances it, so no test waits."""
 
 from __future__ import annotations
 
@@ -11,7 +12,7 @@ from pathlib import Path
 from typing import Callable
 
 from change_workflow import cli
-from change_workflow.wait import run, wait_for
+from change_workflow.wait import Ended, run, wait_for
 
 COMMAND = Path(__file__).resolve().parents[1] / "change-workflow"
 
@@ -97,6 +98,48 @@ def test_a_file_not_yet_created_is_waited_for(tmp_path: Path) -> None:
     clock = Clock(create)
     assert wait_for(output, re.compile(r"^ERROR:"), timeout=10, clock=clock,
                     sleep=clock.sleep) == "ERROR: the part could not start"
+
+
+def test_a_command_that_ended_without_the_line_stops_the_wait(tmp_path: Path,
+                                                              capsys) -> None:
+    output = tmp_path / "out"
+    output.write_text("Run E2E (7) has already completed with 'success'\n"
+                      "Fetched e2e.yml run 7 (success) logs into /x.\n\n"
+                      "[exited with code 0]\n")
+    clock = Clock()
+
+    status = run(output, re.compile("conclusion"), timeout=540, clock=clock,
+                 sleep=clock.sleep)
+
+    assert status == 3
+    assert clock.slept == []
+    assert "ended ([exited with code 0]) with no line" in capsys.readouterr().err
+
+
+def test_the_exit_line_ends_a_wait_already_under_way(tmp_path: Path) -> None:
+    output = tmp_path / "out"
+    output.write_text("running\n")
+
+    def finish(now: float) -> None:
+        if now == 2:
+            with output.open("a") as handle:
+                handle.write("failed early\n\n[exited with code 2]")
+
+    clock = Clock(finish)
+    found = wait_for(output, re.compile(r": PASSED$"), timeout=540, clock=clock,
+                     sleep=clock.sleep)
+
+    assert found == Ended("[exited with code 2]")
+    assert clock.now == 2
+
+
+def test_a_matching_line_before_the_exit_line_is_still_returned(tmp_path: Path) -> None:
+    output = tmp_path / "out"
+    output.write_text("attempt 1: PASSED\n\n[exited with code 0]\n")
+    clock = Clock()
+
+    assert wait_for(output, re.compile(r": PASSED$"), timeout=5, clock=clock,
+                    sleep=clock.sleep) == "attempt 1: PASSED"
 
 
 def test_nothing_matching_gives_up_at_the_bound(tmp_path: Path, capsys) -> None:
