@@ -162,11 +162,14 @@ lifecycle-admission and multiplier cases pass after this repair. The redundant
 scalar/payment equality check was intentionally removed, not weakened into a
 permissive amount comparison.
 
-Deployed e2e remains unrun: this checkout has no `docker` executable, and the
-available Podman compose invocation selects an unconfigured mise provider shim.
-No stack was started or specs run against a down service. PR #349's registry
-carrier/seller-proof dependency is still open; no deployed registry proof check
-is claimed. Promotion/archive remain after review.
+At the slice-C checkpoint, deployed e2e was unrun because `docker` was absent and
+Podman selected an unconfigured provider shim. The final attempt configured the
+native provider and built all fresh images, but startup failed before readiness
+on included registry environment-file path resolution. Task 2.15 is explicitly
+**unobservable**, not passed; no specs ran against a down service. See
+[final-validation.md](final-validation.md) for the exact command, failure, cleanup,
+and rebased focused validation. PR #349's registry carrier/seller-proof dependency
+remains open; no deployed proof check is claimed. Promotion/archive remain after review.
 
 ## Boundaries
 
@@ -176,7 +179,8 @@ The repeated no-revision sub-floor counter in the encounter reaches the existing
 bisection stale exit, so later refusal observations use a fresh thread. Accepting
 the floor instead converges, as the focused persistence regression demonstrates.
 Accepted artifact/claim propagation is covered by slice C above. No typing suite,
-deployed pipeline, browser journey, registry seller-proof verification, promotion,
-archival, or PR is claimed.
+passing deployed pipeline, browser journey, registry seller-proof verification,
+promotion or archival is claimed. Final PR preparation and validation are recorded
+in [final-validation.md](final-validation.md).
 The top-level `rate_structure` carrier is the documented PR #349 contract on
 `registry-as-published`; registry storage/proof is not reimplemented here.
