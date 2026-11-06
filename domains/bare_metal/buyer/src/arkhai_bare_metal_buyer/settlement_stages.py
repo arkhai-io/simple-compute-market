@@ -9,7 +9,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from market_arkhai_payments import PaymentApproval, create_arkhai_payments_registration
-from market_core.schemas import compute_rate_total, rate_scales_by_time
+from market_arkhai_payments.settlement_config import payments_billing_basis
+from market_core.schemas import agreed_price, compute_rate_total, rate_scales_by_time
 from market_deal_lifecycle_contracts.models import Accepted, CommitMessage, Pending
 
 from .evidence import evidence_store
@@ -76,9 +77,10 @@ def require_quoted_agreement(outcome: Any, *, amount: int, duration_seconds: int
             f"seller Agreement is for {agreement.duration_seconds} seconds, "
             f"not the {duration_seconds} requested"
         )
-    if agreement.amount != amount:
+    quote = agreed_price(agreement, project_billing=payments_billing_basis)
+    if quote.unit != "total" or quote.amount != amount:
         raise ValueError(
-            f"seller Agreement amount {agreement.amount} differs from the quoted {amount}"
+            f"seller Agreement price {quote.amount} ({quote.unit}) differs from the quoted {amount} total"
         )
 
 

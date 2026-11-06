@@ -60,6 +60,7 @@ def _option(mechanism: str, asset: str, rates: list[dict[str, Any]]) -> Settleme
     values = [RateValue.model_validate(rate) for rate in rates]
     body = {"price": {"asset": asset, "rates": values}, "settlement": {"schema": mechanism}}
     if mechanism == "arkhai.payments.v1":
+        body["settlement"]["payee_account"] = "22222222-2222-4222-8222-222222222222"
         body["lifecycle"] = {"adjudication": {
             "version": 1, "dispute": {key: _DISPUTE[key] for key in ("interface", "origin", "account", "record_key", "params")},
             "dispute_window_seconds": 120, "case_hold_max_seconds": None,

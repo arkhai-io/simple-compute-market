@@ -16,7 +16,7 @@ CHANGE = "shape-bounds"
 # The workflow's default checks — the change index, the task list, the agent skills,
 # and the OpenSpec validation — are the `pre-commit` hook's, run before this
 # repository's command, so none is here.
-NAMES = ["comment hygiene", "documentation citations", "specification index",
+NAMES = ["comment hygiene", "Agreement amount reads", "documentation citations", "specification index",
          "decision destinations", "history wording", "version bumps", "local imports",
          "capability index"]
 
@@ -61,6 +61,7 @@ def test_every_check_passing_prints_one_line(tmp_path: Path) -> None:
     assert shown == [f"OK: every check of {CHANGE} passed: " + ", ".join(NAMES)]
     assert runner.commands == [
         ["make", "--no-print-directory", "check-comment-hygiene"],
+        ["make", "--no-print-directory", "check-agreement-amount-reads"],
         ["make", "--no-print-directory", "check-doc-citations", f"CHANGE={CHANGE}"],
         # The change named, so its deltas count as the archive will leave them.
         ["make", "--no-print-directory", "check-spec-index", f"CHANGE={CHANGE}"],
@@ -80,7 +81,7 @@ def test_the_diff_checks_read_the_branch_the_clone_recorded(tmp_path: Path) -> N
     run_checks(CHANGE, root=_change(tmp_path, lands_on="release"), runner=runner,
                echo=lambda _: None)
 
-    assert [command[-1] for command in runner.commands[4:7]] == ["CHANGE_BASE=release"] * 3
+    assert [command[-1] for command in runner.commands[5:8]] == ["CHANGE_BASE=release"] * 3
 
 
 def test_a_base_given_overrides_the_recorded_one(tmp_path: Path) -> None:
@@ -89,7 +90,7 @@ def test_a_base_given_overrides_the_recorded_one(tmp_path: Path) -> None:
     run_checks(CHANGE, root=_change(tmp_path, lands_on="dev"), runner=runner,
                echo=lambda _: None, base="main")
 
-    assert [command[-1] for command in runner.commands[4:7]] == ["CHANGE_BASE=main"] * 3
+    assert [command[-1] for command in runner.commands[5:8]] == ["CHANGE_BASE=main"] * 3
 
 
 def test_a_change_with_no_base_recorded_or_given_is_refused(tmp_path: Path) -> None:
@@ -101,6 +102,7 @@ def test_a_change_with_no_base_recorded_or_given_is_refused(tmp_path: Path) -> N
 
     assert runner.commands == []
     assert shown[0].startswith("ERROR: ") and "--base" in shown[0] and "CHANGE_BASE" in shown[0]
+
 
 
 def test_the_command_takes_the_branch_the_change_lands_on(

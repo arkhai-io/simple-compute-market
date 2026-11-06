@@ -29,7 +29,9 @@ from market_arkhai_payments import (
     Refunded,
     SignedReceipt,
 )
+from market_arkhai_payments.settlement_config import payments_billing_basis
 from market_core.schemas import (
+    agreed_price,
     Agreement,
     EscrowProposal,
     SettlementPlan,
@@ -87,7 +89,7 @@ def _accepted_payment(
         or agreement.get("listing_id") != thread.get("our_listing_id")
         or agreement.get("buyer") != buyer_principal.model_dump(mode="json")
         or agreement.get("seller") != seller.model_dump(mode="json")
-        or accepted.amount != thread.get("agreed_price")
+        or agreed_price(accepted, project_billing=payments_billing_basis).amount != thread.get("agreed_price")
         or agreement.get("duration_seconds") != thread.get("agreed_duration_seconds")
     ):
         raise SettlementRequestError("stored Agreement does not match the accepted negotiation")

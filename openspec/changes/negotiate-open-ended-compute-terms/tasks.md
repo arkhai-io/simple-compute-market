@@ -3,7 +3,9 @@
 Implementation started on the stacked resize and registry branches. The partial
 2.1 checkpoints add the quote carrier/accessor, VM pricing-proof retention,
 installed billing projections and period-aware VM multiplier derivation.
-Accepted-evidence enforcement and remaining consumer migration are not implemented. Verification levels follow
+Signed-acceptance evidence enforcement, accepted consumer migration and the
+fail-closed direct-read guard are implemented through 2.1c. Listing bounds and
+later terms behavior remain unimplemented. Verification levels follow
 `docs/development/TESTING.md`. New acceptance test implementation requires the
 maintainer's approval; the scenarios below are the intended contract, not tests
 added by this reconciliation.
@@ -191,9 +193,31 @@ added by this reconciliation.
   all later tasks stay unchecked. PR stays draft. Hosted recurring execution,
   independent review, final rebase, promotion and archival remain unclaimed.
 
+### Reader/guard continuation checkpoint (2026-11-07)
+
+- Completed 2.1c and parent 2.1: accepted financial readers use unit-bearing
+  quotes; escrow recovery explicitly requires total; payments mandate/buyer
+  re-verification uses its installed projection. Generic negotiation's raw
+  Agreement equality check is classified as a transport/expected-money invariant,
+  not a financial interpretation. No hosted recurring adapter is enabled.
+- The fail-closed AST guard inventories production amount reads, including
+  key/getter/reflection aliases and wrapper bodies, with expression/count/reason
+  classifications. It runs in packaging and change checks. Unknown reads and
+  stale classifications refuse the check. Diagnostics, focused results and exact
+  fresh-checkout recipes: `docs/attachments/negotiate-open-ended-compute-terms/reader-guard-checkpoint.md`.
+- Existing Alkahest explicit-proposal acceptances needed their own projector
+  shape alongside published accepted-escrow selections. That compatibility repair
+  passes the existing signed HTTP settlement/recovery suite. Kept test fixtures
+  now provide the explicit total projector and required payment payee; no new
+  permanent tests were added and no assertions were weakened.
+- **Restart at 2.2**, then continue in order. Listing bounds, publication,
+  servicing doors, horizon acceptance and complete buyer disclosure are not yet
+  implemented. PR #351 stays draft; independent review, final rebase, promotion
+  and archival remain pending. No deployed E2E or live approval is claimed.
+
 ## 2. Quote and capacity terms
 
-- [ ] 2.1 In `core/src/market_core/schemas.py` implement the unit-bearing accessor;
+- [x] 2.1 In `core/src/market_core/schemas.py` implement the unit-bearing accessor;
   migrate both domains' policy/reference readers, buyer caps, VM checks and the rate
   adapter to it. Add the fail-closed guard under `scripts/`, integrated into the
   existing check targets. Verify at unit level with `core/tests/unit/test_rate_helpers.py`
@@ -208,7 +232,7 @@ added by this reconciliation.
     Implement historical seller-proof,
     exact option/context, transcript multiplier and accepted Agreement verification
     before recovery or buyer mandate reads. Never substitute a current listing.
-  - [ ] 2.1c Migrate remaining both-domain policy/reference/cap/amount readers and
+  - [x] 2.1c Migrate remaining both-domain policy/reference/cap/amount readers and
     mandate checks, and integrate the fail-closed direct-read guard. Keep 2.1 unchecked
     until all three slices and its focused validation pass.
 - [ ] 2.2 Add validated relative/UTC absolute hints in `kit/resource-pools-contracts`,

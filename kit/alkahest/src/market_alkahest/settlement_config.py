@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from market_core.schemas import (
-    PriceBasis, SettlementOption, settlement_option_schema, settlement_option_params,
+    EscrowProposal, PriceBasis, SettlementOption, settlement_option_schema, settlement_option_params,
 )
 from market_settlement_runtime import (
     ComparisonOperator,
@@ -938,10 +938,18 @@ def alkahest_billing_basis(option: SettlementOption) -> PriceBasis:
     """An Alkahest escrow funds a whole-term total, never a recurring charge."""
     if option.settlement_schema != ALKAHEST_MECHANISM_ID:
         raise ValueError("billing projection requires an Alkahest option")
-    if option.lifecycle is not None or set(option.settlement_params) != {"accepted_escrow"}:
+    if option.lifecycle is not None:
         raise ValueError("Alkahest billing requires an escrow option without lifecycle terms")
-    if _alkahest_escrow(option) is None:
-        raise ValueError("Alkahest billing requires an accepted escrow")
+    params = option.settlement_params
+    if set(params) == {"accepted_escrow"}:
+        if _alkahest_escrow(option) is None:
+            raise ValueError("Alkahest billing requires an accepted escrow")
+    else:
+        # Explicit proposal acceptances carry the negotiated escrow directly,
+        # while published selections wrap their advertised accepted escrow.
+        if not set(params) <= set(EscrowProposal.model_fields):
+            raise ValueError("Alkahest billing requires an escrow option")
+        EscrowProposal.model_validate(params)
     return PriceBasis(unit="total")
 
 
