@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 import typer
 from market_core.schemas import Agreement
+from market_policy.scalar_policies import option_uses_scalar_amount
 from core_buyer.deal_helpers import (  # noqa: F401 — re-exports
     DealContext,
     NegotiationResumePoint,
@@ -27,7 +28,12 @@ from core_buyer.deal_helpers import (
     load_negotiation_resume_point as _core_load_negotiation_resume_point,
 )
 
+from arkhai_vms_negotiation.amounts import has_rate_structure
+
 from .common import chain_address_book
+from .evidence import evidence_store
+from .lifecycle import run_sync
+from .pricing_record import verify_recovered_pricing
 
 if TYPE_CHECKING:
     from market_config.config_loader import ChainConfig
@@ -111,7 +117,21 @@ def load_deal_context(run_id: str, *, signer):
         deal.agreement = agreement.model_dump(mode="json", exclude_none=True)
     # The table's adapters consume ChainSettings from this module, so resolve
     # their composition after the recovery helpers have finished importing.
-    from .settlement_composition import buyer_settlement_stages
+    from .settlement_composition import buyer_settlement_registry, buyer_settlement_stages
+
+    if deal.listing_record is not None and has_rate_structure(deal.listing_record):
+        try:
+            if deal.agreement is None or deal.agreement_bytes is None:
+                raise ValueError("accepted pricing requires retained Agreement bytes")
+            accepted = Agreement.model_validate(deal.agreement)
+            if accepted.settlement is None or option_uses_scalar_amount(accepted.settlement.model_dump(mode="json")):
+                verify_recovered_pricing(
+                    deal.listing_record, accepted, deal.agreement_bytes,
+                    run_sync(lambda: evidence_store().read(deal.negotiation_id)),
+                    project_billing=buyer_settlement_registry().project_billing,
+                )
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
 
     # Only purchase entries decode mechanism artifacts into the deal. An
     # introduction run has no purchase entry; the contact mechanism's own

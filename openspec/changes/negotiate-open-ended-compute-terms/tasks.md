@@ -163,6 +163,34 @@ added by this reconciliation.
   Parent 2.1 and all later tasks stay unchecked. No deployment/E2E, independent review,
   promotion, archival or final integration rebase is claimed; PR #351 stays draft.
 
+### Signed-acceptance pin checkpoint (2026-11-07)
+
+- D2b is decided by webapp owner 2026-11-06, pending maintainer review, and listed
+  in PR #351's Decisions to review. It binds the multiplier and D-e's published
+  rate-structure digest, not a digest of a new seller snapshot. The DB-listing
+  meaning of `Agreement.listing_hash` is unchanged, with its mismatch to the
+  published document retained for maintainer follow-up.
+- Opening, continuation counters and acceptance now expose that one digest;
+  acceptance includes `pricing_pin` in the signed response. Core's HTTP carriers
+  preserve it. VM amount-codec validators authenticate the retained publication,
+  exact pricing inputs/option and transcript multiplier/monetary Agreement before
+  acceptance observation and stage validation. Recovery re-verifies retained
+  seller response and buyer request signatures/context against exact Agreement
+  bytes before stage enrichment. No current listing or seller-returned snapshot
+  supplies pricing; missing historical evidence fails closed for multiplier deals.
+- Retention includes the listing's storefront URL and seller principal so the
+  accepted pricing snapshot remains parseable by the VM listing-price helper.
+  Rateless/exact selections do not acquire a fictitious negotiated multiplier.
+- Replay and focused evidence: `docs/attachments/negotiate-open-ended-compute-terms/acceptance-pin-checkpoint.md`.
+  The committed diagnostics exercise installed once pricing, injected PT1M pricing,
+  signed immediate and continuation acceptance recovery, refusal cases, real-SQLite
+  seller pin production and HTTP-carrier round trips. No permanent tests were added
+  or assertions weakened; these are invocation-local diagnostics, not deployed E2E.
+- **Restart at 2.1c, not 2.2:** finish both-domain readers/caps/check migration,
+  mandate-reader migration and the fail-closed direct-read guard. Parent 2.1 and
+  all later tasks stay unchecked. PR stays draft. Hosted recurring execution,
+  independent review, final rebase, promotion and archival remain unclaimed.
+
 ## 2. Quote and capacity terms
 
 - [ ] 2.1 In `core/src/market_core/schemas.py` implement the unit-bearing accessor;
@@ -175,8 +203,9 @@ added by this reconciliation.
     and VM buyer/seller multiplier derivation. Verify once totals, fail-closed
     unsupported projections and injected sub-hour period quotes using the committed
     diagnostic and existing configuration/multiplier/buyer suites.
-  - [ ] 2.1b Decision gate: choose how signed acceptance binds retained pricing inputs
-    (design's acceptance-evidence question), then implement historical seller-proof,
+  - [x] 2.1b Implement D2b's signed-acceptance pin binding the multiplier and D-e's
+    published rate-structure digest (owner decided 2026-11-06; maintainer review pending).
+    Implement historical seller-proof,
     exact option/context, transcript multiplier and accepted Agreement verification
     before recovery or buyer mandate reads. Never substitute a current listing.
   - [ ] 2.1c Migrate remaining both-domain policy/reference/cap/amount readers and

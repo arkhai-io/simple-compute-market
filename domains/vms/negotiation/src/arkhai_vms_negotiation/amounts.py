@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from collections.abc import Mapping
@@ -21,6 +22,17 @@ UINT256_MAX = 2**256 - 1
 
 def listing_record(listing: Any) -> dict[str, Any]:
     return listing.model_dump(mode="json") if hasattr(listing, "model_dump") else dict(listing)
+
+
+def rate_structure_digest(listing: Any) -> str | None:
+    """One identity for as-published rates at opening, rounds and acceptance."""
+    structure = listing_record(listing).get("rate_structure")
+    if structure is None:
+        return None
+    encoded = json.dumps(
+        structure, sort_keys=True, separators=(",", ":"), allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def has_rate_structure(listing: Any) -> bool:

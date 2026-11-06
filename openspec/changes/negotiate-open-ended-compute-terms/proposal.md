@@ -16,6 +16,11 @@ do not express these products across mechanisms or bound them by an absolute dat
   or `per_period`, following `negotiation-driven-capacity-resize`'s multiplier
   contract. A fail-closed repository check refuses direct `Agreement.amount` reads
   outside the accessor and declared raw negotiation hooks.
+- A signed-acceptance pricing pin binds the agreed multiplier and D-e's digest
+  of the as-published rate structure. Buyers verify the one opening/round/acceptance
+  rate identity against the registry's retained seller-signed publication, never a
+  seller-returned database snapshot. `Agreement.listing_hash` remains unchanged;
+  its database-listing/publication mismatch is a known maintainer follow-up (D2b).
 - Keep listing-level `max_duration_seconds` and add `available_until_utc`, through
   hints, storefront overrides and configured defaults. For an unnamed recurring
   horizon, at the resolved start, `duration_seconds =
@@ -111,6 +116,9 @@ options are immutable and cannot be rewritten from the current listing.
 - D2: unit-bearing price → `docs/development/ARCHITECTURE.md` and
   `openspec/specs/negotiation-protocol/spec.md`; D2a retains resize's monetary
   Agreement carrier and transcript multiplier, with recurring derivation before acceptance.
+  D2b's published-rate identity, signed-acceptance pricing pin and historical proof
+  verification share those destinations. The DB-listing hash mismatch stays an
+  explicit maintainer follow-up rather than a new snapshot contract.
 - D3: shared-codec consumption and penalty recommendations →
   `openspec/specs/settlement-configuration/spec.md`; codec and authority ownership
   remain in `openspec/specs/deal-lifecycle/spec.md`.

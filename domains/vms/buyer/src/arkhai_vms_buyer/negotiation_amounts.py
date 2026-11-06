@@ -18,7 +18,7 @@ from arkhai_vms_negotiation.policies import proposal_uses_scalar_amount
 from core_buyer.negotiation_client import NegotiationAmountCodec
 from market_core.schemas import BillingProjection
 
-from .pricing_record import retained_pricing_record  # noqa: F401
+from .pricing_record import retained_pricing_record, verify_pricing_acceptance, verify_pricing_reply
 from .settlement_composition import buyer_settlement_registry
 
 
@@ -39,9 +39,9 @@ def amount_codec(
     if not proposal_uses_scalar_amount(listing, proposal):
         return None
     hourly = shape_hourly_amount(listing, proposal)
-    basis = selected_billing_basis(
-        listing, proposal, project_billing or buyer_settlement_registry().project_billing,
-    )
+    project_billing = project_billing or buyer_settlement_registry().project_billing
+    basis = selected_billing_basis(listing, proposal, project_billing)
+    pricing_record = retained_pricing_record(listing)
 
     def scalar(price: Any) -> int:
         value = Fraction(Decimal(str(price)))
@@ -80,6 +80,22 @@ def amount_codec(
             }
         return normalize_vm_provision_terms(payload)
 
+    def validate_reply(reply):
+        try:
+            verify_pricing_reply(pricing_record, reply)
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+
+    def validate_accepted(outcome, reply):
+        try:
+            verify_pricing_acceptance(
+                pricing_record, outcome.agreement, reply,
+                multiplier=outcome.negotiated_scalar, project_billing=project_billing,
+            )
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+
     return NegotiationAmountCodec(
         scalar_from_price=scalar, payment_from_scalar=payment, effective_terms=effective,
+        validate_reply=validate_reply, validate_accepted=validate_accepted,
     )
