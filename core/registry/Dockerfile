@@ -49,8 +49,9 @@ COPY --from=builder --chown=appuser:appuser /app/filter-spec-apicredits.yaml ./
 ENV PATH="/app/.venv/bin:$PATH"
 USER appuser
 
+# No ENV for the port: a process variable would override the PORT a profile env
+# file states, and the settings default it to 8080 already.
 ARG PORT=8080
-ENV PORT=${PORT}
 EXPOSE ${PORT}
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \

@@ -13,13 +13,9 @@ api-credits-registry:
     displayName: "Example API Credits Registry"
     operatorIdentity: "Example operator"
     accessAcquisitionPointer: ""
-  auth:
-    bootstrapKeySecret:
-      name: credits-registry-bootstrap
-      key: api-key
-    adminKeySecret:
-      name: credits-registry-admin
-      key: api-key
+  secretProfile:
+    secretName: credits-registry-keys
+    profile: credits-keys
   persistence:
     enabled: true
     storageClass: standard

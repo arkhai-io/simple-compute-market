@@ -11,7 +11,9 @@ back with ``json``. Standard library only.
 
 Set ``BARE_METAL_STOREFRONT_PYTHON`` to the bare-metal storefront environment's
 interpreter to also load release 2's rendered document with the storefront's own
-configuration loader and publication checks.
+configuration loader and publication checks, and ``REGISTRY_PYTHON`` to the
+registry environment's to load release 1's rendered registry profile with the
+registry's own loader.
 """
 
 from __future__ import annotations
@@ -161,6 +163,22 @@ def _env(document: str, name: str) -> str:
     return match.group(1)
 
 
+_PROFILE_LINE = re.compile(r"([A-Z_]+)='((?:\\'|[^'])*)'(?:\n|$)")
+
+
+def _registry_profile(manifest: str, chart: str = "registry") -> dict[str, str]:
+    """The settings a registry chart renders into ``config-production.env``,
+    each ``NAME='value'`` line decoded as the registry's dotenv reader decodes a
+    single-quoted value, ``\\\\`` and ``\\'`` only. That is its reading of every
+    value the chart renders, since the chart refuses the two it would read
+    otherwise; the registry's own loader reads one rendered profile in
+    ``test_the_rendered_registry_profile_loads_with_the_registry_loader``."""
+    text = _block(_source(manifest, f"charts/{chart}/templates/configmap.yaml"), "config-production.env")
+    lines = list(_PROFILE_LINE.finditer(text))
+    assert "".join(line.group(0) for line in lines) == text, f"{chart} renders a line that is not NAME='value'"
+    return {line[1]: re.sub(r"\\([\\'])", r"\1", line[2]) for line in lines}
+
+
 # --- release 2 ------------------------------------------------------------
 
 
@@ -191,17 +209,17 @@ def test_release_two_publishes_to_release_ones_registry_under_its_pinned_trust()
     address book are release 1's dev-env."""
     release_one = _release_one()
     storefront = _storefront_document(_release_two())
-    registry = _source(release_one, "charts/registry/templates/deployment.yaml")
+    registry = _registry_profile(release_one)
 
     registry_url = _service_url(release_one, f"{RELEASE_ONE}-registry")
     assert storefront["registry"]["urls"] == [registry_url]
     assert storefront["registry"]["authorities"] == {
         registry_url: {
-            "authority": _env(registry, "REGISTRY_AUTHORITY_ID"),
+            "authority": registry["REGISTRY_AUTHORITY_ID"],
             "principals": [
                 {
-                    "scheme": _env(registry, "REGISTRY_AUTHORITY_SCHEME"),
-                    "identifier": _env(registry, "REGISTRY_AUTHORITY_IDENTIFIER"),
+                    "scheme": registry["REGISTRY_AUTHORITY_SCHEME"],
+                    "identifier": registry["REGISTRY_AUTHORITY_IDENTIFIER"],
                 }
             ],
         }
@@ -279,11 +297,11 @@ def test_release_ones_smoke_profile_carries_the_pins_and_wallets_the_release_sta
     the e2e-tests chart's Secret, layered as its `e2e-secret` profile."""
     manifest = _release_one()
     profile = _smoke_profile(manifest)
-    registry = _source(manifest, "charts/registry/templates/deployment.yaml")
+    registry = _registry_profile(manifest)
     bob = json.loads(_block(_source(manifest, "storefront/templates/configmap.yaml"), "storefront.json"))
 
-    assert profile["registry"]["authority_id"] == _env(registry, "REGISTRY_AUTHORITY_ID")
-    assert profile["registry"]["identifier"] == _env(registry, "REGISTRY_AUTHORITY_IDENTIFIER")
+    assert profile["registry"]["authority_id"] == registry["REGISTRY_AUTHORITY_ID"]
+    assert profile["registry"]["identifier"] == registry["REGISTRY_AUTHORITY_IDENTIFIER"]
     # The e2e-tests chart's buyer, Anvil account 1: a well-known development
     # address, never for a public network.
     assert profile["buyer"]["wallet_address"] == "0x70997970c51812dc3a010c7d01b50e0d17dc79c8"
@@ -324,7 +342,7 @@ def test_each_registry_keeps_its_database_on_its_volume() -> None:
     manifest = _release_one({"api-credits-registry": {"enabled": True}})
     for chart in ("registry", "api-credits-registry"):
         deployment = _source(manifest, f"charts/{chart}/templates/deployment.yaml")
-        url = _env(deployment, "DATABASE_URL")
+        url = _registry_profile(manifest, chart)["DATABASE_URL"]
         assert url.startswith("sqlite:///"), url
         database = PurePosixPath(url.removeprefix("sqlite:///"))
         mount = re.search(r'- name: arkhai-data\n\s+mountPath: "?([^"\n]+)"?', deployment)
@@ -617,10 +635,10 @@ def test_the_two_releases_run_one_payments_double_and_both_storefronts_reach_it(
         assert document["Settlement"]["arkhai_payments"]["service_url"] == url
 
 
-def _recommended_dispute_authorities(registry: str) -> list:
-    match = re.search(r"- name: REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES\n\s+value: (\".*\")$", registry, re.MULTILINE)
-    assert match, "the registry recommends no dispute authority"
-    return json.loads(json.loads(match.group(1)))
+def _recommended_dispute_authorities(manifest: str) -> list:
+    profile = _registry_profile(manifest)
+    assert "REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES" in profile, "the registry recommends no dispute authority"
+    return json.loads(profile["REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES"])
 
 
 def test_the_local_payments_values_are_the_payments_doubles_committed_fixtures() -> None:
@@ -647,8 +665,7 @@ def test_the_local_payments_values_are_the_payments_doubles_committed_fixtures()
         assert f'- "{seller}"' in {line.strip() for line in _source(manifest, check).splitlines()}
         assert "development_auth" not in manifest
 
-    registry = _source(release_one, "charts/registry/templates/deployment.yaml")
-    assert _recommended_dispute_authorities(registry) == [authority]
+    assert _recommended_dispute_authorities(release_one) == [authority]
 
     # The release's runner profile states the lanes' public payments settings, as
     # the lanes' committed runner profile does, which test_lane_env.py holds to
@@ -746,6 +763,246 @@ def test_one_release_running_both_storefronts_on_its_provisioning_service_is_ref
         )
     assert removed.returncode != 0, "render succeeded"
     assert "run the bare-metal storefront as a second release" in removed.stderr, removed.stderr
+
+
+# --- the registry's profile -------------------------------------------------
+
+
+def _resolver_environment(deployment: str) -> dict[str, str]:
+    """The registry container's whole ``env`` block, as name and value."""
+    block = deployment.split("          env:\n", 1)[1].split("          volumeMounts:\n", 1)[0]
+    pairs = re.findall(r'- name: (\S+)\n\s+value: "?([^"\n]*)"?', block)
+    assert len(pairs) == block.count("- name: "), f"an env entry is not a plain value: {block}"
+    return dict(pairs)
+
+
+_REGISTRY_SETTINGS = {
+    "REGISTRY_AUTHORITY_ID",
+    "REGISTRY_AUTHORITY_SCHEME",
+    "REGISTRY_AUTHORITY_IDENTIFIER",
+    "REGISTRY_AUTHORITY_CREDENTIAL_FILE",
+    "REGISTRY_FILTER_SPEC_PATH",
+    "REGISTRY_DESCRIPTOR_BASE_URL",
+    "REGISTRY_DESCRIPTOR_DISPLAY_NAME",
+    "REGISTRY_DESCRIPTOR_OPERATOR_IDENTITY",
+    "DATABASE_URL",
+    "PORT",
+    "HOST",
+    "LOG_LEVEL",
+    "ROOT_PATH",
+    "REGISTRY_REQUIRE_READ_API_KEY",
+    "REGISTRY_REQUIRE_WRITE_API_KEY",
+}
+
+
+def test_each_registry_renders_its_settings_as_a_profile_and_sets_only_the_resolver_variables() -> None:
+    """The deployment-state scenario "The registry chart renders a release",
+    without a secret profile: each registry, the default and the API-credit
+    alias, renders its identity, descriptor, settings, port and filter
+    specification into its own `config-production.env`, mounted under the
+    configuration directory, and its pod environment holds only the two
+    resolver variables. The settings nothing reads are not rendered."""
+    manifest = _release_one({"api-credits-registry": {"enabled": True}})
+    expected = {
+        "registry": {
+            "REGISTRY_AUTHORITY_ID": "registry-a",
+            "REGISTRY_FILTER_SPEC_PATH": "/app/filter-spec.yaml",
+            "REGISTRY_DESCRIPTOR_DISPLAY_NAME": "Local VM Compute Registry",
+        },
+        "api-credits-registry": {
+            "REGISTRY_AUTHORITY_ID": "registry-api-credits",
+            "REGISTRY_FILTER_SPEC_PATH": "/app/filter-spec-apicredits.yaml",
+            "REGISTRY_DESCRIPTOR_DISPLAY_NAME": "Local API Credits Registry",
+        },
+    }
+    for chart, own in expected.items():
+        profile = _registry_profile(manifest, chart)
+        deployment = _source(manifest, f"charts/{chart}/templates/deployment.yaml")
+        name = f"{RELEASE_ONE}-{chart}"
+
+        # Release 1's registry alone recommends the pinned dispute authority.
+        recommends = {"REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES"} if chart == "registry" else set()
+        assert set(profile) == _REGISTRY_SETTINGS | recommends, sorted(profile)
+        assert {key: profile[key] for key in own} == own
+        assert profile["PORT"] == _service_url(manifest, name).rsplit(":", 1)[1]
+        assert profile["REGISTRY_REQUIRE_READ_API_KEY"] == profile["REGISTRY_REQUIRE_WRITE_API_KEY"] == "false"
+        assert profile["ROOT_PATH"] == "" and profile["HOST"] == "0.0.0.0" and profile["LOG_LEVEL"] == "info"
+        # The credential file the profile names is the Secret key the pod mounts.
+        mount = re.search(r'- name: registry-identity\n\s+mountPath: "?([^"\n]+)"?', deployment)
+        item = re.search(r"- name: registry-identity\n\s+secret:\n.*?\n\s+path: \"?([^\"\n]+)\"?", deployment, re.DOTALL)
+        assert mount and item, f"{chart} mounts no signer credential"
+        assert profile["REGISTRY_AUTHORITY_CREDENTIAL_FILE"] == f"{mount.group(1)}/{item.group(1)}"
+
+        assert _resolver_environment(deployment) == {"CONFIG_DIRECTORY": "/app/config", "ACTIVE_PROFILES": "production"}
+        lines = {line.strip() for line in deployment.splitlines()}
+        assert {"mountPath: /app/config/config-production.env", "subPath: config-production.env"} <= lines
+        assert f'name: "{name}-config"' in lines
+        assert "secret-profile" not in deployment
+        _named(manifest, "ConfigMap", f"{name}-config")
+
+
+def test_a_values_file_stating_settings_nothing_reads_renders() -> None:
+    """A values file stating the settings the registry does not read renders,
+    and they reach neither its profile nor its environment; so does one
+    stating the key Secrets with no name."""
+    stated = {
+        "registry": {
+            "config": {"enableHealthChecks": True, "healthCheckInterval": 60, "endpointCheckTimeout": 10, "heartbeatTtlSecs": 60},
+            "auth": {"bootstrapKeySecret": {"name": "", "key": ""}, "adminKeySecret": {"name": "", "key": ""}},
+        }
+    }
+    manifest = _release_one(stated)
+    assert set(_registry_profile(manifest)) == _REGISTRY_SETTINGS | {"REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES"}
+    assert not re.search(r"ENABLE_HEALTH_CHECKS|HEALTH_CHECK_INTERVAL|ENDPOINT_CHECK_TIMEOUT|HEARTBEAT_TTL_SECS", manifest)
+
+
+def test_a_registry_secret_profile_is_mounted_beside_the_rendered_one_and_layered_after_it() -> None:
+    """The deployment-state scenario "The registry chart renders a release": a
+    `secretProfile` mounts the named Secret's `config-<profile>.env` under the
+    configuration directory and appends the profile to ACTIVE_PROFILES, and
+    the pod environment still holds only the two resolver variables."""
+    overlay = {"registry": {"secretProfile": {"secretName": "registry-keys", "profile": "keys"}}}
+    deployment = _source(_release_one(overlay), "charts/registry/templates/deployment.yaml")
+
+    assert _resolver_environment(deployment) == {"CONFIG_DIRECTORY": "/app/config", "ACTIVE_PROFILES": "production,keys"}
+    assert re.search(
+        r'- name: secret-profile\n\s+mountPath: "/app/config/config-keys\.env"\n\s+subPath: "config-keys\.env"\n\s+readOnly: true',
+        deployment,
+    )
+    assert re.search(
+        r'- name: secret-profile\n\s+secret:\n\s+secretName: "registry-keys"\n\s+items:\n'
+        r'\s+- key: "config-keys\.env"\n\s+path: "config-keys\.env"',
+        deployment,
+    )
+    assert "subPath: config-production.env" in deployment
+
+    for secret_profile, refusal in (
+        ({"secretName": "registry-keys", "profile": ""}, "registry secretProfile.profile is required with its secretName"),
+        ({"secretName": "registry-keys", "profile": "production"}, "registry secretProfile.profile must not be production"),
+        # A comma would split ACTIVE_PROFILES; the values schema refuses it.
+        ({"secretName": "registry-keys", "profile": "keys,more"}, "secretProfile"),
+        ({"secretName": "registry-keys", "profile": "keys", "key": "x"}, "secretProfile"),
+    ):
+        refused = _render(RELEASE_ONE, RELEASE_ONE_VALUES, {"registry": {"secretProfile": secret_profile}})
+        assert refused.returncode != 0, secret_profile
+        assert refusal in refused.stderr, refused.stderr
+
+
+def test_a_retired_registry_key_secret_is_refused_naming_secret_profile() -> None:
+    """The deployment-state scenario "A values file uses a retired key Secret"."""
+    for key in ("bootstrapKeySecret", "adminKeySecret"):
+        refused = _render(RELEASE_ONE, RELEASE_ONE_VALUES, {"registry": {"auth": {key: {"name": "registry-keys", "key": "api-key"}}}})
+        assert refused.returncode != 0, key
+        assert f"registry auth.{key} is retired" in refused.stderr and "secretProfile" in refused.stderr, refused.stderr
+
+
+def test_a_registry_setting_its_profile_cannot_carry_is_refused() -> None:
+    """A value ending in a backslash, which the dotenv reader would take as an
+    escaped closing quote, and one holding `${`, which it would expand as a
+    variable, are refused naming the setting."""
+    for descriptor, refusal in (
+        ({"displayName": "Local registry \\"}, "registry setting REGISTRY_DESCRIPTOR_DISPLAY_NAME must not end in a backslash"),
+        ({"operatorIdentity": "Operator ${HOME}"}, "registry setting REGISTRY_DESCRIPTOR_OPERATOR_IDENTITY must not contain ${"),
+    ):
+        refused = _render(RELEASE_ONE, RELEASE_ONE_VALUES, {"registry": {"descriptor": descriptor}})
+        assert refused.returncode != 0, descriptor
+        assert refusal in refused.stderr, refused.stderr
+
+
+def test_the_registry_posture_checks_refuse_a_mismatched_descriptor() -> None:
+    """A key-gated registry needs an access acquisition pointer and a public one
+    must not state one."""
+    for overlay, refusal in (
+        ({"config": {"requireReadApiKey": True}}, "key-gated registry descriptor requires an access acquisition pointer"),
+        (
+            {"descriptor": {"accessAcquisitionPointer": "https://registry.example/access"}},
+            "public registry descriptor must not configure an access acquisition pointer",
+        ),
+    ):
+        refused = _render(RELEASE_ONE, RELEASE_ONE_VALUES, {"registry": overlay})
+        assert refused.returncode != 0, overlay
+        assert refusal in refused.stderr, refused.stderr
+    gated = {
+        "registry": {
+            "config": {"requireReadApiKey": True},
+            "descriptor": {"accessAcquisitionPointer": "https://registry.example/access"},
+        }
+    }
+    profile = _registry_profile(_release_one(gated))
+    assert profile["REGISTRY_REQUIRE_READ_API_KEY"] == "true"
+    assert profile["REGISTRY_DESCRIPTOR_ACCESS_ACQUISITION_POINTER"] == "https://registry.example/access"
+
+
+_REGISTRY_PROBE = """
+import json, sys
+from core_registry.config import load_settings
+settings = load_settings({"CONFIG_DIRECTORY": sys.argv[1], "ACTIVE_PROFILES": sys.argv[2]})
+print(json.dumps(settings.model_dump(mode="json")))
+"""
+
+
+def test_the_rendered_registry_profile_loads_with_the_registry_loader() -> None:
+    """Release 1's rendered profile, and a secret profile after it, read by the
+    registry's own loader. Every rendered setting differs from the registry's
+    default, so a line it dropped would show; the display name holds a newline
+    and the sequences a single-quoted dotenv value decodes, a backslash pair and
+    a backslashed quote. Each value arrives as given, the dispute authorities as
+    the list, and the secret profile both adds a key and overrides one the
+    rendered profile states."""
+    python = os.environ.get("REGISTRY_PYTHON")
+    if not python:
+        print("skip: REGISTRY_PYTHON unset; the registry loader check did not run")
+        return
+    awkward = "Bob's \\\\ registry\n\\' here"
+    overlay = {
+        "registry": {
+            "descriptor": {"displayName": awkward, "accessAcquisitionPointer": "https://registry.example/access"},
+            "service": {"port": 8081},
+            "config": {"rootPath": "/registry", "logLevel": "debug", "requireReadApiKey": True, "requireWriteApiKey": True},
+        }
+    }
+    manifest = _release_one(overlay)
+    text = _block(_source(manifest, "charts/registry/templates/configmap.yaml"), "config-production.env")
+    with tempfile.TemporaryDirectory() as directory:
+        Path(directory, "config-production.env").write_text(text + "\n", encoding="utf-8")
+        # A placeholder key, never a real one.
+        Path(directory, "config-keys.env").write_text(
+            "REGISTRY_ADMIN_API_KEY='placeholder-admin-key'\nLOG_LEVEL='warning'\n", encoding="utf-8"
+        )
+        loaded = subprocess.run(
+            [python, "-c", _REGISTRY_PROBE, directory, "production,keys"],
+            # An empty working directory and environment, so no default dotenv
+            # file or process variable reaches the loader.
+            cwd=directory,
+            env={"PATH": os.environ.get("PATH", "")},
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    settings = json.loads(loaded.stdout.strip().splitlines()[-1])
+    profile = _registry_profile(manifest)
+
+    assert settings["registry_descriptor_display_name"] == awkward
+    assert settings["registry_descriptor_recommended_dispute_authorities"] == [_fixture("dispute-authority.toml")]
+    for setting, line in (
+        ("registry_authority_id", "REGISTRY_AUTHORITY_ID"),
+        ("registry_authority_scheme", "REGISTRY_AUTHORITY_SCHEME"),
+        ("registry_authority_identifier", "REGISTRY_AUTHORITY_IDENTIFIER"),
+        ("registry_authority_credential_file", "REGISTRY_AUTHORITY_CREDENTIAL_FILE"),
+        ("registry_filter_spec_path", "REGISTRY_FILTER_SPEC_PATH"),
+        ("registry_descriptor_base_url", "REGISTRY_DESCRIPTOR_BASE_URL"),
+        ("registry_descriptor_operator_identity", "REGISTRY_DESCRIPTOR_OPERATOR_IDENTITY"),
+        ("database_url", "DATABASE_URL"),
+        ("host", "HOST"),
+    ):
+        assert settings[setting] == profile[line], setting
+    assert settings["registry_descriptor_access_acquisition_pointer"] == "https://registry.example/access"
+    assert settings["port"] == 8081 and settings["root_path"] == "/registry"
+    assert settings["require_read_api_key"] is True and settings["require_write_api_key"] is True
+    # The secret profile, layered after the rendered one, adds the key and wins
+    # on the setting both state.
+    assert profile["LOG_LEVEL"] == "debug" and settings["log_level"] == "warning"
+    assert settings["admin_api_key"] == "placeholder-admin-key"
 
 
 # --- the storefront's own loader -----------------------------------------

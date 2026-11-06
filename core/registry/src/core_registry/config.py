@@ -28,8 +28,8 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     # root_path: set to the gateway path prefix for this service (e.g. "/registry").
     # Used by FastAPI to generate correct OpenAPI schema URLs when behind a
-    # reverse proxy that strips the prefix. Set via ROOT_PATH env var in the
-    # Helm values overlay in the ops repo.
+    # reverse proxy that strips the prefix. A deployment states it as ROOT_PATH
+    # in a profile env file; the registry chart renders it from config.rootPath.
     root_path: str = ""
 
     registry_authority_id: str | None = Field(

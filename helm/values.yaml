@@ -137,10 +137,6 @@ registry:
     # outside that mount is on the container's own filesystem and is lost
     # with the pod.
     host: "0.0.0.0"
-    enableHealthChecks: true
-    healthCheckInterval: 60
-    endpointCheckTimeout: 10
-    heartbeatTtlSecs: 60
     logLevel: "info"
 
 # ---------------------------------------------------------------------------
@@ -180,21 +176,9 @@ api-credits-registry:
     filterSpecPath: "/app/filter-spec-apicredits.yaml"
     host: "0.0.0.0"
     rootPath: ""
-    enableHealthChecks: true
-    healthCheckInterval: 60
-    endpointCheckTimeout: 10
-    heartbeatTtlSecs: 60
     logLevel: "info"
     requireReadApiKey: false
     requireWriteApiKey: false
-
-  auth:
-    bootstrapKeySecret:
-      name: ""
-      key: ""
-    adminKeySecret:
-      name: ""
-      key: ""
 
   persistence:
     enabled: true

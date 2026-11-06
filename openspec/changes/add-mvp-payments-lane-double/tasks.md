@@ -2451,7 +2451,7 @@ Files: `helm/charts/registry/templates/{deployment.yaml, _helpers.tpl}`, a new
 `helm/values.yaml` and `helm/values.schema.json` where they state the registry aliases'
 `auth`; `helm/scripts/test-render.sh`; `helm/tests/test_release_topology.py`.
 
-- [ ] 11.1 The rendered profile (D16). A ConfigMap key `config-production.env` renders the
+- [x] 11.1 The rendered profile (D16). A ConfigMap key `config-production.env` renders the
   identity, descriptor, `config.*` the registry reads, `PORT` from `service.port`, the
   constant `REGISTRY_AUTHORITY_CREDENTIAL_FILE` and `REGISTRY_FILTER_SPEC_PATH` from
   `config.filterSpecPath`, each value quoted for a dotenv reader and the dispute
@@ -2459,25 +2459,161 @@ Files: `helm/charts/registry/templates/{deployment.yaml, _helpers.tpl}`, a new
   `CONFIG_DIRECTORY=/app/config` and `ACTIVE_PROFILES=production`. The chart's posture
   `fail` checks stay. The five unread variables are no longer rendered; their values keys
   stay accepted, so an existing values file renders (D16).
-- [ ] 11.2 `secretProfile` (D16). `secretProfile: {secretName, profile}` mounts
+  Done: new `templates/configmap.yaml` (`<fullname>-config`), each line
+  `NAME='value'` from a `registry.envLine` helper that doubles backslashes and escapes
+  quotes, the only two sequences the registry's dotenv reader decodes in a single-quoted
+  value (read from its `dotenv/parser.py`); the lines are joined and indented as one
+  block, so a value holding a newline stays inside it. An unset value renders no line.
+  The rendered keys: the three identity keys, `REGISTRY_AUTHORITY_CREDENTIAL_FILE`, the
+  filter specification path, the three descriptor keys, the pointer and the
+  recommendation (`toJson`) when set, `DATABASE_URL`, `PORT`, `HOST`, `LOG_LEVEL`,
+  `ROOT_PATH`, and the two API-key gates. A `registry.credentialFile` helper names the
+  credential path for both the profile and the Secret's mount, so they cannot disagree.
+  The profile mounts by `subPath` at `/app/config/config-production.env`, as the
+  provisioning chart mounts its profile. Beyond the plan: the pod template carries a
+  `checksum/config` annotation over the ConfigMap. Without it, a values change would no
+  longer roll the registry, which it did while the values were pod variables. The
+  posture checks stay in `deployment.yaml`. Both `values.yaml` files drop the four unread
+  `config` keys, and the umbrella's registry schema stays open, so a file stating them
+  renders. `CHAIN_ID` is gone with the `global.rpc` branch.
+  The helper refuses, naming the setting, the two values the reader cannot read back,
+  both found by the fresh-context check and confirmed in the installed python-dotenv:
+  - a value ending in a backslash, whose escaped form ends `\'`, so the reader's
+    single-quote pattern runs on into the next line and drops both settings;
+  - one holding `${`, since `dotenv_values` interpolates every value, quoted or not, and
+    pydantic-settings calls it with interpolation on.
+  Also beyond the plan's files, from the same check:
+  - `core/registry/Dockerfile` loses `ENV PORT`, which, as a process variable, would
+    override the profile's `PORT` (the settings default it to 8080; `EXPOSE` keeps the
+    `ARG`). The image's `CMD` still hard-codes `--port 8080`, a mismatch with a
+    non-default `service.port` that predates this section. Nothing here builds the
+    image; validation's lane and Helm runs do.
+  - `core_registry/config.py`'s `root_path` comment, which said the value came from a
+    pod variable set in a values overlay, now says a profile states it.
+- [x] 11.2 `secretProfile` (D16). `secretProfile: {secretName, profile}` mounts
   `config-<profile>.env` from that existing Secret under `/app/config` and appends the
   profile to `ACTIVE_PROFILES`; `auth.bootstrapKeySecret` and `auth.adminKeySecret` with a
   name set fail rendering naming `secretProfile`. The umbrella's registry aliases drop
   their empty `auth` blocks. The Deployment's `env` holds only `CONFIG_DIRECTORY` and
   `ACTIVE_PROFILES`.
-- [ ] 11.3 Render cases (D16; the delta's scenarios) in `helm/scripts/test-render.sh` or
+  Done. The Secret's key is mounted by `subPath` beside the rendered profile, and
+  `registry.activeProfiles` gives `production,<profile>`. Beyond the plan, two refusals:
+  a `secretName` without a `profile` is refused, and so is the profile `production`,
+  which would mount over the rendered file. A retired key with an empty name still
+  renders, so an existing values file carrying the empty blocks works. Beyond the plan's
+  files: the umbrella schema's `registryInstance` gains a closed `secretProfile`
+  (strings, the profile a file-name-safe word or empty), and
+  `helm/fixtures/two-registries-values.yaml`, which named both retired Secrets and would
+  now fail, names a `secretProfile` instead (`credits-registry-keys`, `credits-keys`).
+  The registry chart's `values.yaml` documents `secretProfile` where `auth` was.
+- [x] 11.3 Render cases (D16; the delta's scenarios) in `helm/scripts/test-render.sh` or
   `helm/tests/test_release_topology.py`, where registry rendering is asserted today: the
   rendered profile's lines for the default and the API-credit alias, each with its own
   filter specification path; the Deployment's environment holding exactly the two
   variables; a `secretProfile` mounted and appended; each retired key refused by name; the
   posture checks still failing as before.
-- [ ] 11.4 **Verification checkpoint.** Chart render: `make -C helm test-render`. Unit:
+  Done. Chart render, in `helm/tests/test_release_topology.py` (run by `test-render.sh`),
+  pass. A `_registry_profile` helper decodes the profile's lines as the dotenv reader
+  decodes a single-quoted value, `\\` and `\'` only, and refuses any line not in that
+  form. That matches the reader only for values the chart renders: it does not reproduce
+  the reader's trailing-backslash and interpolation behaviour, which the chart refuses.
+  New cases:
+  - `test_each_registry_renders_its_settings_as_a_profile_and_sets_only_the_resolver_variables`:
+    release 1 with the API-credit alias enabled. For each registry, the profile's key set
+    is exact, with its own authority, filter specification and display name. `PORT` is the
+    Service's port. The credential path is the Secret mount's directory and item path.
+    The container `env` is exactly `CONFIG_DIRECTORY=/app/config` and
+    `ACTIVE_PROFILES=production`. The profile mounts from the release's ConfigMap. The
+    exact key set and the exact environment are what show that no unread variable or
+    `CHAIN_ID` renders.
+  - `test_a_values_file_stating_settings_nothing_reads_renders`: the four keys and empty
+    `auth` blocks render, and none reaches the profile.
+  - `test_a_registry_secret_profile_is_mounted_beside_the_rendered_one_and_layered_after_it`:
+    the mount, the Secret item, `production,keys`, the two template refusals above, and
+    the values schema refusing a profile with a comma and an unknown key, each error
+    naming `secretProfile`.
+  - `test_a_retired_registry_key_secret_is_refused_naming_secret_profile`: both keys.
+  - `test_a_registry_setting_its_profile_cannot_carry_is_refused`: a trailing backslash
+    and a `${`, each naming its setting.
+  - `test_the_registry_posture_checks_refuse_a_mismatched_descriptor`: both refusals by
+    message, and a gated registry's pointer and gate in the profile.
+  - `test_the_rendered_registry_profile_loads_with_the_registry_loader`, beyond the plan
+    (TESTING.md, "parse one rendered instance with the service's own parser"):
+    - Input: release 1's profile rendered with a non-default value for every setting with
+      a default (port 8081, root path, `debug`, both gates on, a pointer), and a display
+      name holding a newline, `\\` and `\'`. Beside it, a `config-keys.env` stating
+      `REGISTRY_ADMIN_API_KEY` and `LOG_LEVEL='warning'`.
+    - Load: through `core_registry.config.load_settings` under `REGISTRY_PYTHON`, which
+      `test-render.sh` sets when `core/registry/.venv` exists, from an empty working
+      directory and environment.
+    - Shown: each identity, descriptor, filter, credential, database and host value
+      arrives as the profile states it, the display name exactly, the recommendation as
+      the fixture's list, and port, root path and gates as set. The second profile adds
+      the key and overrides `LOG_LEVEL`.
+    - Without the interpreter it prints a skip. The `test · test-deployment-packaging`
+      job builds no registry environment, so there it skips, as the storefront loader
+      checks do.
+  The existing cases that read registry pod variables now read the profile:
+  - in the topology suite, the trust pins, the smoke profile's pins, the database URL,
+    and the recommendation;
+  - in `test-render.sh`, the descriptor, filter specification, recommendation and
+    wallet-free identity, now as whole profile lines, with the Secret and chain checks
+    kept on the Deployment;
+  - also in `test-render.sh`, three new dual-render assertions: the alias's secret
+    profile mounted from its Secret, `production,credits-keys`, and none for the compute
+    registry.
+  Templates broken once while writing the tests: with the profile mount removed, the
+  first and third cases failed. With backslash doubling dropped, the loader case
+  failed, once its value held `\\`: a lone backslash before a space is literal to
+  dotenv, so the first value tried could not show it. Both breaks were restored.
+- [x] 11.4 **Verification checkpoint.** Chart render: `make -C helm test-render`. Unit:
   `make test-release-tooling`. `make test`.
   End-to-end: no pipeline marker exercises the chart; validation's Helm part deploys the
   release, whose registry must start from the rendered profile for its scenario pod and
   payments check to pass.
   Owed by validation: `tests.yml`, job `test · test-deployment-packaging` — `make -C helm
   test-render` passes with the registry cases.
+  Results:
+  - `make -C helm test-render` passes: every umbrella assertion and chart suite, with the
+    registry loader case run, not skipped.
+  - `make test-release-tooling`: 2226 passed.
+  - `make test`: ran every target to its end with no failure.
+  - `make check-change` passes.
+  - After the fresh-context fixes, which touched the chart's helper and comments, the
+    topology tests, the registry's Dockerfile and one `config.py` comment:
+    `make -C helm test-render` passes again; `make test-registry` passes, 139 unit and
+    128 application integration; `make check-packaging` is all OK. `make test` was not
+    rerun after them.
+  - No dependency or lock changed.
+  End-to-end confirmed as planned: none. Validation's Helm deploy is the first run of a
+  registry pod on the rendered profile, and of the registry image without `ENV PORT`; the
+  Compose lanes run that image too. Owed by validation, confirmed as written.
+
+  Fresh-context check. Fixed:
+  - The trailing-backslash and `${` refusals.
+  - The Dockerfile's `ENV PORT` and the `root_path` comment (11.1).
+  - The loader case: non-default values, so a dropped line would show; a newline; a key
+    in both profiles to show precedence.
+  - The values schema's `secretProfile` refusals, now tested.
+  - The test helper's docstring, which claimed the reader's decoding outright.
+  - A manifest-wide `CHAIN_ID` search inside the per-chart loop, removed.
+  - Two test names and a docstring framed as "still … as before".
+  Declined: none.
+
+  Handoff to section 12 and closeout:
+  - Closeout destinations this section made false, beyond 13.9's "Registry descriptor
+    configuration" (which already covers `DEPLOYMENT_AND_CONFIG.md`'s "Helm and Compose
+    surfaces set … through `REGISTRY_DESCRIPTOR_*`" and its "API-key Secret references …
+    are instance-local"):
+    - `TESTING.md`'s "Chart Render Tests" lists each loader check by its interpreter
+      variable and should gain `REGISTRY_PYTHON`.
+    - `DEPLOYMENT_AND_CONFIG.md`'s "Kubernetes: ConfigMap and Secret mounting" says a
+      new non-secret key needs only a `values.yaml` change. That holds for the
+      provisioning chart, not the registry's, which maps each value to its variable by
+      name (D16 keeps the values' shape). Promotion should state the registry as that
+      exception, and that its profile is a dotenv file rather than YAML.
+  - The registry image's `CMD` hard-codes port 8080 whatever `service.port` says;
+    pre-existing, left.
 
 ## 12. Storefront charts: a derived `ca_bundle_path` and the secret overlay
 

@@ -214,6 +214,19 @@
               "type": "string"
             }
           }
+        },
+        "secretProfile": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "secretName": {
+              "type": "string"
+            },
+            "profile": {
+              "type": "string",
+              "pattern": "^([A-Za-z0-9][A-Za-z0-9_.-]*)?$"
+            }
+          }
         }
       }
     },
