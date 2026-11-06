@@ -54,7 +54,9 @@ def test_acceptance_is_durable_before_payment(tmp_path, monkeypatch):
     monkeypatch.setattr("core_buyer.negotiation_client.run_negotiation_chain",
                         lambda *_a, **_kw: SimpleNamespace(action="counter", proposal={"fields": {"amount": 4200}}))
     server = ThreadingHTTPServer(("127.0.0.1", 0), Seller)
-    thread = Thread(target=server.serve_forever)
+    # shutdown() returns only at serve_forever's next poll, and the library
+    # has no way to wake it, so the poll is short rather than the default 0.5s.
+    thread = Thread(target=lambda: server.serve_forever(poll_interval=0.01))
     thread.start()
     def before_payment(_outcome):
         record = asyncio.run(FileEvidenceStore(store.root).read("neg-1"))

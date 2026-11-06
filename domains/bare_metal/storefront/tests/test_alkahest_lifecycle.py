@@ -40,6 +40,8 @@ from arkhai_bare_metal.evidence_routes import (
     SyncBareMetalEvidenceClient,
     evidence_path,
 )
+from arkhai_bare_metal_storefront.deal_controls import settlement_admin_routes
+from arkhai_bare_metal_storefront.models import BareMetalSettleWaitResponse
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from storefront_client.client import StorefrontClientError
 from test_http_settlement import (
@@ -433,19 +435,29 @@ class _FlakySite(_Site):
 
 
 async def _waited(tmp_path, *, failing_reads: int, timeout: float):
+    """The settle wait over this storefront's status hook, in fake time: each
+    read of the clock is a second later, and the wait polls without sleeping.
+    The polling itself is the settlement runtime's; what this storefront owns
+    is that a site read that fails reaches it as a failed read."""
     site = _FlakySite("active")
-    _runtime, app, _obligation_ref = await _settled(
+    runtime, app, _obligation_ref = await _settled(
         tmp_path,
         site=site,
         chain=ChainClient(StringObligations(uid=ATTESTATION_UID)),
         escrow=EscrowOnChain(),
     )
     site.failing_reads = failing_reads
+    ticks = iter(range(10**6))
 
     async with app.router.lifespan_context(app):
         async with _storefront_client(app, ADMIN_SIGNER, "admin") as admin:
             await admin.admin_pause_lifecycle_loops()
-            waited = await admin.wait_for_settlement(ESCROW_UID, timeout=timeout)
+        routes = settlement_admin_routes(
+            runtime, poll_seconds=0.0, clock=lambda: float(next(ticks))
+        )
+        waited = BareMetalSettleWaitResponse.model_validate(
+            await routes.wait(ESCROW_UID, timeout=timeout)
+        )
     return site, waited
 
 

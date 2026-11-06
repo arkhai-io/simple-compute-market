@@ -72,8 +72,9 @@ reads as written:
   `git checkout`, and a merge stopped at a conflict you ask about stays in progress
   for the owner's answer.
 - **A turn's end is its outcome.** Never end a turn with work still running. Wait
-  for a background command inside one Bash call, with a blocking `tail -f … | grep
-  -m1` on its output matching the line it prints when it ends.
+  for a background command inside one Bash call, with `scripts/change-workflow wait
+  <output-file> '<pattern>'` matching the line it prints when it ends, repeated when
+  the wait gives up — never with `tail -f`, which hangs when that line is the last.
 - **The end is an outcome.** Once the merge is concluded and pushed and its exit
   chosen (step 7), end with `finished`, `next` that exit — `{"step": "closeout"}`
   or `{"step": "review", "kind": "pre-closeout"}` — and `message` the report (step

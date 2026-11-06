@@ -153,13 +153,18 @@ expect_override_failure() {
 
 DEFAULT_CONFIGMAP="$(extract_section "$DEFAULT_RENDERED" 'storefront/templates/configmap\.yaml')"
 DEFAULT_DEPLOYMENT="$(extract_section "$DEFAULT_RENDERED" 'storefront/templates/deployment\.yaml')"
-DEFAULT_REGISTRY="$(extract_section "$DEFAULT_RENDERED" 'registry/templates/deployment\.yaml')"
+# A registry's settings are lines of its rendered profile, config-production.env;
+# its Deployment holds the signer Secret, the mounts and the resolver variables.
+DEFAULT_REGISTRY="$(extract_section "$DEFAULT_RENDERED" 'registry/templates/configmap\.yaml')"
 DEFAULT_PROVISIONING_CONFIGMAP="$(extract_section "$DEFAULT_RENDERED" 'provisioning/templates/configmap\.yaml')"
 DEFAULT_TEST_CONFIG="$(extract_section "$DEFAULT_RENDERED" 'templates/tests/test-config\.yaml')"
-TWO_REGISTRIES_COMPUTE="$(extract_section "$TWO_REGISTRIES_RENDERED" 'charts/registry/templates/deployment\.yaml')"
-TWO_REGISTRIES_CREDITS="$(extract_section "$TWO_REGISTRIES_RENDERED" 'charts/api-credits-registry/templates/deployment\.yaml')"
+TWO_REGISTRIES_COMPUTE="$(extract_section "$TWO_REGISTRIES_RENDERED" 'charts/registry/templates/configmap\.yaml')"
+TWO_REGISTRIES_COMPUTE_DEPLOYMENT="$(extract_section "$TWO_REGISTRIES_RENDERED" 'charts/registry/templates/deployment\.yaml')"
+TWO_REGISTRIES_CREDITS="$(extract_section "$TWO_REGISTRIES_RENDERED" 'charts/api-credits-registry/templates/configmap\.yaml')"
+TWO_REGISTRIES_CREDITS_DEPLOYMENT="$(extract_section "$TWO_REGISTRIES_RENDERED" 'charts/api-credits-registry/templates/deployment\.yaml')"
 PAYMENTS_DEPLOYMENT="$(extract_section "$PAYMENTS_RENDERED" 'storefront/templates/deployment\.yaml')"
-PAYMENTS_REGISTRY="$(extract_section "$PAYMENTS_RENDERED" 'registry/templates/deployment\.yaml')"
+PAYMENTS_REGISTRY="$(extract_section "$PAYMENTS_RENDERED" 'registry/templates/configmap\.yaml')"
+PAYMENTS_REGISTRY_DEPLOYMENT="$(extract_section "$PAYMENTS_RENDERED" 'registry/templates/deployment\.yaml')"
 EVM_DEPLOYMENT="$(extract_section "$EVM_RENDERED" 'storefront/templates/deployment\.yaml')"
 PROVISIONING_CONFIGMAP="$(extract_section "$PAYMENTS_RENDERED" 'provisioning/templates/configmap\.yaml')"
 PROVISIONING_DEPLOYMENT="$(extract_section "$PAYMENTS_RENDERED" 'provisioning/templates/deployment\.yaml')"
@@ -202,27 +207,30 @@ check_pvcs "$RETAINED_RENDERED" "$LOCAL_RENDERED" \
     api-credits-registry-data provisioning-data registry-data storefront-bob-data
 check_pvcs "$RETAINED_BARE_METAL_RENDERED" "$LOCAL_BARE_METAL_RENDERED" \
     bare-metal-storefront-data provisioning-data
-expect_present "$DEFAULT_REGISTRY" 'name: +REGISTRY_DESCRIPTOR_BASE_URL' "registry renders its public descriptor URL"
-expect_present "$DEFAULT_REGISTRY" 'value: +"?Local VM Compute Registry"?' "registry renders its descriptor display name"
-expect_present "$DEFAULT_REGISTRY" 'value: +"?Arkhai local development"?' "registry renders its operator identity"
+expect_present "$DEFAULT_REGISTRY" "^ +REGISTRY_DESCRIPTOR_BASE_URL='http://localhost:8080'$" "registry renders its public descriptor URL"
+expect_present "$DEFAULT_REGISTRY" "^ +REGISTRY_DESCRIPTOR_DISPLAY_NAME='Local VM Compute Registry'$" "registry renders its descriptor display name"
+expect_present "$DEFAULT_REGISTRY" "^ +REGISTRY_DESCRIPTOR_OPERATOR_IDENTITY='Arkhai local development'$" "registry renders its operator identity"
 expect_absent "$DEFAULT_REGISTRY" 'REGISTRY_DESCRIPTOR_ACCESS_ACQUISITION_POINTER' "public registry omits an acquisition pointer"
 expect_absent "$DEFAULT_REGISTRY" 'REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES' "registry ships no dispute authority"
-expect_present "$PAYMENTS_REGISTRY" 'REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES' "registry renders operator recommendations"
+expect_present "$PAYMENTS_REGISTRY" "^ +REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES='\[\{" "registry renders operator recommendations as one JSON line"
 expect_present "$PAYMENTS_REGISTRY" 'https://dispute.example' "registry retains the configured recommendation origin"
-expect_present "$DEFAULT_REGISTRY" 'value: +"?/app/filter-spec\.yaml"?' "default registry selects the compute filter specification"
+expect_present "$DEFAULT_REGISTRY" "^ +REGISTRY_FILTER_SPEC_PATH='/app/filter-spec\.yaml'$" "default registry selects the compute filter specification"
 expect_absent "$DEFAULT_RENDERED" 'api-credits-registry' "default render omits the API-credits registry"
 expect_present "$DEFAULT_PROVISIONING_CONFIGMAP" '"identifier": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"' "provisioning keeps EIP-191 identifiers as strings"
 expect_present "$DEFAULT_TEST_CONFIG" '"identifier": "0x90f79bf6eb2c4f870365e785982e1f101e93b906"' "smoke-test profile keeps EIP-191 identifiers as strings"
 
 expect_present "$CHART_DIR/../core/registry/filter-spec.yaml" 'id: +compute\.market' "compute filter specification declares compute.market"
 expect_present "$CHART_DIR/../domains/apicredits/registry/filter-spec.yaml" 'id: +api_credits' "API-credits filter specification declares api_credits"
-expect_present "$TWO_REGISTRIES_COMPUTE" 'name: +'"$RELEASE"'-registries-registry' "dual render names the compute workload independently"
-expect_present "$TWO_REGISTRIES_COMPUTE" 'value: +"?/app/filter-spec\.yaml"?' "dual render selects the compute filter specification"
-expect_present "$TWO_REGISTRIES_COMPUTE" 'secretName: +"?arkhai-registry-identity"?' "dual render keeps the compute signer Secret"
-expect_present "$TWO_REGISTRIES_CREDITS" 'name: +'"$RELEASE"'-registries-api-credits-registry' "dual render names the API-credits workload independently"
-expect_present "$TWO_REGISTRIES_CREDITS" 'value: +"?/app/filter-spec-apicredits\.yaml"?' "dual render selects the API-credits filter specification"
-expect_present "$TWO_REGISTRIES_CREDITS" 'value: +"?https://credits\.example\.test"?' "dual render gives API credits its own descriptor URL"
-expect_present "$TWO_REGISTRIES_CREDITS" 'secretName: +"?credits-registry-identity"?' "dual render gives API credits its own signer Secret"
+expect_present "$TWO_REGISTRIES_COMPUTE_DEPLOYMENT" 'name: +'"$RELEASE"'-registries-registry' "dual render names the compute workload independently"
+expect_present "$TWO_REGISTRIES_COMPUTE" "^ +REGISTRY_FILTER_SPEC_PATH='/app/filter-spec\.yaml'$" "dual render selects the compute filter specification"
+expect_present "$TWO_REGISTRIES_COMPUTE_DEPLOYMENT" 'secretName: +"?arkhai-registry-identity"?' "dual render keeps the compute signer Secret"
+expect_present "$TWO_REGISTRIES_CREDITS_DEPLOYMENT" 'name: +'"$RELEASE"'-registries-api-credits-registry' "dual render names the API-credits workload independently"
+expect_present "$TWO_REGISTRIES_CREDITS" "^ +REGISTRY_FILTER_SPEC_PATH='/app/filter-spec-apicredits\.yaml'$" "dual render selects the API-credits filter specification"
+expect_present "$TWO_REGISTRIES_CREDITS" "^ +REGISTRY_DESCRIPTOR_BASE_URL='https://credits\.example\.test'$" "dual render gives API credits its own descriptor URL"
+expect_present "$TWO_REGISTRIES_CREDITS_DEPLOYMENT" 'secretName: +"?credits-registry-identity"?' "dual render gives API credits its own signer Secret"
+expect_present "$TWO_REGISTRIES_CREDITS_DEPLOYMENT" 'secretName: +"?credits-registry-keys"?' "dual render mounts API credits' secret profile from its Secret"
+expect_present "$TWO_REGISTRIES_CREDITS_DEPLOYMENT" 'value: +"?production,credits-keys"?' "dual render layers API credits' secret profile after the rendered one"
+expect_absent "$TWO_REGISTRIES_COMPUTE_DEPLOYMENT" 'secret-profile' "dual render mounts no secret profile for the compute registry"
 expect_present "$TWO_REGISTRIES_RENDERED" 'name: +'"$RELEASE"'-registries-registry-data' "dual render keeps an independent compute PVC"
 expect_present "$TWO_REGISTRIES_RENDERED" 'name: +'"$RELEASE"'-registries-api-credits-registry-data' "dual render creates an independent API-credits PVC"
 expect_present "$TWO_REGISTRIES_RENDERED" 'name: +'"$RELEASE"'-registries-registry' "dual render keeps an independent compute Service"
@@ -231,10 +239,11 @@ expect_present "$TWO_REGISTRIES_RENDERED" 'name: +'"$RELEASE"'-registries-api-cr
 expect_present "$PAYMENTS_DEPLOYMENT" 'name: +\"?payments-bob-marketplace-identity\"?' "wallet-free signer comes from a Secret reference"
 expect_absent "$PAYMENTS_DEPLOYMENT" 'CHAIN_ID|RPC_URL' "wallet-free storefront pod omits chain configuration"
 expect_absent "$PAYMENTS_DEPLOYMENT" 'STOREFRONT_SETTLEMENT__HOSTED|HOSTED_SETTLEMENT' "wallet-free storefront pod emits no legacy settlement environment"
-expect_absent "$PAYMENTS_REGISTRY" 'CHAIN_ID|RPC_URL' "wallet-free registry pod omits chain configuration"
-expect_present "$PAYMENTS_REGISTRY" 'name: +REGISTRY_AUTHORITY_SCHEME' "wallet-free registry renders its public signer scheme"
-expect_present "$PAYMENTS_REGISTRY" 'value: +\"?NLTZBDFWy23PC-sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y\"?' "wallet-free registry renders its public authority"
-expect_present "$PAYMENTS_REGISTRY" 'secretName: +\"?payments-registry-identity\"?' "wallet-free registry signer credential is Secret-referenced"
+expect_absent "$PAYMENTS_REGISTRY" 'CHAIN_ID|RPC_URL' "wallet-free registry profile omits chain configuration"
+expect_absent "$PAYMENTS_REGISTRY_DEPLOYMENT" 'CHAIN_ID|RPC_URL' "wallet-free registry pod omits chain configuration"
+expect_present "$PAYMENTS_REGISTRY" "^ +REGISTRY_AUTHORITY_SCHEME='ed25519'$" "wallet-free registry renders its public signer scheme"
+expect_present "$PAYMENTS_REGISTRY" "^ +REGISTRY_AUTHORITY_IDENTIFIER='NLTZBDFWy23PC-sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y'$" "wallet-free registry renders its public authority"
+expect_present "$PAYMENTS_REGISTRY_DEPLOYMENT" 'secretName: +\"?payments-registry-identity\"?' "wallet-free registry signer credential is Secret-referenced"
 expect_absent "$PAYMENTS_RENDERED" 'private_key|privateKey|request_credential' "wallet-free manifests contain no private or provider credentials"
 expect_present "$PROVISIONING_CONFIGMAP" '"scheme": "ed25519"' "wallet-free provisioning renders Ed25519 public principals"
 expect_present "$PROVISIONING_CONFIGMAP" '"identifier": "xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI"' "wallet-free provisioning renders its public service identity"
@@ -275,7 +284,7 @@ expect_override_failure \
     --set 'storefront.agents.bob.config.Settlement.stripe.enabled=true'
 expect_override_failure \
     "$CHART_DIR/fixtures/payments-ed25519-values.yaml" \
-    "an unknown payments field fails the generated storefront schema" \
+    "a payments key in pass-through config fails the generated storefront schema" \
     --set-string 'storefront.agents.bob.config.Settlement.arkhai_payments.api_key=forbidden'
 expect_override_failure \
     "$CHART_DIR/fixtures/eip191-evm-values.yaml" \
@@ -318,6 +327,13 @@ fi
 BARE_METAL_STOREFRONT_ENV_PYTHON="$CHART_DIR/../domains/bare_metal/storefront/.venv/bin/python"
 if [[ -z "${BARE_METAL_STOREFRONT_PYTHON:-}" && -x "$BARE_METAL_STOREFRONT_ENV_PYTHON" ]]; then
     export BARE_METAL_STOREFRONT_PYTHON="$BARE_METAL_STOREFRONT_ENV_PYTHON"
+fi
+# The registry chart's rendered profile is read with the registry's own loader
+# when its environment exists (make init-arkhai-core-registry); without it the
+# check says so and skips.
+REGISTRY_ENV_PYTHON="$CHART_DIR/../core/registry/.venv/bin/python"
+if [[ -z "${REGISTRY_PYTHON:-}" && -x "$REGISTRY_ENV_PYTHON" ]]; then
+    export REGISTRY_PYTHON="$REGISTRY_ENV_PYTHON"
 fi
 # The umbrella's own Python render tests (helm/tests/), such as the two-release
 # topology's, run beside the charts'.

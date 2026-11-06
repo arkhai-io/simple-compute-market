@@ -12,6 +12,7 @@ from market_deal_lifecycle.terms import DisputeAuthority
 from market_deal_servicing import DealWatch, DeliveryRecord, EndSession, SellerDeal, SellerServicing, SellerSession
 from market_deal_servicing.evidence import transaction
 from market_deal_servicing.journal import Classification, FinalRequest
+from pydantic import SecretStr
 from test_review_fix_a import BUYER, SELLER
 
 
@@ -31,8 +32,8 @@ def test_unresolved_original_remains_retryable_until_both_callers_adopt(tmp_path
         fixture = peer.data["filing"]["request"]
         start = 1800000000
         async with MediationClient(
-            authority, MediationCredential(authority.identity, "MEDIATION_TEST_CREDENTIAL"),
-            environ={"MEDIATION_TEST_CREDENTIAL": "fixture-payee"}, transport=httpx.MockTransport(handle),
+            authority, MediationCredential(authority.identity, token=SecretStr("fixture-payee")),
+            transport=httpx.MockTransport(handle),
         ) as client:
             def service():
                 return SellerServicing(

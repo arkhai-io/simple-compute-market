@@ -32,9 +32,9 @@ validation's plan for a change, `run` and `openspec`
 the repository's hooks and its OpenSpec command (`hooks`), `check` the
 configuration's, index, task-list, push, skill, and round-view checks, a change's
 default checks (`check change`), and the graph diagram's comparison with the graph
-table, and `hook post-compaction` the post-compaction hook. `check graph` is
-internal: it maintains the engine's own diagram, and no repository or runner relies
-on it.
+table, `hook post-compaction` the post-compaction hook, and `wait` the bounded wait
+on a background command's output. `check graph` is internal: it maintains the
+engine's own diagram, and no repository or runner relies on it.
 
 Before a step starts, `start` checks the configuration whole and refuses a step
 whose required fields are absent, naming them, before anything is launched or
@@ -62,7 +62,7 @@ from typing import Callable, Mapping, Sequence
 
 from . import clone as clones
 from . import (config, cost_report, diagram, find, graph, history, hook, hooks, index,
-               next_step, push, round_view, skills, tasks)
+               next_step, push, round_view, skills, tasks, wait)
 from .clone import clone_of
 from .common import ORCHESTRATOR, SESSION_ID, UNATTENDED_RUN, StepError, repository_root
 from .convert import convert_change
@@ -406,6 +406,11 @@ def _parser() -> argparse.ArgumentParser:
     checks.add_parser("skills", help="every agent skill loaded from its one source")
     checks.add_parser("round-view", help="fail while a round view is open")
     checks.add_parser("graph", help="where the graph's diagram departs from the graph table")
+    waiting = commands.add_parser(
+        "wait", help="block until a file holds a line matching a pattern, within a bound")
+    waiting.add_argument("file", type=Path)
+    waiting.add_argument("pattern")
+    waiting.add_argument("--timeout", type=float, default=wait.DEFAULT_TIMEOUT_S)
     hook_ = commands.add_parser("hook", help="run a harness hook")
     harness_hooks = hook_.add_subparsers(dest="hook", required=True)
     harness_hooks.add_parser("post-compaction",
@@ -541,6 +546,16 @@ def _clone_where(args: argparse.Namespace, root: Path) -> int:
     if found is not None:
         print(found)
     return 0
+
+
+def _wait(args: argparse.Namespace) -> int:
+    if args.timeout <= 0:
+        raise _Usage("--timeout is a number of seconds above zero")
+    try:
+        pattern = re.compile(args.pattern)
+    except re.error as exc:
+        raise _Usage(f"the pattern is not a regular expression: {exc}") from exc
+    return wait.run(args.file, pattern, timeout=args.timeout)
 
 
 class _Usage(Exception):
@@ -683,6 +698,8 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
         except ChangeNotFound as exc:
             raise StepError(str(exc)) from exc
         return 0 if hooks.Hooks(root, configuration, environ).check_change(args.change) else 1
+    if args.command == "wait":
+        return _wait(args)
     if (reached := delegated(args)) is not None:
         main_, arguments = reached
         if args.command == "push":

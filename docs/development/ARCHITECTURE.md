@@ -393,8 +393,8 @@ registries through one implementation. A bare-metal binding's source is the
 Physical Resource the listing sells. The kit imports no VM, API-credit, bare-metal, provider, or
 deployed-service package.
 
-Every storefront capacity effect — reserve, commit, release, lease truncation —
-passes one guarded boundary, the kit's `CapacityEffects`, composed over any
+Every storefront capacity effect — reserve, commit, lease activation, release,
+lease truncation — passes one guarded boundary, the kit's `CapacityEffects`, composed over any
 aggregate capacity client and acting only at the sites that aggregate names.
 Its guard is the binding's backing delegate, which refuses an effect for a
 listing with no admission authority behind it before any site call; a refused
@@ -1036,6 +1036,8 @@ Negotiation-time availability is advisory. Authoritative reservation occurs at a
 4. Fulfillment runs against the committed reservation.
 5. Lease expiry or early termination invokes physical teardown before capacity release.
 
+A site also records a delivered lease's activation: once, from its own clock, addressed by the reservation identity alone, the instant the lease began running. Activation is a fact of the lease's lifecycle that the site records, not delivery evidence: the deal lifecycle judges delivery from the storefront's own records, and a lease with no recorded activation, including one older than the record, says nothing about whether it was delivered. It changes neither the lease's window nor admission. The site and every layer of the storefront's guarded capacity path offer it, but as of this writing no delivery path calls it, so no delivered lease has its activation recorded. See the [site-capacity architecture](../../openspec/specs/site-capacity/architecture.md#reservation-lifecycle).
+
 A reservation whose negotiated shape changes is superseded, never mutated: `CapacityLedgerService.resize_reservation` atomically releases the old reservation and admits a new one under a new `capacity_reservation_id`, so the reservation's committed dimensions always reflect the shape actually being negotiated. Scheduling (see "Fulfillment" below) MAY further narrow within a reservation's bound for a placement or pricing check against a candidate shape; a scheduling narrower than the reservation reports back exactly what it scheduled, not the reservation's original shape, since that is what gets provisioned if accepted (`openspec/specs/site-capacity/spec.md`'s committed-dimensions-through-scheduling requirement). As of this writing, `resize_reservation` has no negotiation-side caller — this describes the intended negotiation model, not yet-implemented wiring between negotiation and reservation resizing.
 
 #### Layered placement ownership
@@ -1119,6 +1121,11 @@ immediately; future ends truncate the immutable lease horizon. Storefront teardo
 
 Compose is organized by market domain and includes the shared development chain. There is no required long-running buyer service. The bare-metal seller uses its dedicated image, role-owned writable storefront database, durable reservation-to-site route map, a separately injected seller signer, and its configuration in mounted files: the operator's `storefront.toml`, which binds each site to its URL and service peer, and the Secret overlay `storefront.secrets.toml`, as every storefront reads them. VM and bare-metal storefront services are independently selectable and may share a provisioning authority without sharing writable storefront databases. The root compose file combines domain stacks for full end-to-end work. On a local Kubernetes cluster, `make -C helm deploy-local` installs the umbrella as one release, and `make helm-topology-up` installs the two-release topology described below.
 
+Two rules govern how stacks receive their configuration:
+
+- **The repository's stacks are configured from committed files.** Every stack the repository runs — each end-to-end lane and the full local stack — takes its configuration from committed profile, overlay, values, and secret-overlay files, whose secret overlays hold public development values only. A deployed stack's secret profile or overlay is never a committed file: it is the file an operator-supplied Secret holds. A Makefile chooses which configuration loads — a profile, the provisioning mode — and never generates or carries a value. A value the base topology fixes stays in the base file; a deployment's own binds and values are in its overlay, and a base file gives no credential or definition document a committed fallback. See [`DEPLOYMENT_AND_CONFIG.md`, "Per-domain stack composition"](DEPLOYMENT_AND_CONFIG.md#per-domain-stack-composition).
+- **Secrets arrive through a secret profile or overlay.** In every stack, local or deployed, a service takes its secrets from a secret profile or overlay file its configuration system layers — on a cluster, the file a Secret supplies — never from an environment variable its configuration names. The signing credential, `ARKHAI_IDENTITY_CREDENTIAL`, is the one exception: the identity specification keeps it from the loader. Trust follows the same rule: a private CA is configured where the client that needs it reads it, never by replacing a process's trust store. See [`DEPLOYMENT_AND_CONFIG.md`, "Profile-based configuration"](DEPLOYMENT_AND_CONFIG.md#profile-based-configuration).
+
 ### Production and staging
 
 The deployment surfaces support independently selectable registries, VM and bare-metal storefront roles, compute provisioning, and optional development/test components. The umbrella chart uses the schema-opaque registry subchart for its default compute registry and may enable a second aliased API-credits registry. Each registry has its own schema path, authority signer Secret, descriptor, Service, and retained PVC. `helm/charts/bare-metal-storefront` installs the dedicated one-domain role with its own service, persistence boundary, health probes, external signer Secret, and its configuration passed through as public `config` with an optional existing Secret overlay; its sites, their service peers, and its public URL are public configuration. The umbrella/shared-shell chart may instead select installed domain contributions. Disabling one role creates no wait or reference from another.
@@ -1130,7 +1137,10 @@ Configuration resolution, ConfigMap/Secret mounting, stateful-service persistenc
 ### Operators
 
 Sites and storefronts are currently deployed and operated by one business, which
-upgrades them together. Authority boundaries are still drawn as if the two were
+upgrades them together. Accordingly, a storefront calling an operation its site
+does not yet offer is not a supported deployment, and no compatibility path is
+kept for it: a caller that cannot complete the operation has not completed it, and
+nothing treats the outcome as if it had. Authority boundaries are still drawn as if the two were
 independent parties, because that is what decides where each rule belongs. What a
 single operator does not yet need is upgrade-order guidance between independently
 operated sites and storefronts — for example, a site writing a declaration that a
@@ -1206,6 +1216,8 @@ Use an existing open-source library wherever one meets the requirements, and bui
 ## Testing strategy
 
 Tests belong at the lowest level that can prove the behavior: unit, integration, smoke, and end-to-end, each defending the narrowest observable contract appropriate to its level — no level should rely on end-to-end tests alone for behavior it could prove itself. See [`docs/development/TESTING.md`](TESTING.md) for the level definitions, coverage jurisdiction between them, the client-contract "no raw calls" rule, contract fixtures, boundary-change validation, cross-language conformance, and offline review validation, and [the testing and compatibility specification](../../openspec/specs/test-compatibility/spec.md) for the normative requirements.
+
+A test double of a service mirrors its producer's API — routes, authentication, admission, read authorization, idempotency, and error codes — unless there is a compelling reason to deviate, and states any deviation. A double that answers differently from its producer proves only that a client agrees with the double. Where a double wraps a kit's engine, it serves what that engine serves, and its claims, not its behaviour, are what is narrowed. The end-to-end lanes' payments double, `tools/payments-lane-double`, is the current example ([`TESTING.md`, "Private Service Dependencies"](TESTING.md#private-service-dependencies)).
 
 ## Capability documentation index
 

@@ -27,7 +27,6 @@ from market_arkhai_payments import (
     ArkhaiPaymentsConfig,
     PaymentSettlementData,
     agreement_from_bytes,
-    payments_client_for_owner,
 )
 from market_core.schemas import SettlementOption, compute_rate_total
 from market_deal_lifecycle_client import LifecycleClient
@@ -65,6 +64,8 @@ from tests.e2e.roles.helpers.payment_compensation import (
     refund_may_clear,
 )
 from tests.e2e.roles.helpers.payments import (
+    buyer_payments_client,
+    buyer_payments_environment,
     configured_payments,
     payment_config_toml,
     payment_setting,
@@ -145,6 +146,7 @@ def payment_buyer_cli(payments_config, buyer_cli_binary, tmp_path_factory) -> Bu
         registries=(url,),
         registry_authorities={url: {"authority": authority,
                                    "identities": [{"scheme": scheme, "identifier": identifier}]}},
+        credential_environment=buyer_payments_environment(payments_config),
         toml_sections=sections,
     )
 
@@ -418,7 +420,7 @@ def test_the_seller_refund_reverses_the_held_payment(
     refunded = _seller_refund(payment_deal_state.negotiation_id)
     assert refunded.status == "refunded"
     assert refunded.settlement_ref == payment_deal_state.settlement_id
-    with payments_client_for_owner(payments_config, str(payment_setting("BUYER_ACCOUNT"))) as client:
+    with buyer_payments_client(payments_config, str(payment_setting("BUYER_ACCOUNT"))) as client:
         snapshot = client.get_transaction(str(payment_deal_state.settlement_id)).snapshot
     assert snapshot.parts and {part.status.value for part in snapshot.parts} == {"reversed"}
     assert all(part.rate is None and part.reversed.root == part.gross.root

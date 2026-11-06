@@ -166,6 +166,12 @@ class CapacityReservation(Base):
     # When the reservation last entered ``releasing``: the start of the release
     # attempt a stalled teardown is timed from, whatever the lease's end.
     release_requested_at = Column(String, nullable=True)
+    # When the site recorded that the lease began running against a provisioned
+    # resource. Written only by activation, once, from the site's clock; whether
+    # a lease is activated is derived from it and stored nowhere else. Null means
+    # only that no activation is recorded: a reservation stored before the
+    # column existed records none, and that says nothing about delivery.
+    activated_at_utc = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False

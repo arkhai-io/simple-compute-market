@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-kit-arkhai-payments"
-version = "0.5.0"
+version = "0.6.0"
 license = "MIT"
 description = "Stateless client for the Arkhai payments HTTP API"
 requires-python = ">=3.10,<3.14"
@@ -31,6 +31,8 @@ warn_unused_ignores = true
 
 [dependency-groups]
 dev = [
+    # Issues the untrusted certificate the access check's TLS test serves.
+    "cryptography>=43",
     "datamodel-code-generator==0.83.0",
     "mypy>=1.15.0,<2.0.0",
     "pytest>=8.3.4,<9",

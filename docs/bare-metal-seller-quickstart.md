@@ -62,9 +62,8 @@ hosts:
 ```
 
 The addresses are documentation values; use your own. `key_path` is the
-provisioning SSH key's path inside the container, where the stack mounts
-`BARE_METAL_PROVISIONING_SSH_PRIVATE_KEY_FILE`; the document never carries a
-key.
+provisioning SSH key's path inside the container, where your overlay mounts the
+site's key (below); the document never carries a key.
 
 The provisioning service reconciles the document at startup whenever it
 changes, after the pool document. List only execution hosts. Each entry declares
@@ -192,51 +191,92 @@ that mode.
 
 Use separate owner-readable files:
 
-- `BARE_METAL_REGISTRY_IDENTITY_CREDENTIAL_FILE` contains only the registry
-  signing credential expected by its configured public principal.
-- `BARE_METAL_STOREFRONT_IDENTITY_ENV_FILE` contains the storefront's
+- the registry's signing credential, only the credential its configured public
+  principal expects;
+- `storefront-identity.env`, holding the storefront's
   `ARKHAI_IDENTITY_CREDENTIAL`, the one value the storefront reads from its
-  environment besides its configuration directory.
-- `BARE_METAL_STOREFRONT_SECRETS_FILE` is the storefront's Secret overlay,
-  `storefront.secrets.toml`: for Alkahest, the seller wallet's
-  `[Wallet] private_key`, and any other secret setting, such as a delivery sink's
-  credentials.
-- `BARE_METAL_PROVISIONING_IDENTITY_ENV_FILE` contains the provisioning
-  authority's `ARKHAI_IDENTITY_CREDENTIAL`.
-- `BARE_METAL_PROVISIONING_SSH_PRIVATE_KEY_FILE` is the Ansible key for the
-  selected host. It is not a marketplace credential.
+  environment besides its configuration directory;
+- the storefront's Secret overlay, `storefront.secrets.toml`: for Alkahest, the
+  seller wallet's `[Wallet] private_key`, and any other secret setting, such as a
+  delivery sink's credentials;
+- `provisioning-identity.env`, holding the provisioning authority's
+  `ARKHAI_IDENTITY_CREDENTIAL`;
+- the Ansible key for the selected host. It is not a marketplace credential.
 
 The files must be regular owner-readable files. Do not reuse one principal or
 credential across roles, and do not commit credential values.
 
 ## Configure public bindings
 
-Export the file paths and the public principals the Compose stack reads. Values
-shown in angle brackets are required deployment inputs, not defaults:
+`compose.bare-metal.yml` holds the stack's topology only, and its services
+refuse to start without a deployment's bindings. Write your own overlay beside it
+binding your files, with a registry profile and a site profile holding the
+public principals. Values shown in angle brackets are required deployment
+inputs, not defaults; paths in the overlay resolve against the directory of the
+first `-f` file, the repository root.
+
+`/run/operator/registry/config-registry.env`, the registry's profile:
 
 ```bash
-export BARE_METAL_REGISTRY_IDENTITY_CREDENTIAL_FILE=/run/operator/registry-credential
-export BARE_METAL_STOREFRONT_IDENTITY_ENV_FILE=/run/operator/storefront-identity.env
-export BARE_METAL_STOREFRONT_CONFIG_FILE=/run/operator/storefront.toml
-export BARE_METAL_STOREFRONT_SECRETS_FILE=/run/operator/storefront.secrets.toml
-export BARE_METAL_PROVISIONING_IDENTITY_ENV_FILE=/run/operator/provisioning-identity.env
-export BARE_METAL_PROVISIONING_SSH_PRIVATE_KEY_FILE=/run/operator/site-ssh-key
-export BARE_METAL_PROVISIONING_HOST_DEFINITIONS_FILE=/run/operator/host-definitions.yaml
-export BARE_METAL_POOL_DEFINITIONS_FILE=/run/operator/resource-pools.yaml
-
-export BARE_METAL_REGISTRY_AUTHORITY_ID=bare-metal-registry
-export BARE_METAL_REGISTRY_AUTHORITY_SCHEME=<scheme>
-export BARE_METAL_REGISTRY_AUTHORITY_IDENTIFIER=<canonical-identifier>
-
-# The provisioning service trusts the storefront's principal and binds it to the site.
-export BARE_METAL_STOREFRONT_IDENTITY_SCHEME=<scheme>
-export BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER=<canonical-identifier>
-export BARE_METAL_PROVISIONING_IDENTITY_SCHEME=<scheme>
-export BARE_METAL_PROVISIONING_IDENTITY_IDENTIFIER=<canonical-site-authority-identifier>
-export BARE_METAL_PROVISIONING_ADMIN_IDENTITY_SCHEME=<scheme>
-export BARE_METAL_PROVISIONING_ADMIN_IDENTITY_IDENTIFIER=<canonical-admin-identifier>
-export BARE_METAL_SITE_ID=california-1
+REGISTRY_AUTHORITY_ID=bare-metal-registry
+REGISTRY_AUTHORITY_SCHEME=<scheme>
+REGISTRY_AUTHORITY_IDENTIFIER=<canonical-identifier>
+REGISTRY_AUTHORITY_CREDENTIAL_FILE=/run/secrets/arkhai/registry-identity/credential
+REGISTRY_DESCRIPTOR_BASE_URL=<externally reachable registry URL>
+REGISTRY_DESCRIPTOR_DISPLAY_NAME="<display name>"
+REGISTRY_DESCRIPTOR_OPERATOR_IDENTITY="<public operator identity>"
 ```
+
+`/run/operator/config-site.yml`, the site's profile. The provisioning service
+trusts the storefront's principal and binds it to the site:
+
+```yaml
+identity:
+  scheme: "<scheme>"
+  identifier: "<canonical-site-authority-identifier>"
+storefront_identity:
+  scheme: "<scheme>"
+  identifier: "<canonical-identifier>"
+storefront_site_id: "california-1"
+admin_identity:
+  scheme: "<scheme>"
+  identifier: "<canonical-admin-identifier>"
+```
+
+`compose.bare-metal-site.yml`, the overlay:
+
+```yaml
+services:
+  bare-metal-registry:
+    environment:
+      - CONFIG_DIRECTORY=/etc/arkhai/registry
+      - ACTIVE_PROFILES=registry
+    volumes:
+      - /run/operator/registry:/etc/arkhai/registry:ro
+      - /run/operator/registry-credential:/run/secrets/arkhai/registry-identity/credential:ro
+  bare-metal-provisioning:
+    env_file:
+      - /run/operator/provisioning-identity.env
+    environment:
+      - CONFIG_DIRECTORY=/app/config
+      - ACTIVE_PROFILES=docker,site
+    volumes:
+      - ./provisioning/compute/service/src/compute_provisioning_service/config/config.yml:/app/config/config.yml:ro
+      - ./provisioning/compute/service/src/compute_provisioning_service/config/config-docker.yml:/app/config/config-docker.yml:ro
+      - /run/operator/config-site.yml:/app/config/config-site.yml:ro
+      - /run/operator/host-definitions.yaml:/run/config/host-definitions.yaml:ro
+      - /run/operator/resource-pools.yaml:/run/config/resource-pools.yaml:ro
+      - /run/operator/site-ssh-key:/home/appuser/.ssh/id_ed25519:ro
+  bare-metal-storefront:
+    env_file:
+      - /run/operator/storefront-identity.env
+    volumes:
+      - /run/operator/storefront.toml:/etc/arkhai/storefront.toml:ro
+      - /run/operator/storefront.secrets.toml:/etc/arkhai/storefront.secrets.toml:ro
+```
+
+The site starts without its SSH key, which Ansible reads only when a job runs, so
+a missing key fails the first delivery rather than startup.
 
 The storefront itself reads its settings only from files under
 `$XDG_CONFIG_HOME/arkhai/`: the operator's `storefront.toml`, the Compose stack
@@ -249,7 +289,7 @@ base_url = "https://seller.example"
 
 [Identity.principal]
 scheme     = "<scheme>"
-identifier = "<canonical-identifier>"   # the storefront principal exported above
+identifier = "<canonical-identifier>"   # the storefront principal the site profile names
 
 [Identity.administrators.operator]
 principals = [{ scheme = "<scheme>", identifier = "<canonical-admin-identifier>" }]
@@ -322,8 +362,8 @@ projections only among the listed trusted sites.
 ## Start and inspect
 
 ```bash
-docker compose -f compose.bare-metal.yml up -d
-docker compose -f compose.bare-metal.yml ps
+docker compose -f compose.bare-metal.yml -f compose.bare-metal-site.yml up -d
+docker compose -f compose.bare-metal.yml -f compose.bare-metal-site.yml ps
 curl -fsS http://localhost:8000/health
 curl -fsS http://localhost:8081/health
 curl -fsS http://localhost:8080/health

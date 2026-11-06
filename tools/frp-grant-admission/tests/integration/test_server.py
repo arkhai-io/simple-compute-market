@@ -130,7 +130,9 @@ def running_plugin(
     running = Plugin(load_config(config_path), config_path, DecisionLog(log), clock=lambda: NOW)
     server = PluginServer((host, 0), running, socket_timeout=socket_timeout)
     previous = install_reload_on_sighup(running)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    # shutdown() returns only at serve_forever's next poll, and the library
+    # has no way to wake it, so the poll is short rather than the default 0.5s.
+    thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.01), daemon=True)
     thread.start()
     try:
         yield RunningPlugin(config_path, log, server.server_address[1], host)

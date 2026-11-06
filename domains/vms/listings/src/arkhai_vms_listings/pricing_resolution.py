@@ -1,9 +1,10 @@
 """VM-domain three-tier resolution of commercial terms.
 
-`kit/resource-pools.hints.raw_pricing` owns the domain-neutral `pricing`
-key and its bare read; this module owns the VM domain's family-grouped
-form and how it resolves against the storefront's own configured and
-overridden values. Two kinds of term resolve here:
+`market_resource_pools_contracts.hints.raw_pricing`, in
+`kit/resource-pools-contracts`, owns the domain-neutral `pricing` key and its
+bare read; this module owns the VM domain's family-grouped form and how it
+resolves against the storefront's own configured and overridden values. Two
+kinds of term resolve here:
 
 - **Per-model listing terms** (`max_duration_seconds`, `accepted_escrows`,
   `settlements`), keyed by GPU model under `pricing.gpu.<model>` and resolved
@@ -40,6 +41,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from arkhai_vms import VM_PRICING_PROJECTION, vm_family_rate
+from market_resource_pools_contracts.hints import raw_pricing
 
 GPU_FAMILY_KEY = "gpu"
 
@@ -133,12 +135,6 @@ _VALID_HINT_FIELD: Mapping[str, Any] = {
 
 
 def _pool_pricing(policy_tags: Mapping[str, Any]) -> Mapping[str, Any] | None:
-    # Local import -- see resolve_vm_listing_cardinality_mode's own comment
-    # in arkhai_vms_listings.listing_cardinality_mode for the reason (kept
-    # out of any consumer that imports this module's signatures without
-    # calling it).
-    from market_resource_pools_contracts.hints import raw_pricing
-
     pricing = raw_pricing(policy_tags)
     return pricing if isinstance(pricing, Mapping) else None
 

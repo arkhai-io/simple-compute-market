@@ -1258,8 +1258,10 @@ def test_concurrent_reclaim_cannot_be_clobbered_by_a_stale_outcome(tmp_path):
     reading."""
 
     database = tmp_path / "reclaim_race.db"
+    # No busy timeout: B meets A's held write reservation at once instead of
+    # waiting it out, and A is released only once B's attempt has ended.
     engine = create_engine(
-        f"sqlite:///{database}", connect_args={"check_same_thread": False, "timeout": 2}
+        f"sqlite:///{database}", connect_args={"check_same_thread": False, "timeout": 0}
     )
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine)

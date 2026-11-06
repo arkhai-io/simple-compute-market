@@ -180,6 +180,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 A project one level deep can use `/app` itself with the wheelhouse at `/.dist`, which
 keeps an editable install of the project valid in the runtime stage; `e2e-tests` does.
+A deeper project whose wheel no image installs from the wheelhouse keeps its editable
+install the same way at its mirrored path: `tools/payments-lane-double`'s image installs
+the project editable at `/repo/tools/payments-lane-double` from its source, skipping
+`install-wheel`, and its runtime stage copies the environment and `src/` to that same
+path.
 
 ## Checks
 

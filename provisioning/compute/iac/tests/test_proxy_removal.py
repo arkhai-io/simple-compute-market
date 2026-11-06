@@ -38,7 +38,9 @@ class Peer:
                 pass
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        # shutdown() returns only at serve_forever's next poll, and the library
+        # has no way to wake it, so the poll is short rather than the default 0.5s.
+        self.thread = threading.Thread(target=lambda: self.server.serve_forever(poll_interval=0.01), daemon=True)
 
     def __enter__(self):
         self.thread.start()

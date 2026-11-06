@@ -41,7 +41,9 @@ def test_start_binds_the_configured_address_logs_and_reloads_on_sighup(tmp_path:
     server = start(str(path), DecisionLog(log))
 
     assert server is not None
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    # shutdown() returns only at serve_forever's next poll, and the library
+    # has no way to wake it, so the poll is short rather than the default 0.5s.
+    thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.01), daemon=True)
     thread.start()
     try:
         assert server.server_address[:2] == ("127.0.0.1", port)

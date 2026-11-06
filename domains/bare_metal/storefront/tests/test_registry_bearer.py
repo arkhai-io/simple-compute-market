@@ -58,7 +58,9 @@ class _Registry:
         self.seen = seen
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        # shutdown() returns only at serve_forever's next poll, and the library
+        # has no way to wake it, so the poll is short rather than the default 0.5s.
+        self.thread = threading.Thread(target=lambda: self.server.serve_forever(poll_interval=0.01), daemon=True)
 
     def __enter__(self) -> "_Registry":
         self.thread.start()

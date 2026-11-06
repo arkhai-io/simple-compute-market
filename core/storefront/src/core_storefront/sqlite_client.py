@@ -1789,7 +1789,7 @@ class SQLiteClient:
         """
 
         def _load() -> str | None:
-            conn = self._connect()
+            conn = sqlite3.connect(self.db_path)
             try:
                 row = conn.execute(
                     """

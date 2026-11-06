@@ -8,6 +8,29 @@
 # on the Anvil chain the dev-env chart deploys, with that chart's address book
 # mounted, and contact exchange. Agents are keyed by name and Helm merges maps
 # key by key, so only what differs from Bob's agent in values.yaml is stated.
+#
+# Bob is also configured for Arkhai payments, through the values a deployment
+# supplies, as the deployment's rehearsal: [Settlement.arkhai_payments] in his
+# configuration, the CA bundle ConfigMap `payments-ca-bundle`, from which the
+# chart derives the section's ca_bundle_path, and the payments key as the
+# section's api_key in his runtime Secret's overlay, never development
+# authentication. The payments service is the payments lane double this overlay
+# enables, whose committed fixtures (tools/payments-lane-double/fixtures/, tls/)
+# every payments value below restates; a render test holds them equal. Each is a
+# public development value, never for a public network. `make -C helm
+# topology-secrets` creates the ConfigMap from the committed lane CA and writes
+# into the overlay the double's seller token and Bob's [[DisputeCredential]]
+# toward the dispute authority the registry below recommends, copied from his
+# Compose secret overlay; without it, servicing would report his payment deals
+# repair_required. `check-local-secrets` requires the ConfigMap and the
+# overlay's Secret, not what the overlay holds: the storefront itself reports a
+# Secret written without the token, its payments readiness blocked by
+# arkhai_payments.api_key_missing, and `helm test`'s payments check fails at its
+# configuration step, naming neither api_key nor api_key_env configured. The
+# release serves no payment scenario; that check reads
+# Bob's own balance at the double.
+payments-lane-double:
+  enabled: true
 storefront:
   persistence:
     retainOnUninstall: false
@@ -19,6 +42,13 @@ storefront:
         configMapName: arkhai-node-operator-dev-env-alkahest-addresses
         key: alkahest_anvil_addresses.json
         mountPath: /etc/arkhai/alkahest
+      # The lane CA, the only CA Bob's HTTPS peer, the double, chains to.
+      caBundle:
+        configMapName: payments-ca-bundle
+        key: ca-bundle.pem
+      # The double's seller account, whose balance the payments check reads.
+      tests:
+        paymentsAccount: 00000000-0000-4000-8000-0000000000b2
       config:
         # Development values only, never for a public network: the address is
         # Anvil's deterministic account 2, whose key every Anvil instance
@@ -49,6 +79,7 @@ storefront:
           priority:
             - alkahest.v1
             - contact-exchange.v1
+            - arkhai.payments.v1
           alkahest:
             enabled: true
             # The dev-env chart's address book, mounted by alkahestAddressBook.
@@ -57,6 +88,16 @@ storefront:
             release_models: [recipient]
             trusted_oracle_addresses: []
             interruptible_oracle_addresses: []
+          # The payments lane double: its Service, its receipt identity, and its
+          # fee policy. The key is api_key in the runtime Secret's overlay.
+          arkhai_payments:
+            enabled: true
+            service_url: https://payments-double:8443
+            service_identity:
+              scheme: ed25519
+              identifier: kaKKC3Q4FZOk2UaVeSCJJq_IrYLIg5t2RDWbnrqaSzo
+            fee_bps: 250
+            livemode: false
           # Offered only on listings whose clauses select it, such as a pool
           # override's. A development contact on a reserved domain.
           contact:
@@ -75,6 +116,21 @@ provisioning:
 registry:
   persistence:
     retainOnUninstall: false
+  # The payments lane double's pinned dispute authority
+  # (tools/payments-lane-double/fixtures/dispute-authority.toml), which sellers
+  # and buyers take from the registry's recommendations. Nobody can act as it:
+  # its origin is under .invalid, which never resolves, its record key has no
+  # usable private half, and its account has no token at the double.
+  descriptor:
+    recommendedDisputeAuthorities:
+      - interface: arkhai.mediation.v1
+        origin: https://dispute.invalid
+        account: 00000000-0000-4000-8000-0000000000d1
+        record_key: "ed25519:lMg0OhYvDsBJf2G3MtLHgbPX3spRLUCV20o7HY7AFOI"
+        params: {}
+        advertisement:
+          mechanisms: [arkhai.payments.v1]
+          minimum_dispute_window_seconds: 0
   # The registry smoke test signs its reads as the release's development buyer.
   # Its credential is never here: it layers the e2e-tests chart's out-of-band
   # Secret's config-e2e-secret.yml, whose buyer.marketplace_credential
@@ -93,3 +149,19 @@ api-credits-registry:
 bare-metal-storefront:
   persistence:
     retainOnUninstall: false
+# The PAYMENTS settings the end-to-end test pods read, for the payments lane
+# double above, as a Compose lane's runner receives them; the target is the
+# release's own, so an unready one fails a payment scenario rather than
+# skipping it. Public development values, never for a public network, restated
+# from the double's fixtures: no marketplace credential or bearer token is here,
+# and the release serves no payment scenario.
+e2e-tests:
+  payments:
+    service_url: https://payments-double:8443
+    service_identity: kaKKC3Q4FZOk2UaVeSCJJq_IrYLIg5t2RDWbnrqaSzo
+    fee_bps: 250
+    livemode: false
+    lane_owned: true
+    api_key_env: PAYMENTS_BUYER_API_KEY
+    buyer_account: 00000000-0000-4000-8000-0000000000b1
+    seller_account: 00000000-0000-4000-8000-0000000000b2

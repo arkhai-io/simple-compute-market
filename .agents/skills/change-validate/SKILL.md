@@ -232,18 +232,23 @@ command with its exit status. A run `run` refuses before running anything — a
 collect with no kept marker, a missing `--owed`, a value its command names that
 the run lacks — prints an `ERROR:` line instead. Run long commands in the
 background and wait for them to finish, rather than inside a call that will time
-out. Wait inside one Bash call, with a blocking read-only `tail -f … | grep -m1`
-on the command's output matching the closing line or an `ERROR:` line — never by
-ending the turn: under the wrapper a turn's
-end is an outcome, so a turn ended with a part in flight is logged as a stop. A
-single call blocks for at most ten minutes, and the pipeline can take longer, so
-when the `tail` times out, repeat it, still without ending the turn. Never a shell
-loop: `bash -c` has no allow rule unattended and will not get one, since no rule
-admits a loop without admitting any command. A long `run` part can outlast one
-call too — this repository's Helm scenarios may take up to thirty minutes, and
-another change's validation may share the machine — so it runs in the background
-and is waited for the same way. In this repository a running local or Helm part
-prints one line as each step starts, naming the step's log under
+out. Wait inside one Bash call, with `scripts/change-workflow wait <output-file>
+'<pattern>'` on the command's output, the pattern matching the closing line or an
+`ERROR:` line — a regular expression, so the prefix's brackets are escaped:
+`'^\[change-workflow\] validation |^ERROR:'` — never by ending the turn: under
+the wrapper a turn's end is an outcome, so a turn ended with a part in flight is
+logged as a stop. The wait returns that line as soon as it is in the file, even if
+it was written before the wait began, and gives up after nine minutes, inside one
+call's ten-minute limit, so give its call that limit; the pipeline can take longer,
+so when the wait gives up, run it again, still without ending the turn. No step
+follows a file with `tail -f`: it hangs when the line waited for is the last one
+written, and no rule allows it. Never a shell loop: `bash -c` has no allow rule
+unattended and will not get one, since no rule admits a loop without admitting any
+command. A long `run` part can outlast one call too — this repository's Helm
+scenarios may take up to thirty minutes, and another change's validation may share
+the machine — so it runs in the background and is waited for the same way. In this
+repository a running local or Helm part prints one line as each step starts, naming
+the step's log under
 `.snapshot/validation/`, and one as it ends, so its output shows how far it has
 got.
 

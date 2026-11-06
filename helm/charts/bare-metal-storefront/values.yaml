@@ -53,8 +53,9 @@ identity:
 
 # An existing Secret whose `configKey` holds the overlay, mounted as
 # /etc/arkhai/storefront.secrets.toml: settings the storefront marks secret,
-# such as [Wallet] private_key and a delivery sink's credentials. An empty name
-# mounts none. The chart never renders one.
+# such as [Wallet] private_key, [Settlement.arkhai_payments].api_key and a
+# delivery sink's credentials. An empty name mounts none. The chart never renders
+# one.
 secret:
   secretName: ""
   configKey: storefront.secrets.toml
@@ -66,6 +67,26 @@ alkahestAddressBook:
   configMapName: ""
   key: alkahest_addresses.json
   mountPath: /etc/arkhai/alkahest
+
+# The CA bundle the storefront's payments client trusts its payments service
+# under, from an existing ConfigMap key, or alternatively an existing Secret key,
+# never both, mounted read-only. The chart sets
+# [Settlement.arkhai_payments].ca_bundle_path in the rendered configuration to
+# the mounted file, and refuses a `config` stating another path or no such
+# section. Only the payments client reads it; the process's own trust store is
+# left as it is. The chart names no CA of its own; empty names mount none and set
+# nothing.
+caBundle:
+  configMapName: ""
+  secretName: ""
+  key: ca-bundle.pem
+
+tests:
+  # The account the payments check test pod reads the balance of, with
+  # `bare-metal-storefront check-payments --account`: the seller's payee account.
+  # The pod renders only when `config` has [Settlement.arkhai_payments] and this
+  # names an account.
+  paymentsAccount: ""
 
 # In an umbrella release whose `config` names no registry.urls, the storefront
 # publishes to the release's internal registry, and this is its trust, which the

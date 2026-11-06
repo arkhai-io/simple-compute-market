@@ -120,7 +120,8 @@ class BareMetalLifecycle:
             key = binding.authority.model_dump_json()
             if key not in self.clients:
                 self.clients[key] = MediationClient(
-                    binding.authority, MediationCredential(binding.authority.identity, credential.api_key_env),
+                    binding.authority,
+                    MediationCredential(binding.authority.identity, token=credential.resolve()),
                 )
             client = self.clients[key]
         return MediationAdapter(binding, json.loads(self.agreement_bytes(binding.negotiation_id)), client, clock=self.clock)

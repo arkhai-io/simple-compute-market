@@ -50,6 +50,13 @@ Secret-backed profile. */ -}}
 {{- if and $e2e.enabled (eq ($e2eBuyer.scheme | default "") "eip191") $e2eBuyer.identifier -}}
   {{- $_ := set $buyer "wallet_address" $e2eBuyer.identifier -}}
 {{- end -}}
+{{- /* The release's PAYMENTS settings, where its e2e-tests chart states them.
+The e2e-tests chart's schema accepts public settings only, since this profile is
+a ConfigMap; a credential a payment scenario needs is a Secret-backed profile's. */ -}}
+{{- $e2ePayments := $e2e.payments | default dict -}}
+{{- if and $e2e.enabled $e2ePayments -}}
+  {{- $_ := set $generated "payments" (deepCopy $e2ePayments) -}}
+{{- end -}}
 {{- /* The release's clients trust global.registryIdentity as its registry; the
 registry signs as its own chart's identity. Where the release runs its registry
 and both are stated, they are one identity. */ -}}

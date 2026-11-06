@@ -1,0 +1,45 @@
+{{/*
+Helm test pod, rendered when the configuration has a [Settlement.arkhai_payments]
+section and tests.paymentsAccount names the account to read:
+`bare-metal-storefront check-payments`, an authenticated read of that account's
+balance from the storefront's own image, configuration, Secret overlay holding
+the payments key, credential, and CA bundle. Those come from the helpers the
+Deployment renders them with, so a mount or variable the storefront lacks fails
+here too.
+
+It leaves out what the command does not use: the data volume, whose
+ReadWriteOnce claim a pod on another node could not attach while the storefront
+holds it, and the /health probes, since no server starts.
+*/}}
+{{- $account := ((.Values.tests | default dict).paymentsAccount) | default "" }}
+{{- if and $account (include "bare-metal-storefront.paymentsSection" . | fromJson) }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "bare-metal-storefront.fullname" . }}-payments-check
+  labels:
+    {{- include "bare-metal-storefront.testLabels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  restartPolicy: Never
+  # As the Deployment: Service-link variables named for a Service beginning
+  # `storefront` would land in the loader's STOREFRONT_ override layer.
+  enableServiceLinks: false
+  containers:
+    - name: payments-check
+      image: {{ include "bare-metal-storefront.image" . | quote }}
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      command:
+        - bare-metal-storefront
+        - check-payments
+        - --account
+        - {{ $account | quote }}
+      env:
+        {{- include "bare-metal-storefront.env" . | nindent 8 }}
+      volumeMounts:
+        {{- include "bare-metal-storefront.configMounts" . | nindent 8 }}
+  volumes:
+    {{- include "bare-metal-storefront.configVolumes" . | nindent 4 }}
+{{- end }}

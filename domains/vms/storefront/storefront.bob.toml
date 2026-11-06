@@ -1,7 +1,7 @@
 # Bob (seller) local Compose profile. Public marketplace identity and EVM
-# mechanism address are configuration; signing credentials are injected by
-# Compose Secrets through ARKHAI_IDENTITY_CREDENTIAL and
-# STOREFRONT_WALLET__PRIVATE_KEY.
+# mechanism address are configuration; the signing credential arrives as
+# ARKHAI_IDENTITY_CREDENTIAL, and the wallet key and registry token in the
+# secret overlay, dev-env/identities/bob.storefront.secrets.toml.
 
 agent_id            = "bob"
 port                = 8001

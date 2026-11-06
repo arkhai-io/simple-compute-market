@@ -26,6 +26,7 @@ from market_deal_lifecycle_contracts.models import Accepted, CommitMessage
 from market_deal_servicing import EndSession
 from market_deal_servicing.evidence import transaction
 from market_identity import Ed25519Signer, TrustedIdentitySet, canonical_json
+from pydantic import SecretStr
 from storefront_client import StorefrontClientError
 
 import market_storefront.server  # noqa: F401 - controller composition order
@@ -70,8 +71,8 @@ async def test_hosted_buyer_commit_and_end_capture_signed_push_retry_and_pull(ma
     mediation = MediationContractFake()
     authority = decode_terms(agreement["settlement"]["lifecycle"]).adjudication.dispute
     h.lifecycle.clients[canonical_json(authority)] = MediationClient(
-        authority, MediationCredential(authority.identity, "DEMO_MEDIATION_TOKEN"),
-        environ={"DEMO_MEDIATION_TOKEN": "fixture-payee"}, transport=mediation.transport(),
+        authority, MediationCredential(authority.identity, token=SecretStr("fixture-payee")),
+        transport=mediation.transport(),
     )
     h.lifecycle.credential_available = lambda candidate: candidate == authority
     h.lifecycle.seller.credential_available = h.lifecycle.credential_available

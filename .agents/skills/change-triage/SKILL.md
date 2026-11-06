@@ -107,11 +107,14 @@ the session, and every turn ends with an outcome matching
   pre-commit <change>` in the
   background as written, with no redirect of its output — a redirect is a write no
   rule admits, and the harness keeps a background command's output in a file — and
-  wait for it inside one Bash call, with a blocking `tail -f … | grep -m1` on that
-  file matching the line it prints when it ends — for `run pre-commit`, the
-  closing line of `pre-commit`, its last hook, `[change-workflow] pre-commit at`,
-  or an `ERROR:` line when it refuses — repeated when the call times out
-  — never with Monitor, a wake-up, or a shell loop.
+  wait for it inside one Bash call, with `scripts/change-workflow wait <that-file>
+  '<pattern>'` matching the line it prints when it ends — for `run pre-commit`, the
+  closing line of `pre-commit`, its last hook, `[change-workflow] pre-commit at`
+  (the pattern a regular expression, so its brackets escaped:
+  `'^\[change-workflow\] pre-commit at|^ERROR:'`), or an `ERROR:` line when it
+  refuses — repeated when the wait gives up — never
+  with `tail -f`, which hangs when that line is the last, Monitor, a wake-up, or a
+  shell loop.
 - **The end is an outcome.** Each discussed finding you present (step 3) and, when
   you recommend another round, the question whether one is merited (step 6) is a
   `question`; the table of default acceptances rides on the last of them. When the
