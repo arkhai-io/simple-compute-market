@@ -17,32 +17,64 @@ Delivers the column, null on every existing reservation, in compute provisioning
 API credits (D6, D9; `site-capacity` "A lease records when it was activated"). Touches
 `provisioning/compute/service` and `domains/apicredits/service`.
 
-- [ ] 1.1 Add an ordered migration to
+- [x] 1.1 Add an ordered migration to
   `provisioning/compute/service/src/compute_provisioning_service/db/migrations.py`,
   dated after the chain's last entry and named `<date>_<n>_reservation_activated_at`,
   that adds `capacity_reservations.activated_at_utc VARCHAR` through
   `_add_column_if_missing`, as `_migrate_reservation_release_requested_at` does. No
   backfill: every existing row stays null (D1, D6). Its docstring says null means no
   activation is recorded, never that a lease was not delivered (08 F3).
-- [ ] 1.2 Add the same migration to
+  Done as `20261106_001_reservation_activated_at`, last in `MIGRATIONS`.
+- [x] 1.2 Add the same migration to
   `domains/apicredits/service/src/apicredits_service/db/migrations.py`, next in its
   numbered chain, guarded by `_table_exists` and `_column_exists` as that service's
   `_migrate_reservation_release_requested_at` is. Its docstring says the service
   takes the column only because it hosts the site ledger, whose row carries a compute
   lease's tail, and never reads or writes it (D6).
-- [ ] 1.3 Extend `provisioning/compute/service/tests/integration/test_database.py` and
+  Done as `20261106_007_reservation_activated_at`; the docstring adds that a quota
+  grant is an open-ended hold, which activation refuses.
+- [x] 1.3 Extend `provisioning/compute/service/tests/integration/test_database.py` and
   `domains/apicredits/service/tests/integration/test_migrations.py` (service
   integration, real database): a database holding leased, releasing and released
   reservations migrates with `activated_at_utc` present and null on each, with state,
   window and other columns unchanged; a rerun changes nothing; a database already
   carrying the column migrates unchanged.
+  Both suites build the pre-column database by migrating a fresh in-memory SQLite
+  database, dropping the column and deleting the migration's record, then inserting
+  the three reservations by SQL (service-internal state setup; no API writes a
+  pre-column row). Each runs the real `run_migrations` and asserts every row's
+  state, mode, hold expiry, executor target, window and release fields with a null
+  instant, the rerun unchanged, and a pre-existing column and its value kept; the
+  API-credits rows carry no lease end, as no quota grant does. The pinned
+  migration-ID lists (compute's set, API credits' ordered list and count) gained the
+  new IDs. The new tests are migration tests: the real migration chain against a
+  real in-memory SQLite database, no app, sitting in each service's
+  `tests/integration` where `TESTING.md` places migration tests.
+  Evidence: `make -C provisioning/compute/service test-integration` 581 passed;
+  `make -C domains/apicredits/service test` (its unit and integration tests, the
+  migration tests among them) 81 passed; `make test` passed; `make check-change`
+  passed. `make check-packaging` not run for this section: it changes no dependency
+  or lock; task 5.4 runs it once every section's suites pass.
 
 Verification point: `make -C provisioning/compute/service test-integration`;
 `make -C domains/apicredits/service test`; `make test`.
 End-to-end: no scenario reads the column; every deployed scenario runs both services'
 migrations at startup, so `e2e_deal`, `e2e_bare_metal_deal`, `e2e_bare_metal_mock_deal`
 and `e2e_credits_deal` passing shows the migration applies to a started service. None
-is owed.
+is owed. Corrected at implementation: no scenario reads the column, and those four
+markers show only that each started service records the migration and starts
+cleanly on it. A deployed database is fresh, and once section 2 maps the column
+`create_all` makes it, so no scenario runs the migration's `ADD COLUMN`; that path
+is proven only by the two migration test files above. No `Owed by validation:` line.
+
+Handoff: until section 2 maps the column, a fresh compute or API-credits database
+gets it from the migration, not from `create_all`; once mapped, `create_all` makes it
+and the migration is a no-op on fresh databases. Both tests drop the column after a
+fresh migration to stand in for a database that predates it (SQLite `DROP COLUMN`
+works here since the column has no index or constraint). The migrations' docstrings
+name the site's activation and the ledger's mapping, which sections 2 and 3 add in
+this round; the fresh-context check flagged them as ahead of this commit, and they
+were kept rather than reworded twice.
 
 ## 2. The activation transition in the site ledger
 
