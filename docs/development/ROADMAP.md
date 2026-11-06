@@ -22,6 +22,21 @@ When every gap for a goal closes, the goal moves to [Completed goals](#completed
 
 ---
 
+## Goal Index
+
+Each goal links to its campaign in the [active-change index](../../openspec/changes/README.md), where its changes' readiness lives.
+
+| Goal | Campaign in the change index |
+|---|---|
+| [Goal 1 — Consolidate physical-resource authority in the provisioning service](#goal-1--consolidate-physical-resource-authority-in-the-provisioning-service) | [campaign](../../openspec/changes/README.md#roadmap-goal--consolidate-physical-resource-authority-in-the-provisioning-service) |
+| [Goal 2 — Negotiate full compute capability, not GPU count alone](#goal-2--negotiate-full-compute-capability-not-gpu-count-alone) | [campaign](../../openspec/changes/README.md#roadmap-goal--negotiate-full-compute-capability-not-gpu-count-alone) |
+| [Goal 3 — One storefront serving several compute-family domains](#goal-3--one-storefront-serving-several-compute-family-domains) | [campaign](../../openspec/changes/README.md#roadmap-goal--one-storefront-serving-several-compute-family-domains) |
+| [Goal 4 — Make a domain a composition of kit](#goal-4--make-a-domain-a-composition-of-kit) | [campaign](../../openspec/changes/README.md#roadmap-goal--make-a-domain-a-composition-of-kit) |
+| [Goal 5 — Make capacity exclusivity compensated](#goal-5--make-capacity-exclusivity-compensated) | [campaign](../../openspec/changes/README.md#roadmap-goal--make-capacity-exclusivity-compensated) |
+| [Goal 6 — Make the settlement mechanism a composed choice](#goal-6--make-the-settlement-mechanism-a-composed-choice) | [campaign](../../openspec/changes/README.md#roadmap-goal--make-the-settlement-mechanism-a-composed-choice) |
+| [Goal 8 — Sell compute by the period until either party stops](#goal-8--sell-compute-by-the-period-until-either-party-stops) | [campaign](../../openspec/changes/README.md#roadmap-goal--sell-compute-by-the-period-until-either-party-stops) |
+| [Completed goals](#completed-goals) | |
+
 ## Goal 1 — Consolidate physical-resource authority in the provisioning service
 
 **Value.** One authority for physical state removes a whole class of divergence bugs, and — less obviously but more consequentially — it is what makes the storefront substitutable. A storefront that owns hardware inventory cannot become a multi-domain storefront (Goal 3), cannot be replaced by a different commercial front-end over the same hardware, and forces every seller to maintain the same facts in two places. It also shrinks the seller's operational surface: hardware inventory stops being something an operator imports into a commercial service.
@@ -369,47 +384,6 @@ Work this goal found and leaves unowned:
 | Servicing API-credit disputes: the API-credit roles compose no seller half, evidence store, `watch` or buyer filing path, although their hosted options carry `adjudication` and the authorities hold and rule on them; and no decision says what a ruling that reverses payment does to credits already issued — revoke the unconsumed balance, let them stand as the seller's loss, or let the ruling say | Unowned — API credits is not launched and this would stand in the way of a viable Goal 8 launch; until owned, the API-credit buyer client states that it offers no filing and the terms are enforceable at the authorities; `move-settle-out-of-core` gives API credits its lifecycle binding and no lifecycle behaviour |
 | Compound payment-service termination authority | Deferred/unowned — revisit with hosted bonds; would need a dispute-authority record of every termination, not a payment-adapter shortcut |
 | Independent attestation of contested delivery beyond the seller's signed end | Unowned — receipt concurrence and respondent signing are implemented; broader automated evidence waits for a managed metering gateway. Contested and unanswered cases remain triaged |
-
----
-
-## Buyer identity lifecycle status
-
-Buyer marketplace identity is now a core-owned durable profile rather than
-repeated domain-local `[Identity]` configuration. The XDG profile store keeps a
-stable random UUID, canonical principal history, redacted credential-provider
-references, lifecycle/selection, and opaque authority bindings. Fresh VM and
-API-credit work uses the selected primary; version-3 run recovery resolves the
-recorded retained principal. Installed buyer plugins must declare the shared
-resolved-identity injection contract.
-
-The implemented change mapping is
-[`add-persistent-buyer-profiles`](../../openspec/changes/add-persistent-buyer-profiles/).
-Remaining external operational evidence belongs to that change's unchecked
-verification tasks; it does not restore legacy identity precedence.
-
----
-
-## Payment qualification boundaries
-
-Local focused suites exercise Agreement retention, mandate validation, signed receipts, retryable pending, and idempotent physical/grant progress. The controlled VM smoke reaches pending → provisioning → ready with one delivery; it is not live-ledger or hardware acceptance. Bare-metal and API-credit package tests likewise do not establish external payments or delivery qualification.
-
-A qualified payment run needs the intended owned payments target, owner-scoped credentials, observed readiness, and the actual domain delivery authority. VM delivery, API-key use and top-up, and bare-metal authenticated access, revocation, teardown, and capacity release remain separate outcomes. Unavailable service or hardware prerequisites remain named evidence gaps, not permission to claim a simulated result.
-
-Two compute purchases have been qualified that way, each on its own host in test mode, through the buyer commands as they ship: a whole bare-metal GPU machine and a GPU guest on an x86-64 host. Both used relayed delivery, reached the paid guest over SSH with a pinned host key, completed bounded GPU work without CPU fallback, ended through ordinary lifecycle handling, refused fresh access after teardown, and returned capacity. VM leases also reached natural expiry without an operator retry. Their correlated signed payment records are separate evidence from physical delivery.
-
-Separate controlled CPU direct and relay pairs establish concurrent-session and create/release behavior, not external buyer identity or GPU acceptance. Independent observations also cover invalid relay admission, same-run recovery without another debit, repeated canonical adoption, bounded bare-metal cleanup and same-job refusal recovery. The supplemental host-network probe came from an operator-only CPU guest bound to the paid deployment's guest base, bridge, NIC and loaded policy; it covers only finite paths exercised and says nothing about paid-tenant setup or universal isolation. These observations do not claim the original named Alkahest drivers ran.
-
-Earlier signed snapshots showed released VM holds and still-held bare-metal contract holds. A subsequent automated TEST bare-metal journey established readiness without legacy fulfillment reads, ordinary teardown and access denial, automatic payee-signed case closure, and natural financial release under its accepted terms. Recovery of earlier interrupted attempts required operator action and does not establish unassisted closure. A held balance is not a refund or cashout. Pipeline lanes do not replace external proof: none configures a payments target or runs a real host.
-
-Seller servicing adopts validated existing compute readiness without buyer polling. Buyer logs preserve canonical public signer evidence while settlement progress excludes private delivery. Mediation case reads retain accepted or pending protection with strict deal binding, and authority advertisements can carry a supported shorter minimum without bypassing compute delivery timing. These implementation results do not establish LIVE financial processing or an unrestricted production-readiness claim.
-
-What this qualification leaves open:
-- A teardown job that exhausts its retries is not re-run: the lease waits for an operator to verify the host and force-release it.
-- Where two live lanes share a machine, they run in sequence, each pausing the other's listings. That relies on a precondition no permanent requirement states: a refresh or reopen under the same identity keeps a listing's pause. Its limits are untested:
-  - successor listings are created unpaused;
-  - no test closes a paused listing by reconciliation and reopens it;
-  - bare metal has no test of a paused listing refusing an opening.
-- Live API-credit purchase/top-up qualification remains separate; consumer wire compatibility does not establish an external API-credit delivery. Current producer vectors and their signature/framing checks are now available in the payment kit; this gap is closed.
 
 ---
 
