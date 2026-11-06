@@ -419,6 +419,8 @@ and each input stays independent of the lease it is checked against:
 
 | State | Read by | Alkahest set | Buyer purchases |
 |---|---|---|---|
+| `fulfillment_id` | `09a`, converged to `active` | `08b`, from the settlement's dispatch | the purchase stages, from the deal's fulfillment as the buyer's run and the seller's status report it |
+| `_create_job_completed` | `09a` | the mock gate's `08b2`, or a real lane's job watch | the same: the purchase stages arm `07a` before the buy and drain through `08b2` in a mock lane, and a real lane watches its create job |
 | `expected_host_id` | `09c`, compared with the lease's host | `08a`, from its evaluate-settle preview | the purchase stages, from the driver's declared host: the one host the scenario registered enabled for its resource, or the target's host on a real lane |
 | `teardown_fulfillment_id` | `11b`, advanced to `torn_down` | the ending: expiry's `10b`, from the lease | the expiry ending's `10b` (VM); the buyer-teardown stage, from the deal's fulfillment as delivery status reports it (bare metal) |
 | `_teardown_job_completed` | `11b` | the mock gate's `11a2`, or a real lane's job watch | the same: the buyer-teardown ending arms `09c2` and drains through `11a2` in a mock lane, and a real lane watches its job |
