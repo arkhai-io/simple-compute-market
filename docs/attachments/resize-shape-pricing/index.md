@@ -112,14 +112,62 @@ persisted Agreement and the buyer codec; transcript scalars remain 10,000 bps.
 No existing truncation assertion was changed. Shape-priced quotes round once in
 `quote_from_multiplier`; `compute_rate_total` still serves legacy amount semantics.
 
+## Slice C: agreed order and capacity claim
+
+The accepted plan now records `service_terms["vm.v1"].order` with the whole
+agreed quantitative/GPU shape. The publication stays unchanged. Both escrow
+and hosted-payment delivery use the snapshot; a legacy plan without one derives
+an order from its accepted provision terms. Acceptance holds use the same order
+builder. No reservation resize is invoked.
+
+After the setup above, open the changed surface with:
+
+```sh
+(cd domains/vms/storefront && uv run --frozen --no-sync pytest tests/integration/test_vm_multiplier.py -q)
+```
+
+This prepares temporary checkout-owned SQLite and an in-memory real site ledger,
+mounts the actual site router, signs site responses, and drives the real
+`SiteCapacityClient` over ASGI. No deployment, secret, chain, registry or resident
+server is needed. It is library/wire integration, **not deployed e2e evidence**.
+
+The smaller-shape cases start from one H200 + four vCPUs, negotiate a whole
+revision to two vCPUs, accept at 10,000 bps, reconstruct SQLite, and observe:
+
+| Case | Accepted order and fulfillment claim | Site reservation |
+|---|---|---|
+| `hold_ttl_seconds=900`, retaining one GPU | one GPU + two vCPUs | acceptance hold and committed lease both match |
+| `hold_ttl_seconds=0`, omitting the GPU family | two vCPUs, no GPU | fresh settlement reservation and committed lease both match |
+
+The listing still advertises four vCPUs after acceptance. The existing provider
+sizing suite confirms that committed reservation dimensions override request and
+pool defaults, and an omitted GPU count provisions no GPU. The fulfillment planner
+and `encode_compute_lease` need no change.
+
+Validation: 122 focused storefront tests and the packet's original encounter pass;
+52 existing VM provider-plan tests pass. `make check-packaging`, all twelve
+`make check-change` checks (including strict OpenSpec validation), and
+`make check-architecture-change` pass. The first new regression attempt supplied
+a double where composition requires a `CapacityRuntime`; composing the real
+runtime over the signed site client fixed setup. An earlier implementation tried
+to normalize durable `VmMessage` metadata as a provision payload; extracting only
+its already-decoded shape fixed that mismatch. Neither failure remains.
+
+Deployed e2e remains unrun: this checkout has no `docker` executable, and the
+available Podman compose invocation selects an unconfigured mise provider shim.
+No stack was started or specs run against a down service. PR #349's registry
+carrier/seller-proof dependency is still open; no deployed registry proof check
+is claimed. Promotion/archive remain after review.
+
 ## Boundaries
 
-This is slice B, not deployment-ready shape negotiation. Shape-priced scalar
+Slices B and C are not yet deployment-qualified shape negotiation. Shape-priced scalar
 threads carry basis points; flat listings retain their absolute/truncating contract.
 The repeated no-revision sub-floor counter in the encounter reaches the existing
 bisection stale exit, so later refusal observations use a fresh thread. Accepting
 the floor instead converges, as the focused persistence regression demonstrates.
-Accepted artifact/claim propagation remains 2c. No typing suite, deployed pipeline, browser
-journey, registry seller-proof verification, promotion, archival, or PR is claimed.
+Accepted artifact/claim propagation is covered by slice C above. No typing suite,
+deployed pipeline, browser journey, registry seller-proof verification, promotion,
+archival, or PR is claimed.
 The top-level `rate_structure` carrier is the documented PR #349 contract on
 `registry-as-published`; registry storage/proof is not reimplemented here.

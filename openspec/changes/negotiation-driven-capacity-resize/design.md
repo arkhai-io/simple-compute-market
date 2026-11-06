@@ -303,13 +303,21 @@ and repository architecture at the final slice's post-review closeout.
 
 ### The agreed shape reaches the claim through the accepted artifacts
 
-`build_vm_accepted_artifacts` writes the settlement order from the listing
-record. It writes the agreed shape into the order's `listing_resource`
-quantities instead, so `compute_capacity_claim_from_order` — unchanged — builds
-the claim from what was agreed, and fulfillment follows the committed
-reservation with no further work. `_place_capacity_hold` takes its claim from
-the same agreed order, so a deployment with a non-zero `hold_ttl_seconds` holds
-the agreed shape.
+The VM acceptance composition writes the agreed order into the settlement
+plan's `service_terms["vm.v1"].order` after the selected mechanism materializes
+its artifacts (`build_vm_accepted_artifacts` on Alkahest). One shared builder
+replaces the listing resource's whole quantitative/GPU shape with the accepted
+shape; omitted families do not inherit the advertised quantities. Capacity
+identity and sale terms remain unchanged, and the published listing is not
+mutated. `compute_capacity_claim_from_order` remains unchanged.
+
+Escrow and hosted-payment settlement read that snapshot for delivery facts.
+Legacy plans without an order derive one from the accepted provision terms.
+The fulfillment planner reads those facts; the provider already sizes from the
+committed reservation. `encode_compute_lease` encodes the supplied order's GPU
+terms and needs no new sizing authority. `_place_capacity_hold` derives its
+claim through the same agreed-order builder, so a deployment with a non-zero
+`hold_ttl_seconds` holds the agreed shape. No reservation is resized here.
 
 ### `resize_reservation` is not wired here
 

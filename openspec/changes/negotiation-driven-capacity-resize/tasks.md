@@ -339,21 +339,44 @@ Slice B plan (2026-11-06):
 
 ### 2c. The agreed shape reaches the claim
 
-- [ ] 2.12 Write the agreed shape into the settlement order's `listing_resource`
+Slice C plan (2026-11-06):
+
+- Centralize a non-mutating agreed-order snapshot in
+  `services/vm_job_spec_service.py`; replace the whole quantitative/GPU shape,
+  preserving the listing's capacity identity and sale terms. Omitted families
+  must not inherit advertised quantities.
+- Persist that snapshot in every accepted settlement plan's `vm.v1` service
+  terms via `negotiation_runtime.py`. The current mechanism-stage composition
+  separates `build_vm_accepted_artifacts` from provision-term decoding, so the
+  shared VM acceptance composition attaches the order after mechanism artifacts
+  are built. Holds derive their claim through the same snapshot builder.
+- Make `settlement_composition.py` and `payment_settlement.py` use the accepted
+  order for delivery facts; legacy plans lacking it derive the order from the
+  accepted provision terms, never from advertised quantities alone.
+- Add the specified smaller-shape regression to `tests/integration/test_vm_multiplier.py`:
+  real SQLite negotiation, signed site API and real ledger, hold and fresh-reserve
+  paths, whole revisions dropping GPUs, durable plan and committed dimensions.
+  Run existing planner, hold, settlement/payment, and provider sizing suites.
+- Record a deployed smaller-shape run separately from in-process evidence;
+  confirm hygiene/import placement and packaging. Permanent destinations remain
+  the design-promotion record. The eleven-part closeout below applies after review;
+  promotion and archive do not precede that review.
+
+- [x] 2.12 Write the agreed shape into the settlement order's `listing_resource`
       quantities in `build_vm_accepted_artifacts`, so
       `compute_capacity_claim_from_order` reserves what was agreed. Confirm
       `vm_fulfillment_planner` and `encode_compute_lease` need no change.
-- [ ] 2.13 Rewrite `_place_capacity_hold`'s claim to come from the acceptance's
+- [x] 2.13 Rewrite `_place_capacity_hold`'s claim to come from the acceptance's
       agreed order rather than `listing_record`, so a non-zero `hold_ttl_seconds`
       deployment holds the agreed shape. No resize is placed here; record that
       `negotiation-time-capacity-hold` owns `resize_reservation`'s first call.
-- [ ] 2.14 Focused tests: a negotiation agreeing a shape smaller than the listing's
+- [x] 2.14 Focused tests: a negotiation agreeing a shape smaller than the listing's
       reserves the smaller shape; the committed reservation's dimensions match the
       agreed shape; the fulfillment request derives from the reservation.
 - [ ] 2.15 One e2e run with a shape agreed below the listing's, asserting the VM
       built has the agreed shape. Treat this as the deployment boundary: in-flight
       negotiations carry a multiplier after it.
-- [ ] 2.16 **Comment hygiene and import placement, before the pre-closeout review.** Run
+- [x] 2.16 **Comment hygiene and import placement, before the pre-closeout review.** Run
       `make check-comment-hygiene` and read the comments this change added for any that
       narrate the review or migration that introduced them; move each import the change
       added to module level unless a verified circular import or a recorded lazy-load
