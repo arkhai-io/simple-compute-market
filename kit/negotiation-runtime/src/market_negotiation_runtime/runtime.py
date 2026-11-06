@@ -716,7 +716,12 @@ class NegotiationRuntime:
         return thread
 
     async def _resume_thread(
-        self, repository: Any, thread: Mapping[str, Any], negotiation_id: str
+        self,
+        repository: Any,
+        thread: Mapping[str, Any],
+        negotiation_id: str,
+        *,
+        validate: bool = True,
     ) -> _ResumedThread:
         """Resolve a recorded thread's binding and the values every round reads."""
 
@@ -729,13 +734,14 @@ class NegotiationRuntime:
         self._require_listing_binding(resolved, listing_id)
         hooks = resolved.hooks
         decoded_terms = hooks.decode_terms(thread.get("provision_terms"))
-        await hooks.validate_continuation(
-            repository,
-            resolved.listing,
-            resolved.listing_record,
-            decoded_terms,
-            thread,
-        )
+        if validate:
+            await hooks.validate_continuation(
+                repository,
+                resolved.listing,
+                resolved.listing_record,
+                decoded_terms,
+                thread,
+            )
         pinned_proposal = _stored_mapping(thread.get("buyer_escrow_proposal"))
         messages = await repository.load_negotiation_thread(
             negotiation_id=negotiation_id
@@ -801,7 +807,11 @@ class NegotiationRuntime:
                 f"unsupported negotiation actor role {actor_role!r}"
             )
 
-        resumed = await self._resume_thread(repository, thread, negotiation_id)
+        # Leaving a thread makes no pricing commitment, even when its terms
+        # fail the seller's commercial continuation validation.
+        resumed = await self._resume_thread(
+            repository, thread, negotiation_id, validate=buyer_action != "exit"
+        )
         listing_id = resumed.listing_id
         resolved = resumed.resolved
         hooks = resolved.hooks

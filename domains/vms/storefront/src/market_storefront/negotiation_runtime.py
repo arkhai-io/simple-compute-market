@@ -81,6 +81,16 @@ AcceptedObligationDispatch = Mapping[
 ]
 
 
+def _rate_structure_digest(listing: Mapping[str, Any]) -> str | None:
+    structure = listing.get("rate_structure")
+    if structure is None:
+        return None
+    encoded = json.dumps(
+        structure, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _negotiation_settings() -> Any:
     return settings.negotiation
 
@@ -1000,12 +1010,23 @@ def build_vm_negotiation_runtime(
         return bool(await repository.is_listing_paused(listing_id=listing_id))
 
     async def validate_continuation(
-        _repository: Any,
+        repository: Any,
         listing: Any,
         listing_record: Mapping[str, Any],
         terms: NegotiationTerms,
-        _thread: Mapping[str, Any],
+        thread: Mapping[str, Any],
     ) -> None:
+        pin = await repository.load_domain_artifact(
+            negotiation_id=thread["negotiation_id"],
+            artifact_slot="message:rate-structure-pin",
+            registry=registry,
+        )
+        current_digest = _rate_structure_digest(listing_record)
+        if getattr(pin, "rate_structure_digest", None) != current_digest:
+            raise OfferUnfulfillableError(
+                "rate_structure_changed_reopen",
+                listing_id=str(listing_record["listing_id"]),
+            )
         _validate_vm_opening(listing, listing_record, terms)
 
     async def persist_opening(
@@ -1024,6 +1045,15 @@ def build_vm_negotiation_runtime(
         require_binding_identity(
             opening.binding,
             site_id=copied.site_id,
+        )
+        await repository.save_domain_artifact(
+            negotiation_id=opening.negotiation_id,
+            artifact_slot="message:rate-structure-pin",
+            value={
+                "duration_seconds": opening.terms.requested_duration_seconds or 3600,
+                "rate_structure_digest": _rate_structure_digest(opening.listing_record),
+            },
+            registry=registry,
         )
 
     def storefront_is_paused() -> bool:

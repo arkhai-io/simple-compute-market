@@ -53,6 +53,7 @@ class VmMessage(BaseModel):
     start_utc: str | None = None
     compute_resource: dict[str, Any] | None = None
     settlement_selection: SettlementSelection | None = None
+    rate_structure_digest: str | None = None
 
     @model_validator(mode="before")
     @classmethod

@@ -6,6 +6,7 @@ from datetime import datetime
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from arkhai_vms import price_vm_shape, vm_family_rate
 from core_storefront.aggregation import fill_first
 from core_storefront.domain_registry import (
     StorefrontListingBinding,
@@ -328,6 +329,69 @@ async def _continue(
         actor_role=("buyer" if actor_principal == buyer_principal else "admin"),
         seller_principal=seller_principal,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["counter", "accept", "exit"])
+async def test_rate_structure_repricing_refuses_even_with_unchanged_listing_total(db, action):
+    before = {"gpu": "60", "cpu": "10"}
+    after = {"gpu": "80", "cpu": "5"}
+    advertised = {"gpu": {"count": 1, "model": "H200"}, "cpu": {"count": 4}}
+    revised = {"gpu": {"count": 1, "model": "H200"}, "cpu": {"count": 2}}
+
+    def price(shape, rates):
+        return price_vm_shape(
+            shape, {family: vm_family_rate(rate, "hour") for family, rate in rates.items()}
+        ).amount
+
+    def structure(rates):
+        return {
+            family: [{"asset": _TOKEN, "rate": rate, "per": "hour"}]
+            for family, rate in rates.items()
+        }
+
+    assert price(advertised, before) == price(advertised, after) == "100"
+    assert price(revised, before) == "80"
+    assert price(revised, after) == "90"
+    await db.update_listing(listing_id="L-hook", rate_structure=structure(before))
+    hook = AsyncMock(return_value=SellerRoundResult(
+        our_amount=10_000,
+        strategy_label="maximize",
+        direction="maximize",
+        chain_label="custom",
+        decision=NegotiationDecision(action="counter", proposal=_selected_proposal(10_000)),
+    ))
+    opened = await _start(
+        sqlite_client=db, our_listing_id="L-hook",
+        buyer_principal=_BUYER, seller_principal=_SELLER,
+        proposal=_selected_proposal(9_000),
+        provision_terms=ProvisionTerms(kind="compute.v1", version=1, payload={
+            "duration_seconds": 3600, "ssh_public_key": "ssh-ed25519 AAAA",
+        }),
+        our_base_url="http://seller.test", their_agent_url="http://buyer.test",
+        seller_round_hook=hook,
+    )
+    await db.update_listing(listing_id="L-hook", rate_structure=structure(after))
+    hook.reset_mock()
+    if action == "exit":
+        response = await _continue(
+            sqlite_client=db, neg_id=opened["negotiation_id"],
+            buyer_action=action, buyer_proposal=None, buyer_reason=None,
+            buyer_principal=_BUYER, actor_principal=_BUYER, seller_round_hook=hook,
+        )
+        assert response["action"] == "exit"
+        hook.assert_not_awaited()
+        return
+    with pytest.raises(OfferUnfulfillableError, match="rate_structure_changed_reopen"):
+        await _continue(
+            sqlite_client=db, neg_id=opened["negotiation_id"],
+            buyer_action=action, buyer_proposal=_selected_proposal(10_000),
+            buyer_reason=None, buyer_principal=_BUYER, actor_principal=_BUYER,
+            seller_round_hook=hook,
+        )
+    hook.assert_not_awaited()
+    thread = await db.load_negotiation_thread_row(negotiation_id=opened["negotiation_id"])
+    assert thread["terminal_state"] is None
 
 
 def test_normalize_vm_message_terms_uses_domain_runtime() -> None:

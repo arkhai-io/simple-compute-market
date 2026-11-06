@@ -107,6 +107,11 @@ None.
 
 ## Dependencies and Related Changes
 
+- Depends on `store-registry-listings-as-published` for the top-level
+  `rate_structure` and the retained seller-signed publication proof (D-a–D-d).
+  A changed structure refuses continuation or acceptance, requiring a new opening
+  rather than silently repricing the negotiation (D-e).
+
 - Depends on `capacity-shape-pricing` for the rate structure, the recorded
   structure that prices a revised shape, its evaluation, and the selected-option
   reference amount the multiplier reinterprets.

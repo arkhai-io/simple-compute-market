@@ -91,7 +91,7 @@ capacity-shape-envelope (archived), negotiation-capacity-feasibility-probe ─�
 capacity-shape-envelope (archived) ──► publish-shape-bounds ◄── store-registry-listings-as-published (archived, Registry productionization)
 settle-capacity-claim-vocabulary (independent; was structured-capacity-requirements)
 negotiation-driven-capacity-resize §2 ──► negotiation-time-capacity-hold (Goal 5) for resize_reservation's first call
-store-registry-listings-as-published (archived, Registry productionization) ··► decision input to negotiation-driven-capacity-resize §2 task 2.1a (not a dependency)
+store-registry-listings-as-published (archived, Registry productionization) ──► negotiation-driven-capacity-resize §2 (seller-signed listing-level rate_structure; D-a–D-d)
 seed-default-pool-at-runtime (archived, Goal 1) ──► gpu-optional-compute-shapes (archived)
 ```
 
