@@ -85,7 +85,8 @@ its implementations in when composed, as each already implements the foundation'
   the caller's transaction: load the reservation and fulfillment identities, the
   step and `activated_at_utc`; record the reservation, the dispatch (before
   `begin_fulfillment`), the fulfillment and the activation, each written once.
-- `ComputeDeliveryDomain`, what only the domain knows: its reserve claim, its exact
+- `ComputeDeliveryDomain`, what only the domain knows: its reserve claim, its
+  accepted acceptance-time hold if it has one (VM's; bare metal has none), its exact
   fulfillment request (VM's fulfillment context, bare metal's materialization), its
   ready evidence from a fulfillment result, and its continuation after availability
   (an Alkahest claim, evidence publication), or none.
@@ -96,6 +97,29 @@ outcomes `waiting(wake_at)`, `pending`, `repair_required(reason)`, `available`,
 existing recovery worker (D4) and `kit-owned-listing-and-fulfillment-lifecycles`'
 convergence worker call it; the hook maps the outcome to `fulfilled`, `deferred` or
 `failed`.
+
+`drive` fails closed on what it cannot read, rather than leaving each port
+implementation to decide:
+
+- A deal with no `servicing_delivery` record or no verified settlement evidence is
+  `repair_required(no_accepted_deal)`, and nothing is written.
+- An accepted deal with no progress row is a first drive: the row is created under
+  admission for `reserve`, as both domains create theirs from verified settlement
+  evidence today.
+- An unknown stored step, a malformed or conflicting recorded identity, a port
+  result of the wrong kind, or an empty fulfillment result is `repair_required` with
+  its reason. The recorded resource is kept; nothing is reserved, dispatched,
+  activated or recorded available on it.
+
+`repair_required` carries a reason from a closed set the `compute-delivery`
+specification names: `no_accepted_deal`, `timing_invalid`, `progress_unreadable`,
+`domain_result_invalid`, `activation_unexplained` and `site_unanswered`. Every
+`repair_required` and `ended` outcome carries the deal's recorded reservation and
+fulfillment identities and the reference of the authority evidence it rests on — the
+site's signed answer or the end record — so a repair or an end report can be
+explained without re-reading the deal. Six outcomes suffice: a first drive is the
+start of the normal path, and a missing deal and unreadable progress ask the same of
+a caller, which the reason distinguishes.
 
 Each progress table gains one nullable column, `activated_at_utc`: the instant the
 site returned when it activated the lease. The site writes its value once and never
@@ -133,9 +157,19 @@ Each storefront's migration list gains, in the release that ships the code needi
 it: VM — add `vm_delivery_records.activated_at_utc`; rename stored
 `fulfillment_phase='activate'` to `'ready'`; clear `tenant_credentials`, the core
 `credentials` rows written for VM listings, and the access material in recorded
-replay bodies of the declared credential routes (D5). Bare metal — add
+replay bodies (D5). Bare metal — add
 `bare_metal_fulfillment_lifecycle.activated_at_utc`, as its migration 0013 added
-columns to the same table. The live credential read ships in the same release as
+columns to the same table, and clear the access material in recorded replay bodies.
+
+Core's replay table records no route, so a recorded body's route cannot be known.
+Each storefront's migration therefore clears access material by its shape, over every
+recorded body in core's `auth_replay_reservations`: VM removes the `tenant_credentials`
+member, and bare metal removes `host`, `port` and `username` from a body whose
+`method` is `ssh`, the shape of its access response. Those fields appear in no other
+route's body. A stripped body is still a recorded body, so its row stays completed and
+its exact retry still resolves to the recorded operation. A storefront migration
+editing rows of a core table is the same shape as clearing core's `credentials` rows
+above. The live credential read ships in the same release as
 the clearing, so no running deal is left unreadable.
 
 In-flight deals continue on their existing rows. A deal already `available` before
@@ -224,9 +258,15 @@ availability record today. Stopping VM's storage is a VM-only edit. The replay
 exclusion is a minimal edit in each compute storefront's middleware, driven by the
 declaration as data, so that `kit-owned-storefront-auth-and-persistence`, which owns
 collapsing the three storefronts' middleware into one set, reads the same
-declaration and redoes nothing here. Core does not change.
+declaration and redoes nothing here. Core does not change: the middleware knows the
+route's operation both when it records an outcome and when it resolves an exact
+retry, so the declaration needs no route column in the replay table, and a body with
+its access material stripped is non-null, so the row records a completed outcome as
+before. Records written before the upgrade are cleared by shape (D2).
 
-Rejected: leaving replay to `redesign-authenticated-requests`, which leaves the
+Rejected: a route column and a body-free completed state in core's replay table,
+which costs a core schema and API edit and still identifies no record written before
+it; leaving replay to `redesign-authenticated-requests`, which leaves the
 password replayable and at rest in the replay table until it lands; keeping stored
 credentials behind a guard, which keeps three copies of the secret at rest and the
 domains divergent; a core retry policy now, which designs ahead of the change that
@@ -245,9 +285,29 @@ nothing written. The key is optional and lives in `deal_ref`, so older callers a
 unaffected and no wire version changes.
 
 The placement names the purpose: VM's acceptance-time hold passes
-`<negotiation_id>:hold` and settlement or recovery passes `<negotiation_id>:settlement`.
-A known-lapsed hold is therefore replaced by a different placement, while a lost
-settlement acknowledgement replays its own. Delivery validates the returned
+`<negotiation_id>:hold`, and a reservation placed at settlement or recovery passes
+`<negotiation_id>:settlement`. A known-lapsed hold is therefore replaced by a different
+placement, while a lost settlement acknowledgement replays its own.
+
+A live hold is adopted, never duplicated. When the domain supplies an accepted hold,
+delivery commits it under the deal before anything else, as VM's settlement does
+today:
+
+| The site's answer to committing the hold | What delivery does |
+|---|---|
+| Commit succeeds | The hold is the deal's reservation, recorded through the progress port |
+| No answer, or an unsigned one | Retry the commit; never a fresh reserve |
+| Refused, and the hold is verified lapsed | Reserve under `:settlement` |
+| Refused while the hold was live | D11's seller failure |
+| The `:settlement` reserve is refused | D11's seller failure |
+
+A hold is verified lapsed when the replay under `:hold` returns it expired or
+released, or, for a hold placed before the upgrade and so carrying no key, when its
+recorded expiry has passed. Today's fallback to a fresh reserve on any commit error
+is removed: a commit whose answer was lost may have succeeded, and a second
+reservation beside it is the orphan this decision exists to prevent.
+
+Delivery validates the returned
 reservation against its request; an expired or released result is repair-required or
 the end hand-off (D11), never a fresh hold. Both domains recover through this key;
 bare metal keeps `escrow_uid` and drops its full-list scan of the site's reservations.
@@ -256,7 +316,10 @@ This is the reserve-replay slice `capacity-reservation-lifecycle-hardening` desi
 (`openspec/changes/capacity-reservation-lifecycle-hardening/design.md`), folded in
 here; that change keeps expiry indexing and retention.
 
-Rejected: waiting for that change, which no one has started; a storefront lookup
+Rejected: a site operation converting a live hold into a settlement placement in one
+step, which adds a site operation and wire surface for what the existing commit and
+the `:hold` replay already establish; waiting for that change, which no one has
+started; a storefront lookup
 before reserving again, which reads every reservation at the site, cannot refuse a
 changed request and leaves a race with a dying process's request; deferring, which
 would keep VM's orphaned reservations on a recovery path this change rewires.
@@ -336,7 +399,9 @@ half files `delivery_end(cause=payee)` through the Agreement's dispute adapter, 
 authority-backed cause is never-delivered evidence, not buyer fault.
 
 Any site refusal of the commit after a reservation was made — including a
-replacement placement that finds no capacity — is a seller failure before dispatch:
+replacement placement that finds no capacity, but not the refused commit of a hold
+verified lapsed, which D6 replaces under `:settlement` — is a seller failure before
+dispatch:
 `record_end` with the seller-failure classification and the `delivery_end` filing at
 the Agreement start, and the reservation released through end service's no-dispatch
 path, an unknown release acknowledgement retried under the same key and never

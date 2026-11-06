@@ -19,6 +19,8 @@ The VM and bare-metal storefronts MUST deliver through the compute-family librar
 
 The library MUST expose `drive(negotiation_id)`, returning one of `waiting(wake_at)`, `pending`, `repair_required(reason)`, `available`, `converged` or `ended`. Each call MUST reconcile the deal's recorded state before acting and MUST be safe to repeat. A fulfillment hook MUST map `available` and `converged` to fulfilled, `waiting`, `pending` and `repair_required` to deferred, and `ended` to failed only once the end hand-off is durable.
 
+`drive` MUST fail closed on state it cannot read. A deal with no servicing delivery record or no verified settlement evidence MUST be `repair_required(no_accepted_deal)` with nothing written. An accepted deal with no progress row is a first drive, whose row MUST be created under admission for `reserve`. An unknown stored step, a malformed or conflicting recorded identity, a port result of the wrong kind or an empty fulfillment result MUST be `repair_required` and MUST NOT lead to a reserve, dispatch, activation or availability on the deal. The reason MUST be one of `no_accepted_deal`, `timing_invalid`, `progress_unreadable`, `domain_result_invalid`, `activation_unexplained` or `site_unanswered`. Every `repair_required` and `ended` outcome MUST carry the deal's recorded reservation and fulfillment identities and the reference of the authority evidence it rests on.
+
 #### Scenario: A domain worker resumes a deal
 
 - **WHEN** a storefront's recovery worker calls `drive` for a deal interrupted after dispatch
@@ -27,7 +29,22 @@ The library MUST expose `drive(negotiation_id)`, returning one of `waiting(wake_
 #### Scenario: Repair-required stays visible
 
 - **WHEN** a deal's accepted timing is missing or its site activation answer is unexplained
-- **THEN** `drive` returns `repair_required` with the reason and the deal keeps its recorded resource
+- **THEN** `drive` returns `repair_required` with the reason, the recorded identities and the authority evidence it rests on, and the deal keeps its recorded resource
+
+#### Scenario: A deal that was never accepted is driven
+
+- **WHEN** `drive` is called for a negotiation with no servicing delivery record
+- **THEN** it returns `repair_required(no_accepted_deal)` and nothing is reserved or written
+
+#### Scenario: A progress row holds an unknown step
+
+- **WHEN** a deal's progress row records a step the library does not know
+- **THEN** `drive` returns `repair_required(progress_unreadable)` with the recorded identities, and no reserve or fulfillment is begun
+
+#### Scenario: A fulfillment result is empty
+
+- **WHEN** the domain port returns an empty result for the recorded fulfillment
+- **THEN** `drive` returns `repair_required(domain_result_invalid)`, the deal is not recorded available, and no replacement fulfillment is begun
 
 ### Requirement: Delivery commits the Agreement window
 
@@ -134,9 +151,23 @@ A lost acknowledgement at any step MUST be recovered without a second resource: 
 - **WHEN** the replayed reservation comes back released
 - **THEN** the deal is repair-required or goes to the end hand-off, and no fresh reservation is placed
 
+### Requirement: A live acceptance hold is adopted
+
+When the domain supplies an accepted acceptance-time hold, delivery MUST commit that hold under the deal before placing any other reservation. A commit with no answer or an unsigned answer MUST be retried and MUST NOT lead to a fresh reserve. Only a refused commit of a hold verified lapsed — its replay under `<negotiation_id>:hold` returns it expired or released, or, for a hold carrying no placement key, its recorded expiry has passed — MAY be replaced by a reserve under `<negotiation_id>:settlement`. A refused commit of a live hold MUST be handled as a commit refused after reservation.
+
+#### Scenario: A live hold is committed
+
+- **WHEN** a VM deal settles while its acceptance hold is live
+- **THEN** delivery commits that hold for the Agreement window and records it as the deal's reservation, and no second reservation is placed
+
+#### Scenario: A hold commit's answer is lost
+
+- **WHEN** the site commits the hold but the answer never reaches the storefront
+- **THEN** the next drive retries the same commit and adopts the hold, and no reserve under `:settlement` is made
+
 ### Requirement: An undelivered deal is handed to the end operation with classified evidence
 
-Before availability, a refusal, provisioning failure, elapsed window or lapsed activation MUST enter end service's `record_end`. Delivery MUST supply the actor, cause and source, the Agreement start, the fixed failure-observation time, the resource identities and verified evidence, and MUST NOT classify by event kind, compute amounts or send a payment stop or reverse. Any site refusal of the commit after a reservation was made MUST be recorded as seller failure before dispatch, with its filing at the Agreement start and the reservation released through end service's no-dispatch path under one key.
+Before availability, a refusal, provisioning failure, elapsed window or lapsed activation MUST enter end service's `record_end`. Delivery MUST supply the actor, cause and source, the Agreement start, the fixed failure-observation time, the resource identities and verified evidence, and MUST NOT classify by event kind, compute amounts or send a payment stop or reverse. Any site refusal of the commit after a reservation was made, other than the refused commit of a hold verified lapsed, MUST be recorded as seller failure before dispatch, with its filing at the Agreement start and the reservation released through end service's no-dispatch path under one key.
 
 #### Scenario: A lawful end wins before availability
 
@@ -156,7 +187,7 @@ Before availability, a refusal, provisioning failure, elapsed window or lapsed a
 
 ### Requirement: Credentials are disclosed only through a live, admitted read
 
-A buyer's credential read MUST require `available` or `converged`, the Agreement start reached and end service's admission; it MUST fetch from provisioning's fulfillment result outside any transaction and recheck the revision and due end before the response is signed, discarding the fetched material if an end won. It MUST NOT read a payment snapshot. A credential-capable route's exact retry MUST run this read again.
+A buyer's credential read MUST require `available` or `converged`, the Agreement start reached and end service's admission; it MUST fetch from provisioning's fulfillment result outside any transaction and recheck the revision and due end before the response is signed, discarding the fetched material if an end won. It MUST NOT read a payment snapshot. A credential-capable route's exact retry MUST run this read again. Because a recorded replay body names no route, each compute storefront MUST clear access material from every recorded body by its shape when it upgrades, leaving each record's status and completion in place.
 
 #### Scenario: An end wins during the fetch
 
@@ -167,6 +198,11 @@ A buyer's credential read MUST require `available` or `converged`, the Agreement
 
 - **WHEN** a buyer repeats an exact authenticated credential request after a locally admitted end
 - **THEN** the read runs again and is refused, and no earlier response body is returned
+
+#### Scenario: A bare-metal storefront upgrades with recorded access responses
+
+- **WHEN** a bare-metal storefront starts on a database whose replay records hold a body with `method` `ssh` and its host, port and username
+- **THEN** that body loses its host, port and username, and the record keeps its status and remains a completed outcome
 
 #### Scenario: A response is already in flight
 

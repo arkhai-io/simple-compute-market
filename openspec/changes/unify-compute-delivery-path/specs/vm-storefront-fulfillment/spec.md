@@ -104,3 +104,8 @@ The connection details a VM storefront records for a deal MUST be the delivery's
 
 - **WHEN** an exact retry of an earlier `settle-status` request arrives after a locally admitted end
 - **THEN** it is refused, and no stored credential or recorded body is returned
+
+#### Scenario: A storefront upgrades with recorded credential responses
+
+- **WHEN** a VM storefront starts on a database whose replay records hold bodies carrying `tenant_credentials`
+- **THEN** every recorded body loses its `tenant_credentials` member, whatever route wrote it, and each record keeps its status and remains a completed outcome
