@@ -40,7 +40,7 @@ disable = []
 [openspec]
 # Engine, `scripts/change-workflow openspec` and the default pre-commit's strict
 # validation: how the OpenSpec CLI is run.
-command = "bunx @fission-ai/openspec@1.14.0"
+command = "scripts/openspec"
 
 [load]
 # Engine, `config load <step>`: the documents every step's skill reads as it
