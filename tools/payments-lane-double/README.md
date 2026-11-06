@@ -135,9 +135,12 @@ there. Outside the image, `python -m payments_lane_double` reads
   every release, so a namespace runs one double. Its `tls.existingSecret` names a
   `kubernetes.io/tls` Secret to serve instead of the committed leaf. The release's
   storefronts reach it through the values a deployment supplies: their payments
-  configuration, a CA bundle ConfigMap holding the lane CA, and a payments key
-  Secret holding the seller's token, which `make -C helm topology-secrets` creates
-  from these fixtures with `scripts/lane_env.py seller-token`. The release's
+  configuration; a CA bundle ConfigMap holding the lane CA, which each chart
+  mounts and names as the configuration's `ca_bundle_path`; and the seller's
+  token as `[Settlement.arkhai_payments].api_key` in each storefront's runtime
+  Secret's overlay. `make -C helm topology-secrets` creates the ConfigMap and
+  writes the token, from these fixtures with `scripts/lane_env.py seller-token`.
+  The release's
   values repeat the receipt identity, fee, service URL, the accounts and the
   pinned authority, and `helm/tests/test_release_topology.py` holds them to the
   fixtures. It serves no payment scenario there; each storefront's `helm test`

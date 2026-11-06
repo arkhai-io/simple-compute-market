@@ -2,10 +2,9 @@
 One storefront process. The pod mounts storefront.json (the ConfigMap) and, when
 `secret` names one, storefront.secrets.toml (an existing Secret) at
 /etc/arkhai/, and points XDG_CONFIG_HOME at /etc so the storefront's loader
-finds them. Its environment carries XDG_CONFIG_HOME and the signing credential,
-and where the values name them the CA bundle's path as SSL_CERT_FILE and the
-payments key under the variable the configuration names: every setting reaches
-the storefront through those files. The environment and the configuration
+finds them. Its environment carries XDG_CONFIG_HOME and the signing credential
+only: every setting, the payments key and the CA bundle's path among them,
+reaches the storefront through those files. The environment and the configuration
 mounts are the payments check test pod's too
 (templates/tests/payments-check-test.yaml). Service
 links are off because Kubernetes would otherwise inject variables for every

@@ -177,8 +177,9 @@ the umbrella's `global.provisioning` and `global.provisioningIdentity`, or "".
 The storefront's CA bundle, as JSON for fromJson: `configMapName` or
 `secretName`, whichever names the source ("" for the other), and its `key`. Both
 empty is no bundle. The chart names no CA of its own: a deployment supplies the
-ConfigMap or Secret, and the bundle becomes the storefront's whole trust through
-SSL_CERT_FILE, so it must hold every CA the storefront's HTTPS peers chain to.
+ConfigMap or Secret, and the storefront's payments client trusts its payments
+service under it, through the `[Settlement.arkhai_payments].ca_bundle_path` the
+chart derives from the mount (`bare-metal-storefront.deriveCaBundlePath`).
 Naming both sources is refused, as is a source without its key.
 */}}
 {{- define "bare-metal-storefront.caBundle" -}}
@@ -196,7 +197,7 @@ Naming both sources is refused, as is a source without its key.
 {{- end -}}
 
 {{/*
-Where the CA bundle mounts, the file SSL_CERT_FILE names.
+Where the CA bundle mounts, the file the derived ca_bundle_path names.
 */}}
 {{- define "bare-metal-storefront.caBundleDirectory" -}}/etc/arkhai/ca{{- end -}}
 {{- define "bare-metal-storefront.caBundleFile" -}}/etc/arkhai/ca/ca-bundle.pem{{- end -}}
@@ -214,33 +215,40 @@ when the configuration has none.
 {{- end -}}
 
 {{/*
-The storefront's payments key, as JSON for fromJson: `secretName` ("" when
-unset), its `key`, and `variable`, the environment variable the storefront reads
-the key from, which is the one its configuration's
-`[Settlement.arkhai_payments].api_key_env` names. The chart learns the name from
-the configuration rather than stating one, so the two cannot disagree; a key
-Secret named while the configuration names no variable is refused, since the
-storefront would never read it. So is a variable the chart already sets, which
-would render twice, and one in the loader's STOREFRONT_ override layer, which
-would hand the key to the loader as a setting.
+`bare-metal-storefront.deriveCaBundlePath`: where the values name a CA bundle,
+set `[Settlement.arkhai_payments].ca_bundle_path` in `cfg`, in place, to the file
+the chart mounts it as; where `cfg` states another path, refuse it naming both.
+The path is derived from the mount's presence rather than configured beside it,
+so the two cannot disagree: a path naming no mounted file would leave the
+payments client with no bundle to load. Only the payments client reads the
+bundle, so one named while `cfg` has no `[Settlement.arkhai_payments]` section is
+refused rather than given a section of its own. Keys are matched in any
+spelling, as the loader matches them. With no bundle named, `cfg` is left as it
+is.
+Argument: dict with `root` (the chart root) and `cfg` (the configuration, nulls
+removed).
 */}}
-{{- define "bare-metal-storefront.paymentsKey" -}}
-{{- $paymentsKey := .Values.paymentsKey | default dict -}}
-{{- $secret := $paymentsKey.secretName | default "" -}}
-{{- $key := "" -}}
-{{- $variable := "" -}}
-{{- if $secret -}}
-  {{- $key = required "bare-metal storefront paymentsKey.key is required with its secretName" $paymentsKey.key -}}
-  {{- $payments := include "bare-metal-storefront.paymentsSection" . | fromJson -}}
-  {{- $variable = include "bare-metal-storefront.foldedValue" (dict "doc" $payments "name" "api_key_env") -}}
-  {{- if not $variable -}}
-    {{- fail (printf "bare-metal storefront names paymentsKey.secretName %q, but its config states no Settlement.arkhai_payments.api_key_env to expose it under" $secret) -}}
+{{- define "bare-metal-storefront.deriveCaBundlePath" -}}
+{{- $bundle := include "bare-metal-storefront.caBundle" .root | fromJson -}}
+{{- if or $bundle.configMapName $bundle.secretName -}}
+  {{- $file := include "bare-metal-storefront.caBundleFile" .root -}}
+  {{- $settlement := index .cfg (include "bare-metal-storefront.foldedKey" (dict "doc" .cfg "name" "settlement")) | default dict -}}
+  {{- $sectionKey := include "bare-metal-storefront.foldedKey" (dict "doc" $settlement "name" "arkhai_payments") -}}
+  {{- $payments := dict -}}
+  {{- if $sectionKey -}}{{- $payments = index $settlement $sectionKey | default dict -}}{{- end -}}
+  {{- if not $payments -}}
+    {{- fail "bare-metal storefront names caBundle, which only its payments client reads, but its config states no Settlement.arkhai_payments section" -}}
   {{- end -}}
-  {{- if or (has (upper $variable) (list "XDG_CONFIG_HOME" "ARKHAI_IDENTITY_CREDENTIAL" "SSL_CERT_FILE")) (hasPrefix "STOREFRONT_" (upper $variable)) -}}
-    {{- fail (printf "bare-metal storefront config Settlement.arkhai_payments.api_key_env %q names a variable the chart sets or the loader reads as settings; name another" $variable) -}}
+  {{- $pathKey := include "bare-metal-storefront.foldedKey" (dict "doc" $payments "name" "ca_bundle_path") -}}
+  {{- if $pathKey -}}
+    {{- $stated := toString (index $payments $pathKey) -}}
+    {{- if ne $stated $file -}}
+      {{- fail (printf "bare-metal storefront config Settlement.%s.%s %q differs from %q, where the chart mounts its caBundle; state that path or none" $sectionKey $pathKey $stated $file) -}}
+    {{- end -}}
+  {{- else -}}
+    {{- $_ := set $payments "ca_bundle_path" $file -}}
   {{- end -}}
 {{- end -}}
-{{- toJson (dict "secretName" $secret "key" $key "variable" $variable) -}}
 {{- end -}}
 
 {{/*
@@ -250,16 +258,12 @@ check test pod, so the two cannot drift: the container's environment, the
 configuration, overlay, address-book, and CA-bundle mounts, and their volumes.
 Each takes the chart root and renders list items at column zero.
 
-`bare-metal-storefront.env`: XDG_CONFIG_HOME, the signing credential, and, where
-the values state them, SSL_CERT_FILE naming the CA bundle and the payments key
-under the variable the configuration names. None is a storefront setting:
-XDG_CONFIG_HOME selects the configuration loaded, the credential and the payments
-key must be kept from the loader, and SSL_CERT_FILE is the process's TLS trust,
-which the storefront's configuration does not state.
+`bare-metal-storefront.env`: XDG_CONFIG_HOME and the signing credential, neither
+a storefront setting: XDG_CONFIG_HOME selects the configuration loaded, and the
+credential must be kept from the loader. Every other value, the payments key and
+the CA bundle's path among them, is in a mounted file.
 */}}
 {{- define "bare-metal-storefront.env" -}}
-{{- $bundle := include "bare-metal-storefront.caBundle" . | fromJson -}}
-{{- $paymentsKey := include "bare-metal-storefront.paymentsKey" . | fromJson -}}
 - name: XDG_CONFIG_HOME
   value: /etc
 - name: ARKHAI_IDENTITY_CREDENTIAL
@@ -267,17 +271,6 @@ which the storefront's configuration does not state.
     secretKeyRef:
       name: {{ required "bare-metal storefront identity.credentialSecret.name is required" .Values.identity.credentialSecret.name | quote }}
       key: {{ required "bare-metal storefront identity.credentialSecret.key is required" .Values.identity.credentialSecret.key | quote }}
-{{- if or $bundle.configMapName $bundle.secretName }}
-- name: SSL_CERT_FILE
-  value: {{ include "bare-metal-storefront.caBundleFile" . | quote }}
-{{- end }}
-{{- if $paymentsKey.secretName }}
-- name: {{ $paymentsKey.variable | quote }}
-  valueFrom:
-    secretKeyRef:
-      name: {{ $paymentsKey.secretName | quote }}
-      key: {{ $paymentsKey.key | quote }}
-{{- end }}
 {{- end -}}
 
 {{/*
@@ -489,6 +482,7 @@ site bound to it trusted through a service peer naming its principal. */ -}}
     {{- end -}}
   {{- end -}}
 {{- end -}}
+{{- include "bare-metal-storefront.deriveCaBundlePath" (dict "root" . "cfg" $cfg) -}}
 {{- /* JSON, not YAML: Helm's YAML encoder leaves a string bare unless it
 would read back as a 64-bit number, so a 160-bit EVM address is emitted
 unquoted and a YAML loader reads it as an integer. JSON quotes every string. */ -}}

@@ -19,11 +19,10 @@ LOCAL_VALUES := local-values.yaml
 # Secrets the release's workloads read with the default values, which the chart
 # never creates: they are provisioned out of band (for local development,
 # `make topology-secrets` creates them). Enabling api-credits-registry adds
-# arkhai-api-credits-registry-identity. seller-payments-key is the storefronts'
-# payments key under $(LOCAL_VALUES), which configures them for payments.
+# arkhai-api-credits-registry-identity. Under $(LOCAL_VALUES), which configures
+# Bob for payments, arkhai-bob-runtime's overlay also holds his payments key.
 LOCAL_SECRETS := arkhai-registry-identity arkhai-bob-identity arkhai-bob-runtime \
-	arkhai-provisioning-identity arkhai-provisioning-runtime arkhai-provisioning-ssh \
-	seller-payments-key
+	arkhai-provisioning-identity arkhai-provisioning-runtime arkhai-provisioning-ssh
 # ConfigMaps the release's workloads read under $(LOCAL_VALUES) and no chart
 # creates, provisioned out of band the same way: the storefronts' CA bundle,
 # which holds the payments lane double's committed lane CA.

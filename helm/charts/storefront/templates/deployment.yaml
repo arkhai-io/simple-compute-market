@@ -4,10 +4,10 @@ two files at /etc/arkhai/ — storefront.json (ConfigMap, non-sensitive) and
 storefront.secrets.toml (Secret, sensitive) — and points XDG_CONFIG_HOME at /etc
 so dynaconf picks them up via its layered discovery and merge. An agent naming
 an Alkahest address-book ConfigMap mounts it read-only too, and one naming a CA
-bundle mounts it read-only and names it as SSL_CERT_FILE. No env-var-based
-config: the environment carries only the configuration directory, the signing
-credential, the CA bundle's path, and the payments key under the variable the
-agent's configuration names.
+bundle mounts it read-only, its rendered configuration's
+[Settlement.arkhai_payments].ca_bundle_path naming the file. No env-var-based
+config: the environment carries only the configuration directory and the signing
+credential; the payments key is a setting in the Secret overlay.
 
 checksum/config + checksum/secrets annotations force a rollout when
 either source object changes, independently — flipping a log level

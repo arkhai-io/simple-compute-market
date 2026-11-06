@@ -215,9 +215,10 @@ alkahestAddressBook does not state it.
 The agent's CA bundle, as JSON for fromJson: `configMapName` or `secretName`,
 whichever names the source ("" for the other), and its `key`. Both empty is no
 bundle. The chart names no CA of its own: a deployment supplies the ConfigMap or
-Secret, and the bundle becomes the storefront's whole trust through
-SSL_CERT_FILE, so it must hold every CA the storefront's HTTPS peers chain to.
-Naming both sources is refused, as is a source without its key.
+Secret, and the storefront's payments client trusts its payments service under
+it, through the `[Settlement.arkhai_payments].ca_bundle_path` the chart derives
+from the mount (`storefront.deriveCaBundlePath`). Naming both sources is
+refused, as is a source without its key.
 Argument: one agent, with its name.
 */}}
 {{- define "storefront.agentCaBundle" -}}
@@ -235,7 +236,7 @@ Argument: one agent, with its name.
 {{- end }}
 
 {{/*
-Where the CA bundle mounts, the file SSL_CERT_FILE names.
+Where the CA bundle mounts, the file the derived ca_bundle_path names.
 */}}
 {{- define "storefront.caBundleDirectory" -}}/etc/arkhai/ca{{- end }}
 {{- define "storefront.caBundleFile" -}}/etc/arkhai/ca/ca-bundle.pem{{- end }}
@@ -251,36 +252,6 @@ Argument: one agent.
 {{- end }}
 
 {{/*
-The agent's payments key, as JSON for fromJson: `secretName` ("" when unset), its
-`key`, and `variable`, the environment variable the storefront reads the key from,
-which is the one its configuration's `[Settlement.arkhai_payments].api_key_env`
-names. The chart learns the name from the configuration rather than stating one,
-so the two cannot disagree; a key Secret named while the configuration names no
-variable is refused, since the storefront would never read it. So is a variable
-the chart already sets, which would render twice, and one in the loader's
-STOREFRONT_ override layer, which would hand the key to the loader as a setting.
-Argument: one agent, with its name.
-*/}}
-{{- define "storefront.agentPaymentsKey" -}}
-{{- $paymentsKey := .paymentsKey | default dict -}}
-{{- $secret := $paymentsKey.secretName | default "" -}}
-{{- $key := "" -}}
-{{- $variable := "" -}}
-{{- if $secret -}}
-  {{- $key = required (printf "storefront agent %s paymentsKey.key is required with its secretName" .name) $paymentsKey.key -}}
-  {{- $payments := include "storefront.agentPaymentsSection" . | fromJson -}}
-  {{- $variable = include "storefront.foldedValue" (dict "doc" $payments "name" "api_key_env") -}}
-  {{- if not $variable -}}
-    {{- fail (printf "storefront agent %s names paymentsKey.secretName %q, but its config states no Settlement.arkhai_payments.api_key_env to expose it under" .name $secret) -}}
-  {{- end -}}
-  {{- if or (has (upper $variable) (list "XDG_CONFIG_HOME" "ARKHAI_IDENTITY_CREDENTIAL" "SSL_CERT_FILE")) (hasPrefix "STOREFRONT_" (upper $variable)) -}}
-    {{- fail (printf "storefront agent %s config Settlement.arkhai_payments.api_key_env %q names a variable the chart sets or the loader reads as settings; name another" .name $variable) -}}
-  {{- end -}}
-{{- end -}}
-{{- toJson (dict "secretName" $secret "key" $key "variable" $variable) -}}
-{{- end }}
-
-{{/*
 What decides how an agent's storefront process loads its configuration and
 reaches its payments service, rendered once for its Deployment and once for its
 payments check test pod, so the two cannot drift: the container's environment,
@@ -288,17 +259,13 @@ the configuration, overlay, address-book, and CA-bundle mounts, and their
 volumes. Each takes a dict with `root` (the chart root) and `agent` (one agent,
 with its name and a `secret` map), and renders list items at column zero.
 
-`storefront.agentEnv`: XDG_CONFIG_HOME, the signing credential, and, where the
-agent states them, SSL_CERT_FILE naming its CA bundle and its payments key under
-the variable its configuration names. None is a storefront setting:
-XDG_CONFIG_HOME selects the configuration loaded, the credential and the payments
-key must be kept from the loader, and SSL_CERT_FILE is the process's TLS trust,
-which the storefront's configuration does not state.
+`storefront.agentEnv`: XDG_CONFIG_HOME and the signing credential, neither a
+storefront setting: XDG_CONFIG_HOME selects the configuration loaded, and the
+credential must be kept from the loader. Every other value, the payments key and
+the CA bundle's path among them, is in a mounted file.
 */}}
 {{- define "storefront.agentEnv" -}}
 {{- $agent := .agent -}}
-{{- $bundle := include "storefront.agentCaBundle" $agent | fromJson -}}
-{{- $paymentsKey := include "storefront.agentPaymentsKey" $agent | fromJson -}}
 - name: XDG_CONFIG_HOME
   value: /etc
 - name: ARKHAI_IDENTITY_CREDENTIAL
@@ -306,17 +273,6 @@ which the storefront's configuration does not state.
     secretKeyRef:
       name: {{ required "storefront agent identity.credentialSecret.name is required" $agent.identity.credentialSecret.name | quote }}
       key: {{ required "storefront agent identity.credentialSecret.key is required" $agent.identity.credentialSecret.key | quote }}
-{{- if or $bundle.configMapName $bundle.secretName }}
-- name: SSL_CERT_FILE
-  value: {{ include "storefront.caBundleFile" . | quote }}
-{{- end }}
-{{- if $paymentsKey.secretName }}
-- name: {{ $paymentsKey.variable | quote }}
-  valueFrom:
-    secretKeyRef:
-      name: {{ $paymentsKey.secretName | quote }}
-      key: {{ $paymentsKey.key | quote }}
-{{- end }}
 {{- end }}
 
 {{/*
@@ -616,11 +572,48 @@ which must include the release's provisioning principal. */ -}}
     {{- end -}}
   {{- end -}}
 {{- end -}}
+{{- include "storefront.deriveCaBundlePath" (dict "agent" $agent "cfg" $cfg) -}}
 {{- /* JSON, not YAML: Helm's YAML encoder leaves a string bare unless it
 would read back as a 64-bit number, so a 160-bit EVM address such as
 0x3c44...93bc is emitted unquoted and a YAML loader reads it as an integer.
 JSON quotes every string. */ -}}
 {{- toPrettyJson $cfg -}}
+{{- end }}
+
+{{/*
+`storefront.deriveCaBundlePath`: where the agent names a CA bundle, set
+`[Settlement.arkhai_payments].ca_bundle_path` in `cfg`, in place, to the file the
+chart mounts it as; where `cfg` states another path, refuse it naming both. The
+path is derived from the mount's presence rather than configured beside it, so
+the two cannot disagree: a path naming no mounted file would leave the payments
+client with no bundle to load. Only the payments client reads the bundle, so one
+named while `cfg` has no `[Settlement.arkhai_payments]` section is refused rather
+than given a section of its own. Keys are matched in any spelling, as the loader
+matches them. With no bundle named, `cfg` is left as it is.
+Argument: dict with `agent` (one agent, with its name) and `cfg` (its
+configuration, nulls removed).
+*/}}
+{{- define "storefront.deriveCaBundlePath" -}}
+{{- $bundle := include "storefront.agentCaBundle" .agent | fromJson -}}
+{{- if or $bundle.configMapName $bundle.secretName -}}
+  {{- $file := include "storefront.caBundleFile" . -}}
+  {{- $settlement := index .cfg (include "storefront.foldedKey" (dict "doc" .cfg "name" "settlement")) | default dict -}}
+  {{- $sectionKey := include "storefront.foldedKey" (dict "doc" $settlement "name" "arkhai_payments") -}}
+  {{- $payments := dict -}}
+  {{- if $sectionKey -}}{{- $payments = index $settlement $sectionKey | default dict -}}{{- end -}}
+  {{- if not $payments -}}
+    {{- fail (printf "storefront agent %s names caBundle, which only its payments client reads, but its config states no Settlement.arkhai_payments section" .agent.name) -}}
+  {{- end -}}
+  {{- $pathKey := include "storefront.foldedKey" (dict "doc" $payments "name" "ca_bundle_path") -}}
+  {{- if $pathKey -}}
+    {{- $stated := toString (index $payments $pathKey) -}}
+    {{- if ne $stated $file -}}
+      {{- fail (printf "storefront agent %s config Settlement.%s.%s %q differs from %q, where the chart mounts its caBundle; state that path or none" .agent.name $sectionKey $pathKey $stated $file) -}}
+    {{- end -}}
+  {{- else -}}
+    {{- $_ := set $payments "ca_bundle_path" $file -}}
+  {{- end -}}
+{{- end -}}
 {{- end }}
 
 {{/*

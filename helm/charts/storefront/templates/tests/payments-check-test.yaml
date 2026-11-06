@@ -2,9 +2,10 @@
 Helm test pod, one per agent whose configuration has a
 [Settlement.arkhai_payments] section and whose tests.paymentsAccount names the
 account to read: `market-storefront check-payments`, an authenticated read of
-that account's balance from the agent's own image, configuration, credential,
-CA bundle, and payments key. Those come from the helpers the agent's Deployment
-renders them with, so a mount or variable the storefront lacks fails here too.
+that account's balance from the agent's own image, configuration, Secret overlay
+holding the payments key, credential, and CA bundle. Those come from the helpers
+the agent's Deployment renders them with, so a mount or variable the storefront
+lacks fails here too.
 
 It runs the command directly, not through the image's entrypoint, and leaves out
 what the command does not use: the data volume, whose ReadWriteOnce claim a pod

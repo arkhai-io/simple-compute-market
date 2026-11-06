@@ -107,18 +107,33 @@ fi
 
 echo "Development Secrets in namespace $NAMESPACE (never for a public network):"
 
+# Both releases' storefronts' payments key: the payments lane double's seller
+# token, which each storefront's secrets overlay states as
+# [Settlement.arkhai_payments].api_key. lane_env.py reads it from the double's
+# committed account directory, so the overlays cannot drift from it. It is
+# written into a TOML basic string, so a token needing escapes is refused.
+payments_token="$(python3 -I "$PAYMENTS_LANE_ENV" seller-token | tr -d '\n')"
+if [[ ! "$payments_token" =~ ^[A-Za-z0-9._~+/=-]+$ ]]; then
+    echo "ERROR: $PAYMENTS_LANE_ENV seller-token printed no token a TOML string carries unescaped" >&2
+    exit 1
+fi
+
 # Release 1: the registry, Bob, and the provisioning service.
 credential arkhai-registry-identity "$DEV_ACCOUNT_REGISTRY"
 credential arkhai-bob-identity "$DEV_ACCOUNT_BOB"
 credential arkhai-provisioning-identity "$DEV_ACCOUNT_PROVISIONING"
 
-# Bob's secrets overlay: the wallet key Alkahest settles with. The same Secret's
-# config-seller-secret.yml is the storefront smoke test's seller profile, which
-# signs as Bob and as his administrator (both Bob's account). Values are quoted:
-# TOML requires it, and YAML reads an unquoted 0x-prefixed value as an integer.
+# Bob's secrets overlay: the wallet key Alkahest settles with and the payments
+# key. The same Secret's config-seller-secret.yml is the storefront smoke test's
+# seller profile, which signs as Bob and as his administrator (both Bob's
+# account). Values are quoted: TOML requires it, and YAML reads an unquoted
+# 0x-prefixed value as an integer.
 cat >"$work/bob.storefront.secrets.toml" <<EOF
 [Wallet]
 private_key = "$(key "$DEV_ACCOUNT_BOB")"
+
+[Settlement.arkhai_payments]
+api_key = "$payments_token"
 EOF
 cat >"$work/config-seller-secret.yml" <<EOF
 seller:
@@ -128,7 +143,7 @@ EOF
 apply arkhai-bob-runtime \
     "storefront.secrets.toml=$work/bob.storefront.secrets.toml" \
     "config-seller-secret.yml=$work/config-seller-secret.yml"
-echo "  arkhai-bob-runtime: [Wallet].private_key and the smoke seller profile, Anvil account $DEV_ACCOUNT_BOB"
+echo "  arkhai-bob-runtime: [Wallet].private_key, Anvil account $DEV_ACCOUNT_BOB, [Settlement.arkhai_payments].api_key, the double's seller token, and the smoke seller profile"
 
 # Provisioning's secrets profile: mock provisioning needs nothing from it, so it
 # is an empty mapping. The chart mounts the profile whatever it holds, and the
@@ -160,29 +175,24 @@ apply arkhai-e2e-credentials "config-e2e-secret.yml=$work/config-e2e-secret.yml"
 echo "  arkhai-e2e-credentials: buyer $DEV_ACCOUNT_BUYER, seller $DEV_ACCOUNT_BOB, provisioning admin $DEV_ACCOUNT_PROVISIONING_ADMIN and service $DEV_ACCOUNT_PROVISIONING"
 credential arkhai-buyer-profile-credential "$DEV_ACCOUNT_BUYER"
 
-# Both releases' storefronts: their payments key, the payments lane double's
-# seller token, and their CA bundle, the double's committed lane CA, which
-# local-values.yaml's double serves under. lane_env.py reads the token from the
-# double's committed account directory, so the Secret cannot drift from it.
-python3 -I "$PAYMENTS_LANE_ENV" seller-token | tr -d '\n' >"$work/seller-payments-key"
-if [ ! -s "$work/seller-payments-key" ]; then
-    echo "ERROR: $PAYMENTS_LANE_ENV seller-token printed no token" >&2
-    exit 1
-fi
-apply seller-payments-key "api-key=$work/seller-payments-key"
+# Both releases' storefronts' CA bundle, the double's committed lane CA, which
+# local-values.yaml's double serves under.
 kubectl create configmap payments-ca-bundle --namespace "$NAMESPACE" \
     "--from-file=ca-bundle.pem=$PAYMENTS_LANE_CA_FILE" \
     --dry-run=client --output yaml | kubectl apply --namespace "$NAMESPACE" --filename -
-echo "  seller-payments-key, ConfigMap payments-ca-bundle: the payments lane double's seller token and lane CA ($PAYMENTS_LANE_CA_FILE)"
+echo "  ConfigMap payments-ca-bundle: the payments lane double's lane CA ($PAYMENTS_LANE_CA_FILE)"
 
 # Release 2: the bare-metal storefront and its own provisioning service.
 credential arkhai-bare-metal-storefront-identity "$DEV_ACCOUNT_BARE_METAL_STOREFRONT"
 cat >"$work/bare-metal.storefront.secrets.toml" <<EOF
 [Wallet]
 private_key = "$(key "$DEV_ACCOUNT_BARE_METAL_STOREFRONT")"
+
+[Settlement.arkhai_payments]
+api_key = "$payments_token"
 EOF
 apply arkhai-bare-metal-storefront-runtime "storefront.secrets.toml=$work/bare-metal.storefront.secrets.toml"
-echo "  arkhai-bare-metal-storefront-runtime: [Wallet].private_key, Anvil account $DEV_ACCOUNT_BARE_METAL_STOREFRONT"
+echo "  arkhai-bare-metal-storefront-runtime: [Wallet].private_key, Anvil account $DEV_ACCOUNT_BARE_METAL_STOREFRONT, and [Settlement.arkhai_payments].api_key, the double's seller token"
 credential arkhai-bare-metal-provisioning-identity "$DEV_ACCOUNT_BARE_METAL_PROVISIONING"
 
 # Release 1's deal test's buyer profile store, a volume no chart creates. The

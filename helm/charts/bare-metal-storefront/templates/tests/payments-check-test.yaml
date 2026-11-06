@@ -2,9 +2,10 @@
 Helm test pod, rendered when the configuration has a [Settlement.arkhai_payments]
 section and tests.paymentsAccount names the account to read:
 `bare-metal-storefront check-payments`, an authenticated read of that account's
-balance from the storefront's own image, configuration, credential, CA bundle,
-and payments key. Those come from the helpers the Deployment renders them with,
-so a mount or variable the storefront lacks fails here too.
+balance from the storefront's own image, configuration, Secret overlay holding
+the payments key, credential, and CA bundle. Those come from the helpers the
+Deployment renders them with, so a mount or variable the storefront lacks fails
+here too.
 
 It leaves out what the command does not use: the data volume, whose
 ReadWriteOnce claim a pod on another node could not attach while the storefront

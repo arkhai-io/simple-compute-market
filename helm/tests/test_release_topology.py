@@ -558,6 +558,22 @@ def test_topology_secrets_creates_every_secret_both_releases_read() -> None:
     assert created == referenced == checked, (created, referenced, checked)
 
 
+def _container_env_names(document: str) -> list[str]:
+    """The variable names of the first container ``env`` block in ``document``:
+    the list items nested under its ``env:`` line."""
+    lines = document.splitlines()
+    start = next(index for index, line in enumerate(lines) if line.strip() == "env:")
+    indent = len(lines[start]) - len(lines[start].lstrip())
+    names = []
+    for line in lines[start + 1 :]:
+        if line.strip() and len(line) - len(line.lstrip()) <= indent:
+            break
+        match = re.fullmatch(r"\s*- name: \"?([^\"]+)\"?", line)
+        if match:
+            names.append(match.group(1))
+    return names
+
+
 def _configmap_references(manifest: str) -> set[str]:
     return set(re.findall(r'configMap:\n\s+name: "?([^"\s]+)"?', manifest))
 
@@ -574,8 +590,10 @@ def _rendered_names(manifest: str, kind: str) -> set[str]:
 def test_topology_secrets_creates_every_configmap_the_releases_read_and_no_chart_renders() -> None:
     """The one such ConfigMap is the storefronts' CA bundle, created from the
     payments lane double's committed lane CA under the key both storefronts
-    mount; `check-local-secrets` checks for it. The payments key Secret beside
-    it holds its token under the key both storefronts read."""
+    mount; `check-local-secrets` checks for it. Neither storefront reads a
+    payments key from a Secret key: the key is in the runtime Secret's overlay
+    each mounts (scripts/tests/test_change_build_and_helm_targets.py runs the
+    script and reads the overlays it writes)."""
     release_one, release_two = _release_one(), _release_two()
     referenced = _configmap_references(release_one) | _configmap_references(release_two)
     rendered = _rendered_names(release_one, "ConfigMap") | _rendered_names(release_two, "ConfigMap")
@@ -586,10 +604,17 @@ def test_topology_secrets_creates_every_configmap_the_releases_read_and_no_chart
     assert '"--from-file=ca-bundle.pem=$PAYMENTS_LANE_CA_FILE"' in script
     assert (UMBRELLA / _make_variable("PAYMENTS_LANE_CA_FILE")).resolve() == DOUBLE / "tls" / "lane-ca.pem"
     assert (UMBRELLA / _make_variable("PAYMENTS_LANE_ENV")).resolve() == DOUBLE / "scripts" / "lane_env.py"
-    assert 'apply seller-payments-key "api-key=' in script
-    for manifest in (release_one, release_two):
-        assert re.search(r'configMap:\n\s+name: "payments-ca-bundle"\n\s+items:\n\s+- key: "ca-bundle.pem"', manifest)
-        assert re.search(r'secretKeyRef:\n\s+name: "seller-payments-key"\n\s+key: "api-key"', manifest)
+    for manifest, chart, runtime in (
+        (release_one, "storefront", "arkhai-bob-runtime"),
+        (release_two, "bare-metal-storefront", "arkhai-bare-metal-storefront-runtime"),
+    ):
+        for path in ("templates/deployment.yaml", "templates/tests/payments-check-test.yaml"):
+            document = _source(manifest, f"charts/{chart}/{path}")
+            assert re.search(r'configMap:\n\s+name: "payments-ca-bundle"\n\s+items:\n\s+- key: "ca-bundle.pem"', document)
+            assert re.search(rf'secret:\n\s+secretName: "{runtime}"\n\s+items:\n\s+- key: "?storefront\.secrets\.toml"?', document)
+            # The configuration directory and the signing credential, and no
+            # payments variable.
+            assert _container_env_names(document) == ["XDG_CONFIG_HOME", "ARKHAI_IDENTITY_CREDENTIAL"], (chart, path)
 
 
 # --- the payments rehearsal -------------------------------------------------
@@ -661,6 +686,10 @@ def test_the_local_payments_values_are_the_payments_doubles_committed_fixtures()
         assert payments["service_identity"] == accounts["receipt_identity"]
         assert payments["fee_bps"] == accounts["fee_bps"]
         assert payments["livemode"] is False
+        # Trust through the chart's derived path to the mounted lane CA; the key
+        # is in the runtime overlay, never named or stated in the public document.
+        assert payments["ca_bundle_path"] == "/etc/arkhai/ca/ca-bundle.pem"
+        assert not {"api_key", "api_key_env", "development_auth"} & set(payments)
         assert "arkhai.payments.v1" in document["Settlement"]["priority"]
         assert f'- "{seller}"' in {line.strip() for line in _source(manifest, check).splitlines()}
         assert "development_auth" not in manifest

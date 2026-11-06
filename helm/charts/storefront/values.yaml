@@ -79,22 +79,20 @@ image:
 #         configMapName: ""
 #         key: alkahest_addresses.json
 #         mountPath: /etc/arkhai/alkahest
-#       # A CA bundle from an existing ConfigMap key, or alternatively an
-#       # existing Secret key, never both, mounted read-only and named by
-#       # SSL_CERT_FILE. It replaces the image's trust store, so it holds every
-#       # CA the storefront's HTTPS peers chain to, such as its payments
-#       # service's. The chart names no CA of its own; empty names mount none.
+#       # The CA bundle the storefront's payments client trusts its payments
+#       # service under, from an existing ConfigMap key, or alternatively an
+#       # existing Secret key, never both, mounted read-only. The chart sets
+#       # [Settlement.arkhai_payments].ca_bundle_path in the rendered
+#       # configuration to the mounted file, and refuses a config stating
+#       # another path or no such section. Only the payments client reads it;
+#       # the process's own trust store is left as it is. The chart names no CA
+#       # of its own; empty names mount none and set nothing. The payments key
+#       # itself is [Settlement.arkhai_payments].api_key in the runtime secret
+#       # overlay.
 #       caBundle:
 #         configMapName: payments-ca-bundle
 #         secretName: ""
 #         key: ca-bundle.pem
-#       # An existing Secret key holding the storefront's payments API key,
-#       # exposed under the variable config's
-#       # [Settlement.arkhai_payments].api_key_env names, which config must
-#       # state; an empty secretName exposes none.
-#       paymentsKey:
-#         secretName: seller-payments-key
-#         key: api-key
 #       # The account the agent's payments check test pod reads the balance of,
 #       # with `market-storefront check-payments --account`: the seller's payee
 #       # account. The pod renders only when config has

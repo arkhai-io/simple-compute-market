@@ -284,7 +284,7 @@ expect_override_failure \
     --set 'storefront.agents.bob.config.Settlement.stripe.enabled=true'
 expect_override_failure \
     "$CHART_DIR/fixtures/payments-ed25519-values.yaml" \
-    "an unknown payments field fails the generated storefront schema" \
+    "a payments key in pass-through config fails the generated storefront schema" \
     --set-string 'storefront.agents.bob.config.Settlement.arkhai_payments.api_key=forbidden'
 expect_override_failure \
     "$CHART_DIR/fixtures/eip191-evm-values.yaml" \

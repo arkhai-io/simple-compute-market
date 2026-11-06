@@ -2633,12 +2633,23 @@ tests/test_render.py}` and the same under `helm/charts/bare-metal-storefront/`;
 `helm/scripts/topology-secrets.sh`; `helm/tests/test_release_topology.py`;
 `tools/payments-lane-double/README.md`'s Helm passage.
 
-- [ ] 12.1 The CA option derives `ca_bundle_path` (D3). With the option set, each chart
+- [x] 12.1 The CA option derives `ca_bundle_path` (D3). With the option set, each chart
   mounts the bundle as before and adds `[Settlement.arkhai_payments].ca_bundle_path`,
   naming the mounted file, to the rendered configuration where `config` states none, and
   fails rendering naming both paths where `config` states another; it sets no
   `SSL_CERT_FILE`. Unset, it adds neither mount nor setting.
-- [ ] 12.2 The key in the secret overlay (D19, D11). Remove both charts' `paymentsKey`
+  Done: `storefront.deriveCaBundlePath` and `bare-metal-storefront.deriveCaBundlePath`,
+  called last in each chart's configuration document. Each sets the key in the section
+  as `config` spells it, matched in any spelling, to `/etc/arkhai/ca/ca-bundle.pem`. A
+  stated equal path is kept as written. A stated other path is refused naming both. The
+  mount and volume are as before; `SSL_CERT_FILE` is gone from both environment
+  helpers. Differs from the plan: a bundle named while `config` has no
+  `[Settlement.arkhai_payments]` section, or an empty one, is refused, naming the
+  section, rather than given one. Only the payments client reads the bundle, and a
+  section created for it would put payments configuration into a storefront that never
+  stated any. This mirrors the retired `paymentsKey`'s refusal without `api_key_env`. A
+  section with `enabled: false` is still a section, so the path is derived into it.
+- [x] 12.2 The key in the secret overlay (D19, D11). Remove both charts' `paymentsKey`
   option, its helpers, its `api_key_env` checks and its environment entry, from the
   Deployment and the payments-check pod alike; the values schemas no longer accept it.
   `helm/local-values.yaml` and `helm/bare-metal-release-values.yaml` drop `paymentsKey` and
@@ -2647,10 +2658,27 @@ tests/test_render.py}` and the same under `helm/charts/bare-metal-storefront/`;
   `storefront.secrets.toml` (`arkhai-bob-runtime` and the bare-metal release's) from
   `lane_env.py seller-token`, instead of creating `seller-payments-key`, which leaves
   `LOCAL_SECRETS`. `helm/fixtures/payments-ed25519-values.yaml` follows.
-- [ ] 12.3 The payments-check pod (D12). It mounts the configuration, the secret overlay
+  Done. `storefront.agentPaymentsKey` and `bare-metal-storefront.paymentsKey` are gone.
+  Both environment helpers render only `XDG_CONFIG_HOME` and `ARKHAI_IDENTITY_CREDENTIAL`.
+  Schemas:
+  - The bare-metal chart's top level is closed, so removing `paymentsKey` refuses it.
+  - The storefront chart's agent entry, and the umbrella's copy of it, are open, so each
+    states `"paymentsKey": false`.
+  - `caBundle`'s description names the derived path, in all three.
+  `topology-secrets.sh` reads the token once, refuses one a TOML basic string could not
+  carry unescaped, and writes it under `[Settlement.arkhai_payments]` in both overlays.
+  Updated with the files: the values' and templates' comments, the Makefile's
+  `LOCAL_SECRETS` comment, `bare-metal-release-values.yaml`'s header list of the
+  Secrets, and the double's README Helm passage. `test-render.sh`'s refusal of
+  `api_key` in Bob's `config` was labelled "an unknown payments field"; it now says "a
+  payments key".
+- [x] 12.3 The payments-check pod (D12). It mounts the configuration, the secret overlay
   and the CA bundle, and carries the identity credential and no payments variable, from
   the helpers the Deployment uses.
-- [ ] 12.4 Render cases (D3, D11, D12, D19; the deltas' scenarios), in both charts'
+  Done with no template change but its comment: the pod already renders its environment,
+  mounts and volumes from the Deployment's helpers, so 12.1 and 12.2 changed both
+  together.
+- [x] 12.4 Render cases (D3, D11, D12, D19; the deltas' scenarios), in both charts'
   `tests/test_render.py` and `helm/tests/test_release_topology.py`: the derived
   `ca_bundle_path` from a ConfigMap and from a Secret source; a stated different path
   refused naming both; neither mount nor setting when unset; no `SSL_CERT_FILE` and no
@@ -2659,7 +2687,50 @@ tests/test_render.py}` and the same under `helm/charts/bare-metal-storefront/`;
   configuration directory and the signing credential, with and without the CA option
   (the MODIFIED requirement's scenario); the payments-only case and the check pod mounting
   no data volume, as before; the local topology's Secrets without `seller-payments-key`.
-- [ ] 12.5 **Verification checkpoint.** Chart render: `make -C helm test-render`. Unit:
+  Done. Chart render, pass, in both charts' suites:
+  - `_ca_bundle(document, config)` now asserts the volume, the mount and the derived
+    `ca_bundle_path` in the rendered `storefront.json` together, all present or all
+    absent. It also asserts the container environment is exactly `XDG_CONFIG_HOME` and
+    `ARKHAI_IDENTITY_CREDENTIAL`.
+  - Through it: a ConfigMap and a Secret source; nothing with no bundle, an empty one,
+    or a payments section without one.
+  - A stated equal path kept as spelt (`Arkhai_Payments.CA_BUNDLE_PATH` in the VM case,
+    `CA_BUNDLE_PATH` in bare metal) and another refused naming both.
+  - A bundle without a payments section refused.
+  - `api_key` in `config` and a `paymentsKey` value each refused by the values schema,
+    naming the key.
+  - The payments-only case and the check-pod equality case use the new helper, and
+    assert the Secret overlay is mounted. Their data-volume, probe and selector checks
+    are unchanged.
+  - Bare metal only:
+    `test_the_pod_environment_holds_only_the_configuration_directory_and_the_credential`
+    runs over the example's Deployment, and over the payments-access render's Deployment
+    and check pod, the MODIFIED scenario with and without the option.
+  - VM's local-release case asserts the derived path and no `api_key`, `api_key_env` or
+    `development_auth`. Its removed-Settlement case removes `caBundle` with it, as it
+    removed `paymentsKey`.
+  In `helm/tests/test_release_topology.py`:
+  - The ConfigMap case asserts, for each release's storefront Deployment and check pod,
+    the CA bundle volume, the runtime Secret's `storefront.secrets.toml` volume, and an
+    environment of exactly the two variables, read by a new indentation-based
+    `_container_env_names`.
+  - The Secrets case still holds created == referenced == checked, now without
+    `seller-payments-key`.
+  Beyond the plan's files, release tooling (`scripts/tests/test_change_build_and_helm_targets.py`,
+  which runs `topology-secrets` for real against fake `kubectl` and `cast`):
+  - `_fake_kubectl` gains an optional `secrets` directory, into which each
+    `create secret generic` copies its `--from-file` files.
+  - `test_topology_secrets_writes_the_payments_key_into_each_storefronts_overlay` parses
+    both runtime overlays with `tomllib`: `Settlement` is exactly
+    `{"arkhai_payments": {"api_key": <accounts.toml's seller token>}}`, beside the wallet
+    key, and no other Secret holds the token.
+  Templates and the script broken once while writing the tests:
+  - With the derivation's `set` removed from both charts, the source, payments-only,
+    check-pod and (VM) local-release cases failed.
+  - With the bare-metal overlay's `api_key` removed from the script, the new
+    release-tooling case failed.
+  Each was restored.
+- [x] 12.5 **Verification checkpoint.** Chart render: `make -C helm test-render`. Unit:
   `make test-release-tooling`, `make test-payments-lane-double`. `make test`.
   End-to-end: no pipeline marker exercises the charts; validation's Helm part deploys the
   release and runs every `-payments-check` pod (D12), which must pass with the key from the
@@ -2668,6 +2739,80 @@ tests/test_render.py}` and the same under `helm/charts/bare-metal-storefront/`;
   Owed by validation: `tests.yml`, jobs `test · test-deployment-packaging` — `make -C helm
   test-render` and release tooling pass with the new cases — and
   `test · test-payments-lane-double` — passes.
+  Results:
+  - `make -C helm test-render` passes, with no skip line: the storefront startup-refusal
+    and loader checks over the payments renders ran, both storefront environments
+    existing here.
+  - `make test-release-tooling`: 2227 passed.
+  - `make test-payments-lane-double`: 49 passed.
+  - `make test`: ran to its end with no make error.
+  - `make check-change` passes; `make check-packaging` is all OK.
+  - No dependency or lock changed, and the generated values-schema definitions are
+    untouched.
+  End-to-end confirmed as planned: none. Validation's Helm deploy is the first run of a
+  storefront reading its key from the runtime overlay and its trust from the derived
+  path, in Bob's `-payments-check` pod; the bare-metal one runs under `topology-check`.
+  Owed by validation, confirmed as written; the release-tooling case is in the
+  `test · test-deployment-packaging` job.
+
+  Fresh-context check. It found no template, script, schema, layering or comment-hygiene
+  defect, and nothing outside `openspec/` and `docs/attachments/` still depending on
+  `paymentsKey`, `seller-payments-key`, a storefront chart's `api_key_env` or a chart-set
+  `SSL_CERT_FILE`. Fixed:
+  - The storefront chart's own `"paymentsKey": false` is now tested alone, through
+    `_render_chart`: the umbrella render validates both schemas, so removing either one
+    would have failed nothing.
+  - The VM chart's schema refusals now name the refused value's path (`_names_path`), as
+    the bare-metal suite's `_refused_at` does, rather than any mention of the key.
+  - The empty-section refusal is tested in both charts (`arkhai_payments: {}`).
+  - `test_the_local_payments_values_are_the_payments_doubles_committed_fixtures` asserts,
+    for Bob's and release 2's documents, the derived `ca_bundle_path` and no `api_key`,
+    `api_key_env` or `development_auth`. Before, nothing caught `api_key_env` returning
+    to `bare-metal-release-values.yaml`.
+  - A comment naming the wrong helper for the derivation.
+  - `local-values.yaml` said `check-local-secrets` requires the token. It checks that
+    the runtime Secret exists, not what its overlay holds; the comment now says so, and
+    that a Secret without the token fails the payments check, which reports neither
+    `api_key` nor `api_key_env` configured (read from `access_check.py`).
+  After them, `make -C helm test-render` and `make check-change` pass again. `make
+  test`, `make test-release-tooling` and `make check-packaging` ran before them; the
+  fixes touched only the two charts' render tests, the topology test, one template
+  comment and one values comment.
+  Left for the round's triage, not changed here:
+  - **The refusal of a CA bundle with no payments section** (12.1) is this session's
+    choice. D3 and the delta say the chart derives the path "from the option's
+    presence", without naming the case. The triage should confirm it, and record it in
+    D3 and as a delta scenario, or choose to create the section instead.
+  - **D3's "the local deploy target checks for them before installing"** now holds for
+    the CA ConfigMap and the runtime Secret, not for the token inside the Secret. The
+    alternatives are a content check in `check-local-secrets` (`kubectl get secret … -o
+    jsonpath` and a TOML read in the Makefile) or D3 reworded to match.
+  - **Still unplaced: section 7's handoff plan gap.** The delta requires both storefront
+    values schemas to refuse a secret dispute credential setting in `config`. Neither
+    does: the VM generator types no `[[DisputeCredential]]`, and bare metal's settings
+    type it as `list[dict]`. The fix is one `{"type": "array", "items":
+    model_fragment(DisputeCredential, role=role)}` override per generator
+    (`domains/{vms,bare_metal}/storefront/src/…/values_schema.py`), `make
+    helm-values-schema`, both drift tests, and a render refusal per chart. It is left
+    out of this section because no section 12 task names it, and it changes two domain
+    storefront packages beyond the section's files.
+
+  Handoff to closeout. Destinations this section made false, beyond 13.9's "Kubernetes:
+  ConfigMap and Secret mounting":
+  - `DEPLOYMENT_AND_CONFIG.md`, "Storefront agents: pass-through configuration":
+    - its derived-settings table should gain `Settlement.arkhai_payments.ca_bundle_path`,
+      derived from `caBundle` and refused when stated differently, as `port` is; the
+      sentence "except for the port only where `config` does not state it" needs the
+      same exception;
+    - its account of what `arkhai-bob-runtime`'s overlay carries should name the
+      payments `api_key`;
+    - section 5's handoff already named its pod-environment table.
+  - `TESTING.md`, "Chart Render Tests": the release-tooling case reading the overlays
+    `topology-secrets` writes.
+  - The double's README Helm passage is current (12.2).
+  - The session is large: two sections, two fresh-context checks, and a dozen render
+    suite runs. The next step is the round's validation and implementation review, in
+    fresh sessions.
 
 ## 13. Closeout
 
