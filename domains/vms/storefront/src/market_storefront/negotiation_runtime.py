@@ -29,6 +29,7 @@ from arkhai_vms_listings import (
 from arkhai_vms_listings.models import Listing
 from arkhai_vms_negotiation import storefront_round as vm_storefront_round
 from arkhai_vms_negotiation.policies import _amount_from_proposal
+from arkhai_vms_negotiation.amounts import has_rate_structure, multiplier_floor, quote_from_multiplier
 from arkhai_vms_negotiation.storefront_round import SellerRoundHook
 from arkhai_vms_settlement.proposals import accepted_escrow_artifacts_from_proposal
 from market_alkahest.proposals import (
@@ -133,6 +134,8 @@ def seller_reference_amount(
 ) -> int:
     """The seller's reference amount from the option ``proposal`` selects."""
     try:
+        if has_rate_structure(listing):
+            return multiplier_floor(_negotiation_settings())
         return vm_storefront_round._seller_reference_amount(
             listing,
             duration_seconds,
@@ -252,6 +255,10 @@ def _decision_wire(decision: NegotiationDecision) -> dict[str, Any]:
     proposal = payload.get("proposal")
     if not isinstance(proposal, dict):
         return payload
+    # A revision is the buyer's instruction for this counter, not an instruction
+    # to repeat when accepting the seller's quote of the resulting terms.
+    proposal = {key: value for key, value in proposal.items() if key != "provision_terms"}
+    payload["proposal"] = proposal
     fields = proposal.get("fields")
     if not isinstance(fields, dict) or not isinstance(fields.get("amount"), int):
         return payload
@@ -433,8 +440,11 @@ def _accepted_selection_artifacts(
         )
     except (TypeError, ValueError) as exc:
         raise OfferUnfulfillableError("selected_settlement_option_not_exact") from exc
+    obligation = dict(built.obligation)
     if built.amount is not None:
-        if agreed_amount != built.amount:
+        if has_rate_structure(listing):
+            obligation["amount"] = agreed_amount
+        elif agreed_amount != built.amount:
             raise OfferUnfulfillableError("selected_amount_not_duration_scaled")
     elif agreed_amount:
         raise OfferUnfulfillableError("selection_amount_not_negotiable")
@@ -449,7 +459,7 @@ def _accepted_selection_artifacts(
                     provision_terms=provision_terms,
                 ),
             },
-            obligations=[SettlementObligation.model_validate(built.obligation)],
+            obligations=[SettlementObligation.model_validate(obligation)],
         )
     except (TypeError, ValueError) as exc:
         raise OfferUnfulfillableError("selected_settlement_option_not_exact") from exc
@@ -550,6 +560,7 @@ def _json_compatible(value: Any) -> Any:
 def _with_agreement(
     acceptance: Acceptance,
     artifacts: dict[str, Any],
+    payment_amount: int | None = None,
 ) -> dict[str, Any]:
     settlement_raw = artifacts.pop("_agreement_settlement_option", None)
     settlement = (
@@ -591,7 +602,7 @@ def _with_agreement(
         ).settlement_params
         if artifacts.get("settlement_selection") is not None
         else {},
-        amount=acceptance.agreed_amount,
+        amount=acceptance.agreed_amount if payment_amount is None else payment_amount,
         asset=asset,
         duration_seconds=acceptance.agreement.duration_seconds,
         start_utc=acceptance.agreement.start_utc,
@@ -615,6 +626,19 @@ def _build_response_artifacts(
     # its backing; only capacity effects ask the backing to admit them.
     if not isinstance(acceptance.binding, PublicationBinding):
         raise RuntimeError("VM negotiation has no frozen listing binding")
+    payment_amount = acceptance.agreed_amount
+    if acceptance.uses_scalar_amount and has_rate_structure(acceptance.listing_record):
+        try:
+            if accepted and acceptance.agreed_amount < multiplier_floor(_negotiation_settings()):
+                raise ValueError("multiplier_below_floor")
+            payment_amount = quote_from_multiplier(
+                acceptance.listing_record, acceptance.pinned_proposal,
+                acceptance.agreed_amount, acceptance.agreement.duration_seconds,
+                vm_listing_resource_shape(acceptance.terms.decoded.compute_resource)
+                if getattr(acceptance.terms.decoded, "compute_resource", None) else None,
+            )
+        except ValueError as exc:
+            raise OfferUnfulfillableError(str(exc)) from exc
     if accepted:
         artifacts = _with_agreement(
             acceptance,
@@ -626,14 +650,19 @@ def _build_response_artifacts(
                 domain=domain,
                 proposal=acceptance.pinned_proposal,
                 listing=acceptance.listing_record,
-                agreed_amount=acceptance.agreed_amount,
+                agreed_amount=payment_amount,
                 duration_seconds=acceptance.agreement.duration_seconds,
                 uses_scalar_amount=acceptance.uses_scalar_amount,
                 buyer_principal=acceptance.buyer_principal,
                 seller_principal=acceptance.seller_principal,
                 provision_terms=acceptance.terms.decoded,
             ),
+            payment_amount=payment_amount,
         )
+        if has_rate_structure(acceptance.listing_record):
+            # The policy proposal carries the scalar. A materialized escrow's
+            # monetary proposal must not overwrite it in the terminal response.
+            artifacts.pop("proposal", None)
         agreement = artifacts["agreement"]
         if agreement.settlement is None:
             raise OfferUnfulfillableError("accepted_settlement_unavailable")
@@ -659,7 +688,7 @@ def _build_response_artifacts(
             negotiation_id=acceptance.negotiation_id, listing_id=acceptance.listing_id,
             proposal={"settlement_selection": selection},
             uses_scalar_amount=acceptance.uses_scalar_amount,
-            agreed_amount=acceptance.agreed_amount,
+            agreed_amount=payment_amount,
             duration_seconds=acceptance.agreement.duration_seconds,
             buyer_principal=acceptance.buyer_principal,
             seller_principal=acceptance.seller_principal,
@@ -1039,7 +1068,7 @@ def build_vm_negotiation_runtime(
                 ),
             )
         except ValueError as exc:
-            if str(exc).startswith("shape_price_unavailable:"):
+            if str(exc).startswith(("shape_price_unavailable:", "shape_price_overflow:")):
                 raise OfferUnfulfillableError(str(exc), listing_id=str(request.listing_record["listing_id"])) from exc
             raise
         state = {

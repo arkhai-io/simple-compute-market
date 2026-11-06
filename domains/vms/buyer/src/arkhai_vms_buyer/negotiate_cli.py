@@ -439,6 +439,10 @@ def register(app: typer.Typer) -> None:
         # conditions it advertised; a resumed run carries its first run's record.
         if selected_stage is not None and listing_dict is not None:
             listing_record = selected_stage.listing_record(listing_dict)
+            if listing_dict.get("rate_structure"):
+                listing_record = {**listing_record, **{key: listing_dict[key] for key in (
+                    "listing_id", "listing_resource", "rate_structure", "settlement_options", "accepted_escrows"
+                ) if key in listing_dict}}
         elif resume_state is not None:
             listing_record = resume_point.listing_record
         else:
@@ -566,6 +570,7 @@ def register(app: typer.Typer) -> None:
                 principal=identity.principal,
                 signer=signer,
                 listing_id=listing_id,
+                listing=listing_dict if listing_dict is not None else listing_record,
                 initial_price=initial_price or 0,
                 max_price=max_price,
                 provision_terms=provision_terms,

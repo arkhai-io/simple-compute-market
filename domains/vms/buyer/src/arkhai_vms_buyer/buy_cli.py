@@ -211,6 +211,7 @@ def _run_resume_from(
                 principal=resume_point.buyer_principal,
                 signer=signer,
                 listing_id=resume_point.listing_id,
+                listing=resume_point.listing_record,
                 initial_price=resumed_initial_price,
                 max_price=resumed_max_price,
                 max_rounds=max_rounds,

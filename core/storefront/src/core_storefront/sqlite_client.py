@@ -2457,10 +2457,9 @@ class SQLiteClient:
         run (or be retried) as a separate step by reading these columns,
         without replaying the round-by-round message history.
 
-        ``agreed_price`` is the absolute payment amount in base units of
-        the payment token (the column name is retained from before the
-        per-hour → absolute refactor; semantically it now holds the
-        amount, not a per-hour rate). ``agreed_duration_seconds`` echoes
+        ``agreed_price`` stores the exact domain-negotiated scalar; the
+        accepted Agreement carries the derived monetary amount, when applicable.
+        ``agreed_duration_seconds`` echoes
         the buyer's negotiation-init ask and is used by settlement-time
         arbiter codecs that bind the seller's delivery window.
         """
@@ -4687,8 +4686,8 @@ class SQLiteClient:
                     "terminal_state",
                     "requested_duration_seconds",
                     "requested_start_utc",
-                    # Column stays ``agreed_price``; wire field is
-                    # ``agreed_amount`` (absolute amount in base units).
+                    # The wire exposes the domain-negotiated scalar; monetary
+                    # settlement terms are carried by the accepted Agreement.
                     "agreed_amount",
                     "agreed_duration_seconds",
                     "agreed_at",
@@ -4767,9 +4766,8 @@ class SQLiteClient:
                     "seller_identifier",
                     "requested_duration_seconds",
                     "requested_start_utc",
-                    # Column is named ``agreed_price`` (kept from before the
-                    # per-hour → absolute refactor); the wire field is
-                    # ``agreed_amount`` since it holds an absolute amount.
+                    # The column and wire field carry the exact negotiated
+                    # scalar, whose units belong to the domain.
                     "agreed_amount",
                     "agreed_duration_seconds",
                     "agreed_at",
