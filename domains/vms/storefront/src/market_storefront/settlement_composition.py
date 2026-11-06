@@ -56,6 +56,7 @@ from market_settlement_runtime import (
 )
 
 from market_storefront.deal_lifecycle import VmDealLifecycle
+from market_storefront.services.vm_job_spec_service import settlement_vm_order
 from market_storefront.delivery_lifecycle import request_delivery_end, VmPhysicalEnd
 from market_deal_servicing.end import EndService
 from market_storefront.payment_settlement import VmPaymentsCoordinator
@@ -298,6 +299,7 @@ async def prepare_vm_settlement(
     if not isinstance(raw, bytes):
         raise ValueError("accepted Agreement bytes are unavailable")
     agreement = json.loads(raw)
+    order = settlement_vm_order(thread, dict(order), agreement["provision_terms"])
     stage = resolve_proposal_stage(
         domain.settlement.seller_stages, proposal_raw, agreement=agreement,
     )
