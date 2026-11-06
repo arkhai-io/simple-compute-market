@@ -723,7 +723,13 @@ async def test_negotiation_runtime_continuation_uses_injected_seller_round_hook(
         sqlite_client=db,
         neg_id=opened["negotiation_id"],
         buyer_action="counter",
-        buyer_proposal=_selected_proposal(100),
+        buyer_proposal={
+            **_selected_proposal(100),
+            "provision_terms": {
+                "kind": "compute.v1", "version": 1,
+                "payload": {"gpu": {"model": "H200", "count": 1}},
+            },
+        },
         buyer_reason=None,
         buyer_principal=_BUYER,
         actor_principal=_BUYER,
@@ -731,6 +737,10 @@ async def test_negotiation_runtime_continuation_uses_injected_seller_round_hook(
     )
 
     assert response["action"] == "accept"
+    messages = await db.load_negotiation_thread(negotiation_id=opened["negotiation_id"])
+    assert messages[-1]["provision_terms"]["payload"]["compute_resource"] == {
+        "gpu_model": "H200", "gpu_count": 1,
+    }
     assert response["accepted_escrow_proposal"]["fields"]["amount"] == "100"
     thread = await db.load_negotiation_thread_row(negotiation_id=opened["negotiation_id"])
     assert thread["settlement_data"]["accepted_escrow_proposal"] == response["accepted_escrow_proposal"]

@@ -2041,6 +2041,11 @@ def migrate_listing_closed_by(conn: sqlite3.Connection) -> None:
         )
 
 
+def migrate_negotiation_message_terms(conn: sqlite3.Connection) -> None:
+    """Keep the delivery terms alongside each scalar in the transcript."""
+    _add_column_if_missing(conn, "negotiation_messages", "provision_terms", "TEXT")
+
+
 _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260604_000_listing_resource_timestamps",
@@ -2101,5 +2106,10 @@ _MIGRATIONS: tuple[Migration, ...] = (
         "20261001_001_listing_rate_structure",
         migrate_listing_rate_structure,
         required_tables=("listings",),
+    ),
+    Migration(
+        "20261106_001_negotiation_message_terms",
+        migrate_negotiation_message_terms,
+        required_tables=("negotiation_messages",),
     ),
 )
