@@ -1261,9 +1261,31 @@ implementation.
   change added names this change, a task, or the review that introduced it, and that
   `config.py`, `hooks.py`, and the modules sections 4–5 changed describe the current
   system. A finding returns the change to implementation.
+  - Closeout at `8aa8f375e`, returned: `make check-comment-hygiene` passes, and no
+    comment the change added names a review, triage, or migration (the added
+    comment lines read for "review", "triage", "migration", "no longer", "previous",
+    "interim", "handoff"; each "review" names the review step). `config.py`,
+    `hooks.py`, `running.py`, `cli.py`, `steps.py`, `review.py`, and `wrapper.py`
+    describe the current system. One docstring does not: the package's module
+    list in `scripts/change_workflow/__init__.py`, which `change-workflow`'s
+    `spec.md` Evidence names as where the modules are listed with their roles,
+    omits the two modules the change added, `config` (the repository's workflow
+    configuration, read and checked whole) and `hooks` (running the repository's
+    hooks, validation's parts, and the kept markers), still says `steps` holds each
+    step's "permissions, and models", and does not say `running` keeps a session's
+    invocations through `run` and the guarded push. Fixing it is a code edit, so
+    the change returns to implementation for a fix round of that docstring alone;
+    closeout resumes after it.
 - [ ] 10.2 Import placement: check every import the change added inside a function
   (`make check-local-imports CHANGE_BASE=dev` among the closing checks) for a stated
   reason; one that should move returns the change to implementation.
+  - Closeout at `8aa8f375e`: `make check-local-imports CHANGE_BASE=origin/dev`
+    passes; the change adds no import inside a function (no indented `import` among
+    its added `.py` lines). To be confirmed again after the fix round.
+  - Run out of order before the return, and owed again once the fix round's commit
+    exists: 10.7's `scripts/change-workflow run pre-archive
+    add-workflow-capability-contract` passed at `8aa8f375e` (`make check-packaging`;
+    `make check-architecture-change`: "owns no architecture row").
 - [ ] 10.3 Documentation compliance: check D1–D21 and P1–P4 against
   `openspec/README.md`'s placement rules: subsystem behaviour in the two `spec.md`,
   rationale in their `README.md`, the guide's procedure in
