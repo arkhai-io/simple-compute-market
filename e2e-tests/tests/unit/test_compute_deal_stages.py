@@ -91,8 +91,22 @@ REAL_BM_LANE = Lane(
     "RealBareMetalDealState",
 )
 REAL_LANES = (REAL_LANE, REAL_BM_LANE)
-ALL_LANES = (*LANES, *REAL_LANES)
+#: The buyer purchases through the shipped buyer, which run the stages from
+#: fulfillment onwards after the purchase stages of ``buyer_purchase_stages.py``
+#: (held to their own order by ``test_buyer_purchase_stages.py``).
+PURCHASE_LANES = (
+    Lane(
+        "bare_metal_purchase",
+        ROLES / "scenarios" / "bare_metal" / "test_bare_metal_payment_deal.py",
+        ROLES / "scenarios" / "bare_metal" / "test_bare_metal_payment_deal.py",
+        "BareMetalPurchaseState",
+    ),
+)
+ALL_LANES = (*LANES, *REAL_LANES, *PURCHASE_LANES)
 BARE_METAL_STAGES = classes(tree(ROLES / "scenarios" / "bare_metal" / "publication_stages.py"))
+PURCHASE_TREE = tree(ROLES / "helpers" / "buyer_purchase_stages.py")
+PURCHASE_STAGES = [node for node in classes(PURCHASE_TREE) if is_stage(node)]
+PURCHASE_FIELDS = fields(class_named(PURCHASE_TREE, "PurchaseState"))
 
 #: The real lane's run order: every shared stage, by its name here, with the
 #: lane's own stages, by their declared names, where they replace a mock lane's
@@ -160,6 +174,8 @@ STAGE_NAMES = [node.name for node in STAGES]
 MOCK_LANE_STAGES = [node for node in STAGES if MOCK_LANE_MARKER in base_names(node)]
 SHARED_STAGES = [node for node in STAGES if MOCK_LANE_MARKER not in base_names(node)]
 SHARED_NAMES = [node.name for node in SHARED_STAGES]
+#: Every stage body a lane may declare by subclassing it.
+DECLARABLE = [*STAGES, *BARE_METAL_STAGES, *PURCHASE_STAGES]
 COMPUTE_FIELDS = fields(class_named(STAGES_TREE, "ComputeDealState"))
 DOMAIN_DEAL_FIELDS = fields(class_named(tree(DOMAIN_DEAL), "DomainDealState"))
 STAGES_USE = state_use(STAGES, state=STATE)
@@ -203,14 +219,15 @@ MOCK_GATES = _members("MockGates")
 
 
 def _lane_own_stages(lane: Lane) -> list[ast.ClassDef]:
+    shared = set(STAGE_NAMES) | {node.name for node in PURCHASE_STAGES}
     return [
         body for _name, body in running_stages(lane.scenario, BARE_METAL_STAGES)
-        if not set(base_names(body)) & set(STAGE_NAMES)
+        if not set(base_names(body)) & shared
     ]
 
 
 def _scenario(lane: Lane) -> list[tuple[str, StateUse]]:
-    return run_order(lane.scenario, [*STAGES, *BARE_METAL_STAGES], state=STATE)
+    return run_order(lane.scenario, DECLARABLE, state=STATE)
 
 
 def _driver_annotation(stage: ast.ClassDef) -> str | None:
@@ -291,6 +308,10 @@ def test_the_real_lane_consumes_every_field_it_produces():
     ]
     finalised = state_use(fixtures, state=STATE)
     consumed |= finalised.read | finalised.required
+    # A shared stage's field that only a mock-lane stage reads is produced for
+    # the mock lanes, which run the same shared body.
+    gates, shared = state_use(MOCK_LANE_STAGES, state=STATE), state_use(SHARED_STAGES, state=STATE)
+    consumed |= (gates.read | gates.required) - shared.read - shared.required
     assert produced - consumed == set(), sorted(produced - consumed)
 
 
@@ -355,8 +376,11 @@ def test_settlement_skips_until_the_preflight_before_it_passes():
 
 @pytest.mark.parametrize("lane", ALL_LANES, ids=lambda lane: lane.name)
 def test_a_lane_state_extends_the_compute_state(lane: Lane):
+    """Directly, or through a buyer purchase's state, which extends it
+    (``test_buyer_purchase_stages.py``)."""
     node = class_named(tree(lane.state_module), lane.state_class)
-    assert "ComputeDealState" in base_names(node), base_names(node)
+    expected = "PurchaseState" if lane in PURCHASE_LANES else "ComputeDealState"
+    assert expected in base_names(node), base_names(node)
 
 
 @pytest.mark.parametrize("lane", ALL_LANES, ids=lambda lane: lane.name)
@@ -422,6 +446,7 @@ def test_a_lane_stage_uses_only_its_states_fields(lane: Lane):
         fields(class_named(tree(lane.state_module), lane.state_class))
         | COMPUTE_FIELDS
         | DOMAIN_DEAL_FIELDS
+        | (PURCHASE_FIELDS if lane in PURCHASE_LANES else set())
     )
     use = state_use(_lane_own_stages(lane), state=STATE)
     used = use.written | use.required
@@ -502,7 +527,7 @@ def test_the_handoff_is_what_the_stages_from_fulfillment_onwards_read():
 
 @pytest.mark.parametrize("lane", ALL_LANES, ids=lambda lane: lane.name)
 def test_each_handoff_is_written_earlier_and_independently_of_the_lease(lane: Lane):
-    running = running_stages(lane.scenario, [*STAGES, *BARE_METAL_STAGES])
+    running = running_stages(lane.scenario, DECLARABLE)
     assert handoff_faults(running) == []
 
 

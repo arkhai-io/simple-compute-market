@@ -46,9 +46,10 @@ escrow, at 07), and each input they check comes from state an earlier stage
 wrote independently of the lease under check: the expected host from 08a's
 settlement preview, the teardown's fulfillment from the ending that ran. So a
 compute deal settled another way runs the same bodies, supplying those inputs
-from its own earlier stages. What those stages ask of the driver — the delivery
-and the lease view — is the driver's, and an Alkahest lane's driver may read
-its escrow there.
+from its own earlier stages, as a buyer purchase through the shipped buyer does
+(``buyer_purchase_stages.py``). What those stages ask of the driver — the
+delivery and the lease view — is the driver's, and an Alkahest lane's driver may
+read its escrow there.
 """
 
 from __future__ import annotations
@@ -223,12 +224,19 @@ class ComputeDealState(DomainDealState):
     real_escrow_uid: Optional[str] = None
     #: The reference the deal settled under, which the stages from 09a on
     #: wait on, log, and name the re-reservation after: the escrow, written
-    #: beside ``real_escrow_uid`` at 07.
+    #: beside ``real_escrow_uid`` at 07, or a buyer purchase's negotiation
+    #: (``buyer_purchase_stages.py``).
     settlement_ref: Optional[str] = None
+    #: The deal is about to settle, so a create job will follow: the escrow
+    #: exists (07), or a buyer purchase found the option it buys. A mock lane's
+    #: 07a arms the create gate only then, so a deal that will not settle
+    #: leaves no rule armed.
+    _settlement_imminent: bool = False
     #: A mock lane's create rule is armed, so its create job will be held.
     provisioning_gate_armed: bool = False
     #: The host the deal's lease must name, never read from the lease 09c
-    #: compares it with: 08a's settlement preview, in this stage set.
+    #: compares it with: 08a's settlement preview, in this stage set, or a
+    #: buyer purchase's declared host.
     expected_host_id: Optional[str] = None
     _evaluate_settle_passed: bool = False
     #: The lane's last check before settlement passed, so 08b may submit it.
@@ -1029,6 +1037,7 @@ class Stage07_OnChainEscrow:
         # The deal settles under its escrow, so the stages from 09a on are
         # keyed on it.
         deal_state.settlement_ref = escrow_uid
+        deal_state._settlement_imminent = True
         log.info("[07] Created on-chain escrow %s for negotiation %s",
                  escrow_uid, deal_state.negotiation_id)
 
@@ -1039,11 +1048,12 @@ class Stage07a_ArmCreateGate(MockLaneStage):
     ):
         """Arm the mock rule that holds the create job before it reports.
 
-        The hold gives 08b a window to assert the fulfillment dispatching
-        before 08b2 releases it. Armed only once the escrow exists, so a deal
-        whose escrow could not be created leaves no rule armed.
+        The hold gives the settling stage a window to assert the fulfillment
+        dispatching before 08b2 releases it. Armed only once the deal is about
+        to settle — its escrow exists, or a buyer purchase found its option —
+        so a deal that will not settle leaves no rule armed.
         """
-        require_state(deal_state, "real_escrow_uid", "_provisioning_execution_confirmed")
+        require_state(deal_state, "_settlement_imminent", "_provisioning_execution_confirmed")
         deal_driver.arm_create_gate()
         deal_state.provisioning_gate_armed = True
         log.info("[07a] Provisioning gate armed with rule=%s", deal_driver.create_rule_id)

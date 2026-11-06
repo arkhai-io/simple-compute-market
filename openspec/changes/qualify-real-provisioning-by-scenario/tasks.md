@@ -379,7 +379,7 @@ purchase driver in `e2e-tests/tests/e2e/roles/scenarios/bare_metal/` (beside
 (the purchase's handoff row); `e2e-tests/pyproject.toml`'s `e2e_bare_metal_payment_deal`
 description.
 
-- [ ] 3.1 The stage set (D1, D15's table). `buyer_purchase_stages.py` defines, like
+- [x] 3.1 The stage set (D1, D15's table). `buyer_purchase_stages.py` defines, like
   `compute_deal_stages.py`, the stages every scenario buying through the shipped buyer
   runs: hold the loops; discover through the purchase profile; buy through the domain's
   command (`market buy` or `market bare-metal buy`), the mock gates around it in a mock
@@ -392,21 +392,70 @@ description.
   and the buyer's configuration; each stage logs the identifiers it reads (buyer run,
   Agreement, transaction, reservation, jobs). The purchase's row joins the handoff check
   of 1.3 (section 1's handoff note says how).
-- [ ] 3.2 Payment records (D4). A stage checks each transaction: bound to its Agreement,
+  Done. `PurchaseState(ComputeDealState)`, the `PurchaseDriver(ComputeDealDriver)`
+  protocol and `Purchase01_PayerBalanceBefore`, `Purchase02_ListingDiscovered`,
+  `Purchase03_Bought`, `Purchase04_PurchaseCorrelated` (3.2's `Purchase05` and 3.3's
+  `Purchase10` beside them). The bare-metal driver is `BareMetalPurchaseDriver` in
+  `scenarios/bare_metal/purchase_driver.py`, over `BareMetalComputeDealDriver`: a
+  payments-only pool override in `seed_supply`, the registry read as the purchase
+  profile, the CLI arguments, the buyer's fulfillment status, and a lease view finding
+  the hold by negotiation (the site's commit keeps the reserve's `deal_ref`,
+  `kit/site/.../ledger.py`). Differed from the plan, each recorded for review:
+  "hold the loops" is the canonical deal's readiness stages, reused rather than
+  restated (`Stage00`–`00c2`, a mock lane's `00e`, `00f1` seeding through the driver,
+  `00h`, which `09c2` requires; not `00d`, typed negotiation, or `00g`, Alkahest).
+  `seller_listing_id` is written by the module's own listing stage, as
+  `ComputeDealState` gives listing stages to the domain (bare metal's publication step;
+  the VM purchase creates its listing); the purchase stages require it. `07a`'s
+  prerequisite was `real_escrow_uid`, which a purchase never writes: it is now
+  `_settlement_imminent`, a new `ComputeDealState` field `07` writes beside the escrow
+  and `Purchase02` writes once the option is found, so an Alkahest lane behaves as
+  before and no rule is armed for a deal that will not settle. `08c` (the mock job
+  evaluation) is not run: its preview is 08a's, by escrow. `test_compute_deal_stages.py`
+  gains `PURCHASE_LANES` in `ALL_LANES`, resolving the purchase stages' bodies, so the
+  bare-metal purchase is held to the prerequisite, read-before-write, one-producer,
+  own-fields and handoff checks; the real lane's consumption check now counts as
+  consumed a field that a mock-lane stage reads and no shared stage reads (`07`'s
+  `_settlement_imminent`, read only by `07a`). `Purchase05` verifies against the
+  configuration's `receipt_trust`, as the buyer and seller roles do, so a retiring
+  receipt key a target configures is accepted. Unit (source checks): `make
+  test-e2e-unit` passes, the purchase row included.
+- [x] 3.2 Payment records (D4). A stage checks each transaction: bound to its Agreement,
   its receipt over that mandate, its snapshot naming the configured payer and payee, its
   parts' gross equal to the Agreement's price for its duration. The balance sum check reads
   the payer's own balance through `PaymentsClient.get_balance` with the buyer's token
   before the first purchase and after the last approval, and asserts the drop in
   `available` equals the sum of the scenario's own transactions' debits, logging the
   dedicated-account precondition beside the result.
-- [ ] 3.3 The buyer-teardown ending (D15, D16, D10). A shared stage runs
+  Done as `Purchase01_PayerBalanceBefore` (before discovery) and
+  `Purchase05_PaymentRecordsChecked` (after `08b2`): `require_bound_to` at correlation,
+  then `verify_snapshot` and `verify_receipt` against the pinned service identity,
+  Agreement and mandate, the receipt's `from`/`to` against `BUYER_ACCOUNT` and
+  `SELLER_ACCOUNT`, its parts' gross against the Agreement's `amount` and `asset` (the
+  mandate's once part is the Agreement's amount for its duration, `derive_mandate`),
+  and the drop in `available` against that gross, which is what approval debits
+  (`PaymentsAuthority.approve`). It checks one transaction: a module with two purchases
+  (section 8's observation 2) needs the sum over both. Its first proof is
+  `e2e_bare_metal_payment_deal` in the pipeline.
+- [x] 3.3 The buyer-teardown ending (D15, D16, D10). A shared stage runs
   `market bare-metal teardown --run-id <run>`, records `teardown_fulfillment_id` from the
   deal's fulfillment as delivery status reports it, and ends where `11b` starts; in a mock
   lane `09c2` arms the teardown gate before it and `11a2` drains after it. The delivery-end
   filing's `Unknown` outcome at the unanswerable authority neither fails the stage nor is
   read as delivery, access-end or refund evidence. If a buyer teardown releases the lease
   outside `check_leases`, the section stops and the change returns to design (D15).
-- [ ] 3.4 The bare-metal lane purchase (D16). `test_bare_metal_payment_deal.py` runs, in
+  Done as `Purchase10_BuyerTeardown`: the CLI teardown, then the lease read `releasing`
+  (a released lease fails the stage, the D15 case), `teardown_fulfillment_id` from the
+  buyer's fulfillment status (checked equal to the lease's), the fulfillment
+  `teardown_dispatch_pending`, and one convergence advance to `tearing_down` with the
+  machine still held, which is what `11a` does in the expiry ending: `11a2` then has the
+  teardown job to release. The D15 rule is not triggered as far as the code reads: the
+  seller's end-delivery route drives the physical end synchronously
+  (`market_deal_servicing/routes.py`), bare metal's `apply_end` terminates the lease at
+  provisioning, and `LeaseLifecycle.terminate_lease` requests release as expiry does;
+  the pipeline run is the first observation. The filing's outcome is never read; the
+  stage's docstring states why.
+- [x] 3.4 The bare-metal lane purchase (D16). `test_bare_metal_payment_deal.py` runs, in
   order: the purchase stages and `09a`–`09c`; its re-drive of the run's commit (its own
   stage, as today); the shared buyer-teardown ending; the seller refund of the still-held
   payment (its own stage, the snapshot showing every part reversed); `11b`. Its
@@ -415,13 +464,37 @@ description.
   replaces. If the reverse after the teardown is refused, the section stops and the change
   returns to design (D16). The marker's description in `e2e-tests/pyproject.toml` says
   the buyer's CLI teardown precedes the refund.
-- [ ] 3.5 The source check (D1; delta "defined once"). `test_buyer_purchase_stages.py`, on
+  Done. The module declares the canonical readiness stages, its own `03` publication,
+  `Purchase01`–`02`, `07a`, `Purchase03`–`04`, `08b2`, `Purchase05`, `09a`, bare metal's
+  `09a2` publication close (which `09b` needs for `_listing_reconciled`), `09b`, `09c`,
+  its own `09d` re-drive, `09c2`, `Purchase10`, `11a2`, its own `11` refund, `11b`, and
+  its own `12`, which reads the deal released and the whole machine available and
+  records the teardown evidence: the cleanup's compensation runs unless `12` recorded
+  it, as it ran unless the old refund stage had. The wall-clock poll is gone with the
+  step `09b` replaces; the fixture's ungated mock rules are gone too, since `07a` and
+  `09c2` arm the gates, and the cleanup now opens any gate still closed before the
+  compensation (a removed rule leaves its held job waiting) and removes the rules after
+  it. `PurchaseCompensation`, its refund retry and the mock rules' removal are otherwise
+  unchanged. `e2e-tests/README.md`'s rerun line no longer says "three ordered calls".
+  The refund after the teardown is not known refused: D16 found no such refusal in the
+  code, and the pipeline run is the first observation. Unit: the module collects and
+  resolves its fixtures under `test_scenario_cleanup_order.py`'s `--setup-plan` (holds
+  released after `purchase_cleanup`).
+- [x] 3.5 The source check (D1; delta "defined once"). `test_buyer_purchase_stages.py`, on
   the pattern of `test_compute_deal_stages.py` and `stage_sources.py`: every scenario
   buying through the shipped buyer declares the purchase stages in order without replacing
   a body, inserts only its own stages between them, and runs the shared ending its lease
   ends by; the bare-metal lane purchase is one row. Unit: a constructed module replacing a
   shared body, or running the buyer-teardown ending and the expiry stages both, fails.
-- [ ] 3.6 **Verification checkpoint.** Unit: `make test-e2e-unit`, with
+  Done. `purchase_faults` holds a row's shared stages (purchase and canonical) to one
+  run order, `expected_order(mock=..., ending=...)`, each declared as `Test<base>` with
+  an empty body, with exactly one ending; own stages sit anywhere between. Further
+  checks: the purchase stages are not collected where defined, every one is in the
+  order, none names a mock gate or the mock test client, each takes `PurchaseDriver`,
+  and `PurchaseState` extends `ComputeDealState`. Unit (source checks): the bare-metal
+  row passes; constructed modules pass with either ending and fail on a replaced body,
+  both endings, and two purchase stages swapped.
+- [x] 3.6 **Verification checkpoint.** Unit: `make test-e2e-unit`, with
   `test_buyer_purchase_stages.py` and `test_compute_deal_stages.py`. Run `make test` and
   `make check-comment-hygiene`.
   End-to-end: `e2e_bare_metal_payment_deal` (bare-metal lane) runs the purchase stages,
@@ -429,6 +502,59 @@ description.
   ending and the refund after it.
   Owed by validation: `tests.yml`, job `test · test-e2e-unit` — passes with the purchase
   source check.
+  Unit: `make test-e2e-unit`, 582 passed (unit, the source checks of both stage sets and
+  `test_scenario_cleanup_order.py`'s `--setup-plan` over the restructured module among
+  them), run again after the fresh-context fixes. `make test` passed (every unit and
+  integration suite) before those fixes, which touched only `e2e-tests` sources, its
+  README and this file. `make check-change` passed all 12 checks, comment hygiene among
+  them. No dependency or lock changed, so `make check-packaging` was not run. No
+  end-to-end lane was run locally: the restructured module's stages are proven first by
+  validation's pipeline.
+  End-to-end scenarios, confirmed and extended: `e2e_bare_metal_payment_deal`
+  (bare-metal lane) runs every purchase stage, `09a`–`09c` with `09b` on the
+  negotiation, the buyer-teardown ending and the refund after it. `07`'s and `07a`'s
+  changed prerequisite runs in `e2e_deal` (VM lane) and `e2e_bare_metal_mock_deal`
+  (bare-metal lane); the real modules run `07` but are in no lane.
+  Owed by validation: `tests.yml`, job `test · test-e2e-unit` — passes with the purchase
+  source check (confirmed).
+
+Handoff from section 3:
+
+- **For section 4.** The VM purchase declares `expected_order(mock=True, ending=EXPIRY)`
+  (`test_buyer_purchase_stages.py`) and joins `PURCHASES` there and `PURCHASE_LANES` in
+  `test_compute_deal_stages.py`, its state a `PurchaseState` subclass. `Purchase03`
+  runs the buy in the foreground and waits for it to exit: bare metal's buy returns
+  after its commit, with the create job held at `07a`'s gate. If `market buy` keeps
+  polling its settlement until delivery, `Purchase03` cannot step convergence meanwhile;
+  that needs a `PurchaseDriver` part, or a background run the stage drives, decided
+  there. `Purchase02` requires `listing_published`, which the VM module's listing stage
+  writes beside `seller_listing_id`. The VM driver needs `declared_host_id` (the host it
+  registers), `discover`, `check_purchase_option`, `buy_arguments`,
+  `teardown_arguments` (unused by an expiry ending, but in the protocol),
+  `purchase_fulfillment` and a lease view by negotiation (VM already finds holds that
+  way).
+- **For section 8.** `Purchase05` checks one transaction against the balance drop since
+  `Purchase01`; observation 2's two purchases need the sum over both. `PURCHASES` is a
+  hand-kept table: each new purchase module adds its row.
+- **Not proven locally.** The buyer teardown leaving the lease `releasing` and the
+  fulfillment `teardown_dispatch_pending`, the settle wait answering the payments deal,
+  and the refund after the teardown are read from the code (3.3's and 3.4's notes cite
+  it); the pipeline is their first run. A failure at `Purchase10` with the lease
+  `released` is D15's return-to-design case; a refused refund at stage 11 is D16's.
+- **Fresh-context check.** No correctness defect found. Fixed: the README's stale
+  description of the scenario (the authority filing, order, cleanup); a stale
+  `TESTING.md` paragraph, added to 9.9 for closeout; the real-lane consumption
+  exemption, narrowed to fields only a mock-lane stage reads; `Purchase05`'s trust,
+  now `receipt_trust`; `Purchase10`'s message for a lease still `leased`; log lines in
+  the module's own stages; the docstring's account of `09a2`. Declined: stage 12
+  depending on `11b` (it writes no state; 12's own release and capacity reads fail if
+  `11b` did not release, and a failure after the release leaves nothing to
+  compensate); folding the two rule removals into `disarm_gates`, which swallows
+  failures the cleanup reports; the private `_pinned` import from the lane's conftest,
+  which the bare-metal mock deal module already makes. Left for triage: the delta's
+  "three ordered calls" (`specs/test-compatibility/spec.md`, the bare-metal purchase
+  scenario), which still reads as discovery, negotiation and approval, now through the
+  shared stages.
 
 Stopped before 2.1 (now 3.1), under that task's then return-to-design rule (D15): `09b`'s
 settlement wait does not resolve the bare-metal payments deal, by its negotiation or by any
@@ -770,6 +896,12 @@ and the `settlement-servicing` delta.
   - `docs/development/TESTING.md`, "#### The canonical compute deal": the buyer-purchase
     stage set, the settlement reference and D15's handoff, the two lane purchases (D15,
     D16, D17);
+  - `docs/development/TESTING.md`, the bare-metal lane's entry under "### 4. System
+    Integration Tests (End-to-End)": `e2e_bare_metal_payment_deal` runs the shared
+    purchase stages, the buyer's CLI teardown before the seller's refund, and a cleanup
+    that opens any gate still closed and runs unless the last stage recorded the deal
+    ended (D16) (added by section 3, which found the paragraph's order and cleanup
+    stale);
   - `docs/development/TESTING.md`, "#### The real-provisioning lane": the shared listing,
     `management_unit`, `admission_log` and the qualification markers (D2, D5, D9);
   - `docs/development/ARCHITECTURE.md`, "Testing strategy": the repository-wide rule that

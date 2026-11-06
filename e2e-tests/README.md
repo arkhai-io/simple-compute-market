@@ -384,8 +384,8 @@ prove tunnel coexistence and require no GPU.
 
 The bare-metal lane includes marker `e2e_bare_metal_payment_deal`, which runs
 against the lane's payments double: `make test-e2e-bare-metal` runs it with the
-rest of the lane. To rerun its three ordered calls against the lane's running
-stack, select the lane's runner profiles:
+rest of the lane. To rerun it against the lane's running stack, select the
+lane's runner profiles:
 
 ```sh
 make test-buyer-machine \
@@ -403,24 +403,32 @@ must resolve to the lane's pinned seller scheme; the purchase buyer is a separat
 wallet-free Ed25519 profile. A run with no payments target configured reports a
 named blocked payments prerequisite, not success.
 
-The fixture declares a distinct backed whole host and publishes only a USD
-1.00/hour option for a one-hour term. The registry recommends the lane's pinned
-dispute authority, which the option names but which never answers, since no
-stage files a case; the option includes a 300-second delivery deadline,
-a 15-day dispute window and an unbounded case hold. The dispute window covers
-the delivery deadline plus the authority's minimum filing window; the payment
-`window=P7D` is a separate input.
+The scenario runs the shared buyer-purchase stages
+(`tests/e2e/roles/helpers/buyer_purchase_stages.py`) and the canonical compute
+deal's stages from fulfillment onwards, inserting its own. Its supply stage
+declares a distinct backed whole host and its publication stage publishes only a
+USD 1.00/hour option for a one-hour term. The registry recommends the lane's
+pinned dispute authority, which the option names but which never answers; the
+buyer's teardown files a delivery-end case with it, whose `Unknown` outcome the
+scenario neither fails on nor reads as evidence. The option includes a
+300-second delivery deadline, a 15-day dispute window and an unbounded case
+hold. The dispute window covers the delivery deadline plus the authority's
+minimum filing window; the payment `window=P7D` is a separate input.
 
 The installed `market bare-metal buy` emits
 `run_started → negotiation_completed(status=agreed) → payment_approved →
 run_ended(status=agreed)`. It commits through `BuyerLifecycle` after approval.
-Delivery reads use that purchase's signer and fulfillment transport. Re-drive
-recovers the original run's retained profile and repeats canonical lifecycle
-`commit`, keeping both transaction and fulfillment unchanged; there is no
-bare-metal settle command. Seller refund reverses the held once payment;
-idempotent canonical buyer surrender and convergence establish mock reclaim
-and proven site capacity release separately. Unless the refund stage completed the deal's
-teardown, the module's cleanup finds the purchase in the buyer's run log; when
+The scenario checks the transaction against its Agreement and receipt and the
+payer's balance drop against its debit, then reads readiness through the
+storefront's settle wait on the negotiation. Delivery reads use that purchase's
+signer and fulfillment transport. Re-drive recovers the original run's retained
+profile and repeats canonical lifecycle `commit`, keeping both transaction and
+fulfillment unchanged; there is no bare-metal settle command. The buyer's
+`market bare-metal teardown` then ends delivery and starts mock reclaim, after
+which the seller's refund reverses the still-held once payment, and the site's
+capacity release is proven separately. Unless the last stage recorded the deal
+ended, the module's cleanup first opens any mock gate still closed, then finds
+the purchase in the buyer's run log; when
 the log records the payment approved, it refunds the payment (a repeat refund
 returns the same result), then reads the purchase's fulfillment and releases a
 host it finds. A host it cannot read or tear down — a delivery that stopped, or
