@@ -25,7 +25,8 @@ stages:
 
   00e1 The service executes VM jobs for real (in place of the mock lanes' 00e)
   00f2 The registered host is the target's, connection and all
-  02b  Create the GPU-less listing paused, or adopt the one an earlier run left
+  02b  Create the GPU-less listing paused, offering every ready mechanism, or
+       adopt the one an earlier run left, which must offer Alkahest
   03b  Resume it into publication at the registry
   08a2 The settlement preview chose the target host, so 08b may settle
   08b3 The create job ran on the target host and succeeded; its guest recorded
@@ -53,13 +54,11 @@ from __future__ import annotations
 import logging
 import time
 from datetime import datetime, timezone
+from decimal import Decimal
 
 import pytest
-from market_alkahest.alkahest import (
-    get_alkahest_network,
-    resolve_alkahest_address_config,
-)
-from market_alkahest.dev_chain import anvil_address_book_path
+from market_alkahest.plans import ALKAHEST_MECHANISM
+from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
 
 from e2e_harness.real_provisioning_target import TargetNotConfigured, load_real_provisioning_target
 from e2e_harness.settings import settings
@@ -102,7 +101,13 @@ from tests.e2e.roles.helpers.compute_deal import (
 )
 from tests.e2e.roles.helpers.escrow import create_buyer_escrow
 from tests.e2e.roles.helpers.domain_deal import require_state
+from tests.e2e.roles.helpers.payments import payment_setting
 from tests.e2e.roles.helpers.ssh_access import memory_within_tolerance, ssh_session
+from tests.e2e.roles.scenarios.vms.composed_listing import (
+    create_or_adopt_listing,
+    listing_mechanisms,
+    payments_settlement,
+)
 from tests.e2e.roles.scenarios.vms.conftest import (
     capacity_site_id,
     capacity_source_for,
@@ -136,20 +141,35 @@ pytestmark = [
     pytest.mark.e2e_vm_real_provisioning,
 ]
 
-# The canonical deal's token, at the asking rate every lane's listing advertises.
-DEMAND_RESOURCE = {"token": DEAL_TOKEN, "amount": LISTED_HOURLY_RATE}
-# Resolved from the dev chain's address book, as a real seller's `market
-# publish` resolves it; the deal settles on the escrow the listing advertises.
-_ALKAHEST_CFG = resolve_alkahest_address_config(
-    get_alkahest_network("anvil"),
-    config_path=str(anvil_address_book_path()),
-)
-ACCEPTED_ESCROWS = [{
-    "chain_name": "anvil",
-    "escrow_address": str(_ALKAHEST_CFG.erc20_addresses.escrow_obligation_default).lower(),
-    "literal_fields": {"token": DEMAND_RESOURCE["token"]["contract_address"]},
-    "rates": [{"field": "amount", "per": "hour", "value": str(DEMAND_RESOURCE["amount"])}],
-}]
+#: The canonical deal's asking rate on the dev chain's deal token, stated in
+#: whole tokens an hour, which the storefront's Alkahest composition publishes
+#: in the token's base units as ``LISTED_HOURLY_RATE``; the deal settles on the
+#: escrow the published option names.
+ALKAHEST_SETTLEMENT = {
+    "mechanism": ALKAHEST_MECHANISM,
+    "asset": DEAL_TOKEN["contract_address"],
+    "rate": str(Decimal(LISTED_HOURLY_RATE) / 10 ** DEAL_TOKEN["decimals"]),
+    "per": "hour",
+    "mechanism_input": {"chain": "anvil", "escrow_kind": "erc20_escrow_obligation_default"},
+}
+
+
+def listing_settlements() -> dict[str, dict]:
+    """The settlement this module states for each mechanism it can.
+
+    Alkahest always; Arkhai payments where the run names the seller's payments
+    account, so a stack composing it lists the resource with both, and a module
+    dealing on the resource through Arkhai payments finds it offered
+    (``composed_listing.py``).
+    """
+    settlements = {ALKAHEST_MECHANISM: ALKAHEST_SETTLEMENT}
+    seller_account = payment_setting("SELLER_ACCOUNT")
+    if seller_account:
+        settlements[ARKHAI_PAYMENTS_MECHANISM] = payments_settlement(
+            seller_account=str(seller_account),
+            dispute_window=str(payment_setting("DISPUTE_WINDOW", "P7D")),
+        )
+    return settlements
 
 
 # ---------------------------------------------------------------------------
@@ -347,34 +367,31 @@ class TestStage02b_ListingCreated:
         self, deal_driver: RealVmComputeDealDriver, storefront_seller_client,
         storefront_admin_client, offer_resource, deal_state: RealVmDealState,
     ):
-        """Create the listing for everything the host sells, paused, or adopt
-        the one an earlier run against this stack left.
+        """Create the resource's listing paused, offering every mechanism the
+        storefront reports ready, or adopt the one another run against this
+        stack left (``composed_listing.py``).
 
         Its capacity source states the GPU-less shape the pool states, derived
         from the same resource, so the storefront finds the listing's shape and
-        its source's in agreement. That source backs one listing for good, so a
-        rerun takes over the open listing on it, paused, and fails naming the
-        listings where there is not exactly one open listing of the target's
-        shape.
+        its source's in agreement. That source backs one listing for good, so
+        an earlier run, or a module dealing on the resource by another
+        mechanism, leaves the listing this run adopts: the only one on the
+        resource, open, of the target's shape, offering Alkahest. Any other
+        fails naming the listings and their options.
         """
         require_state(deal_state, "_registry_reachable", "_target_host_confirmed")
-        adopted = deal_driver.listing_for_run()
-        if adopted is not None:
-            deal_state.seller_listing_id = adopted.listing_id
-            log.info("[02b] Listing %s, an earlier run's, adopted paused", adopted.listing_id)
-            return
-        resp = storefront_seller_client.create_listing(
-            listing_resource=offer_resource,
-            capacity_source=capacity_source_for(offer_resource),
-            accepted_escrows=ACCEPTED_ESCROWS,
+        listing, adopted = create_or_adopt_listing(
+            storefront_admin_client=storefront_admin_client,
+            storefront_seller_client=storefront_seller_client,
+            resource=offer_resource,
+            shape=deal_driver.target.listing_shape.model_dump(),
+            mechanism=ALKAHEST_MECHANISM,
+            settlements=listing_settlements(),
             max_duration_seconds=DURATION_HOURS * 3600,
-            paused=True,
         )
-        assert resp.listing_id, f"listing creation returned no id: {resp}"
-        listing = storefront_admin_client.get_listing(resp.listing_id)
-        assert (listing.status, listing.paused) == ("open", True), listing
-        deal_state.seller_listing_id = resp.listing_id
-        log.info("[02b] Listing %s created paused", resp.listing_id)
+        deal_state.seller_listing_id = listing.listing_id
+        log.info("[02b] Listing %s %s paused, offering %s", listing.listing_id,
+                 "adopted" if adopted else "created", list(listing_mechanisms(listing)))
 
 
 class TestStage03b_ListingPublished:

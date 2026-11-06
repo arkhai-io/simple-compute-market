@@ -24,13 +24,15 @@ from tests.e2e.roles.scenarios.vms.compute_deal_driver import (
     E2E_DEAL_GPU_COUNT,
     VmComputeDealDriver,
 )
+from tests.e2e.roles.scenarios.vms.composed_listing import (
+    DELIVERY_DEADLINE_SECONDS,
+    DISPUTE_WINDOW_SECONDS,
+    payments_settlement,
+)
 
-#: The listed price of an hour of the purchase's VM, in USD/6 base units.
+#: The listed price of an hour of the purchase's VM, in USD/6 base units:
+#: ``payments_settlement``'s rate of 1.00 USD an hour.
 HOURLY_GROSS = 1_000_000
-#: Compute dispute coverage: the authority's minimum filing window plus the
-#: delivery latency the seller allows for.
-DISPUTE_WINDOW_SECONDS = 15 * 86400
-DELIVERY_DEADLINE_SECONDS = 300
 #: How long ``market buy`` waits for delivery, from its approval.
 SETTLEMENT_TIMEOUT_SECONDS = 300
 #: How often it reads its settlement meanwhile.
@@ -76,15 +78,9 @@ class VmPurchaseDriver(VmComputeDealDriver):
     def listing_settlement(self) -> dict[str, Any]:
         """The listing's one settlement: an hour of the VM in USD/6, paid
         through Arkhai payments to the lane's seller account."""
-        return {
-            "mechanism": "arkhai.payments.v1", "asset": "USD/6", "rate": "1.00", "per": "hour",
-            "mechanism_input": {
-                "payee_account": self.seller_account, "asset": "USD/6",
-                "window": self.dispute_window,
-                "delivery_deadline_seconds": DELIVERY_DEADLINE_SECONDS,
-                "dispute_window_seconds": DISPUTE_WINDOW_SECONDS,
-            },
-        }
+        return payments_settlement(
+            seller_account=self.seller_account, dispute_window=self.dispute_window,
+        )
 
     def open_gates(self) -> None:
         """Resume this deal's gates that still hold, so no job stays parked."""

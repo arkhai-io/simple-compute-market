@@ -55,9 +55,6 @@ REAL_RESOURCE_ID = "compute-e2e-real-001"
 #: The region the listing and the declaration both state: the seller's inventory
 #: guard compares it by equality, and it names no real place.
 REAL_REGION = "e2e-real-host"
-#: The most listings one read of the storefront's listings asks for: the
-#: largest page the storefront serves, which refuses a larger limit.
-_LISTING_PAGE = 200
 #: How long a failed run's recovery waits for an accepted settlement's dispatch
 #: to be recorded, where the settle status names no fulfillment yet.
 DISPATCH_BOUND_SECONDS = 60
@@ -269,60 +266,6 @@ class RealVmComputeDealDriver(VmDealDriverBase, RealComputeObservations):
 
     def registered_host(self) -> Any:
         return self.provisioning_client.get_host(self.target.host_id)
-
-    def listing_for_run(self) -> Optional[Any]:
-        """The listing an earlier run left on the lane's resource, adopted paused.
-
-        A publication source backs one listing for good, open or closed, and a
-        rerun derives the same source from the same target, so a second listing
-        on it is refused: a rerun takes over the listing already there. None on
-        the resource returns nothing, for the run to create its own. Exactly
-        one, open, stating the target listing shape is paused unless it is
-        already, read back paused and open, and returned. Any other finding
-        fails naming the listings and the capacity, for an operator to recover,
-        and changes nothing.
-        """
-        listings = self._listings_on_resource()
-        if not listings:
-            return None
-        capacity = self.target.listing_shape.model_dump()
-        stated = [
-            (listing, {name: listing.listing_resource.get(name) for name in capacity})
-            for listing in listings
-        ]
-        (listing, shape), *others = stated
-        assert not others and listing.status == "open" and shape == capacity, (
-            f"the storefront holds listings on resource {REAL_RESOURCE_ID!r} this "
-            f"run cannot adopt, where one open listing of the target's listing shape "
-            f"{capacity} can be: "
-            + "; ".join(
-                f"{each.listing_id} {each.status!r} paused={each.paused} {each_shape}"
-                for each, each_shape in stated
-            )
-            + ". Closing a listing does not free its source: rerun with the target "
-            "the listing was made for, or against a fresh stack"
-        )
-        if not listing.paused:
-            self.storefront_admin_client.pause_listing(listing.listing_id)
-        adopted = self.storefront_admin_client.get_listing(listing.listing_id)
-        assert (adopted.status, adopted.paused) == ("open", True), adopted
-        return adopted
-
-    def _listings_on_resource(self) -> list[Any]:
-        """Every storefront listing on the lane's resource, read page by page."""
-        found: list[Any] = []
-        offset = 0
-        while True:
-            page = self.storefront_admin_client.list_listings(
-                limit=_LISTING_PAGE, offset=offset
-            ).listings
-            found += [
-                listing for listing in page
-                if listing.listing_resource.get("resource_id") == REAL_RESOURCE_ID
-            ]
-            if len(page) < _LISTING_PAGE:
-                return found
-            offset += len(page)
 
     def provision_terms(self) -> dict[str, Any]:
         return {

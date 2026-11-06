@@ -751,23 +751,114 @@ Files: `e2e-tests/tests/e2e/roles/helpers/real_provisioning.py` (or a sibling he
 module); `e2e-tests/tests/e2e/roles/scenarios/vms/test_real_provisioning_deal.py` (its
 listing stage, lines ~350–380); `e2e-tests/tests/unit/test_real_vm_lane.py`.
 
-- [ ] 5.1 The helper (D2). Given the storefront's ready mechanisms, the target's resource
+- [x] 5.1 The helper (D2). Given the storefront's ready mechanisms, the target's resource
   and the module's own mechanism, it adopts the resource's existing listing when it offers
   that mechanism, fails naming the listing and its options when it does not (changing
   nothing), and otherwise creates the listing with one settlement per ready mechanism. The
   VM Alkahest real module's listing stage calls it. Bare metal needs no helper: its
   published options are the composed mechanisms (D2).
-- [ ] 5.2 Unit, in `test_real_vm_lane.py`: creation states one settlement per ready
+  Done as `create_or_adopt_listing` in `scenarios/vms/composed_listing.py`, not under
+  `helpers/` as the plan offered. It is VM's, built on the VM conftest's
+  `capacity_source_for`, and `helpers/real_provisioning.py` holds only domain-neutral
+  parts.
+  - **Readiness.** The storefront reports it in its system status's `settlement`, one
+    `MechanismReadiness` projection per composed mechanism (`ready_mechanisms`). It is
+    read only on the creation path, so adoption never depends on it.
+  - **Creation.** One settlement clause per ready deal mechanism, paused, then read back
+    offering exactly those mechanisms (compared as sets, since a mechanism may publish
+    several options). A ready mechanism the run states no settlement for fails before
+    anything is created; so does the module's own mechanism not being ready.
+  - **Adoption.** The former `RealVmComputeDealDriver.listing_for_run`, moved here
+    (exactly one listing, open, of the target's shape; paused unless already), plus the
+    own-mechanism check, made before the pause so a refused listing is left unchanged.
+    Failures name each listing's options. The driver's `listing_for_run` and
+    `_listings_on_resource` are removed.
+
+  Differed from the plan, for triage: "ready mechanisms" means the ready *deal*
+  mechanisms, Alkahest and Arkhai payments (`DEAL_MECHANISMS`). The VM storefront also
+  composes `contact-exchange.v1` and reports it ready wherever contact profiles are set,
+  as `helm/local-values.yaml` and Bob's storefront configurations do. Stating it would make
+  creation require a contact settlement that no module on the resource deals by. D2's
+  intent is both kinds of module on one stack; the delta's "each mechanism the storefront
+  composes and reports ready" reads wider, and its wording is left for triage to reconcile.
+  The real module's `02b` now states its Alkahest terms as a clause (`ALKAHEST_SETTLEMENT`:
+  the deal token, 10 whole tokens an hour, `escrow_kind` `erc20_escrow_obligation_default`
+  on `anvil`) in place of `accepted_escrows`. A create request with clauses builds options
+  only for its clauses' mechanisms (`settlement_composition.py`, `publication_artifacts`),
+  so a listing offering two mechanisms needs a clause for each. The clause publishes the
+  former escrow: the storefront resolves the escrow address from its own address book,
+  and the token's decimals over RPC. `listing_settlements()` adds the Arkhai payments
+  clause where the run names `PAYMENTS.SELLER_ACCOUNT`. `payments_settlement` is shared
+  with section 4's `VmPurchaseDriver`, which now builds its listing settlement through it.
+  Outside the plan: `e2e-tests/pyproject.toml` now declares `arkhai-core`, whose
+  `market_core.schemas` sections 3–5 import, and `make lock` added it to
+  `e2e-tests/uv.lock` (two lines).
+- [x] 5.2 Unit, in `test_real_vm_lane.py`: creation states one settlement per ready
   mechanism; an Alkahest module and a payments module, in either order, adopt the same
   listing and create no second one; a listing lacking the adopting module's mechanism
   fails naming the listing and its options before any deal; a one-mechanism stack yields
   one option.
-- [ ] 5.3 **Verification checkpoint.** Unit: `make test-e2e-unit`. Run `make test` and
+  Done, against a fake storefront that publishes an option per stated settlement whose
+  mechanism is ready, refuses a second listing on a resource, and reports contact
+  exchange ready beside the deal mechanisms. Unit cases:
+  - creation states one settlement per ready deal mechanism, not contact exchange;
+  - a stack with one deal mechanism ready gets one option;
+  - in either order, an Alkahest and a payments module end with one listing and one
+    creation;
+  - a listing lacking the module's mechanism fails naming the listing and an option id,
+    pausing and creating nothing;
+  - a ready mechanism with no stated settlement, or the module's own mechanism not ready,
+    creates nothing;
+  - the former adoption cases pass on the helper: closed, two listings, another shape,
+    other resources, a later page, already paused;
+  - `02b` adopts and creates none;
+  - `ALKAHEST_SETTLEMENT`'s rate is `LISTED_HOURLY_RATE` in whole tokens.
+
+  Not covered at unit level: `listing_settlements()`'s payments branch, which reads the
+  run's settings, and the storefront's own suppression of an unready option, which the
+  fake models rather than exercises.
+- [x] 5.3 **Verification checkpoint.** Unit: `make test-e2e-unit`. Run `make test` and
   `make check-comment-hygiene`.
   End-to-end: `e2e_vm_real_provisioning` runs the helper but is in no lane; no pipeline
   marker covers it, and none is owed, since a real resource exists only on a target.
   Owed by validation: `tests.yml`, job `test · test-e2e-unit` — passes with the helper's
   cases.
+  Unit: `make test-e2e-unit`, 607 passed, after the fresh-context fixes. `make lock`
+  rewrote `e2e-tests/uv.lock` only; `make check-packaging` passed after it.
+  `make check-change` passed all 12 checks, comment hygiene and version bumps among them.
+  `make test` passed before the fixes and again after them, on the final tree.
+  End-to-end scenarios, confirmed:
+  - `e2e_vm_real_provisioning` runs the helper, in no lane; no pipeline marker covers
+    it, and none is owed.
+  - `e2e_vm_payment_purchase` (VM lane) runs `payments_settlement` through its driver.
+  Owed by validation: `tests.yml`, job `test · test-e2e-unit` — passes with the helper's
+  cases (confirmed).
+
+Handoff from section 5:
+
+- **For section 8.** The observation 2 module calls `create_or_adopt_listing` with
+  `mechanism=ARKHAI_PAYMENTS_MECHANISM`, the real target's resource
+  (`REAL_RESOURCE_ID`, the real module's `offer_resource` shape), and settlements for
+  both deal mechanisms: the real module's `listing_settlements()` gives both where
+  `PAYMENTS.SELLER_ACCOUNT` is set. The listing is created or adopted paused, so the
+  module resumes it into publication as the real module's `03b` does.
+- **Not proven.** The clause-built Alkahest option on a real target, and the storefront
+  reading `settlement` readiness there; the real module's first run is the first
+  observation.
+- **Fresh-context check.** Fixed:
+  - contact exchange, a ready seller mechanism, would have failed every creation on the
+    local stack; readiness now counts deal mechanisms only;
+  - the created listing's mechanisms are compared as sets;
+  - readiness is read only when creating;
+  - option schemas are read without full validation;
+  - the Alkahest rate is computed exactly;
+  - comments naming modules not yet on the branch are rephrased as the rule;
+  - `composed_listing.py`'s docstring now owns the shared payments settlement;
+  - import order in `test_real_vm_lane.py`;
+  - the undeclared `arkhai-core` dependency.
+
+  Recorded: `TESTING.md`'s real-lane adoption paragraph is stale until closeout's 9.9
+  writes the shared listing there.
 
 ## 6. The host diagnostics VM operator job
 
