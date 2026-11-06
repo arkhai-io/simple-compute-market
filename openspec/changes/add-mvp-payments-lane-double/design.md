@@ -737,6 +737,14 @@ cluster, External Secrets writes that file.
 - **Charts.** Both storefront charts' `paymentsKey` option, its `seller-payments-key`
   Secret and the chart's `api_key_env` check are removed; the CA option derives
   `ca_bundle_path` (D3).
+- **Values schemas.** Both storefronts' generated schemas refuse in `config` the payments
+  `api_key` (marked secret in the model), the payments `api_key_env`, and every
+  `[[DisputeCredential]]` entry, whole. No variable the chart sets holds a key a public
+  `api_key_env` could name, and a dispute credential entry is incomplete without its token. The refusal
+  of `api_key_env` is the storefront generators', not a role marker on the shared
+  payments model: the settlement runtime enforces a field's roles when it loads the
+  configuration, and conformance here is a check of the charts, not a runtime refusal.
+  (74 F1)
 - **The signing credential** stays `ARKHAI_IDENTITY_CREDENTIAL` from a Secret, kept from
   the loader by the identity specification, until a change decides its delivery (Open
   Questions).

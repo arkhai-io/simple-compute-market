@@ -1096,20 +1096,40 @@ DISPUTE_CREDENTIAL = {
 }
 
 
-def test_a_dispute_credentials_token_is_refused_in_public_configuration() -> None:
-    """The deployment-state requirement "A storefront's secrets reach it through
-    its secret overlay": a dispute credential's token is refused in `config`, by
+def test_a_payments_key_named_by_variable_is_refused() -> None:
+    """The deployment-state scenario "The public configuration names a payments
+    key's variable": the key reaches the storefront only through its Secret
+    overlay, and no variable the chart sets holds it. Refused by
     the umbrella's copy of the definition and the chart's own."""
-    token = [{**DISPUTE_CREDENTIAL, "api_key": "x"}]
+    named = {"api_key_env": "ARKHAI_PAYMENTS_API_KEY"}
+    carol_settlement = {**CAROL["config"].get("Settlement", {}), "arkhai_payments": named}
     for rendered, dotted in (
-        (_render(agent=_with_config(DisputeCredential=token)), "agents.bob.config.DisputeCredential.0.api_key"),
+        (_render(agent=_with_config(Settlement={"arkhai_payments": named})), "agents.bob.config.Settlement.arkhai_payments.api_key_env"),
         (
-            _render_chart({"agents": {"carol": {**CAROL, "config": {**CAROL["config"], "DisputeCredential": token}}}}),
-            "agents.carol.config.DisputeCredential.0.api_key",
+            _render_chart({"agents": {"carol": {**CAROL, "config": {**CAROL["config"], "Settlement": carol_settlement}}}}),
+            "agents.carol.config.Settlement.arkhai_payments.api_key_env",
         ),
     ):
         assert rendered.returncode != 0, dotted
         assert _names_path(rendered.stderr, dotted), rendered.stderr
+
+
+def test_a_dispute_credential_is_refused_in_public_configuration() -> None:
+    """The deployment-state scenario "The public configuration states a dispute
+    credential": the whole entry belongs in the Secret overlay, so `config`
+    refuses one whether it states its token or names a variable for it, by the
+    umbrella's copy of the definition and the chart's own."""
+    for credential in ({"api_key": "x"}, {"api_key_env": "DISPUTE_API_KEY"}):
+        entries = [{**DISPUTE_CREDENTIAL, **credential}]
+        for rendered, dotted in (
+            (_render(agent=_with_config(DisputeCredential=entries)), "agents.bob.config.DisputeCredential"),
+            (
+                _render_chart({"agents": {"carol": {**CAROL, "config": {**CAROL["config"], "DisputeCredential": entries}}}}),
+                "agents.carol.config.DisputeCredential",
+            ),
+        ):
+            assert rendered.returncode != 0, (credential, dotted)
+            assert _names_path(rendered.stderr, dotted), rendered.stderr
 
 
 def _payments_only() -> subprocess.CompletedProcess[str]:

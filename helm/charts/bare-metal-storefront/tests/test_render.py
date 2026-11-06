@@ -637,6 +637,16 @@ def test_no_payments_key_option_or_public_payments_key_is_accepted() -> None:
     _refused_at(_render({"paymentsKey": {"secretName": "payments-key", "key": "api-key"}}), "paymentsKey")
 
 
+def test_a_payments_key_named_by_variable_is_refused() -> None:
+    """The deployment-state scenario "The public configuration names a payments
+    key's variable": the key reaches the storefront only through its Secret
+    overlay, and no variable the chart sets holds it."""
+    _refused_at(
+        _render(_with_config(Settlement={"arkhai_payments": {**PAYMENTS, "api_key_env": "ARKHAI_PAYMENTS_API_KEY"}})),
+        "config.Settlement.arkhai_payments.api_key_env",
+    )
+
+
 # A development dispute authority's public binding, on a reserved domain.
 DISPUTE_CREDENTIAL = {
     "interface": "arkhai.mediation.v1",
@@ -646,13 +656,15 @@ DISPUTE_CREDENTIAL = {
 }
 
 
-def test_a_dispute_credentials_token_is_refused_in_public_configuration() -> None:
-    """The deployment-state requirement "A storefront's secrets reach it through
-    its secret overlay": a dispute credential's token is refused in `config`."""
-    _refused_at(
-        _render(_with_config(DisputeCredential=[{**DISPUTE_CREDENTIAL, "api_key": "x"}])),
-        "config.DisputeCredential.0.api_key",
-    )
+def test_a_dispute_credential_is_refused_in_public_configuration() -> None:
+    """The deployment-state scenario "The public configuration states a dispute
+    credential": the whole entry belongs in the Secret overlay, so `config`
+    refuses one whether it states its token or names a variable for it."""
+    for credential in ({"api_key": "x"}, {"api_key_env": "DISPUTE_API_KEY"}):
+        _refused_at(
+            _render(_with_config(DisputeCredential=[{**DISPUTE_CREDENTIAL, **credential}])),
+            "config.DisputeCredential",
+        )
 
 
 def _payments_access(**changes) -> dict:
