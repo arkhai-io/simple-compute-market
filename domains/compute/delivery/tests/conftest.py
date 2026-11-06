@@ -26,7 +26,7 @@ from compute_provisioning_contracts.contracts import lease_state_for_reservation
 from market_alkahest.payment_adapter import AlkahestOnceAdapter
 from market_capacity_publication import CapacityEffects, publication_binding
 from market_core import VersionedEnvelope
-from market_deal_lifecycle.delivery import ReadyEvidenceRef
+from market_deal_lifecycle.delivery import BillingStartResult, ReadyEvidenceRef
 from market_deal_servicing import DeliveryRecord, EndService, EndSession, PhysicalResult
 from market_deal_servicing.evidence import transaction
 from market_identity import Ed25519Signer
@@ -168,6 +168,7 @@ class FakeFulfillment:
         self.state = "active"
         self.result: dict[str, Any] = {"endpoint": "vm-1.example:22", "ready_at": "fixed"}
         self.lose_begin = 0
+        self.reads: list[str] = []
 
     async def begin_fulfillment(self, body, *, site_id):
         self.begins.append(body)
@@ -181,12 +182,14 @@ class FakeFulfillment:
         )
 
     async def get_fulfillment_status(self, fulfillment_id, *, capacity_reservation_id, site_id):
+        self.reads.append("status")
         return FulfillmentStatusResponse(
             fulfillment_id=fulfillment_id, capacity_reservation_id=capacity_reservation_id,
             state=self.state, failure_reason="create_failed" if self.state == "failed" else None,
         )
 
     async def get_fulfillment_result(self, fulfillment_id, *, capacity_reservation_id, site_id):
+        self.reads.append("result")
         return VersionedEnvelope(kind="fulfillment.result.v1", schema_version=1, payload=dict(self.result))
 
     async def get_lease(self, capacity_reservation_id, *, site_id):
@@ -341,17 +344,28 @@ class ScriptedAdapter:
         self.answers: dict[str, list[str]] = {}
         self.on_authorize = on_authorize
         self.authorized: list[str] = []
+        self.billing_keys: list[str] = []
+        #: Billing starts whose answer is lost after the authority took them.
+        self.lose_billing = 0
+        #: An outcome billing start answers instead of the adapter's own.
+        self.billing_outcome: Any = None
+        #: Every call made on the adapter, by method name.
+        self.calls: list[str] = []
 
     def validate(self, command):
+        self.calls.append("validate")
         return self.inner.validate(command)
 
     async def submit(self, command, keys):
+        self.calls.append("submit")
         return await self.inner.submit(command, keys)
 
     async def read(self):
+        self.calls.append("read")
         return await self.inner.read()
 
     async def authorize(self, phase, evidence):
+        self.calls.append("authorize")
         self.authorized.append(phase.value)
         if self.on_authorize is not None:
             self.on_authorize(phase)
@@ -363,7 +377,15 @@ class ScriptedAdapter:
         return await self.inner.authorize(phase, evidence)
 
     async def start_billing(self, operation_key, evidence):
-        return await self.inner.start_billing(operation_key, evidence)
+        self.calls.append("start_billing")
+        self.billing_keys.append(operation_key)
+        if self.billing_outcome is not None:
+            return BillingStartResult(outcome=self.billing_outcome)
+        started = await self.inner.start_billing(operation_key, evidence)
+        if self.lose_billing:
+            self.lose_billing -= 1
+            raise ConnectionError("billing-start acknowledgement lost")
+        return started
 
 
 @dataclass

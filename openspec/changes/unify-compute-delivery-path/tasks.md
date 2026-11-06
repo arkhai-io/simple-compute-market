@@ -398,31 +398,87 @@ intent and evidence have one owner"). Files: `domains/compute/delivery/src/compu
 and its tests; `kit/deal-servicing/tests/integration/` only for the billing-start
 refusal scenario.
 
-- [ ] 4.1 Activation after ready evidence, admission for `activate` and no earlier than
+- [x] 4.1 Activation after ready evidence, admission for `activate` and no earlier than
       the Agreement start, through `CapacityEffects.activate_lease`: on 200 record the
       site's `activated_at_utc` through the progress port and adopt the current end; on
       409 read `LeaseView` and enter the end hand-off for `releasing` or `released`,
       `repair_required(activation_unexplained)` otherwise; on 404, no answer or an
       unsigned answer, `repair_required(site_unanswered)`, never treated as activated
       (D7, D8).
-- [ ] 4.2 Billing start: `authorize_delivery` for `start`, then `EndService.begin_billing`
+      Done (`_activate`, `_activation_refused`). Admission for `activate` runs in its
+      own transaction just before the call; an end due there takes the end path. The
+      site's instant is read in whole seconds and recorded once; an answer naming
+      another reservation or carrying no instant is `site_unanswered`, as are a signed
+      404, an unsigned answer and a transport failure. The lease's end is not touched,
+      so an earlier truncation stands. "No earlier than the Agreement start" holds by
+      order, with no separate check: activation follows dispatch, which follows the
+      start. An exception from the `LeaseView` read after a 409 propagates, and the
+      next drive asks again.
+- [x] 4.2 Billing start: `authorize_delivery` for `start`, then `EndService.begin_billing`
       with a stable key and a `DeliveryEvidence` whose `ActivatedDeliveryRef` names the
       capacity reservation and the site's instant in integer seconds and whose
       `ReadyEvidenceRef` comes from the domain port; recovery repeats the same key and
       keeps no intent of its own (D9).
-- [ ] 4.3 Availability and convergence: `authorize_delivery` for `disclose`, then
+      Done (`_start_billing`), key `<negotiation_id>:billing-start`; the `start`
+      authorization and `begin_billing` carry the same full bundle (reservation,
+      fulfillment, activation, ready). An accepted outcome goes on; a rejected one
+      takes the end path when an end is due and is otherwise `no_accepted_deal`
+      (evidence: the journaled billing intent, or `billing:<negotiation_id>` when end
+      service refused before journaling one); pending or unknown leaves the deal
+      pending. Two guards before the call, each for a case a test triggers: while the
+      site's activation instant is ahead of this clock the deal stays pending (end
+      service refuses an activation in its own future, and the instant is the
+      site's); and ready evidence that differs from what billing start already
+      journaled is `domain_result_invalid`, since `begin_billing` refuses a retry
+      whose evidence changed (the port's docstring requires stable evidence).
+- [x] 4.3 Availability and convergence: `authorize_delivery` for `disclose`, then
       `EndSession.available` without any buyer read; `converged` once the domain's
       continuation is acknowledged or absent, retried without another fulfillment (D1).
-- [ ] 4.4 The end hand-off for refusals, provisioning failure, an elapsed window and a
+      Done (`_disclose`, `_converge`). `available` is written in the `disclose`
+      authorization's own transaction (its `apply`), stamped with the instant read
+      just before the authorization: no later than the one the authorization admits
+      at, so an end due at it would have refused the authorization too, and
+      availability is always written when the authorization allows. End service
+      already refuses `disclose` until the billing intent is accepted. Once `available_at` is recorded, later drives go straight to the
+      continuation, reading no fulfillment status or result.
+      `ContinuationState.pending` returns `available`; `none` and `acknowledged`
+      return `converged`.
+- [x] 4.4 The end hand-off for refusals, provisioning failure, an elapsed window and a
       lapsed activation: `record_end` with actor, cause, source, the Agreement start, the
       fixed observation time, identities and verified evidence; consume end service's
       classification and timing; no amounts, stop or reverse; late settlement after the
       window dispatches nothing and supplies never-delivered evidence (D11).
-- [ ] 4.5 The access check: `available` or `converged`, start reached, admission; a
+      Done through section 3's `_hand_off`: `provisioning_failure` for a fulfillment
+      `failed`, `abandoned` or in a teardown state before availability (unless an end
+      is already due, which takes the end path), `activation_lapse` for a refused
+      activation of a releasing or released lease, and `non_delivery` for an elapsed
+      window: admission `ended` with no end recorded and nothing available, which is
+      also what settlement after the Agreement's end meets on its first drive, before
+      any reservation. Each source is fixed by what failed
+      (`delivery:fulfillment-failed:<fulfillment>`, `delivery:activation-lapsed:<reservation>`,
+      `delivery:window-elapsed:<negotiation>`). Every drive past dispatch asks
+      admission before polling, so a create that never settles cannot outlast a due
+      end or the window. An unknown fulfillment state is `site_unanswered`. The path
+      journals the filing and never dispatches it; the seller half's servicing does.
+      "A lawful end wins before availability" is met this way: the buyer's end
+      reaches end service through its own route, which records it with its lawful
+      classification; the path's next admission ends the deal, and it records nothing
+      of its own and files nothing. Where the path itself observes a failure after
+      such an end is due, it records the failure with that end controlling and no
+      filing (section 3's `_record_failure`, tested by the commit refusal under an
+      earlier lawful end).
+- [x] 4.5 The access check: `available` or `converged`, start reached, admission; a
       fetch through an injected result reader outside any transaction; a revision and
       due-end recheck before returning, discarding the fetched material when an end won;
       no payment snapshot (D5).
-- [ ] 4.6 Verify: library integration in `domains/compute/delivery/tests/` with the real
+      Done: `ComputeDeliveryPath.read_access(negotiation_id, fetch)`, where `fetch`
+      receives the fulfillment and reservation identities. It refuses with
+      `AccessRefused` (`not_available`, `not_started` or `ended`). The recheck admits
+      `disclose` again at the current instant, at the revision admitted before the
+      fetch and at the current one if that changed: an end recorded earlier that
+      falls due during the fetch refuses, as does one recorded during it, while a
+      truncation still in the future discloses. It calls no payment adapter.
+- [x] 4.6 Verify: library integration in `domains/compute/delivery/tests/` with the real
       journal, port fakes, the once-only adapters (`kit/arkhai-payments`' and section 2's)
       and the clock-injected payments engine and in-process mediation fake from kit
       fixtures, for a truncation before activation, expiry claiming the lease first, a
@@ -434,6 +490,51 @@ refusal scenario.
       and journaling nothing. Run `make -C domains test-compute-delivery`,
       `make -C kit test-deal-servicing` and `make test`. End-to-end: none until sections
       5 and 7.
+      Library integration (`ComputeDeliveryPath` over the real servicing journal and
+      end service on SQLite, with section 3's fakes): `test_drive_delivery.py` — a
+      buyer who never reads recorded available, the lease activated before billing
+      started, and the billing intent's `ActivatedDeliveryRef` naming the reservation
+      and the site's instant; an Alkahest no-op billing start (section 2's adapter);
+      the hosted once-only payments adapter (`kit/arkhai-payments`' `PaymentAdapter`
+      over its `FakePaymentsClient`, whose engine time the test sets) reaching
+      `converged` with a no-op start, each phase read against its signed snapshot;
+      pending evidence publication (`available`, then `converged`, with no second
+      fulfillment, activation or fulfillment read); a truncation before activation
+      kept; expiry claiming the lease first, `releasing` and `released` (no billing,
+      `activation_lapse` with its filing); a refused activation of a running lease
+      (`activation_unexplained`); a site that cannot activate (unsigned,
+      unreachable, 404 — `site_unanswered`, retried to success) and activation
+      answers naming another reservation or no instant; billing waiting for this
+      clock to reach the site's instant; a lost billing-start acknowledgement
+      recovered under the same key and intent (a once-only adapter makes no start,
+      so there is none to duplicate); a refused, an end-refused and an unknown
+      billing start; ready evidence changed after billing journaled it; a lawful end
+      before availability (no filing, no billing, nothing recorded by the path);
+      settlement after the window and a create that never settles before the
+      window's end (nothing more dispatched, `non_delivery` with a never-delivered
+      filing); a failed, abandoned, tearing-down and torn-down fulfillment handed to
+      the end port, an end already due when provisioning fails, and an unknown
+      fulfillment state. `test_access.py` — a live read making no payment adapter
+      call, a future truncation recorded during the fetch still disclosing, an end
+      recorded before the read falling due during the fetch discarding the material,
+      refusals before availability and before the start, an end admitted during the
+      fetch discarding the material, and a read repeated after an end refused
+      without fetching while the earlier response stands (nothing in the path
+      retracts it). `make -C domains test-compute-delivery`: 116 passed (section 3's
+      late-settlement and forward-start tests now expect `converged`, which the path
+      reaches). `make check-packaging` passes with the payments kit back in the dev
+      group and the lock rewritten. `make test` passed whole on this section before
+      the fresh-context check's last three fixes, which touched only the delivery
+      library and its tests; that suite then passed (116). `make check-change`
+      reports only the closeout citation. End-to-end: none, confirmed; sections 5
+      and 7 compose the library. Owed by validation: none. `kit/deal-servicing/tests/integration/test_end.py`
+      gains `begin_billing` refusing evidence with no `ActivatedDeliveryRef` before
+      any adapter call, journaling no billing intent; `make -C kit test-deal-servicing`:
+      64 passed. Differs from the plan: the in-process mediation fake is not used. The
+      path journals the seller's `delivery_end` filing with the end and never sends
+      it — the seller half's servicing dispatches filings — so a mediation fake would
+      exercise servicing, not the path; the tests assert the journaled filing
+      instead. The payments kit returns to the dev group for the hosted adapter test.
 
 ## 5. VM on the family path
 

@@ -62,7 +62,7 @@ async def test_late_settlement_commits_the_agreement_window_on_the_first_attempt
     assert first.kind is OutcomeKind.PENDING and first.capacity_reservation_id == "res-1"
     assert window_of(rig, "res-1") == (rig.start, rig.start + 7200)
     second = await rig.drive()
-    assert second.kind is OutcomeKind.PENDING and second.fulfillment_id == "ful-1"
+    assert second.kind is OutcomeKind.CONVERGED and second.fulfillment_id == "ful-1"
     assert window_of(rig, "res-1") == (rig.start, rig.start + 7200)
     assert len(rig.site.rows) == 1
     # Every attempt asked for the Agreement window, not the time it was made.
@@ -89,7 +89,7 @@ async def test_a_forward_reservation_commits_at_settlement_and_waits_for_its_sta
     assert again.kind is OutcomeKind.WAITING and rig.fulfillment.begins == []
     rig.clock[0] = rig.start
     started = await rig.drive()
-    assert started.kind is OutcomeKind.PENDING and len(rig.fulfillment.begins) == 1
+    assert started.kind is OutcomeKind.CONVERGED and len(rig.fulfillment.begins) == 1
     assert len(rig.site.rows) == 1
 
 

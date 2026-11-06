@@ -3,7 +3,7 @@
 See openspec/specs/compute-delivery/spec.md.
 """
 
-from .outcome import DeliveryOutcome, HookDisposition, OutcomeKind, RepairReason
+from .outcome import AccessRefused, DeliveryOutcome, HookDisposition, OutcomeKind, RepairReason
 from .path import ComputeDeliveryPath
 from .ports import (
     AcceptedDeal,
@@ -20,6 +20,7 @@ from .ports import (
 from .window import AgreementWindow, TimingInvalid, agreement_window
 
 __all__ = [
+    "AccessRefused",
     "AcceptedDeal",
     "AcceptedHold",
     "AgreementWindow",

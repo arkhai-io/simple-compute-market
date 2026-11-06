@@ -39,6 +39,18 @@ class RepairReason(str, Enum):
 HookDisposition = Literal["fulfilled", "deferred", "failed"]
 
 
+class AccessRefused(Exception):
+    """A buyer's access read the path refused; nothing fetched is returned.
+
+    ``reason`` is ``not_available``, ``not_started`` or ``ended``.
+    """
+
+    def __init__(self, reason: Literal["not_available", "not_started", "ended"], detail: str) -> None:
+        super().__init__(detail)
+        self.reason = reason
+        self.detail = detail
+
+
 @dataclass(frozen=True)
 class DeliveryOutcome:
     kind: OutcomeKind

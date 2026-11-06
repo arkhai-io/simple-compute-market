@@ -3,9 +3,10 @@
 ``drive`` reconciles what the deal's records say before it acts and is safe to
 repeat: a lost acknowledgement at any step is recovered by repeating that step
 against the same resource, never by placing another. Its order is the
-Agreement window, commit, the future-start wait, dispatch and readiness.
-The caller serializes drives of one deal, as each domain's claim or lock
-already does.
+Agreement window, commit, the future-start wait, dispatch, readiness,
+activation, billing start, availability and the domain's continuation; an
+undelivered deal is handed to the end operation instead. The caller serializes
+drives of one deal, as each domain's claim or lock already does.
 
 See openspec/specs/compute-delivery/spec.md.
 """
@@ -15,20 +16,25 @@ from __future__ import annotations
 import base64
 import logging
 import sqlite3
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, TypeVar
 
-from compute_provisioning_contracts import FulfillmentAcceptanceResponse, FulfillmentRequestBody
+from compute_provisioning_contracts import (
+    FulfillmentAcceptanceResponse,
+    FulfillmentRequestBody,
+    LeaseState,
+)
 from market_capacity_publication import CapacityEffects
 from market_core import VersionedEnvelope
 from market_deal_lifecycle.delivery import (
+    ActivatedDeliveryRef,
     DeliveryAuthorization,
     DeliveryEvidence,
     DeliveryPhase,
     ReadyEvidenceRef,
 )
-from market_deal_lifecycle_contracts.models import EvidenceItem
+from market_deal_lifecycle_contracts.models import Accepted, EvidenceItem, Rejected
 from market_deal_servicing import (
     Admission,
     Classification,
@@ -43,23 +49,41 @@ from market_identity import canonical_json
 from market_site_client import SiteCapacityAuthenticationError, SiteCapacityClientError
 from pydantic import ValidationError
 
-from .outcome import DeliveryOutcome, OutcomeKind, RepairReason
+from .outcome import AccessRefused, DeliveryOutcome, OutcomeKind, RepairReason
 from .ports import (
     AcceptedDeal,
     AcceptedHold,
     ComputeDeliveryDomain,
+    ContinuationState,
     DeliveryProgress,
     DeliveryStep,
     ReserveClaim,
     SiteFulfillment,
 )
 from .progress import Progress, ProgressUnreadable, read_progress, recorded_identities
-from .window import AgreementWindow, TimingInvalid, agreement_window, require_committed_window
+from .window import (
+    AgreementWindow,
+    TimingInvalid,
+    agreement_window,
+    require_committed_window,
+    utc_seconds,
+)
 
 logger = logging.getLogger(__name__)
 
 #: Reservation states in which the site holds no capacity for the reservation.
 _RELEASED_STATES = frozenset({"released", "force_released"})
+#: Fulfillment states of a create that has not settled yet.
+_SETTLING_STATES = frozenset({"assigned", "dispatch_pending", "dispatching"})
+#: Fulfillment states in which the dispatched resource never became, or no
+#: longer is, available: its create failed or was abandoned, or it is torn down.
+_UNDELIVERED_STATES = frozenset({
+    "failed", "abandoned", "teardown_dispatch_pending", "tearing_down", "teardown_failed", "torn_down",
+})
+#: Lease states a refused activation is explained by: an end claimed the lease.
+_ENDING_LEASE_STATES = frozenset({LeaseState.RELEASING, LeaseState.RELEASED})
+
+T = TypeVar("T")
 
 
 def _site_refused(exc: SiteCapacityClientError) -> bool:
@@ -84,19 +108,36 @@ class _Deal:
     def site_id(self) -> str:
         return self.accepted.binding.site_id
 
-    def evidence(self, phase: DeliveryPhase) -> DeliveryEvidence:
+    def evidence(self, phase: DeliveryPhase, ready: ReadyEvidenceRef | None = None) -> DeliveryEvidence:
         """The evidence a phase is authorized on: only what is fixed before it starts.
 
         End service journals an authorization under its phase and admission
         revision, and refuses a retry at the same revision whose evidence
         differs. So commit, which may place the reservation, binds only the
-        commitment, and dispatch adds the reservation it dispatches.
+        commitment; dispatch adds the reservation it dispatches; billing start
+        and disclosure bind the whole delivered bundle, the same one billing
+        start journals.
         """
-        dispatching = phase is not DeliveryPhase.COMMIT
+        if phase is DeliveryPhase.COMMIT:
+            return DeliveryEvidence(
+                negotiation_id=self.negotiation_id, commitment_ref=self.record.commitment_ref,
+            )
+        if phase is DeliveryPhase.DISPATCH:
+            return DeliveryEvidence(
+                negotiation_id=self.negotiation_id, commitment_ref=self.record.commitment_ref,
+                reservation_ref=self.progress.capacity_reservation_id,
+            )
+        reservation_id = self.progress.capacity_reservation_id
+        activated_at = self.progress.activated_at
+        assert reservation_id is not None and activated_at is not None
         return DeliveryEvidence(
             negotiation_id=self.negotiation_id,
             commitment_ref=self.record.commitment_ref,
-            reservation_ref=self.progress.capacity_reservation_id if dispatching else None,
+            reservation_ref=reservation_id,
+            fulfillment_ref=self.progress.fulfillment_id,
+            # The reservation identity is the activation's stable reference.
+            activated_delivery=ActivatedDeliveryRef(record_ref=reservation_id, activated_at=activated_at),
+            ready=ready,
         )
 
 
@@ -152,8 +193,9 @@ class ComputeDeliveryPath:
     async def drive(self, negotiation_id: str) -> DeliveryOutcome:
         """Advance one deal as far as it can go now, and report where it stands.
 
-        An exception from a fulfillment call propagates with every step before
-        it recorded, so the next drive resumes there.
+        An exception from a fulfillment or lease read, or from billing start's
+        payment authority, propagates with every step before it recorded, so
+        the next drive resumes there.
         """
         nid = negotiation_id
         snapshot: _Snapshot = await self._transaction(lambda conn: self._snapshot(conn, nid))
@@ -528,11 +570,31 @@ class ComputeDeliveryPath:
     # -- readiness ---------------------------------------------------------
 
     async def _fulfil(self, deal: _Deal) -> DeliveryOutcome:
-        """Poll the recorded fulfillment; never schedule or begin another."""
+        """Carry the recorded fulfillment to availability; never schedule or begin another.
+
+        Activation precedes billing start and availability, and available means
+        readiness, activation, billing start and disclose authorization are all
+        durable, whether or not the buyer ever reads.
+        """
+        if deal.record.available_at is not None:
+            return await self._converge(deal)
+        # A create that never settles must not outlast a due end or the window.
+        if await self._transaction(lambda conn: self._end_due(conn, deal.negotiation_id)):
+            return await self._ended(deal)
         ready = await self._ready(deal)
         if isinstance(ready, DeliveryOutcome):
             return ready
-        return self._outcome(OutcomeKind.PENDING, deal, detail="fulfillment is ready")
+        if deal.progress.activated_at is None:
+            outcome = await self._activate(deal)
+            if outcome is not None:
+                return outcome
+        outcome = await self._start_billing(deal, ready)
+        if outcome is not None:
+            return outcome
+        outcome = await self._disclose(deal, ready)
+        if outcome is not None:
+            return outcome
+        return await self._converge(deal)
 
     async def _ready(self, deal: _Deal) -> DeliveryOutcome | ReadyEvidenceRef:
         reservation_id = deal.progress.capacity_reservation_id
@@ -541,8 +603,24 @@ class ComputeDeliveryPath:
         status = await self._fulfillment.get_fulfillment_status(
             fulfillment_id, capacity_reservation_id=reservation_id, site_id=deal.site_id,
         )
-        if status.state != "active":
+        if status.state in _SETTLING_STATES:
             return self._outcome(OutcomeKind.PENDING, deal, detail=f"fulfillment is {status.state}")
+        if status.state in _UNDELIVERED_STATES:
+            # Dispatched work is adopted and ended through the end operation,
+            # never replaced.
+            return await self._hand_off(deal, _Failure(
+                kind="provisioning_failure", cause="provisioning_failed",
+                source_ref=f"delivery:fulfillment-failed:{fulfillment_id}",
+                evidence={
+                    "fulfillment_id": fulfillment_id, "state": status.state,
+                    "failure_reason": status.failure_reason, "failure_message": status.failure_message,
+                },
+            ))
+        if status.state != "active":
+            return self._repair_deal(
+                deal, RepairReason.SITE_UNANSWERED, f"fulfillment:{fulfillment_id}",
+                f"provisioning reports an unknown fulfillment state {status.state!r}",
+            )
         result = await self._fulfillment.get_fulfillment_result(
             fulfillment_id, capacity_reservation_id=reservation_id, site_id=deal.site_id,
         )
@@ -559,6 +637,195 @@ class ComputeDeliveryPath:
             )
         return ready
 
+    # -- activation, billing start, availability -----------------------------
+
+    async def _activate(self, deal: _Deal) -> DeliveryOutcome | None:
+        """Activate the lease at its site, after readiness and admission for ``activate``.
+
+        The site writes the instant once from its own clock and keeps the
+        lease's current end, an earlier truncation included; a retry after a
+        lost answer returns the same instant. A site that cannot be asked, does
+        not know the reservation, or answers unsigned has not activated.
+        """
+        nid = deal.negotiation_id
+        reservation_id = deal.progress.capacity_reservation_id
+        assert reservation_id is not None
+        admission: Admission = await self._transaction(
+            lambda conn: self._admit(conn, nid, DeliveryPhase.ACTIVATE)
+        )
+        if admission.status == "ended":
+            return await self._ended(deal)
+        if admission.status == "retry":
+            return self._outcome(OutcomeKind.PENDING, deal, detail="stale admission revision")
+        try:
+            activated = await self._capacity.activate_lease(
+                deal.accepted.binding, capacity_reservation_id=reservation_id,
+            )
+        except SiteCapacityClientError as exc:
+            if _site_refused(exc) and exc.status_code == 409:
+                return await self._activation_refused(deal, reservation_id, exc)
+            return self._repair_deal(
+                deal, RepairReason.SITE_UNANSWERED, f"reservation:{reservation_id}",
+                f"the site has not activated the lease: {exc}",
+            )
+        if activated is None or activated.get("capacity_reservation_id") != reservation_id:
+            return self._repair_deal(
+                deal, RepairReason.SITE_UNANSWERED, f"reservation:{reservation_id}",
+                "the site's activation answer names no activated reservation",
+            )
+        try:
+            activated_at = utc_seconds(activated.get("activated_at_utc"))
+        except TimingInvalid as exc:
+            return self._repair_deal(
+                deal, RepairReason.SITE_UNANSWERED, f"reservation:{reservation_id}",
+                f"the site's activation answer carries no instant: {exc}",
+            )
+        await self._transaction(lambda conn: self._progress.record_activation(conn, nid, activated_at))
+        deal.progress = replace(deal.progress, step=DeliveryStep.ACTIVATED, activated_at=activated_at)
+        return None
+
+    async def _activation_refused(
+        self, deal: _Deal, reservation_id: str, refusal: SiteCapacityClientError,
+    ) -> DeliveryOutcome:
+        """Explain a refused activation from the lease as the site records it."""
+        lease = await self._fulfillment.get_lease(reservation_id, site_id=deal.site_id)
+        if lease.status in _ENDING_LEASE_STATES:
+            return await self._hand_off(deal, _Failure(
+                kind="activation_lapse", cause="activation_lapsed",
+                source_ref=f"delivery:activation-lapsed:{reservation_id}",
+                evidence={
+                    "capacity_reservation_id": reservation_id, "lease_status": lease.status.value,
+                    "refusal": str(refusal),
+                },
+            ))
+        return self._repair_deal(
+            deal, RepairReason.ACTIVATION_UNEXPLAINED, f"lease:{reservation_id}",
+            f"the site refused activation ({refusal}) of a lease it reports {lease.status.value}",
+        )
+
+    async def _start_billing(self, deal: _Deal, ready: ReadyEvidenceRef) -> DeliveryOutcome | None:
+        """Start billing through end service's one intent for the deal.
+
+        End service journals the key and evidence before the payment
+        authority is asked; a retry repeats the same key and adopts the
+        recorded outcome, so the path keeps no billing intent of its own.
+        """
+        nid = deal.negotiation_id
+        key = f"{nid}:billing-start"
+        evidence = deal.evidence(DeliveryPhase.START, ready)
+        activated_at = deal.progress.activated_at
+        assert activated_at is not None
+        if activated_at > self._clock():
+            # The instant is the site's; end service refuses an activation it
+            # sees in its own future, so billing waits for this clock to reach it.
+            return self._outcome(
+                OutcomeKind.PENDING, deal, detail="the site's activation instant is ahead of this clock",
+            )
+        journaled = await self._transaction(lambda conn: [
+            intent for intent in EndSession(conn).intents(nid) if intent.kind == "billing"
+        ])
+        if journaled and journaled[0].payload != evidence.model_dump(mode="json"):
+            return self._repair_deal(
+                deal, RepairReason.DOMAIN_RESULT_INVALID, journaled[0].intent_ref,
+                "the ready evidence differs from what billing start journaled",
+            )
+        blocked = await self._authorized(deal, DeliveryPhase.START, ready=ready)
+        if blocked is not None:
+            return blocked
+        started = await self._end.begin_billing(key, evidence, adapter=deal.accepted.payment)
+        outcome = started.result.outcome
+        if isinstance(outcome, Accepted):
+            return None
+        if isinstance(outcome, Rejected):
+            if await self._transaction(lambda conn: self._end_due(conn, nid)):
+                return await self._ended(deal)
+            intent = await self._transaction(lambda conn: EndSession(conn).intent(started.intent_ref))
+            return self._repair_deal(
+                deal, RepairReason.NO_ACCEPTED_DEAL,
+                started.intent_ref if intent is not None else f"billing:{nid}", outcome.reason,
+            )
+        return self._outcome(OutcomeKind.PENDING, deal, detail=f"billing start is {outcome.status}")
+
+    async def _disclose(self, deal: _Deal, ready: ReadyEvidenceRef) -> DeliveryOutcome | None:
+        """Record the deal available in the disclose authorization's transaction.
+
+        The instant is read before the authorization, so it is no later than
+        the one the authorization admits at: an end due at it would have
+        refused the authorization too, and availability is written whenever the
+        authorization allows.
+        """
+        nid = deal.negotiation_id
+        now = self._clock()
+
+        def record_available(session: EndSession, _: DeliveryAuthorization) -> None:
+            record = session.read(nid)
+            session.available(nid, at=now, expected_revision=record.revision, now=now)
+
+        return await self._authorized(deal, DeliveryPhase.DISCLOSE, ready=ready, apply=record_available)
+
+    async def _converge(self, deal: _Deal) -> DeliveryOutcome:
+        """Converged once the domain's continuation is acknowledged, or it has none."""
+        state = await self._domain.continuation(deal.negotiation_id)
+        if state is ContinuationState.PENDING:
+            return self._outcome(OutcomeKind.AVAILABLE, deal)
+        if state in (ContinuationState.NONE, ContinuationState.ACKNOWLEDGED):
+            return self._outcome(OutcomeKind.CONVERGED, deal)
+        return self._repair_deal(
+            deal, RepairReason.DOMAIN_RESULT_INVALID, f"continuation:{deal.negotiation_id}",
+            f"continuation returned {state!r}",
+        )
+
+    # -- access ------------------------------------------------------------
+
+    async def read_access(
+        self, negotiation_id: str, fetch: Callable[[str, str], Awaitable[T]],
+    ) -> T:
+        """Fetch a deal's access material for its buyer, only while delivery stands.
+
+        The deal must be available, its Agreement started, and admitted for
+        disclosure. ``fetch`` receives the fulfillment and reservation
+        identities and reads provisioning's live result outside any
+        transaction. Admission is asked again afterwards at the revision it
+        first admitted, and at the current one if that changed, so an end due
+        now discards the fetched material while a truncation still in the future
+        does not. No payment snapshot is read. Material returned before an end is not
+        retracted: physical teardown revokes the access it grants.
+        """
+        nid = negotiation_id
+        progress, revision = await self._transaction(lambda conn: self._access_admitted(conn, nid))
+        assert progress.fulfillment_id is not None and progress.capacity_reservation_id is not None
+        material = await fetch(progress.fulfillment_id, progress.capacity_reservation_id)
+        if not await self._transaction(lambda conn: self._disclosure_admitted(conn, nid, revision)):
+            raise AccessRefused("ended", "an end was admitted while access was read")
+        return material
+
+    def _access_admitted(self, conn: sqlite3.Connection, nid: str) -> tuple[Progress, int]:
+        session = EndSession(conn)
+        try:
+            record = session.read(nid)
+            progress = read_progress(self._progress.load(conn, nid))
+        except (KeyError, ValidationError, ProgressUnreadable) as exc:
+            raise AccessRefused("not_available", f"delivery cannot be read: {exc}") from None
+        if record.available_at is None or progress.fulfillment_id is None:
+            raise AccessRefused("not_available", "the deal is not available")
+        now = self._clock()
+        if now < record.start_at:
+            raise AccessRefused("not_started", "the Agreement has not started")
+        admission = session.admit(nid, DeliveryPhase.DISCLOSE, record.revision, now=now)
+        if admission.status != "admitted":
+            raise AccessRefused("ended", "delivery has ended")
+        return progress, admission.revision
+
+    def _disclosure_admitted(self, conn: sqlite3.Connection, nid: str, revision: int) -> bool:
+        # Admitted again at the current instant even when nothing was written,
+        # since an end recorded earlier can fall due while the fetch runs.
+        session = EndSession(conn)
+        now = self._clock()
+        admission = session.admit(nid, DeliveryPhase.DISCLOSE, revision, now=now)
+        if admission.status == "retry":
+            admission = session.admit(nid, DeliveryPhase.DISCLOSE, admission.revision, now=now)
+        return admission.status == "admitted"
+
     # -- authorization and ends ----------------------------------------------
 
     async def _authorized(
@@ -566,6 +833,7 @@ class ComputeDeliveryPath:
         deal: _Deal,
         phase: DeliveryPhase,
         *,
+        ready: ReadyEvidenceRef | None = None,
         apply: Callable[[EndSession, DeliveryAuthorization], None] | None = None,
     ) -> DeliveryOutcome | None:
         """``None`` when end service allows the phase; otherwise where the deal stands.
@@ -578,7 +846,7 @@ class ComputeDeliveryPath:
         nid = deal.negotiation_id
         revision = await self._transaction(lambda conn: EndSession(conn).read(nid).revision)
         authorization = await self._end.authorize_delivery(
-            phase, deal.evidence(phase), adapter=deal.accepted.payment,
+            phase, deal.evidence(phase, ready), adapter=deal.accepted.payment,
             expected_revision=revision, apply=apply,
         )
         if authorization.status == "allow":
@@ -595,6 +863,11 @@ class ComputeDeliveryPath:
         session = EndSession(conn)
         record = session.read(nid)
         return session.admit(nid, record.phase, record.revision, now=self._clock()).status == "ended"
+
+    def _admit(self, conn: sqlite3.Connection, nid: str, phase: DeliveryPhase) -> Admission:
+        session = EndSession(conn)
+        record = session.read(nid)
+        return session.admit(nid, phase, record.revision, now=self._clock())
 
     async def _hand_off(self, deal: _Deal, failure: _Failure) -> DeliveryOutcome:
         """Record an undelivered deal's end with its classified evidence, then end it."""
@@ -665,7 +938,18 @@ class ComputeDeliveryPath:
         repeat under the same key; it never changes that the deal ended.
         """
         nid = deal.negotiation_id
-        selected = await self._transaction(lambda conn: EndSession(conn).selected_end(nid))
+        selected, record = await self._transaction(
+            lambda conn: (EndSession(conn).selected_end(nid), EndSession(conn).read(nid))
+        )
+        if selected is None and record.available_at is None and self._clock() >= record.term_end:
+            # The window elapsed with nothing delivered and no end recorded,
+            # settlement after the Agreement's end included: never-delivered
+            # evidence, with no buyer fault inferred from the lateness.
+            return await self._hand_off(deal, _Failure(
+                kind="non_delivery", cause="window_elapsed",
+                source_ref=f"delivery:window-elapsed:{nid}",
+                evidence={"term_end": record.term_end, "available_at": None},
+            ))
         try:
             await self._end.drive_physical(nid)
         except Exception:
