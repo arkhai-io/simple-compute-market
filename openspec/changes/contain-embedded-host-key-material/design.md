@@ -107,7 +107,11 @@ service, and it is redacted too (10 F3). `check_connectivity_with_inventory`
 passes the `detail` it returns through `redact_ansible_output`, with the generic
 secret fields, since a probe runs no domain's playbook: both the output of
 `ansible -m ping` and the text of an exception running it. The redactor replaces
-only credential-shaped values, so SSH's diagnostic text survives.
+the value of a `password` field, an SSH identity-file argument, and an `sshpass`
+password, and nothing else, so SSH's diagnostic text survives. That is the
+whole of the promise: a probe's inventory names a key only by the path of a
+transient file and carries no domain's variables, so no other secret reaches
+its output (35 F1).
 
 Rejected: forcing `ANSIBLE_LOG_PATH=/dev/null` into every Ansible subprocess,
 which overrides an operator's deliberate configuration; a per-run log removed

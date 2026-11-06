@@ -2,7 +2,7 @@
 
 ### Requirement: Ansible output is kept only redacted unless an operator configures otherwise
 
-The provisioning service's packaged Ansible configuration MUST NOT name a log file. The output of a playbook run MUST be kept only as the job's logs, redacted, and the output of a connectivity check, including the text of an error running it, MUST be returned only redacted in the check's result. An operator whose `ansible_cfg` names a configuration stating a log file receives Ansible's unredacted output there, and the service MUST NOT override that configuration.
+The provisioning service's packaged Ansible configuration MUST NOT name a log file. The output of a playbook run MUST be kept only as the job's logs, redacted, and the output of a connectivity check, including the text of an error running it, MUST be returned only redacted in the check's result: the value of a `password` field, an SSH identity-file argument, and an `sshpass` password are replaced. A probe runs no domain's playbook, and its inventory names a key only by the path of a transient file, so no domain's secret variable reaches its output. An operator whose `ansible_cfg` names a configuration stating a log file receives Ansible's unredacted output there, and the service MUST NOT override that configuration.
 
 #### Scenario: A playbook runs under the packaged configuration
 
@@ -11,7 +11,7 @@ The provisioning service's packaged Ansible configuration MUST NOT name a log fi
 
 #### Scenario: A connectivity check's output carries a secret
 
-- **WHEN** the output of a connectivity check contains a credential-shaped value
+- **WHEN** the output of a connectivity check contains the value of a `password` field, an SSH identity-file argument, or an `sshpass` password
 - **THEN** the check's result carries that output with the value redacted
 
 #### Scenario: An operator configures a log file
