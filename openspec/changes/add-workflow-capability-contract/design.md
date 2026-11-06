@@ -104,7 +104,8 @@ disable = []
 
 [openspec]
 # The default pre-commit's validation and closeout's archive run the CLI through this.
-command = "bunx @fission-ai/openspec@1.14.0"
+# The script runs the pinned @fission-ai/openspec@1.14.0 through bunx, else npx --yes.
+command = "scripts/openspec"
 
 [load]
 # Every step's skill reads these as it starts; the post-compaction hook re-reads them.
@@ -258,9 +259,13 @@ commit one measured figure, and widen archive cleanup's hooks in the engine's ta
 
 A part's `after` names a part declared before it, and a started part follows only
 another started part, since every dispatch starts before any long part runs; the
-configuration's check refuses any other `after`, cycles included (28 F4). Ordering
-the plan topologically was rejected: it would break the declared order CW-g4oz
-promises in order to tolerate an ordering mistake.
+configuration's check refuses any other `after`, cycles included (28 F4). Declared
+order holds within each shape: every started part in declared order, then every
+`run` part in declared order (45 F1); a `run` part declared before a started one is
+accepted and runs after it. Refusing that declaration, so the file's order is always
+the run's, was rejected: it refuses an order the skill keeps without difficulty.
+Ordering the plan topologically was rejected: it would break the order within each
+shape that CW-g4oz promises in order to tolerate an ordering mistake.
 
 Rejected: individual capabilities the skill sequences, which keeps one repository's
 validation in the skill; one engine operation running every part (14 F1), which

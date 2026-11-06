@@ -1243,6 +1243,13 @@ names removed targets or variables.
     step table's `gh auth status` grant to validation and its steps-suite chain,
     and the orchestrating skill's `pull --no-rebase origin dev`, which hold in
     this repository; the step table is the owner's to trim.
+  - Pre-closeout triage (review 45), documents only: 45 F1 — CW-g4oz states the
+    order within each shape (started parts in declared order, then `run` parts in
+    declared order), with a scenario for a `run` part declared before a started
+    one, and D3 records it; the loader and the skill already behave so. 45 F2 —
+    D3's example configuration names `scripts/openspec`, the command
+    `.agents/workflow.toml` holds since the owner chose a runner script over
+    8.5's handoff options.
 
 ## 10. Closeout
 

@@ -165,9 +165,11 @@ configuration.
 
 ### Requirement: CW-g4oz Validation runs the parts the configuration declares
 
-Validation MUST run, in their declared order, the parts the configuration declares
-but those waived: each `run` once, or `start` then `collect`; an owed part once per
-`Owed by validation:` line of a complete section. It MUST run
+Validation MUST run the parts the configuration declares but those waived: each
+`run` once, or `start` then `collect`; an owed part once per `Owed by validation:`
+line of a complete section. It MUST start every started part, in declared order,
+before it runs any `run` part, then run the `run` parts in declared order, each after
+the part its `after` names. It MUST run
 `validation.preflight` first, a failure ending it as environmental, and MUST
 diagnose each failure from the part's declared evidence. It MUST learn the parts from
 `config parts <change>`, never from the configuration's representation: the
@@ -184,6 +186,13 @@ configuration's check MUST refuse any other `after`.
 - **WHEN** one complete section owes `ci.yml` and another owes `docker.yml`
 - **THEN** `config parts` lists the `ci` part twice, as `ci ci.yml` and `ci
   docker.yml`, and validation starts and collects each by that name
+
+#### Scenario: A long part is declared before a dispatched one
+
+- **WHEN** the configuration declares `local`, a `run` part, before `pipeline`, a
+  `start` and `collect` part, and neither names an `after`
+- **THEN** `config parts` lists `local` first, and validation starts `pipeline` before
+  it runs `local`
 
 #### Scenario: A repository has no Helm part
 
