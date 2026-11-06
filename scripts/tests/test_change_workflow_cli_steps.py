@@ -719,7 +719,37 @@ def test_the_root_makefile_runs_the_command_through_the_fragment(
     assert _make_n(target, "CHANGE=X", *variables) == commands
 
 
-@pytest.mark.parametrize("target", ["code-snapshot", "validate-local", "run-ci"])
+def test_the_repository_keeps_no_code_snapshot_target() -> None:
+    """No skill needs a zip of the tracked tree, so the repository defines none."""
+    env = {**{key: value for key, value in os.environ.items()
+              if key not in ("MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKELEVEL")},
+           "LC_ALL": "C"}
+    printed = subprocess.run(["make", "-n", "--no-print-directory", "code-snapshot"],
+                             cwd=Path(__file__).resolve().parents[2], capture_output=True,
+                             text=True, env=env)
+
+    assert printed.returncode != 0
+    assert "No rule to make target 'code-snapshot'" in printed.stderr
+
+
+@pytest.mark.parametrize("target,variables,commands", [
+    ("run-e2e", [], [f"{COMMAND} check round-view", "python3 scripts/ci_evidence.py pipeline"]),
+    ("run-ci", ["WORKFLOW=tests.yml"],
+     [f"{COMMAND} check round-view", 'python3 scripts/ci_evidence.py dispatch "tests.yml"']),
+    ("pre-push", ["REMOTE=origin"], []),
+])
+def test_validations_dispatches_and_the_pre_push_checks_run_the_repositorys_scripts(
+        target: str, variables: list[str], commands: list[str]) -> None:
+    printed = _make_n(target, *variables)
+
+    if commands:
+        assert printed == commands
+    else:
+        assert any("check_public_content.py --pre-push \"origin\"" in line for line in printed)
+        assert any("check_secrets.py --pre-push \"origin\"" in line for line in printed)
+
+
+@pytest.mark.parametrize("target", ["run-e2e", "validate-local", "run-ci"])
 def test_a_repository_target_refuses_while_a_round_view_is_open(target: str) -> None:
     # The repository's own targets that read or publish HEAD keep the fragment's
     # round-view check as their first prerequisite.

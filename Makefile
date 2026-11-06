@@ -21,7 +21,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: dist-bare-metal-buyer
 .PHONY: run-e2e run-ci fetch-e2e-logs
 .PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
-.PHONY: design-review validate-local validate-ci validate-helm validate-parallel check-change install-gitleaks check-public-content check-secrets audit-secrets check-decision-destinations check-history-wording check-version-bumps check-local-imports check-capability-index record-capacity review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
+.PHONY: design-review validate-local validate-ci validate-helm validate-parallel check-change install-gitleaks check-public-content check-secrets audit-secrets check-decision-destinations check-history-wording check-version-bumps check-local-imports check-capability-index record-capacity review-diff last-diff review-wheelhouse-prepare review-locks pre-push
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -908,17 +908,6 @@ check-architecture-change: ## Fail while CHANGE=<name> owns an architecture exce
 architecture-report: ## Write the full architecture report, no exception applied (OUT=<path>, else stdout)
 	@python3 scripts/architecture_report.py $(if $(OUT),--out "$(OUT)")
 
-# `zip -y` stores a symlink as a link. Without it the agent-skill links under
-# .claude/skills and .codex/skills unzip as empty directories, and the snapshot no
-# longer shows which skills each harness loads.
-code-snapshot: round-view-closed ## Zip all git-tracked files for sharing (excludes gitignored artifacts).
-	@mkdir -p .snapshot
-	@OUTFILE="$(CURDIR)/.snapshot/$(GIT_NAME)-$(GIT_SUFFIX).zip"; \
-	echo "Creating $$OUTFILE ..."; \
-	git ls-files --recurse-submodules | zip -y -@ "$$OUTFILE"; \
-	SIZE=$$(du -sh "$$OUTFILE" | cut -f1); \
-	echo "Done: $$OUTFILE ($$SIZE)"
-
 # review-diff must capture untracked new files, not only modifications to
 # tracked ones -- a reviewer needs to see everything under review, and
 # `git diff HEAD` alone is silent about paths git has never seen. `git add
@@ -1023,16 +1012,13 @@ validate-helm: round-view-closed ## Validate HEAD on the Helm charts in the chan
 validate-parallel: ## Run two changes' clones' Helm parts at the same moment and report whether each kept to its own namespace, tags, and scenario pod, and what it left in its namespace (CLONES="<clone> <clone>" HELM_CONTEXT=docker-desktop)
 	@python3 scripts/validate_parallel.py --context "$(HELM_CONTEXT)" $(CLONES)
 
-run-e2e: round-view-closed ## Run the E2E GitHub Actions workflow on the current branch.
-	@branch="$$(git branch --show-current)"; \
-	if [ -z "$$branch" ]; then \
-		echo "ERROR: run-e2e requires a checked-out branch." >&2; \
-		exit 1; \
-	fi; \
-	echo "Triggering E2E workflow on branch $$branch..."; \
-	gh workflow run e2e.yml --ref "$$branch"
+# Each dispatch ends its output with the newest run of its workflow on the branch
+# before the dispatch, alone on the last line: the marker validation's collect
+# waits past (fetch-e2e-logs' E2E_AFTER_RUN, validate-ci's CI_AFTER_RUN).
+run-e2e: round-view-closed ## Run the E2E GitHub Actions workflow on the current branch, ending with the newest run of it there before the dispatch
+	@python3 scripts/ci_evidence.py pipeline
 
-run-ci: round-view-closed ## Dispatch a CI workflow validation may dispatch on the current branch, refusing any other, and print the newest run of it there before the dispatch as CI_AFTER_RUN (WORKFLOW=<file>)
+run-ci: round-view-closed ## Dispatch a CI workflow validation may dispatch on the current branch, refusing any other, ending with the newest run of it there before the dispatch (WORKFLOW=<file>)
 	@python3 scripts/ci_evidence.py dispatch "$(WORKFLOW)"
 
 E2E_LOG_DIR ?= $(CURDIR)/.snapshot/e2e-logs
@@ -1071,6 +1057,20 @@ check-public-content: ## Scan staged changes for recognizable private content, a
 	@status=0; \
 	python3 scripts/check_public_content.py --staged || status=1; \
 	python3 scripts/check_secrets.py --staged || status=1; \
+	exit $$status
+
+REMOTE ?=
+
+# Git gives a pre-push hook its ref updates on standard input, which both checks
+# read, so they are read once and given to each; either refuses the push. The
+# updates go on with no newline added: Git runs the hook with no input when every
+# ref is up to date, and a blank line would be read as a malformed update. The
+# repository's Git hook and the workflow's guarded push both run this.
+pre-push: ## Run both public-content checks on what a push would send, as Git runs a pre-push hook: the ref updates on standard input (REMOTE=<remote>)
+	@if [ -z "$(REMOTE)" ]; then echo "ERROR: pre-push needs REMOTE=<remote>" >&2; exit 2; fi; \
+	updates=$$(cat); status=0; \
+	printf '%s' "$$updates" | python3 scripts/check_public_content.py --pre-push "$(REMOTE)" || status=1; \
+	printf '%s' "$$updates" | python3 scripts/check_secrets.py --pre-push "$(REMOTE)" || status=1; \
 	exit $$status
 
 check-secrets: ## Scan staged changes for private keys and provider credentials through the pinned gitleaks (.gitleaks.toml)

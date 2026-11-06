@@ -677,7 +677,7 @@ Implements MCW-r4tx and MCW-k3vy, and D20's repository-side fixes but
 `Makefile`, `scripts/hooks/pre-push`, `scripts/validate_slice.py`,
 `scripts/ci_evidence.py`, and their tests.
 
-- [ ] 6.1 Write `.agents/workflow.toml` as `design.md`'s "The configuration, as this
+- [x] 6.1 Write `.agents/workflow.toml` as `design.md`'s "The configuration, as this
   repository declares it" gives it, with a `models` row for every step of the step
   table and its `[orchestrator]` model and effort as they stand, each field's comment
   saying who uses it (D1, D15, MCW-r4tx). Its `pre-commit` names `make
@@ -689,7 +689,28 @@ Implements MCW-r4tx and MCW-k3vy, and D20's repository-side fixes but
   - Amended in section 1: the file exists from section 1 (see 1.2's note), all of
     the design's listing but `pre-commit` and `pre-push`; this task adds those two,
     once their targets exist, and checks every field's comment names who uses it.
-- [ ] 6.2 Add `make pre-push REMOTE=<remote>`, running both public-content checks
+  - Done: `pre-push` is `make pre-push REMOTE={remote}`, replacing section 4's
+    interim list of the two scripts; `pre-commit` names `make check-repository`,
+    which section 8 adds, so `run pre-commit` fails in this repository until then
+    (no skill runs it before section 7). Each table's comment names the engine
+    operation using its fields and the steps it serves, as the engine holds them
+    now (the hook table, `config load`, `openspec`); each part's comment says what
+    it is, under one naming who runs the parts. Comments name a table's users, not
+    each key's: the design's listing comments by table too. Section 8 adds that
+    `make check-change` runs `run pre-commit` once it does. Evidence (unit, config
+    suite): the file passes its check through `cli.main(["check", "config"])` with
+    every required field, the models of every step and the orchestrator included;
+    MCW-r4tx's hooks as declared; those comments, by table; and
+    MCW-r4tx's scenario, `config parts` for a change whose complete section owes
+    `tests.yml` listing the pipeline, `ci tests.yml`, local, and Helm after local
+    from this repository's own file. `scripts/change-workflow check config` itself
+    was denied this session (no rule allows it until 7.1); the test runs the same
+    check.
+  - Handoff: this checkout is a clone made before clones recorded their landing
+    branch, so its marker has no `base`: `run pre-commit` here (section 7's skills,
+    section 8's `make check-change`) needs `--base dev` until the marker records one,
+    or `{base}` is refused naming `--base`.
+- [x] 6.2 Add `make pre-push REMOTE=<remote>`, running both public-content checks
   (`scripts/check_public_content.py --pre-push` and `scripts/check_secrets.py
   --pre-push`) under Git's hook contract, the ref lines read once from standard input
   and given to each, either refusing; `scripts/hooks/pre-push` runs it with its first
@@ -697,16 +718,54 @@ Implements MCW-r4tx and MCW-k3vy, and D20's repository-side fixes but
   Git repository that the hook and `make pre-push` both refuse a commit adding a
   recognizable private path and pass a clean one, beside
   `scripts/tests/test_check_public_content.py` and `test_check_secrets.py` passing.
-- [ ] 6.3 End `make run-e2e`'s and `make run-ci`'s output with the bare marker their
+  - Done: the target refuses without `REMOTE`; the hook `exec`s `make -s pre-push
+    REMOTE="$1"` from the top level. The updates go on with no newline added, as
+    the hook gave them before: Git runs the hook with no input when every ref is
+    up to date, and a blank line is a malformed update to both checks (found by
+    the fresh-context check). Evidence, library integration in
+    `test_check_public_content.py` (a real Git repository and bare remote, a real
+    `make` running the target's recipe as the root Makefile defines it, the real
+    public-content check): an owner's `git push` running the hook passes a clean
+    commit, the secret scan given the remote and the ref line, and refuses a
+    private path, the secret scan still running; an up-to-date push passes, the
+    scan given no input; `make pre-push` refuses a private path and passes a clean
+    commit, refuses when the secret scan refuses, and needs `REMOTE`. The secret
+    scan is a stand-in there, recording what it read, since it needs the pinned
+    gitleaks; `test_check_secrets.py` runs the real one through the guarded push.
+    `make -n` of the target shows both scripts given the remote
+    (`test_change_workflow_cli_steps.py`).
+- [x] 6.3 End `make run-e2e`'s and `make run-ci`'s output with the bare marker their
   collect waits past — the newest run of the workflow on the branch before the
   dispatch — and fold `make dist-clean` into `make validate-local` and `make
   validate-helm` (D20). Verify: tests in `scripts/tests/test_ci_evidence.py` and
   `test_validate_slice.py` (unit) for the marker as the last line and the wheelhouse
   cleared before a building part; `scripts/tests/test_change_build_and_helm_targets.py`
   passes.
-- [ ] 6.4 Remove `make code-snapshot` and its `.PHONY` entry (D20). Verify: `make -n
+  - Done: `ci_evidence.py pipeline` dispatches `e2e.yml` (`PIPELINE`, not on
+    `DISPATCHABLE`, which `dispatch` still refuses it) and `make run-e2e` runs it;
+    each dispatch names the run as its fetch takes it (`CI_AFTER_RUN=<id>`, the
+    pipeline's `E2E_AFTER_RUN=<id>`) and ends with the ID alone, `0` with no
+    earlier run, after the dispatch; a dispatch refused before or by `gh` ends with
+    no bare ID. The `dist-clean` half was already true: `validate_slice.py` starts its
+    local and Helm parts with `make dist-clean`, which `test_validate_slice.py`
+    asserts as each part's first command; what is left over is the validation
+    skill's own `make dist-clean`, section 7's. Evidence: the marker last for a
+    listed workflow, for none, and for the pipeline, and none after a failed
+    dispatch, through `dispatch`, `dispatch_pipeline`, and `main` (unit, `git` and
+    `gh` faked); `make -n run-e2e` and `make -n run-ci` running those scripts after
+    the round-view check (`test_change_workflow_cli_steps.py`, library
+    integration); `test_validate_slice.py` and `test_change_build_and_helm_targets.py`
+    pass.
+- [x] 6.4 Remove `make code-snapshot` and its `.PHONY` entry (D20). Verify: `make -n
   code-snapshot` fails; `grep -rn code-snapshot Makefile` finds nothing.
-- [ ] 6.5 Verification: `pytest -q scripts/tests/test_change_workflow_config.py
+  - Done, with the scripts suite's code-snapshot test, which tested only that
+    target's zip flags (`git rm`); the round-view test's `code-snapshot` case is
+    `run-e2e`'s. `make -n code-snapshot` was denied this session (no rule allows
+    `make -n`), so a test runs it and asserts make's "No rule to make target"
+    (`test_change_workflow_cli_steps.py`, library integration); Grep finds no
+    `code-snapshot` in the Makefile. The triage skill's sentence (7.4) and the
+    provision row (8.4) still name it.
+- [x] 6.5 Verification: `pytest -q scripts/tests/test_change_workflow_config.py
   scripts/tests/test_check_public_content.py scripts/tests/test_check_secrets.py
   scripts/tests/test_ci_evidence.py scripts/tests/test_validate_slice.py
   scripts/tests/test_change_build_and_helm_targets.py` (unit, and library integration
@@ -714,6 +773,24 @@ Implements MCW-r4tx and MCW-k3vy, and D20's repository-side fixes but
   check-packaging` passes. End-to-end: none in `e2e-tests/`; the round's validation
   runs `run-e2e`, `run-ci`, `validate-local`, and `validate-helm` as changed here, and
   its record is their evidence.
+  - Done: the six suites with the CLI-steps, assumptions, and push suites pass;
+    `make test-release-tooling` (2591), `make test`, and `make check-packaging`
+    pass. End-to-end: confirmed none in `e2e-tests/`; the
+    round's validation, once section 7 moves the skill, runs these targets and is
+    their evidence. `make check-change` fails only on the specification index
+    (10.9).
+  - Handoff to sections 7–9: the engine now reads everything sections 4–6 moved
+    into `.agents/workflow.toml` (models, protected branches, `pre-push`,
+    `post-clone`, inert paths, `load`, evidence), so 7.1's step-table edit can drop
+    `models` and `[orchestrator]`; the loader already ignores them. 7.1 should also
+    allow `Bash(scripts/change-workflow push --remote *)` only if a skill needs
+    it: none does, since clones give their branch an upstream. The merge skill
+    still expects `from <branch>` in its invocation, which `start merge` now
+    supplies from the recorded branch; `make merge` passes it only with `FROM`.
+    The validation skill's `gh run list` and its own `make dist-clean` are what
+    7.3 removes: `run-e2e` and `run-ci` now end with their marker, and both local
+    and Helm parts clear the wheelhouse themselves. This clone's marker records no
+    landing branch (6.1's note).
 
 ## 7. The skills invoke hooks through the engine (D3, D6, D9, D14, D16, D17, D20)
 

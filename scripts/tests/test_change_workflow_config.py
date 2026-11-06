@@ -468,9 +468,78 @@ def test_a_plan_without_parts_is_refused(tmp_path: Path,
     assert "validation needs validation.parts" in capsys.readouterr().err
 
 
-def test_the_repositorys_own_configuration_passes_its_check() -> None:
+def test_the_repositorys_own_configuration_passes_its_check(
+        capsys: pytest.CaptureFixture[str]) -> None:
     loaded = config.load(REPOSITORY)
 
     assert loaded.exists
     assert config.missing(loaded, config.PRE_COMMIT_FUNCTIONAL, config.PARTS,
-                          config.PROTECTED_BRANCHES) == []
+                          config.PROTECTED_BRANCHES, f"models.{config.ORCHESTRATOR}",
+                          *(f"models.{step}" for step in config.STEPS)) == []
+    assert main(["check", "config"], root=REPOSITORY) == 0
+    assert "passes its check" in capsys.readouterr().out
+
+
+def test_the_repository_declares_every_hook() -> None:
+    """MCW-r4tx: this repository relocks after a functional change, runs its own
+    closing checks before every commit, checks packaging and runs every suite
+    before a functional commit, checks packaging and the change's architecture rows
+    before the archive, and runs its pre-push checks as one target."""
+    loaded = config.load(REPOSITORY)
+
+    assert loaded.hook("after-functional-change") == ("make lock",)
+    assert loaded.hook("pre-commit") == (
+        "make check-repository CHANGE={change} CHANGE_BASE={base}",)
+    assert loaded.hook("pre-commit-functional") == ("make check-packaging", "make test")
+    assert loaded.hook("pre-archive") == ("make check-packaging",
+                                          "make check-architecture-change CHANGE={change}")
+    assert loaded.hook("pre-push") == ("make pre-push REMOTE={remote}",)
+    assert loaded.hook("post-clone") == ("make init",)
+
+
+def test_every_table_of_the_repositorys_file_says_who_uses_it() -> None:
+    """Each table of this repository's file has a comment beside it naming the engine
+    operation or the skill that uses its fields; each validation part has one
+    saying what it is, under the comment naming who runs the parts."""
+    text = (REPOSITORY / config.CONFIGURATION).read_text("utf-8")
+    lines = text.splitlines()
+    users = ("Engine", "engine", "change-")
+    assert "for change-validate: validation's parts" in text
+    for index, line in enumerate(lines):
+        if not line.startswith("["):
+            continue
+        above = []
+        for earlier in reversed(lines[:index]):
+            if not earlier.startswith("#"):
+                break
+            above.append(earlier)
+        below = []
+        for later in lines[index + 1:]:
+            if not later.startswith("#"):
+                break
+            below.append(later)
+        if line.startswith("[validation.parts."):
+            assert below, line
+        else:
+            assert any(user in comment for comment in above + below for user in users), line
+
+
+def test_validation_runs_this_repositorys_parts(tmp_path: Path,
+                                               capsys: pytest.CaptureFixture[str]) -> None:
+    """MCW-r4tx: with a complete section owing `tests.yml`, the plan starts the
+    pipeline and the owed CI run, then runs the local part, then the Helm part after
+    it, from this repository's own file."""
+    configured(tmp_path, (REPOSITORY / config.CONFIGURATION).read_text("utf-8"))
+    _change(tmp_path, "## 1. A section\n\n- [x] 1.1 Done.\n  - Owed by validation: "
+                      "`tests.yml`, job `py`, its suite passing.\n")
+
+    assert main(["config", "parts", CHANGE, "--json"], root=tmp_path) == 0
+
+    shown = json.loads(capsys.readouterr().out)
+    assert shown["preflight"] == ["make check-uv-version"]
+    assert [(run["name"], run["shape"], run["after"]) for run in shown["runs"]] == [
+        ("pipeline", "start-collect", None),
+        ("ci tests.yml", "start-collect", None),
+        ("local", "run", None),
+        ("helm", "run", "local"),
+    ]

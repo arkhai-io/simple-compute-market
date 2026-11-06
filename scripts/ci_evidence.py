@@ -9,9 +9,13 @@ the run of the validated commit.
 workflow on `DISPATCHABLE`, and refuses any other, naming the list. Several
 workflows that accept a dispatch publish a release, so a plan naming one must not
 be able to publish from a feature branch; the list is held here rather than in the
-step table because the table binds only unattended runs. Before dispatching it
-prints the newest run of the workflow on the branch, as `CI_AFTER_RUN=<id>`, so the
-fetch that follows waits for a run newer than it.
+step table because the table binds only unattended runs. `pipeline` dispatches the
+end-to-end pipeline, `PIPELINE`, which validation runs on every commit it
+validates. Each reads the newest run of its workflow on the branch before
+dispatching, printed as the fetch that follows takes it (`CI_AFTER_RUN=<id>`, or
+`E2E_AFTER_RUN=<id>` for the pipeline), and ends its output with that ID alone, `0`
+when there is none: the marker the workflow configuration's `collect` waits past,
+which the change workflow's engine keeps from a `start`'s last line.
 
 The rest is the comparison validation's `ci` part makes (`validate_slice.py ci`).
 A workflow may fail on `dev` in jobs no change owes, so a run's conclusion says
@@ -49,8 +53,9 @@ from dataclasses import asdict, dataclass, field
 from typing import Callable, Iterable, Sequence
 
 # The workflows validation may dispatch. None publishes; adding one is the owner's
-# tracked change. `e2e.yml` is validation's pipeline part, dispatched by `make run-e2e`.
+# tracked change. The pipeline is validation's own part, dispatched by `make run-e2e`.
 DISPATCHABLE = ("tests.yml",)
+PIPELINE = "e2e.yml"
 BASELINE_BRANCH = "dev"
 RUN_LIST_LIMIT = 100
 
@@ -154,14 +159,30 @@ def dispatch(workflow: str, *, runner: Runner = subprocess.run,
              echo: Callable[[str], None] = print) -> int:
     """Dispatch a listed workflow on the current branch; the newest run before it."""
     refuse_unlisted(workflow)
+    return _dispatched(workflow, "CI_AFTER_RUN", runner, echo)
+
+
+def dispatch_pipeline(*, runner: Runner = subprocess.run,
+                      echo: Callable[[str], None] = print) -> int:
+    """Dispatch the end-to-end pipeline on the current branch; the newest run before
+    it."""
+    return _dispatched(PIPELINE, "E2E_AFTER_RUN", runner, echo)
+
+
+def _dispatched(workflow: str, variable: str, runner: Runner,
+                echo: Callable[[str], None]) -> int:
+    """Dispatch `workflow` on the current branch, ending with the newest run of it
+    there before the dispatch, alone on the last line; `variable` is what the fetch
+    that waits past it takes it as."""
     branch = _checked(["git", "branch", "--show-current"], runner).strip()
     if not branch:
         raise CIError("a checked-out branch is required: the workflow runs on it")
     after = newest_run(workflow, branch, runner)
     echo(f"Newest {workflow} run on {branch} before the dispatch: {after or 'none'}")
-    echo(f"CI_AFTER_RUN={after}")
+    echo(f"{variable}={after}")
     echo(f"Dispatching {workflow} on {branch}...")
     _checked(["gh", "workflow", "run", workflow, "--ref", branch], runner)
+    echo(str(after))
     return after
 
 
@@ -371,12 +392,18 @@ def main(argv: Sequence[str] | None = None, runner: Runner = subprocess.run) -> 
     dispatching = commands.add_parser(
         "dispatch", help="dispatch a workflow validation may dispatch on the current branch")
     dispatching.add_argument("workflow", help=f"one of: {', '.join(DISPATCHABLE)}")
+    commands.add_parser("pipeline", help=f"dispatch the end-to-end pipeline, {PIPELINE}, on "
+                                         "the current branch")
     args = parser.parse_args(argv)
     try:
-        dispatch(args.workflow.strip(), runner=runner)
+        if args.command == "pipeline":
+            dispatch_pipeline(runner=runner)
+        else:
+            dispatch(args.workflow.strip(), runner=runner)
     except CIError as exc:
         print(f"ci_evidence: {exc}", file=sys.stderr)
-        return 2 if args.workflow.strip() not in DISPATCHABLE else 1
+        return 2 if args.command == "dispatch" and args.workflow.strip() not in DISPATCHABLE \
+            else 1
     return 0
 
 

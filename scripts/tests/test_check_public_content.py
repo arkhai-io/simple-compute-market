@@ -89,6 +89,124 @@ def test_the_check_passes_a_clean_guarded_push(branch: Path) -> None:
     assert remote_head(branch) == git(branch, 'rev-parse', 'HEAD')
 
 
+def _pre_push_target() -> str:
+    """This repository's `make pre-push`, as its Makefile defines it."""
+    text = (ROOT / 'Makefile').read_text('utf-8')
+    start = text.index('REMOTE ?=')
+    return text[start:text.index('\ncheck-secrets:', start)] + '\n'
+
+
+@pytest.fixture
+def hooked(branch: Path) -> Path:
+    """`branch` with this repository's `make pre-push` and Git hook, and, for the
+    secret scan, which needs the pinned gitleaks, a stand-in that keeps what it read
+    and passes."""
+    (branch / 'Makefile').write_text(_pre_push_target(), 'utf-8')
+    (branch / 'scripts/check_secrets.py').write_text(
+        "import sys\nfrom pathlib import Path\n"
+        "Path('.git/secrets-read').write_text(' '.join(sys.argv[1:]) + '|' + sys.stdin.read())\n",
+        'utf-8')
+    hook = branch / '.git/hooks/pre-push'
+    hook.write_text((ROOT / 'scripts/hooks/pre-push').read_text('utf-8'), 'utf-8')
+    hook.chmod(0o755)
+    with (branch / '.git/info/exclude').open('a', encoding='utf-8') as exclude:
+        exclude.write('/Makefile\n')
+    return branch
+
+
+def _without_make_flags() -> dict[str, str]:
+    return {key: value for key, value in os.environ.items()
+            if key not in ('MAKEFLAGS', 'MFLAGS', 'MAKELEVEL', 'MAKEOVERRIDES')}
+
+
+def _git_push(repo: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(['git', 'push', '-q', 'origin', 'feat/change'], cwd=repo,
+                          capture_output=True, text=True, env=_without_make_flags())
+
+
+def _make_pre_push(repo: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+    head = git(repo, 'rev-parse', 'HEAD')
+    ref = 'refs/heads/feat/change'
+    return subprocess.run(['make', '--no-print-directory', '-s', 'pre-push', *arguments],
+                          cwd=repo, input=f'{ref} {head} {ref} {"0" * 40}\n',
+                          capture_output=True, text=True, env=_without_make_flags())
+
+
+def test_the_git_hook_runs_make_pre_push_giving_each_check_the_ref_updates(
+        hooked: Path) -> None:
+    """MCW-k3vy, library integration: an owner's `git push` runs the repository's
+    hook, which runs `make pre-push` with the remote, and each check reads Git's ref
+    updates."""
+    stage(hooked, 'notes\n')
+    git(hooked, 'commit', '-qm', 'notes')
+
+    pushed = _git_push(hooked)
+
+    assert pushed.returncode == 0, pushed.stderr
+    assert remote_head(hooked) == git(hooked, 'rev-parse', 'HEAD')
+    remote, updates = (hooked / '.git/secrets-read').read_text('utf-8').split('|', 1)
+    assert remote == '--pre-push origin'
+    assert updates.startswith(f'refs/heads/feat/change {git(hooked, "rev-parse", "HEAD")} ')
+
+
+def test_the_git_hook_refuses_a_commit_adding_a_private_path(hooked: Path) -> None:
+    stage(hooked, personal_path())
+    git(hooked, 'commit', '-qm', 'notes')
+
+    pushed = _git_push(hooked)
+
+    assert pushed.returncode != 0
+    assert remote_head(hooked) == ''
+    assert 'personal home path' in pushed.stderr
+    assert personal_path() not in pushed.stderr + pushed.stdout
+    # Either refusing, the other still runs.
+    assert (hooked / '.git/secrets-read').is_file()
+
+
+@pytest.mark.parametrize('private', [False, True])
+def test_make_pre_push_refuses_a_private_path_and_passes_a_clean_commit(
+        hooked: Path, private: bool) -> None:
+    stage(hooked, personal_path() if private else 'notes\n')
+    git(hooked, 'commit', '-qm', 'notes')
+
+    ran = _make_pre_push(hooked, 'REMOTE=origin')
+
+    # Make exits 2 whenever its recipe fails.
+    assert (ran.returncode != 0) is private, ran.stderr
+    assert ('personal home path' in ran.stderr) is private
+
+
+def test_make_pre_push_needs_the_remote(hooked: Path) -> None:
+    ran = _make_pre_push(hooked)
+
+    assert ran.returncode != 0
+    assert 'pre-push needs REMOTE=<remote>' in ran.stderr
+
+
+def test_an_up_to_date_push_passes(hooked: Path) -> None:
+    """Git runs the hook with no input when every ref is up to date; no blank line
+    reaches the checks to be read as a malformed update."""
+    assert _git_push(hooked).returncode == 0
+
+    second = _git_push(hooked)
+
+    assert second.returncode == 0, second.stderr
+    assert (hooked / '.git/secrets-read').read_text('utf-8') == '--pre-push origin|'
+
+
+def test_the_secret_scan_refusing_refuses_the_push(hooked: Path) -> None:
+    (hooked / 'scripts/check_secrets.py').write_text(
+        "import sys\nprint('REFUSED: a key', file=sys.stderr)\nsys.exit(1)\n", 'utf-8')
+    stage(hooked, 'notes\n')
+    git(hooked, 'commit', '-qm', 'notes')
+
+    ran = _make_pre_push(hooked, 'REMOTE=origin')
+    pushed = _git_push(hooked)
+
+    assert ran.returncode != 0 and 'REFUSED: a key' in ran.stderr
+    assert pushed.returncode != 0 and remote_head(hooked) == ''
+
+
 @pytest.mark.parametrize('removed_later', [False, True])
 def test_private_content_refuses_the_guarded_push(branch: Path, removed_later: bool) -> None:
     stage(branch, personal_path())
