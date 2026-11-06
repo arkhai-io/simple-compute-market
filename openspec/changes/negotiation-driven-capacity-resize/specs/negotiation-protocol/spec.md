@@ -69,9 +69,11 @@ exit the negotiation.
 ### Requirement: A round may revise the capacity shape
 
 A negotiation round after the first MAY carry a revised capacity shape as a child of
-its `proposal`, in the domain's versioned provision envelope, expressed in the
+`proposal.provision_terms`, in the domain's versioned provision envelope, expressed in the
 family-grouped capability shape the domain's schema validates. A round that carries
-no revised shape is evaluated against the shape most recently agreed. Before pricing
+no revised shape is evaluated against the shape most recently agreed. Effective
+provision terms MUST be durably recorded with each seller quote, and continuation
+and acceptance MUST resume that quote's terms without mutating the opening. Before pricing
 a revised shape the seller MUST evaluate, where its composition provides them,
 admissibility, authoritative feasibility, and commercial feasibility, and MUST report
 each refusal distinctly. A domain that composes no admissibility or feasibility check
