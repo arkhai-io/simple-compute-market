@@ -230,15 +230,6 @@ the reason for each beside the list. The provider-specific rules stay, because
 they match fixed formats that almost never misfire. A later fixture that trips one
 is another entry in the gate's list, never a marker beside the fixture.
 
-The development TLS leaf key is generated during the image build from public
-fixed inputs; only its certificates are committed. The gate has no forward
-key-path or key-material exemption. `.gitleaksignore` baselines only exact
-commit/path/rule/line fingerprints for the published deterministic fixture in
-immutable history. Staging or committing the same block again is refused, as is
-other material at that path. Current-file audits retain the key rule. Pinned
-scanner regressions exercise historical suppression, staged/new refusal and audit
-visibility.
-
 `scripts/tests/test_check_secrets.py` scans the whole tracked tree under the gate
 and asserts it finds nothing, under any rule. A gitleaks release whose new rule the
 tree trips therefore fails that test when the pin moves, rather than at someone's

@@ -164,21 +164,26 @@ Deployment manifests and operator configuration MUST reference the destination p
 
 ### Requirement: Payment credentials stay with their owning process
 
-The Arkhai payments API key MUST reach only its owning buyer or seller process. Outside loopback the payments service origin MUST use HTTPS. Public renderings MUST omit resolved credentials and contain no payment authority, provider, database or worker deployment.
+The Arkhai payments API key MUST reach only its owning buyer or seller process. Outside loopback the payments service origin MUST use HTTPS. Public renderings MUST omit resolved credentials and contain no payment authority, provider, database or worker deployment. The payments lane double is a development fixture, not a payment authority: only the end-to-end lanes and the local release, whose own values enable its subchart, run it, and release values never enable it.
 
 #### Scenario: A non-loopback origin is plain HTTP
 
 - **WHEN** a role's `[Settlement.arkhai_payments]` names an `http://` service origin on a non-loopback host
 - **THEN** its configuration is refused, naming the HTTPS requirement
 
+#### Scenario: A release is rendered from release values
+
+- **WHEN** the umbrella chart is rendered without the local release's values
+- **THEN** it renders no payments double and no other payment authority
+
 ### Requirement: Marketplace deployment config contains consumer data only
 
-Arkhai payment consumers MUST use `[Settlement.arkhai_payments]` for trusted service origin, Ed25519 receipt identity, fee policy, and an environment-variable name for the owner's API key, and `[[Dispute]]` and `[[DisputeCredential]]` entries for the dispute authorities they offer or accept; registry descriptors may recommend authorities.
+Arkhai payment consumers MUST use `[Settlement.arkhai_payments]` for trusted service origin, Ed25519 receipt identity, fee policy, and the owner's API key — a storefront's as `api_key` in its secret overlay, a buyer's as the environment-variable name `api_key_env` its provider reads — and `[[Dispute]]` and `[[DisputeCredential]]` entries for the dispute authorities they offer or accept; registry descriptors may recommend authorities.
 
 #### Scenario: Payments consumer is rendered
 
 - **WHEN** an operator enables Arkhai payments
-- **THEN** only consumer policy and credential references enter marketplace configuration, while the independently operated payments service owns its ledger and provider roles
+- **THEN** only consumer policy and credential references enter marketplace public configuration, a storefront's key reaching it in its secret overlay, while the independently operated payments service owns its ledger and provider roles
 
 ### Requirement: Packaging preserves provider separation
 

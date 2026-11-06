@@ -6,8 +6,6 @@ and standalone infrastructure components: software the market's deployments
 run beside them, which is not itself a market service, depends on no internal
 package, and is meant to move to a repository of its own (see
 [Standalone infrastructure components](#standalone-infrastructure-components)).
-A third kind, [lane collaborators](#lane-collaborators), may depend on internal
-kits to serve their public contracts beside the services a lane tests.
 
 The main purpose of this namespace is to keep operational tooling versioned
 with the code it validates. These tools encode repeatable workflows such as
@@ -167,18 +165,28 @@ specification.
 
 ## Lane collaborators
 
-A lane collaborator is a separately served test peer. It may import the public
-internal kits that own its models and fixture engine; production packages do not
-import it, and the harness remains its driver rather than its counterparty.
+A lane collaborator is a stand-in for a service outside this repository, run by
+the end-to-end lanes and the local Helm release so a scenario can reach the
+service's public interface without an external deployment. Unlike a standalone
+component it may import internal kits — it wraps their engines rather than
+restating them — and unlike a developer tool it is not invoked through
+`scripts/`. Nothing imports it, and it ships only as a development image.
 
 ### `payments-lane-double/`
 
-An HTTPS mirror of the payments service's API over the payments kit's engine,
-with deterministic public development fixtures and TLS. Its suite qualifies the
-once-only surface; it supplies no hosted-ledger, funding or physical-delivery
-evidence. See its [README](payments-lane-double/README.md). From the repository
-root, `make test-payments-lane-double` joins the full test target and CI matrix;
-`make build-payments-lane-double` builds the lane image.
+An HTTPS double of the Arkhai Payments service, mirroring its API over the
+payments kit's engine, with committed public development fixtures and a lane
+CA. Its [README](payments-lane-double/README.md) says what it serves, what its
+results establish and what they do not.
+
+- `make test` (in its directory) runs its unit and library-integration suites
+  and `check-tls`, which regenerates the committed certificates and requires
+  them unchanged.
+- From the repository root, `make test-payments-lane-double` runs its
+  `make test` and is part of `make test` and the Tests workflow's matrix.
+- `make build-payments-lane-double`, part of `make build-dev` and each lane's
+  `build-e2e-*` target, builds `arkhai:payments-lane-double`; it is never
+  pushed.
 
 ## Adding More Tools
 

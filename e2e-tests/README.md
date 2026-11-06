@@ -60,8 +60,8 @@ ACTIVE_PROFILES=staging,staging-secrets
 ### Shared payment-scenario configuration
 
 The payment scenarios — `e2e_credits_payment_deal`, `e2e_bare_metal_payment_deal`
-and `e2e_vm_payment_deal` — read the `PAYMENTS` section from the runner's
-configuration profiles through `tests/e2e/roles/helpers/payments.py`. SERVICE_URL
+and `e2e_vm_payment_deal` — read the `PAYMENTS` section (environment prefix
+`ARKHAI_PAYMENTS__`) through `tests/e2e/roles/helpers/payments.py`. SERVICE_URL
 names the payments target; leave it blank and the scenario reports `blocked` and
 skips. With it set, supply the other four: SERVICE_IDENTITY (public Ed25519
 receipt signer), BUYER_ACCOUNT, BUYER_MARKETPLACE_CREDENTIAL and
@@ -98,9 +98,7 @@ never both. The key is the setting BUYER_API_KEY, never a variable of the
 runner's environment: the harness hands it to each buyer it runs under the name
 API_KEY_ENV gives, to a `market` process in its environment and to an in-process
 payments client as the environment it resolves the key from. An external run
-states BUYER_API_KEY in a secret profile. A missing, blank or unusable token fails
-by setting name before readiness or marketplace mutations; development
-authentication is the explicit no-token case.
+states BUYER_API_KEY in a secret profile.
 
 An unreachable or unready external `/health` also reports `blocked` and skips.
 The readiness probe disables environment proxies and trusts the CA_BUNDLE_PATH
@@ -234,10 +232,9 @@ a real guest or SSH access.
 
 The commit and servicing stages (1–2) run against the VM lane's payments double.
 The lane's two registries recommend a dispute authority under `.invalid` that can
-never answer, and Bob's lane configuration
-(`domains/vms/storefront/storefront.bob.lane.toml`) holds an identity-bound
-`[[DisputeCredential]]` for it, whose `api_key` is a labelled public development
-value in Bob's mounted secret overlay. With a usable credential the servicing stage reads the
+never answer, and Bob's secret overlay
+(`dev-env/identities/bob.storefront.secrets.toml`) holds an identity-bound
+`[[DisputeCredential]]` for it, whose `api_key` is a public development value. With a usable credential the servicing stage reads the
 deal's authority view `running`; without one it reads `repair_required`. Bob's
 storefront logs "VM respondent discovery awaits recovery" at ERROR on every
 servicing cycle while that authority cannot be reached, which is expected in the
@@ -251,9 +248,9 @@ authorities, set MEDIATION.SERVICE_URL to the mediation authority's URL — the
 stages reach the authority the registries recommend, and the setting states that
 one accepting cases is there — configure exact signed-registry
 recommendations, seller recommendation consent and an identity-bound
-`[[DisputeCredential]]` for the accepted mediation authority. The storefront's
-secret overlay supplies its `api_key`; role composition resolves it and passes
-the token to the mediation client. A running authority without a usable party credential is not enough.
+`[[DisputeCredential]]` for the accepted mediation authority. State it whole in
+the storefront's secret overlay, its `api_key` the seller's bearer credential.
+A running authority without a usable party credential is not enough.
 Development-auth adapters belong to the disposable authority setup, not SCM.
 Before pytest, check Compose health, payment health from host/seller/buyer,
 mediation health and an authenticated publication using

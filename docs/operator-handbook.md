@@ -388,51 +388,108 @@ storefront publishes from a declaration is in the
 
 ## Payments access
 
-Supply the storefront payments service policy and receipt identity in public
-configuration. Put `[Settlement.arkhai_payments].api_key` and any
-`[[DisputeCredential]].api_key` in its existing runtime Secret's
-`storefront.secrets.toml`; do not place tokens in chart values, public `config`
-or named pod variables. Buyer credential providers may use `api_key_env`.
+A storefront settling in `arkhai.payments.v1` needs three things from its
+deployment, beside `[Settlement.arkhai_payments]` in its public `config`: its
+payments key, the CA its payments service's certificate chains to when that is
+not a public one, and a way to prove the two work together. How the storefront
+resolves them is in `DEPLOYMENT_AND_CONFIG.md`,
+["Settlement consumer configuration and cutover"](development/DEPLOYMENT_AND_CONFIG.md#settlement-consumer-configuration-and-cutover).
 
-For a service using a deployment-specific CA, set the storefront's `caBundle`
-option (`configMapName` or `secretName`, plus `key`). The chart mounts the PEM
-and derives `Settlement.arkhai_payments.ca_bundle_path`; a conflicting stated
-path fails rendering. With no option, the chart adds no mount or setting.
-Trust stays local to the payments client; do not set process `SSL_CERT_FILE`.
+**The key goes in the runtime Secret's overlay.** State it as
+`[Settlement.arkhai_payments] api_key` in the `storefront.secrets.toml` key of the
+Secret the agent's `secret.secretName` names (`secret.secretName` at the top level
+of the bare-metal chart), beside the wallet key:
 
-Run the role CLI inside its configured container:
-`market-storefront check-payments --account <seller-account>` or
-`bare-metal-storefront check-payments --account <seller-account>`; the API-credit
-role offers the same subcommand. Success is one JSON `ok` outcome and exit 0.
-Failures name configuration, credential, transport or the service refusal without
-printing credentials. A malformed or unreadable CA is a configuration failure.
+```toml
+[Settlement.arkhai_payments]
+api_key = "<the seller's payments API key>"
+```
 
-Set `tests.paymentsAccount` on the agent (VM) or chart (bare metal) to render the
-payments-check hook. Run `helm test <release> --filter name=<hook-name> --logs`
-and verify that pod's own exit 0 and `ok` JSON: a filter matching nothing proves
-nothing. The hook uses the Deployment's image, configuration, Secret, signer
-and CA, with no storefront PVC or network-overlay privileges. It proves access,
-not funding, a paid rental or financial reconciliation.
+No chart value carries the key, and the values schema refuses `api_key`,
+`api_key_env`, and any `[[DisputeCredential]]` entry in public `config`; a
+dispute credential the storefront needs goes whole in the same overlay. A Secret
+written without the key still deploys: the storefront reports its payments
+readiness blocked by `arkhai_payments.api_key_missing`.
 
-Local Helm values enable one payments double per namespace, provision its public
-seller token and CA out of band, and exercise these same deployment-facing
-interfaces without development authentication. Those fixtures must never be
-used as production credentials or deployed as evidence of hosted payments.
+**A private CA is a ConfigMap the deployment supplies.** Put the PEM bundle in a
+ConfigMap key, or a Secret key, and name it with the agent's `caBundle`:
+
+```yaml
+caBundle:
+  configMapName: payments-ca-bundle   # or secretName, never both
+  key: ca-bundle.pem
+```
+
+The chart mounts it and sets `[Settlement.arkhai_payments].ca_bundle_path` to the
+mounted file; a `config` stating another path, or stating no payments section, is
+refused at render. Only the payments client trusts the bundle. The chart has no
+default and creates no ConfigMap: a pod naming a missing one never starts. A
+service with a publicly trusted certificate needs no `caBundle`.
+
+**Prove it with `check-payments`.** Set the agent's `tests.paymentsAccount` to the
+seller's payee account, and `helm test <release>` runs the agent's
+`<agent>-payments-check` pod: `market-storefront check-payments --account
+<account>` (`bare-metal-storefront check-payments` for the bare-metal chart) from
+the storefront's own image, configuration, overlay, credential and CA mount. Rerun
+it after any change to the key, the CA or `service_url`. When the exact conditions
+of the running pod matter, run the same command in it:
+
+```console
+kubectl exec deploy/<storefront deployment> -- market-storefront check-payments --account <payee account>
+```
+
+It prints one JSON line and exits 0 when the read succeeded:
+
+| `step` | What failed | Look at |
+|---|---|---|
+| `configuration` | the section is absent, invalid or disabled, names no `service_url` or no key, or its CA bundle cannot be loaded | `config`, the overlay, the `caBundle` source |
+| `credential` | the variable a buyer-style `api_key_env` names is unset or empty | the overlay: a storefront states `api_key` |
+| `transport` | the service could not be reached over a trusted connection, or answered outside its contract | `service_url`, the network path, the CA bundle |
+| `refused` | the service refused the read; `code` is its error code | the key, and that `--account` is the key's own account |
+
+The line never contains the key.
 
 ## Registry secret profile
 
-The registry renders ordinary values into `config-production.env`. Supply secret
-settings in an existing Secret's `config-<profile>.env` key and name both
-`secretProfile.secretName` and `secretProfile.profile`; the chart mounts it beside
-the rendered profile and appends its profile name after `production`. Only
-`CONFIG_DIRECTORY` and `ACTIVE_PROFILES` are application settings in the pod's
-environment. The signing credential retains its separate identity projection.
+The registry chart takes the registry's secret settings — the bootstrap key
+`REGISTRY_BOOTSTRAP_API_KEY`, which seeds one write-scoped key when the key table
+is empty, and the administrator key `REGISTRY_ADMIN_API_KEY` — from a Secret
+holding a profile env file, named by `secretProfile`. It mounts the file beside the
+profile it renders from its values and appends its profile to `ACTIVE_PROFILES`,
+so a setting the file states overrides the rendered one
+(["Registry descriptor configuration"](development/DEPLOYMENT_AND_CONFIG.md#registry-descriptor-configuration)).
 
-Values `auth.bootstrapKeySecret` and `auth.adminKeySecret` are refused. For an
-upgrade, preserve their intended key values in the Secret profile as
-`REGISTRY_BOOTSTRAP_API_KEY` and `REGISTRY_ADMIN_API_KEY`, respectively,
-remove those retired values and configure `secretProfile`. Do not copy resolved
-secrets into values or the rendered ConfigMap. Validate the chart and the mounted
-profile before activating the registry; retain identity, database and client
-trust pins. A registry profile is a dotenv settings file, not a Dynaconf YAML
-profile, and process environment overrides it.
+A values file naming `auth.bootstrapKeySecret` or `auth.adminKeySecret` is refused
+at render, naming `secretProfile`. To move off them:
+
+1. Create a Secret whose key is `config-<profile>.env`, holding each setting on a
+   dotenv line, with any profile name but `production`, the rendered profile's:
+
+   ```console
+   kubectl create secret generic registry-secret-profile \
+     --from-file=config-secret.env=./config-secret.env
+   ```
+
+   where `config-secret.env` holds
+
+   ```
+   REGISTRY_BOOTSTRAP_API_KEY='<the bootstrap key>'
+   REGISTRY_ADMIN_API_KEY='<the administrator key>'
+   ```
+
+   An External Secrets `ExternalSecret` writing that key into that Secret serves
+   equally.
+2. In the release's values, remove `auth` and name the Secret:
+
+   ```yaml
+   registry:
+     secretProfile:
+       secretName: registry-secret-profile
+       profile: secret
+   ```
+
+3. Upgrade the release. The pod's environment holds only `CONFIG_DIRECTORY` and
+   `ACTIVE_PROFILES`, which reads `production,secret`.
+
+A bootstrap key seeds a key only into an empty table, so moving an existing
+registry changes no key it already holds.

@@ -1,9 +1,13 @@
 """The payments kit's real client against the double's app, in process.
 
-Each test drives the app through ``PaymentsClient`` over an in-process transport,
-so the routes, bodies and error codes are the ones the kit's client sends and
-reads. The clock is injected. The suite claims only the once-only surface:
-approval, attachment, receipts, snapshots, the seller's reverse and the balance.
+The tests drive the app through ``PaymentsClient`` over an in-process transport
+wherever the client can make the call, so the routes, bodies and error codes are
+the ones the kit's client sends and reads. A request the client will not send —
+one without a token, an approval whose Agreement is not the mandate's deal, or a
+body its models refuse — and the mandate read, for which it has no call, are built
+by hand, each with its reason beside it. The clock is injected. The suite claims
+only the once-only surface: approval, attachment, receipts, snapshots, the seller's
+reverse and the balance.
 """
 
 from __future__ import annotations

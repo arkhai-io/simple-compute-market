@@ -424,3 +424,4 @@ def test_public_delivery_settings_are_accepted() -> None:
 
 def test_an_instance_of_an_unshipped_sink_stays_open_when_spelled_correctly() -> None:
     assert _accepts({"enabled": ["pager"], "pager": {"sink": "pager", "anything": 1}})
+
