@@ -5,6 +5,9 @@
 Backend-only implementation evidence, 2026-11-06. No screenshots or visual claim.
 This is not independent acceptance or a deployed end-to-end pipeline result.
 Maintainer review, permanent-document promotion and archival remain pending.
+The branch was rebased onto dev at `b0b389703` before opening PR #349; packaging,
+scoped change checks, the first-use example, and all four primary suites listed
+below were rerun successfully on that rebased tree.
 
 ## First use
 
@@ -62,7 +65,7 @@ with the migrated schema. All passed; legacy content survived and publication
 proof remained null. A downgrade to the retired-column 017 shape followed by
 upgrade to head also passed. The experiment's temporary databases were deleted.
 
-This first exposed base-chain defects, repaired separately in `07c095789`:
+This first exposed base-chain defects, repaired separately in `5fe46dd7a`:
 revision 018 attempted to rename an already-current column on fresh replay, and
 migration-derived schemas lacked listing demands and API-key storage. The repair
 recognizes both supported shape names and adds missing schema without rewriting
@@ -82,8 +85,8 @@ unchanged in this development PR.
 
 ## Limits and next stage
 
-No full-suite run, browser run, external deployment, PostgreSQL run or end-to-end
-pipeline run is claimed. The existing compute lanes cover publication wire
+No full-suite run, standalone type-checker run, browser run, external deployment,
+PostgreSQL run or end-to-end pipeline run is claimed. The existing compute lanes cover publication wire
 compatibility but do not assert retained arbitrary fields or seller-proof reads.
 The closeout plan retains pipeline evidence and post-review documentation
 promotion/archival as explicit unfinished work. Independent verification should
