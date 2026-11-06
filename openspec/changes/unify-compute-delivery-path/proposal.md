@@ -124,25 +124,30 @@ lane deal stages change. API credits is a regression consumer.
 
 - D1 family path, ports and `drive`: `compute-delivery` spec and architecture
   companion; `docs/development/ARCHITECTURE.md` "Family kits" and "Fulfillment";
-  `openspec/specs/fulfillment/architecture.md` (boundary only); the capability index
-  in `openspec/specs/README.md`.
-- D2 additive upgrade: `docs/development/DEPLOYMENT_AND_CONFIG.md`;
-  `openspec/specs/vm-storefront-fulfillment/architecture.md`.
-- D3 bare metal through core's hook: `physical-provisioning` spec and architecture
-  companion.
+  `openspec/specs/fulfillment/architecture.md` "Storefront pull composition"
+  (boundary only); both tables of the capability index in `openspec/specs/README.md`.
+- D2 additive upgrade: `docs/development/DEPLOYMENT_AND_CONFIG.md` "Migrations at
+  startup"; `openspec/specs/vm-storefront-fulfillment/architecture.md` "Evidence and
+  delivery ownership".
+- D3 bare metal through core's hook: `physical-provisioning` spec;
+  `openspec/specs/physical-provisioning/architecture.md` "Bare-metal storefront pull
+  boundary".
 - D4 Agreement window and future-start wait: `compute-delivery` spec and architecture
   companion.
 - D5 live access and credential routes: `compute-delivery`,
   `vm-storefront-fulfillment` and `marketplace-identity` specs;
   `docs/development/ARCHITECTURE.md` "Fulfillment status and results" and
   "Marketplace identity".
-- D6 placement key: `site-capacity` spec and architecture companion;
+- D6 placement key: `site-capacity` spec;
+  `openspec/specs/site-capacity/architecture.md` "Reservation lifecycle";
   `docs/development/ARCHITECTURE.md` "Capacity reservation".
 - D7 no compatibility for a site without activation: `compute-delivery` spec.
 - D8 activation through `CapacityEffects` and refusals through `LeaseView`:
-  `compute-delivery` spec.
+  `compute-delivery` spec; `docs/development/ARCHITECTURE.md` "Capacity reservation"
+  (activation is now called by delivery).
 - D9 billing-start evidence: `compute-delivery` spec; `deal-lifecycle` spec.
-- D10 Alkahest once-only adapter: `openspec/specs/deal-lifecycle/architecture.md`.
+- D10 Alkahest once-only adapter: `openspec/specs/deal-lifecycle/architecture.md`
+  "Package and counterpart boundaries".
 - D11 end hand-off: `compute-delivery` spec, referencing `deal-lifecycle`.
 - D12: no permanent destination — the deltas themselves are merged by the archive.
 - D13: no permanent destination — index rows are planning state.
