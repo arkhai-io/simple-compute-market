@@ -43,7 +43,12 @@ states what the workflow assumes about a repository.
   step.
 - **What ran is recorded.** `scripts/change-workflow config` lists how every field
   resolved, the engine writes each command's closing line, and each run's log line
-  records every hook and command it invoked with its exit status.
+  records every hook and command it invoked through `run` or the guarded push, with
+  its exit status; a clone's bootstrap, which belongs to no step's run, is recorded
+  in its own bootstrap state with the command it resolved to.
+- **Validation's plan comes from the engine.** `config parts <change>` lists the runs
+  of validation's parts in order, an owed part once per owed workflow, each named so
+  its kept marker is its own; `run cleanup <change>` runs every part's cleanup.
 - **Inert paths.** The paths a change to which proves nothing validation would prove
   are configured, replacing the engine's `openspec/` and `docs/`, and they decide
   which pre-commit hooks a commit runs.
@@ -51,8 +56,9 @@ states what the workflow assumes about a repository.
   targets, so its behaviour is unchanged but for the decisions' own effects: a
   documentation-only commit skips the code checks, and a step with no recorded or
   given landing branch refuses instead of assuming `dev`. Its pre-push checks become
-  one make target its Git hook also runs, and the legacy `make code-snapshot` is
-  removed.
+  one make target its Git hook also runs, `make check-change` stays the complete
+  closing check by running the engine's `pre-commit`, whose hook is the new `make
+  check-repository`, and the legacy `make code-snapshot` is removed.
 
 ## Capabilities
 
@@ -89,12 +95,14 @@ states what the workflow assumes about a repository.
 ## Impact
 
 - `scripts/change_workflow/`: a configuration module and its check; the `run`,
-  `config`, `config load`, `check config`, `check change`, and `openspec` subcommands;
+  `config`, `config load`, `config parts`, `check config`, `check change`, and
+  `openspec` subcommands;
   `push`, `clone`, `review`, `find`, `next_step`, `records`, `history`, `hook`,
   `steps`, `harness`, `wrapper`, `log`, and `cli`, where constants become fields or
   derivations.
 - `.agents/workflow.toml`, new, and this repository's `Makefile`: `pre-push`, the
-  markers of `run-e2e` and `run-ci`, `dist-clean` folded into the parts, and
+  markers of `run-e2e` and `run-ci`, `dist-clean` folded into the parts,
+  `check-repository` added and `check-change` running the engine's `pre-commit`, and
   `code-snapshot` removed; `scripts/hooks/pre-push`.
 - `.agents/skills/change-*/SKILL.md`, which invoke hooks, `openspec`, and `config
   load` instead of this repository's targets and documents.
@@ -110,9 +118,10 @@ As `openspec/README.md`, "Change documentation requirements", and CW-c2tw requir
 
 | Interface | Change | Compatible |
 |---|---|---|
-| `run`, `config`, `config load`, `check config`, `check change`, `openspec` | new subcommands | yes |
+| `run` (with `run cleanup` and `--owed`), `config`, `config load`, `config parts`, `check config`, `check change`, `openspec` | new subcommands | yes |
 | `.agents/workflow.toml` | a new public input, versioned by the engine's release | yes, as new |
 | `hooks.pre-commit-functional`, `validation.parts`, `repository.protected-branches`, `models` | roles an adopter must now provide | no: minor while the major version is 0 |
+| `clone-remove` | judges the merge against the recorded landing branch; `--base` for a clone with none recorded | no (minor) for a clone made before it |
 | `find --json`'s `base`; the log line's `invoked` | optional fields added | yes |
 | The step table's `models` and `[orchestrator]` | removed from a provisional schema | allowed |
 | A repository forbidding models (CW-zq4h) | removed | no (minor) |
@@ -152,10 +161,10 @@ file states what the workflow assumes about a repository" in
   and "What an adopting repository provides", what stays fixed in the engine among its
   current limits.
 - D2: CW-b2xr, CW-k9vd; `openspec/specs/change-workflow/README.md`, the hooks.
-- D3: CW-g4oz, CW-zkhs, CW-ikmm; `openspec/specs/change-workflow/README.md`,
+- D3: CW-g4oz, CW-zkhs, CW-ikmm, CW-o6kc; `openspec/specs/change-workflow/README.md`,
   "Validation observes a committed slice"; `market-change-workflow/README.md`,
   "Validation's parts".
-- D4: CW-s3ju, CW-hdxi, CW-59c7; `openspec/specs/change-workflow/README.md`, "A change
+- D4: CW-s3ju, CW-hdxi, CW-59c7, CW-xx5f; `openspec/specs/change-workflow/README.md`, "A change
   is worked in its own clone" and "Pushing is guarded, never repaired".
 - D5: CW-ebmo, CW-zq4h, CW-w2ld; `openspec/specs/change-workflow/README.md`, "Models
   are policy, with no same-vendor fallback"; MCW-y37w removed.
@@ -165,10 +174,11 @@ file states what the workflow assumes about a repository" in
 - D8: CW-v2dq; `openspec/specs/change-workflow/README.md`, the hooks.
 - D9: CW-u4pc, CW-y6mj; `openspec/specs/change-workflow/README.md`, "Restrictions bind
   unattended runs only".
-- D10: CW-x9bt, CW-q5fy; `openspec/specs/change-workflow/README.md`, "Validation
+- D10: CW-x9bt, CW-q5fy, CW-8npg; `openspec/specs/change-workflow/README.md`, "Validation
   observes a committed slice" and "A step run's life".
-- D11: CW-c8lw, CW-i2we; `openspec/specs/change-workflow/README.md`, the hooks;
-  `docs/agents/change-workflow.md`, "Skills".
+- D11: CW-c8lw, CW-i2we, MCW-r4tx; `openspec/specs/change-workflow/README.md`, the
+  hooks; `docs/agents/change-workflow.md`, "Skills" and its description of `make
+  check-change`.
 - D12: CW-t5hz; `openspec/specs/change-workflow/README.md`, the configuration's
   section.
 - D13: CW-w8ne; `openspec/specs/change-workflow/README.md`, the configuration's

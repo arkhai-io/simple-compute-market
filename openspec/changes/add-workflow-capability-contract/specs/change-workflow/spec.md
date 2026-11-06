@@ -145,8 +145,10 @@ reason, under `defaults.disable`. `check change <change>` MUST run them alone.
 A declared command MUST receive the workflow's values as placeholders the engine
 fills in, shell-quoted, before running it with `sh -c` from the repository's root:
 `{change}`, `{base}`, `{remote}` in `pre-push` only, `{owed}` in an owed part only,
-and `{after}` in a `collect` only. A value of the owner's machine MUST reach the
-command through the environment, not the configuration.
+filled from `run`'s `--owed <workflow>`, and `{after}` in a `collect` only. `run` MUST
+refuse `--owed` for a part not owed, and its absence for an owed part. A value of the
+owner's machine MUST reach the command through the environment, not the
+configuration.
 
 #### Scenario: A placeholder is used where it is unavailable
 
@@ -159,7 +161,18 @@ Validation MUST run, in their declared order, the parts the configuration declar
 but those waived: each `run` once, or `start` then `collect`; an owed part once per
 `Owed by validation:` line of a complete section. It MUST run
 `validation.preflight` first, a failure ending it as environmental, and MUST
-diagnose each failure from the part's declared evidence.
+diagnose each failure from the part's declared evidence. It MUST learn the parts from
+`config parts <change>`, never from the configuration's representation: the
+preflight, then each run of a part in declaration order with its shape, the part it
+follows, and its evidence, an owed part once per owed workflow, named by its part and
+that workflow, or once as not owed when no complete section owes it. Which parts are
+waived MUST stay validation's judgement, not the plan's.
+
+#### Scenario: Two sections owe CI workflows
+
+- **WHEN** one complete section owes `ci.yml` and another owes `docker.yml`
+- **THEN** `config parts` lists the `ci` part twice, as `ci ci.yml` and `ci
+  docker.yml`, and validation starts and collects each by that name
 
 #### Scenario: A repository has no Helm part
 
@@ -176,9 +189,17 @@ diagnose each failure from the part's declared evidence.
 
 A declared command MUST promise only its exit status and, for a `start`, a last
 line of standard output naming the marker its `collect` waits past. The engine MUST
-keep that marker for the commit and part, MUST fill `{after}` from it, and MUST end
-each part with a closing line naming the part, the commit, the result, the exit
-status, and the evidence.
+keep that marker for the commit, the part, and an owed part's workflow, a later
+`start` of the same key replacing it, MUST fill `{after}` from it, and MUST end each
+part with a closing line naming the part, its owed workflow, the commit, the result,
+the exit status, and the evidence.
+
+#### Scenario: Two owed runs are collected side by side
+
+- **WHEN** validation starts `ci` for `ci.yml`, which prints `401`, then for
+  `docker.yml`, which prints `402`, and collects both in the background
+- **THEN** the collect of `ci.yml` waits past `401` and the collect of `docker.yml`
+  past `402`
 
 #### Scenario: The pipeline is collected
 
@@ -190,10 +211,18 @@ status, and the evidence.
 ### Requirement: CW-q5fy Each run's log line records what it invoked
 
 The log line of a run MUST record, as `invoked`, each hook, part, and command the run
-invoked through `run`, with the command it resolved to, its exit status, when it
-started, and how long it took. An unattended run's line is the wrapper's, an
-interactive run's the one `record` writes; an invocation outside any session MUST
-NOT be recorded.
+invoked through `run` or the guarded push, with its owed workflow and phase where it
+has them, the command it resolved to, its exit status, when it started, and how long
+it took. An unattended run's line is the wrapper's, an interactive run's the one
+`record` writes; an invocation outside any session MUST NOT be recorded. A clone's
+bootstrap, which belongs to no step's run, MUST be recorded in its bootstrap state
+(CW-8npg).
+
+#### Scenario: A step's push is refused by the pre-push hook
+
+- **WHEN** an unattended validation's guarded push runs `pre-push` and it exits 1
+- **THEN** the run's log line lists `pre-push` with its resolved command and exit
+  status 1
 
 #### Scenario: Validation's Helm part fails
 
@@ -248,7 +277,8 @@ through `openspec.command`, or `openspec` on the path when none is declared; `op
 
 `config` MUST list every field and how it resolved — declared, default, disabled, or
 absent — with the command it resolves to, and `config --json` MUST give the same as
-structured output.
+structured output. `config parts <change>`, and its `--json`, MUST list validation's
+plan for the change (CW-g4oz).
 
 #### Scenario: An optional hook is absent
 
@@ -537,7 +567,8 @@ A clone's bootstrap, the configuration's `post-clone`, MAY run while design proc
 implementation and validation MUST NOT start before it has succeeded, and with no
 `post-clone` it succeeds at once. Its state MUST be recorded so that running,
 succeeded, and failed are told apart, and a failed bootstrap MUST be brought to the
-owner, naming its log, rather than retried by itself.
+owner, naming its log, rather than retried by itself. The state MUST record the
+command the bootstrap resolved to, beside its log and exit status.
 
 #### Scenario: The bootstrap failed
 
@@ -550,8 +581,9 @@ owner, naming its log, rather than retried by itself.
 ### Requirement: CW-ikmm Archive cleanup removes a change's validation resources
 
 Archive cleanup MUST run the `cleanup` of every validation part that declares one,
-and each cleanup MUST succeed when it finds nothing to clean. A tracked file a cleanup
-writes MUST be committed on its own.
+through `run cleanup <change>`, which runs them in declaration order as one list
+(CW-k9vd), and each cleanup MUST succeed when it finds nothing to clean. A tracked
+file a cleanup writes MUST be committed on its own.
 
 #### Scenario: A change's validation left resources
 
@@ -563,6 +595,35 @@ writes MUST be committed on its own.
 - **WHEN** archive cleanup runs a part's cleanup for a change that part never
   validated
 - **THEN** the cleanup succeeds, removing nothing
+
+### Requirement: CW-xx5f A clone is removed only once its work is safe
+
+A clone MUST be removed only on the owner's command. The removal MUST first repeat
+the copy, and MUST proceed only once the clone's records, and the named evidence it
+holds, are in the workspace with identical contents, its branch is merged into the
+branch the change lands on (CW-s3ju) on its upstream's remote, and it holds no commit
+and no change that remote lacks; named evidence the clone does not hold MUST be named
+in the removal's report. A clone with no landing branch recorded MUST be removed only
+with the branch given as an argument.
+
+#### Scenario: The owner removes a clone too early
+
+- **WHEN** the owner asks to remove a clone whose branch is not merged, or whose
+  records are not all in the workspace
+- **THEN** the removal is refused, naming what is missing, and nothing is deleted
+
+#### Scenario: A change landed on another branch
+
+- **WHEN** a change's clone was created from `main`, and its branch is merged into
+  `main` on its upstream's remote but not into `dev`
+- **THEN** the removal proceeds, its branch counted as merged
+
+#### Scenario: A clone recorded no landing branch
+
+- **WHEN** the owner removes a clone made before the engine recorded a landing
+  branch, giving no branch
+- **THEN** the removal refuses, naming the argument that gives the branch, and
+  nothing is deleted
 
 ### Requirement: CW-m4ps An adopting repository provides the workflow's roles
 

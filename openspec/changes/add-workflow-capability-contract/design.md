@@ -85,7 +85,8 @@ inert-paths = ["openspec/", "docs/"]
 # the pre-commit hooks.
 after-functional-change = ["make lock"]
 # Every step that commits, before each commit, after the workflow's default checks.
-pre-commit = "make check-change CHANGE={change} CHANGE_BASE={base}"
+# `make check-change`, the owner's complete closing check, runs `run pre-commit`.
+pre-commit = "make check-repository CHANGE={change} CHANGE_BASE={base}"
 # Also before a commit that changes a path outside `inert-paths`.
 pre-commit-functional = ["make check-packaging", "make test"]
 # change-closeout, once, before the archive.
@@ -132,7 +133,8 @@ collect  = "make fetch-e2e-logs E2E_AFTER_RUN={after}"
 evidence = ".snapshot/e2e-logs/"
 
 [validation.parts.ci]
-# Started once for each `Owed by validation:` line of a complete section.
+# Started once for each `Owed by validation:` line of a complete section, each run
+# named by its workflow (`run ci start <change> --owed <workflow>`).
 owed     = true
 start    = "make run-ci WORKFLOW={owed}"
 collect  = "make validate-ci WORKFLOW={owed} CI_AFTER_RUN={after}"
@@ -220,13 +222,38 @@ environmental. The skill keeps the workflow's rules: push first, start the slow
 parts first, waivers, diagnosis, and the result. What the agent is told about one
 repository's failures is `add-skill-extension-points`' work.
 
-Archive cleanup runs the cleanup of every part that declares one, and a cleanup
-tolerates finding nothing to clean (CW-ikmm), so cleanup reads no field of the
-validation record. Whatever tracked file a cleanup writes, archive cleanup commits
-on its own.
+The skill learns the parts from the engine, never from the file (14 F1):
+`scripts/change-workflow config parts <change> [--json]` prints the preflight, then
+each run of a part in declaration order, with its shape (`run`, or `start` and
+`collect`), the part it comes `after`, and its evidence. An owed part is listed once
+per `Owed by validation:` line of a complete section, the engine reading them from
+`tasks.md`, each run named by its part and that line's workflow (`ci ci.yml`); an owed
+part with no such line is listed `not owed`. With no part declared the step was
+refused before it started (D12). Waivers are not in the plan: whether one has lapsed
+is judged against earlier records' `Parts:` and `Commit:` lines, which stays the
+skill's. "Start the slow parts first" follows from the shape: every `start` is a
+dispatch that returns at once, so the skill dispatches those, then runs the `run`
+parts in order, keeping each `after`. For this repository, with section 3 owing
+`ci.yml`:
+
+```text
+preflight            make check-uv-version
+pipeline             start, collect      evidence .snapshot/e2e-logs/
+ci ci.yml            start, collect      owed by section 3   evidence .snapshot/validation/
+local                run                 evidence .snapshot/validation/
+helm                 run   after local   evidence .snapshot/validation/
+```
+
+Archive cleanup runs the cleanup of every part that declares one, with one call,
+`scripts/change-workflow run cleanup <change>`, which runs them in declaration order
+as one list (D2), so archive cleanup needs no plan. A cleanup tolerates finding
+nothing to clean (CW-ikmm), so cleanup reads no field of the validation record.
+Whatever tracked file a cleanup writes, archive cleanup commits on its own.
 
 Rejected: individual capabilities the skill sequences, which keeps one repository's
-validation in the skill; a top-level `[cleanup]` table, which separates a part's
+validation in the skill; one engine operation running every part (14 F1), which
+would run dispatches and long parts concurrently past a tool call's limits and move
+waivers and retries across the engine's boundary; a top-level `[cleanup]` table, which separates a part's
 cleanup from the part that leaves resources behind; choosing cleanups by the parts
 the latest validation ran, which would make the record's `Parts:` line a new parsed
 field of the public record format.
@@ -241,6 +268,12 @@ for one run. A change worked in place, or started without orchestration, has non
 recorded: its steps take the argument and refuse without one. Running orchestration
 again from another branch does not move it.
 
+Clone removal reads it too (14 F4): a clone is removed only once its branch is
+merged into its recorded landing branch on its upstream's remote, and that remote
+holds every commit of the clone, where removal checked `origin/dev` and `origin`. A
+clone made before the engine recorded a landing branch takes `--base <branch>` at
+removal and refuses without it.
+
 The remote is the branch's upstream unless an argument overrides it. `clone` gives a
 new change branch its landing branch's upstream remote as its upstream
 configuration, so the first push needs no fallback; a branch with neither upstream
@@ -249,7 +282,8 @@ nor argument refuses to push.
 Rejected: a committed `lands-on` value and remote, which P2 rules out; falling back
 to the remote's default branch, which here is `main` while changes land on `dev`;
 falling back to `remote.pushDefault` or the only remote other than `workspace`,
-fallbacks the owner did not want.
+fallbacks the owner did not want; an explicit base at every clone removal (14 F4),
+which can disagree with the base the merge used.
 
 ### D5 — Models are an ordered preference per step, in the configuration
 
@@ -303,7 +337,9 @@ by step, which puts back in the skills the knowledge P1 moves out.
 
 A declared command names the values it needs as placeholders the engine fills in,
 each value shell-quoted, and runs it with `sh -c` from the repository's root:
-`{change}`, `{base}` (D4), `{remote}`, `{after}` (D10), and `{owed}` (D3). The
+`{change}`, `{base}` (D4), `{remote}`, `{after}` (D10), and `{owed}` (D3), filled
+from `run`'s `--owed <workflow>`, which an owed part requires and any other part
+refuses (14 F2). The
 vocabulary is closed and defined per hook: `{remote}` only in `pre-push`, `{owed}`
 only in an owed part, `{after}` only in a `collect`. A placeholder the engine does
 not know, or one not available where it is used, is refused when the configuration
@@ -327,7 +363,7 @@ beside the graph and changed by no repository:
 | `pre-commit` | design, plan, implement, triage, merge, closeout, archive cleanup, review |
 | `pre-archive` | closeout |
 | validation's preflight and parts | validate |
-| a part's cleanup | archive cleanup |
+| `cleanup`, every part's cleanup as one list | archive cleanup |
 
 `pre-push` and `post-clone` are run only by the engine's own `push` and `clone`. A
 skill invokes a hook through `scripts/change-workflow run`. The unattended-run marker
@@ -361,17 +397,24 @@ its last line of standard output is the marker its `collect` waits past. The eng
 passes the command's output through and writes one closing line in a fixed form the
 shipped skills match, naming the hook or part, the commit, the result, the exit
 status, and the evidence directory; it is internal, as the marker is. The engine
-keeps a `start`'s marker in the validation's own state, keyed by the commit and the
-part, and fills `{after}` from it, so the skill passes none. Classifying a failure as
+keeps a `start`'s marker in the validation's own state, keyed by the commit, the
+part, and, for an owed part, its owed workflow (14 F2), so owed runs dispatched side
+by side never share one; a retried `start` replaces its key's marker, so a collect
+always waits past the newest dispatch. It fills `{after}` from it, so the skill
+passes none. Classifying a failure as
 caused by the commit, environmental, or of unknown cause stays the skill's, from the
 evidence (CW-a1nz).
 
-Every invocation is recorded on the run's log line as `invoked`: for each hook or
-part and each command of a list, its name, part and phase, the command it resolved
-to, its exit status, when it started, and how long it took. An unattended run's line
-is the wrapper's; an interactive run's is the one `record` writes, `run` keeping the
+Every invocation through `run` or `push` is recorded on the run's log line as
+`invoked` (14 F5): for each hook or part and each command of a list, its name, part,
+owed workflow, and phase, the command it resolved to, its exit status, when it
+started, and how long it took. An unattended run's line is the wrapper's; an
+interactive run's is the one `record` writes, `run` and `push` keeping the
 invocations by the session's id until then. An invocation outside any session is not
-recorded. The field is optional, so the record set's format does not move. A hook's
+recorded. `post-clone` belongs to no step's run: the orchestrating session starts it
+in the background, and it outlives the call. Its record is the clone's bootstrap
+state (CW-8npg), which holds its log and exit status and gains the command it
+resolved to. The field is optional, so the record set's format does not move. A hook's
 output stays in the run's transcript, which history copies with `reviews/`. With the
 validation record and the evidence directories, the engine's record is the durable
 account of what ran and how it ended, one the agent cannot write.
@@ -380,7 +423,10 @@ Rejected: a structured result file each command writes, which moves part of the
 diagnosis into repository code and asks every adopter to write a format, though a
 later workflow may add it as an optional placeholder; a result line every
 repository's command prints in the workflow's wording, which the engine can write
-itself.
+itself; a marker keyed by commit and part alone, or owed runs started and collected
+one at a time (14 F2), which collide or give up concurrent dispatch; an owning run
+invented for the clone's bootstrap, or `pre-push` left off the pushing run's line
+(14 F5).
 
 ### D11 — Default checks run unless disabled by name
 
@@ -394,16 +440,25 @@ same checks run alone as `scripts/change-workflow check change <change>`.
 `[openspec] command` names how the CLI is run; it defaults to `openspec` on the path.
 The default validation and closeout's archive use it, through `scripts/change-workflow
 openspec <arguments>` (D16). Decision destinations and the spec index stay this
-repository's checks in `check_change.py`, which drops the four the default runs;
-whether they move into the engine is `extract-change-workflow-repository`'s open
-question of what moves. Bootstrapping a repository's first configuration is not this
-change's.
+repository's checks; whether they move into the engine is
+`extract-change-workflow-repository`'s open question of what moves. Bootstrapping a
+repository's first configuration is not this change's.
+
+The owner's closing check stays complete (14 F3). `make check-change CHANGE=<change>`
+runs `scripts/change-workflow run pre-commit <change>`, unrestricted with no
+unattended marker (D9): the four defaults, then the hook. The hook names a new
+repository-only target, `make check-repository`, which is `check_change.py` without
+the four: comment hygiene, documentation citations, the spec index, decision
+destinations, history wording, version bumps, local imports, and the capability
+index. No check runs twice, and nothing recurses.
 
 Rejected: defaults no repository can turn off, since the owner wants removal
 possible when deliberate; a declared hook replacing the default, kept only by listing
 it, which removes a safeguard by omission; a `{default}` token the list must contain,
 the same omission; no engine checks at pre-commit, which leaves each adopter to wire
-them.
+them; `make check-change` trimmed to the repository's checks, with the guide and its
+callers moved to the engine's command (14 F3), which leaves the familiar target
+silently partial.
 
 ### D12 — A field is required or optional
 
@@ -454,9 +509,9 @@ kebab-case, as Git's hook names are; the step table keeps its own keys.
 
 `scripts/change-workflow config` lists every field and how it resolved — declared,
 default, disabled, or absent — with the command it resolves to, and `--json` gives the
-structured form. `config load <step>` prints a step's documents (D6), and `openspec
-<arguments>` runs the configured OpenSpec command (D11), so no skill reads the file's
-internals. The step table's pinned `bunx` and `npx` OpenSpec rules become
+structured form. `config load <step>` prints a step's documents (D6), `config parts
+<change>` validation's plan (D3), and `openspec <arguments>` runs the configured
+OpenSpec command (D11), so no skill reads the file's internals. The step table's pinned `bunx` and `npx` OpenSpec rules become
 `Bash(scripts/change-workflow openspec *)`.
 
 Rejected: listing only in `check config`'s report, which gives a program nothing to
@@ -465,9 +520,10 @@ the file.
 
 ### D17 — The skills invoke hooks; the fragment's targets stay
 
-Every repository target a skill runs itself moves behind `run`: `make check-change`,
+Every repository target a skill runs itself moves behind `run`: `make check-change`
+(the skills run `run pre-commit`, which `make check-change` wraps for the owner),
 `make test`, `make lock`, `make check-packaging`, validation's parts, its preflight,
-the teardown, and the capacity record. The skills keep telling the owner to run the
+the teardown, and the capacity record (`run cleanup`). The skills keep telling the owner to run the
 fragment's targets (`make review`, `make round-view`, and the rest), whose role
 `extract-change-workflow-repository` owns.
 
@@ -486,9 +542,10 @@ omit; the engine's check of the file (D13) holds the rest.
 
 | Interface | Change | Compatible |
 |---|---|---|
-| `run`, `config`, `config load`, `check config`, `check change`, `openspec` | new subcommands | yes |
+| `run` (with `run cleanup` and `--owed`), `config`, `config load`, `config parts`, `check config`, `check change`, `openspec` | new subcommands | yes |
 | `.agents/workflow.toml` | a new public input, versioned by the engine's release | yes, as new |
 | `hooks.pre-commit-functional`, `validation.parts`, `repository.protected-branches`, `models` | roles an adopter must now provide | no: a minor change while the major version is 0; this repository, the only adopter, provides them here |
+| `clone-remove` | judges a merge against the recorded landing branch and upstream remote; `--base` for a clone with none recorded | yes for clones it creates; a clone made before it needs `--base` |
 | `find --json`'s `base`; the log line's `invoked` | optional fields added | yes |
 | The step table loses `models` and `[orchestrator]` | a provisional schema changes | allowed |
 | CW-zq4h's clause letting a repository forbid models | an obligation removed | no (minor) |
@@ -509,28 +566,34 @@ Small, understood fixes that the decisions need, kept in the change
 - `make dist-clean` folds into the parts' own commands.
 - `make code-snapshot`, its triage sentence, and its role and provision rows are
   removed: no skill needs it.
-- `check_change.py` drops the checks the default `pre-commit` runs, and reads its
-  base from `find --json`.
+- `check_change.py` drops the checks the default `pre-commit` runs, reads its base
+  from `find --json`, and becomes `make check-repository`, the `pre-commit` hook's
+  command; `make check-change` runs `scripts/change-workflow run pre-commit` and
+  stays the complete closing check (14 F3).
 
 ### D21 — Implementation cadence
 
 One round, reviewed once, in three sessions:
 
 1. **The configuration contract in the engine:** the loader and its check (D13);
-   `config`, `config load`, `check config`, `check change`, `run`, and `openspec`;
-   hooks and their lists, the defaults and `disable`, the placeholders; the marker
-   naming the step and the engine's hook table (D9); the kept marker, the closing
-   line, and `invoked` (D10).
+   `config`, `config load`, `config parts`, `check config`, `check change`, `run`
+   (with `run cleanup` and `--owed`), and `openspec`; hooks and their lists, the
+   defaults and `disable`, the placeholders; the marker naming the step and the
+   engine's hook table (D9); the kept marker keyed by commit, part, and owed
+   workflow, the closing line, and `invoked`, for `run` and `push` (D10).
 2. **The held values and this repository's file:** each constant replaced by the
    file or a derivation — the protected branches, the remote, `pre-push`, the clone
-   recording its base and setting the upstream, the review base and `find --json`'s
+   recording its base and setting the upstream, clone removal judging the merge
+   against that base and its upstream's remote, `--base` for an older clone, the
+   bootstrap's state recording its command, the review base and `find --json`'s
    `base`, the inert paths, history reading the parts' evidence, the hook's `load`;
    the models moved and the forbidden rule removed; this repository's
    `.agents/workflow.toml` and its Makefile targets (D20). The step table's `models`
    and `[orchestrator]` removal and the deny rules (D14) are `.claude/` edits only the
    owner or the orchestrating session makes.
 3. **The callers:** the skills moved to `run`, `openspec`, and `config load`; the
-   step table's rules (D9), again a `.claude/` edit; `check_change.py`; the guide; and
+   step table's rules (D9), again a `.claude/` edit; `check_change.py` as `make
+   check-repository` and `make check-change` running `run pre-commit`; the guide; and
    the assumptions test and its tables (D18).
 
 ## Open Questions

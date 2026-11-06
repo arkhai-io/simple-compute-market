@@ -2,7 +2,9 @@
 
 ### Requirement: MCW-r4tx This repository's hooks and validation parts
 
-This repository's configuration MUST relock after a functional change; check
+This repository's configuration MUST relock after a functional change; run its own
+closing checks, `make check-repository`, before every commit, while `make
+check-change` runs the workflow's whole `pre-commit` for the owner; check
 packaging and run every suite before a functional commit; check packaging and the
 change's architecture exceptions before the archive; and declare validation's
 pipeline, owed CI, local, and Helm parts, the Helm part after the local one, with a
