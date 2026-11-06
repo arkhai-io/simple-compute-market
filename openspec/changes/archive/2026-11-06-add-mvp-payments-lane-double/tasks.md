@@ -2442,3 +2442,16 @@ were those obsolete expectations; the reconciled suites pass35VM schema,
 13bare-metal schema and94chart render tests. Canonical schema generation and
 packaging pass. Current corrected-source review and validation remain pending;
 1744c3384's complete evidence is retained with its exact scope.
+
+Validation of the final credential-path correction atfa805388a completed:
+Tests42197678637 passed all24jobs/21root test targets; E2E42197679703 passed all
+three lanes with70bare-metal,4credits and153VM passes and only the two designed
+VM mediation skips. All payment stages expected to run and authenticated setup
+checks passed; the native Ansible gate passed. Actual current-chart Helm passed
+14served tests, mounted credential comparison/typing and payments podexit0/ok.
+Only the two affected storefront images were rebuilt canonically; nine exact
+unchanged images were retained, with all11node IDs verified. One temporary image
+archive export failed before Helm; streaming import resolved it without source or
+image changes. Release scaledzero; other namespace replica observations unchanged.
+Both independent review axes report no findings. Hosted funding, accepting
+mediation and physical qualification remain separate.
