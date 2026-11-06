@@ -608,6 +608,8 @@ qualification is claimed.
 
 The dependency checkpoint in `dependency-contracts.md` reconciles the draft with the installed foundation and terms contracts, including the published schema's required, inert once-end partialPeriod. This slice leaves declarations absent in deployed compositions, does not implement seller notice or re-anchoring, and does not claim full qualification or closeout. Maintainer design review remains pending on the stacked PR.
 
+The public projection decision is `arkhai_payments.billing_kind = total | per_period`; setup beside rate stays per_period. `arkhai_payments.period` returns text or the existing typed missing value None, with the existing DSL missing-value rule rather than new presence syntax. `approval_window` is the public rate-preset field; once window remains readable. `PaymentOperation` stores canonical event JSON and exposes a digest, never mutable event state. A supplied journaled billing-start result paired with its operation key can definitively refuse disclosure; otherwise a missing verified start is pending. Neutral `AuthorityView.parts` carries verified rate bounds and pending/final stops. Raw `stop_request` events never end delivery; notice maturity can reuse its original sequence, so watch observes its final per-part record outside the event cursor. These interface details promote with D4/D7 to settlement-servicing and settlement-configuration; no journal owner or continuation is added here.
+
 ## Design promotion record
 
 Destinations are planned, not claims of implemented behaviour.

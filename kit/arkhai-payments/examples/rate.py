@@ -108,17 +108,25 @@ async def main() -> None:
     keys = OperationKeys(stop.negotiation_id, stop.operation_key)
     stopped = await seller.submit(stop, keys, journaled_digest=seller.describe(stop, keys).digest)
     pending = await seller.read()
-    fake.observed_at += 30
+    payer = RatePaymentAdapter(agreement, data, account=PAYER, client_for_owner=fake,
+                              verify_snapshot=pinned_snapshot_verifier(agreement, data, config), clock=lambda: fake.observed_at)
+    fake.observed_at += 1
+    payer_stop = LifecycleCommand(negotiation_id=agreement["negotiation_id"], kind="stop",
+                                  operation_key="payer-protection-stop", payload={"part": "1"})
+    payer_keys = OperationKeys(payer_stop.negotiation_id, payer_stop.operation_key)
+    payer_stopped = await payer.submit(payer_stop, payer_keys,
+                                       journaled_digest=payer.describe(payer_stop, payer_keys).digest)
+    fake.observed_at += 29
     ended = await seller.read()
     print(json.dumps({
         "evidence_class": "fixture", "before_activation": before.status,
         "lost_start_response": first.outcome.status, "same_key_retry": retry.outcome.status,
-        "disclose": disclosed.status, "notice": stopped.status,
+        "disclose": disclosed.status, "notice": stopped.status, "payer_stop": payer_stopped.status,
         "pending": pending.model_dump(mode="json"), "ended": ended.model_dump(mode="json"),
         "mandate": data.to_wire(),
     }, indent=2))
     if (before.status, first.outcome.status, retry.outcome.status, disclosed.status, stopped.status,
-        pending.state, ended.state) != ("allow", "unknown", "accepted", "allow", "accepted", "ending", "ended"):
+        pending.state, ended.state, payer_stopped.status) != ("allow", "unknown", "accepted", "allow", "accepted", "ending", "ended", "accepted"):
         raise RuntimeError("rate first-use outcome differs from the expected library flow")
 
 
