@@ -100,7 +100,7 @@ Files: `provisioning/compute/iac/scripts/native_ansible_gate.sh`; a new
 `provisioning/compute/iac/tests/test_native_gate_runner.py`;
 `provisioning/compute/iac/README.md`.
 
-- [ ] 2.1 Write `provisioning/compute/iac/scripts/native_gate_runner.py`, standard library only (D2). Invoked as
+- [x] 2.1 Write `provisioning/compute/iac/scripts/native_gate_runner.py`, standard library only (D2). Invoked as
   `native_gate_runner.py <tests dir> <module pattern>...`, it discovers the test ids of the
   named modules with `unittest.defaultTestLoader.discover(<dir>, pattern=<module>,
   top_level_dir=<dir>)`, as the gate does now, and runs each id in its own child
@@ -116,7 +116,24 @@ Files: `provisioning/compute/iac/scripts/native_ansible_gate.sh`; a new
   Its module docstring states the invariant: each test runs in its own interpreter so
   no test's cwd, environment, or umask reaches another, and each test's output is printed
   whole.
-- [ ] 2.2 Integration tests, `tests/test_native_gate_runner.py`, running the real runner
+  Done. Beyond the plan: a module that fails to import fails the run, naming it (from
+  the loader's `errors`); a pattern naming no test is checked per pattern, not only as
+  an empty run; and the summary ends `in <seconds>s`, the gate's wall time, so the job
+  log records it. The child puts the tests directory (its cwd) on `sys.path`, since
+  the native modules import one another by name, and runs unbuffered (`-u`) so its
+  stderr and stdout keep their order in the one pipe; its output is decoded with
+  replacement, so a stray byte cannot lose the report. The JSON line's `skipped` is a
+  list of `[test id, reason]`; `failures` also counts unexpected successes (no case
+  covers that). The child exits non-zero on a failure or error, or when it ran no
+  test and skipped none; a skip, including one raised in a class fixture (tested) or a
+  module fixture (by `unittest`'s handling, untested), is the parent's to judge from
+  the JSON line. The parent finds the JSON line by
+  searching back from the end, so output written at interpreter exit does not hide
+  it, and counts a child failed when its status is non-zero, its JSON line is missing,
+  or it reports a failure or error. Only the parent's result loop prints, so blocks
+  never interleave. A pattern named twice runs its tests twice; the gate names each
+  module once.
+- [x] 2.2 Integration tests, `tests/test_native_gate_runner.py`, running the real runner
   against planted `unittest` modules in a temporary directory (D2). Cases: every test
   passing exits 0 and the summary counts them; one failing test exits non-zero and its
   traceback appears inside its own header's block and no other's; a skipped test exits
@@ -129,7 +146,19 @@ Files: `provisioning/compute/iac/scripts/native_ansible_gate.sh`; a new
   Verify: `make test-provisioning-iac` passes with the new cases.
   Owed by validation: `tests.yml`, job `test · test-provisioning-iac` — the new
   `test_native_gate_runner.py` cases run and pass.
-- [ ] 2.3 Make `provisioning/compute/iac/scripts/native_ansible_gate.sh` call the runner (D2): keep its version
+  Done. `make test-provisioning-iac`: 33 passed, 19 skipped (the native tests, with no
+  supported Ansible on this host). The nine runner cases are integration tests running
+  the real runner over planted modules in real child interpreters; they are not
+  native, so they run in the default suite and never skip but for the single-CPU
+  concurrency case. All ran, the concurrency case included (28 CPUs here). Beyond the
+  plan: cases for a module that cannot be imported (named, with its missing import), a
+  skip raised in `setUpClass` (counted a skip), and output written at interpreter exit
+  after the JSON line (the test still passes, the output inside its block). The
+  concurrency case's wait polls the other test's marker every 10 ms against a 60 s
+  bound: a poll on that event, not a duration it waits out, though it is a polling
+  loop. With the runner forced to one worker, the case failed at its bound naming the
+  test that never started, then passed again once restored.
+- [x] 2.3 Make `provisioning/compute/iac/scripts/native_ansible_gate.sh` call the runner (D2): keep its version
   prints and both syntax checks, then replace the inline heredoc with one call of the
   runner beside it, through `${PYTHON:-python3}` from the IaC directory the script
   already changes into, naming the `tests` directory and the four modules
@@ -143,11 +172,34 @@ Files: `provisioning/compute/iac/scripts/native_ansible_gate.sh`; a new
   passes; the compute gate prints 19 test blocks and `native gate: 19 run, 0 failed, 0
   skipped`; record the compute gate's wall time (expected about 70–90 s on four CPUs,
   from 273 s).
-- [ ] 2.4 Verification point: 2.2's integration tests and 2.3's local gate run pass;
+  Done. After `make build-provisioning`, `make test-provisioning-iac-native` passed: the
+  VM IaC gate's 3 tests as before, then the compute gate's 19 blocks, each `passed`,
+  and `native gate: 19 run, 0 failed, 0 skipped in 26.8s`; image syntax gate passed.
+  This host has 28 CPUs, so all 19 ran at once: 26.8 s against 131.9 s serially on the
+  same host (1.3). The four-CPU figure is the pipeline's to record (2.4).
+- [x] 2.4 Verification point: 2.2's integration tests and 2.3's local gate run pass;
   `scripts/change-workflow run pre-commit shorten-the-end-to-end-pipeline` passes.
   End-to-end: the pipeline's `native-ansible-gate` job passes, its log shows the 19
   test blocks and the summary, and it finishes before `e2e-vm`; record its duration.
   Owed by validation: `tests.yml`, job `test · test-provisioning-iac` — as 2.2 states.
+  Done on the section's local evidence: 2.2's cases and 2.3's gate run pass. Pre-commit:
+  `after-functional-change` and `pre-commit-functional` (`make check-packaging`, every
+  suite, `test-provisioning-iac` 33 passed, 19 skipped) passed; `pre-commit` failed
+  only on the citations check's three files sections 3 and 4 create, as in 1.3. A
+  comment in `native_ansible_gate.sh` was reworded after that run;
+  `make check-comment-hygiene` and `make check-history-wording` passed over it.
+  Confirmed: the `Owed by validation` line names the job that runs
+  `make test-provisioning-iac`, which collects `test_native_gate_runner.py`.
+  Handoff: sections 3–5 touch none of this. The VM IaC gate keeps its own serial
+  runner (D2); `domains/vms/provisioning/iac/tests/test_ansible_structure.py` reads that
+  gate's inline Python, so it must not be moved onto this runner without changing the
+  structure test. The pipeline's four-CPU timing of the compute gate is unmeasured
+  until validation; if the admission tests contend there (design's risk), the worker
+  count is the lever.
+  End-to-end scenarios: no `e2e-tests` marker exercises this section; its pipeline
+  evidence is the `native-ansible-gate` job's log (19 blocks, the summary) and its
+  duration against `e2e-vm`'s. Unrun until the round's validation dispatches the
+  pipeline.
 
 ## 3. Buy scenarios step convergence
 
