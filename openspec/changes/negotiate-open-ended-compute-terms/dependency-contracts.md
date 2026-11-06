@@ -81,6 +81,22 @@ ensures disabling new offers does not strand accepted work. This change's fixtur
 qualify publication/acceptance only. No deployed recurring offers are enabled by
 this document, the declaration, or an injected proposed helper.
 
+The publication interface now lives in
+`kit/settlement-runtime/src/market_settlement_runtime/rate_publication.py`:
+`RatePresetHelper.pricing(clause, authorities)` returns `RatePresetPricing`
+(unit-bearing reference `quote`, parsed period, approval window, adjudication,
+`TermContext` and the vendored setup capability). `build(RatePresetRequest)`
+returns a canonical option or `RatePresetRefusal`. The common derivation checks
+the authority against the composition's offered advertisement, derives the
+penalty recommendation/runway and validates lifecycle capabilities before build.
+It then refuses changed mechanism, asset, period, reserve or lifecycle bytes.
+Both compositions expose `rate_preset_helpers` and `delivery_deadline_for_pool`;
+the latter reads site/pool facts, defaulting to no enforced deadline until the
+effective pool-facts port is wired. A raw clause value cannot stand in for it.
+The structured clause's `recurring` request is absent for once publication;
+its payer/payee notices derive the class rather than storing one. Servicing
+selection/declaration inputs still belong to task 3.1 and must gate this seam.
+
 ## Ownership and implementation sequence
 
 Task 2.1 implements the accessor, accepted snapshot retention and reader guard.

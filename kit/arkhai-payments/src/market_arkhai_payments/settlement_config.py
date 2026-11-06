@@ -434,16 +434,16 @@ def arkhai_payments_option_builder(
             dispute_window_seconds=params.dispute_window_seconds,
             case_hold_max_seconds=params.case_hold_max_seconds,
         ),
-        **({"delivery_deadline_seconds": params.delivery_deadline_seconds}
-           if params.delivery_deadline_seconds is not None else {}),
+        **({"delivery_deadline_seconds": resources.get("delivery_deadline_seconds")}
+           if resources.get("compute") and resources.get("delivery_deadline_seconds") is not None else
+           {"delivery_deadline_seconds": params.delivery_deadline_seconds}
+           if not resources.get("compute") and params.delivery_deadline_seconds is not None else {}),
     })
     validate_terms(encode_terms(lifecycle), TermContext(
         mechanism=ARKHAI_PAYMENTS_MECHANISM, has_adapter=True,
         dispute_interfaces=frozenset(resources.get("dispute_interfaces", ())),
         authority=entry.requirements, compute=bool(resources.get("compute", False)),
     ))
-    if resources.get("compute") and lifecycle.delivery_deadline_seconds is None:
-        raise ValueError("compute option requires delivery_deadline_seconds")
 
     rates: list[RateValue] = []
     if clause.rate is not None:

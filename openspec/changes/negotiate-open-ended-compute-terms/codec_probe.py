@@ -51,6 +51,7 @@ def probe():
     built = arkhai_payments_option_builder(config, readiness, {
         "publication_clause": clause, "dispute_authorities": (authority,),
         "dispute_interfaces": frozenset({authority.interface}), "compute": True,
+        "delivery_deadline_seconds": 1200,
     }, "seller")
     option = SettlementOption.model_validate(built["settlement_options"][0])
     assert encode_terms(decode_terms(option.lifecycle)) == option.lifecycle

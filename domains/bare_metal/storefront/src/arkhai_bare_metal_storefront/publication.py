@@ -9,7 +9,7 @@ domain reads them, reads each pool's declarations and region (see
 refreshed, or reopened; listings whose resource is unavailable or withdrawn
 close; listings at a site whose projection is not held or whose generation this
 domain refuses, in a pool whose declarations do not resolve, or in a pool that
-resolves no positive maximum lease duration, are held. A candidate that can
+offers only reserved terms without a positive maximum lease duration, are held. A candidate that can
 publish no settlement option is refused: its open listing closes when the
 storefront's configuration rules out every mechanism its clauses name, and is
 held while any of them is unknown. Every cycle then converges each registry the
@@ -87,6 +87,7 @@ from market_storefront_kit import LifecycleRouteError
 from market_resource_pools_contracts.backing import capacity_backing
 
 from .listing_binding import bare_metal_listing_binding
+from .publication_terms import pool_settlement_clauses
 from .publication_service import (
     BareMetalPublicationHooks,
     RegistryClientFactory,
@@ -210,6 +211,7 @@ class BareMetalPublicationCycle:
         build_payload: PayloadBuilder,
         default_max_duration_seconds: int | None = None,
         default_available_until_utc: str | None = None,
+        default_publication_clauses: Sequence[Any] | None = None,
         enter_stage: Callable[[str], None] = _no_stage,
         derivation: SiteDerivationLog | None = None,
     ) -> None:
@@ -221,6 +223,7 @@ class BareMetalPublicationCycle:
             available_until_utc=default_available_until_utc,
         )
         self._registry = registry
+        self._default_publication_clauses = tuple(default_publication_clauses) if default_publication_clauses is not None else None
         self._site_projections = site_projections
         self._site_ids = tuple(site_ids)
         self._enter_stage = enter_stage
@@ -431,10 +434,28 @@ class BareMetalPublicationCycle:
                     reason="publication_capabilities_ignored",
                 )
         self._report_unpublished_rates(site_id, reading, classification)
-        unpublishable = self._hold_unbounded_pools(site_id, reading)
+        clauses_by_pool: dict[str, Any] = {}
+        for pool in pools:
+            pool_id = str(pool.get("pool_id", ""))
+            override = site_overrides.get(pool_id)
+            try:
+                clauses_by_pool[pool_id] = (
+                    override.clauses if override is not None and override.clauses is not None
+                    else pool_settlement_clauses(pool)
+                )
+                if clauses_by_pool[pool_id] is None:
+                    clauses_by_pool[pool_id] = self._default_publication_clauses
+            except ValueError as exc:
+                self.report.record("hold", site_id=site_id, pool_id=pool_id,
+                                   reason="pool_pricing_unreadable", error=str(exc))
+                self._held_pools.add((site_id, pool_id))
+                held_pools.add(pool_id)
+        unpublishable = self._hold_unbounded_pools(site_id, reading, clauses_by_pool) | held_pools
         for candidate in classification.candidates:
             if candidate["pool_id"] in unpublishable:
                 continue
+            if clauses_by_pool.get(candidate["pool_id"]) is not None:
+                candidate["resolved_clauses"] = clauses_by_pool[candidate["pool_id"]]
             override = site_overrides.get(candidate["pool_id"])
             if override is not None:
                 _apply_override(candidate, override)
@@ -453,8 +474,9 @@ class BareMetalPublicationCycle:
         self,
         site_id: str,
         reading: SitePoolReading,
+        clauses_by_pool: Mapping[str, Any],
     ) -> set[str]:
-        """Hold each admitted pool whose maximum lease duration resolves to nothing.
+        """Hold reserved-only pools whose maximum lease duration resolves to nothing.
 
         A pool's bound is its override's maximum, else its hint, else the
         configured default; one that is absent or not positive leaves its listings nothing to
@@ -466,6 +488,15 @@ class BareMetalPublicationCycle:
             if admission != POOL_ADMITTED:
                 continue
             if reading.capacity_bounds[pool_id].positive_max_duration_seconds is not None:
+                continue
+            clauses = clauses_by_pool.get(pool_id) or ()
+            if any(
+                (clause.get("recurring") if isinstance(clause, Mapping) else getattr(clause, "recurring", None)) is not None
+                for clause in clauses
+            ):
+                # Recurring candidates judge their own finite horizon. Keeping
+                # the pool held here would hide both their refusal and a valid
+                # absolute-only horizon. Reserved options still need a maximum.
                 continue
             unbounded.add(pool_id)
             self._held_pools.add((site_id, pool_id))

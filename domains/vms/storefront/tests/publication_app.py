@@ -19,7 +19,7 @@ from __future__ import annotations
 import contextlib
 from types import SimpleNamespace
 from copy import deepcopy
-from collections.abc import AsyncIterator, Collection, Iterator, Mapping
+from collections.abc import AsyncIterator, Callable, Collection, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -590,6 +590,8 @@ async def publication_app(
     contacts: Mapping[str, Mapping[str, str]] | None = None,
     admissibility_default: Mapping[str, Any] | None = None,
     unreachable_sites: Collection[str] = (),
+    settlement_configuration: Mapping[str, Any] | None = None,
+    settlement_composition_factory: Callable[[Mapping[str, bool]], Any] = SettlementCompositionDouble,
 ) -> AsyncIterator[PublicationApp]:
     """Run the VM storefront app for publication tests.
 
@@ -636,7 +638,8 @@ async def publication_app(
         stack.enter_context(
             replaced_setting(
                 "settlement",
-                contact_settlement(contacts) if contacts is not None else SETTLEMENT,
+                settlement_configuration if settlement_configuration is not None
+                else contact_settlement(contacts) if contacts is not None else SETTLEMENT,
             )
         )
 
@@ -664,7 +667,7 @@ async def publication_app(
         # applies nothing.
         migrate_storefront_database(tmp_path / "storefront.db")
         db = SQLiteClient(db_path=str(tmp_path / "storefront.db"), registry=registry)
-        composition = SettlementCompositionDouble(
+        composition = settlement_composition_factory(
             mechanism_fulfillment
             if mechanism_fulfillment is not None
             else {"alkahest.v1": True, "arkhai.payments.v1": True}
