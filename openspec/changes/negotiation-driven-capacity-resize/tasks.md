@@ -382,6 +382,45 @@ Slice C plan (2026-11-06):
       added to module level unless a verified circular import or a recorded lazy-load
       reason keeps it local. Closeout only confirms both.
 
+### Slice C checkpoint (2026-11-06; 2.12–2.14 and 2.16)
+
+- `8bc8b1f75` records the whole agreed shape in every plan's VM order and
+  derives acceptance holds from the same builder. Escrow and hosted-payment
+  settlement consume that order for delivery facts; legacy plans derive it from
+  accepted provision terms. Published listings stay unchanged. The planner and
+  lease encoder need no change; provisioning already sizes from the committed
+  reservation. No reservation resize was introduced.
+- `cb5c8c83e` fixes a payment consumer found at that boundary: hosted settlement
+  must not compare the monetary Agreement with the basis-point `agreed_price`.
+  The payments kit already verifies that the exact Agreement derives its stored
+  mandate. The existing receipt/delivery regression now exercises different
+  scalar and payment values; mismatched mandates still refuse.
+- Evidence and reproducible first use:
+  `docs/attachments/resize-shape-pricing/index.md`. 122 focused storefront cases
+  and the fixture encounter pass; 52 existing provider-plan cases pass. After the
+  payment repair, all 31 payment/lifecycle/multiplier cases pass. Packaging,
+  all twelve change checks (including strict OpenSpec), comment/import checks,
+  and architecture-exception ownership pass. No typing or deployed e2e result
+  is claimed.
+- Corrected setup: durable `VmMessage` metadata is not a provision payload, so
+  order construction extracts only its decoded shape; capacity composition
+  requires a real `CapacityRuntime`, now composed over the signed site API and
+  real ledger in the regression. These attempts are fixed, not carried failures.
+- **Remaining: 2.15 and post-review closeout.** No stack was started: `docker`
+  is absent here; Podman compose selected an unconfigured mise provider shim.
+  Use the existing VM lane or workflow on a prepared Docker host; extend the
+  shape-priced stage in `e2e-tests/tests/e2e/roles/scenarios/vms/test_listing_shapes.py`
+  to negotiate below the listing, then check reservation and create-job sizing.
+  Its existing stage only checks publication of family rates, not a resized deal.
+  PR #349 remains the registry carrier/seller-proof dependency. The in-process
+  regression is not a substitute for this deployment evidence.
+- Rebase/integration onto current `origin/dev`, final change validation, and the
+  PR remain outstanding at this checkpoint. Preserve promotion/archive until
+  review; do not tick closeout from implementation checks alone. The PR must
+  open with Decisions to review: D-d, D-e, and draining incompatible in-flight
+  negotiations at deploy; cite dependency PR #349. No PR has been opened and no
+  release/deployment or independent acceptance is claimed.
+
 ## 3. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`. This change's implementation predates the closeout task becoming a planning requirement. The parts are recorded here so each carries an explicit disposition rather than an assumed one; confirm and tick each rather than treating the change as closed.
