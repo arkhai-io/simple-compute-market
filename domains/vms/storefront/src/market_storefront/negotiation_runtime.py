@@ -11,8 +11,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from arkhai_vms import DIMENSION_KEYS as _DIMENSION_COMPUTE_KEYS
-from arkhai_vms.capability_shapes import canonical_vm_shape, flatten_vm_shape
+from arkhai_vms.capability_shapes import (
+    canonical_vm_shape,
+    flatten_vm_shape,
+    vm_listing_resource_shape,
+)
 from arkhai_vms.provision_terms import VM_PROVISION_KIND, VM_PROVISION_VERSION
 from core_storefront import (
     StorefrontDomainBinding,
@@ -71,6 +74,7 @@ from market_storefront.lifecycle import trading_pause
 from market_storefront.services.listing_source_check import check_listing_source
 from market_capacity_publication import PublicationBinding
 from market_storefront.services.capacity_client import capacity_binding_for_listing
+from market_storefront.services.negotiation_shapes import check_requested_shape
 from market_storefront.utils.config import (
     chain_address_books,
     get_evm_wallet_address,
@@ -125,14 +129,21 @@ def seller_reference_amount(
     listing: Any,
     duration_seconds: int | None,
     proposal: Mapping[str, Any] | None = None,
+    requested_shape: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> int:
     """The seller's reference amount from the option ``proposal`` selects."""
-    return vm_storefront_round._seller_reference_amount(
-        listing,
-        duration_seconds,
-        default_min_price=_default_min_price(),
-        proposal=proposal,
-    )
+    try:
+        return vm_storefront_round._seller_reference_amount(
+            listing,
+            duration_seconds,
+            default_min_price=_default_min_price(),
+            proposal=proposal,
+            requested_shape=requested_shape,
+        )
+    except ValueError as exc:
+        if str(exc).startswith("shape_price_unavailable:"):
+            raise OfferUnfulfillableError(str(exc)) from exc
+        raise
 
 
 def _default_seller_round_hook(domain: MarketDomainContract) -> SellerRoundHook:
@@ -200,26 +211,10 @@ def _decode_vm_revised_terms(
 
 def _validate_vm_opening(
     _listing: Any,
-    listing_record: Mapping[str, Any],
-    terms: NegotiationTerms,
+    _listing_record: Mapping[str, Any],
+    _terms: NegotiationTerms,
 ) -> None:
-    decoded = terms.decoded
-    if decoded is None:
-        return
-    requested = getattr(decoded, "compute_resource", None)
-    if not requested:
-        return
-    listing_compute = extract_compute_from_order(dict(listing_record))
-    mismatched = {
-        key: {"requested": requested[key], "listing": listing_compute.get(key)}
-        for key in _DIMENSION_COMPUTE_KEYS
-        if requested.get(key) is not None and requested[key] != listing_compute.get(key)
-    }
-    if mismatched:
-        raise OfferUnfulfillableError(
-            f"resource_shape_not_negotiable: {mismatched}",
-            listing_id=str(listing_record.get("listing_id") or "") or None,
-        )
+    """Requested shapes are checked by the round composition before pricing."""
 
 
 def _proposal_wire(proposal: Any) -> dict[str, Any] | None:
@@ -985,20 +980,76 @@ def build_vm_negotiation_runtime(
             binding=capacity_binding,
         )
 
-    async def evaluate(request: RoundRequest) -> RoundEvaluation:
-        policy = seller_round_hook or _default_seller_round_hook(domain)
-        result = await policy(
-            listing=request.listing,
-            history=list(request.history),
-            requested_duration_seconds=request.terms.requested_duration_seconds,
-            listing_source=request.listing_source,
-            **(
-                {"strategy_label": request.strategy_label}
-                if request.strategy_label is not None
-                else {}
-            ),
+    async def prepare_requested_shape(
+        repository: Any,
+        record: Mapping[str, Any],
+        terms: NegotiationTerms,
+        *,
+        partial: bool = False,
+    ) -> tuple[Mapping[str, Mapping[str, Any]] | None, NegotiationTerms]:
+        requested = getattr(terms.decoded, "compute_resource", None)
+        if not requested:
+            return None, terms
+        advertised = extract_compute_from_order(dict(record))
+        # The opening's flat vocabulary permits partial dimensions; grouped
+        # revisions are whole shapes and must never inherit omitted families.
+        if partial:
+            requested = {**advertised, **requested}
+        shape = await check_requested_shape(
+            repository=repository,
+            listing_id=str(record["listing_id"]),
+            listing_resource=advertised,
+            requested_resource=requested,
+            site_projections=site_projections,
         )
-        state = result.intermediate or {}
+        if not record.get("rate_structure") and shape != vm_listing_resource_shape(advertised):
+            raise OfferUnfulfillableError(
+                "shape_commercially_infeasible: flat-priced listing is shape-fixed",
+                listing_id=str(record["listing_id"]),
+            )
+        # Persist the complete effective shape so later rounds do not merge
+        # a partial opening with a republished listing.
+        flat = flatten_vm_shape(shape)
+        wire = dict(terms.wire or {})
+        payload = dict(wire.get("payload", wire))
+        payload["compute_resource"] = {
+            **flat.quantities, **flat.attributes,
+            **({"region": requested["region"]} if requested.get("region") else {}),
+        }
+        wire = {**wire, "payload": payload} if "payload" in wire else payload
+        return shape, _decode_vm_terms(domain, wire)
+
+    async def evaluate(request: RoundRequest) -> RoundEvaluation:
+        shape, terms = await prepare_requested_shape(
+            request.repository, request.listing_record, request.terms,
+            partial=not any(round_.sender == "us" for round_ in request.history),
+        )
+        policy = seller_round_hook or _default_seller_round_hook(domain)
+        try:
+            result = await policy(
+                listing=request.listing_record,
+                history=list(request.history),
+                requested_duration_seconds=terms.requested_duration_seconds,
+                requested_shape=shape,
+                listing_source=request.listing_source,
+                **(
+                    {"strategy_label": request.strategy_label}
+                    if request.strategy_label is not None
+                    else {}
+                ),
+            )
+        except ValueError as exc:
+            if str(exc).startswith("shape_price_unavailable:"):
+                raise OfferUnfulfillableError(str(exc), listing_id=str(request.listing_record["listing_id"])) from exc
+            raise
+        state = {
+            **(result.intermediate or {}),
+            "shape_checks": {
+                "admissibility": "checked" if shape is not None else "not requested",
+                "authoritative_feasibility": "not checked",
+                "commercial_feasibility": "checked" if shape is not None else "not requested",
+            },
+        }
         pinned = state.get("accepted_escrow_proposal")
         return RoundEvaluation(
             our_amount=int(result.our_amount),
@@ -1012,7 +1063,7 @@ def build_vm_negotiation_runtime(
                 else None
             ),
             domain_state=state,
-            agreed_terms=request.terms,
+            agreed_terms=terms,
         )
 
     async def listing_is_paused(repository: Any, listing_id: str) -> bool:
@@ -1037,7 +1088,7 @@ def build_vm_negotiation_runtime(
                 "rate_structure_changed_reopen",
                 listing_id=str(listing_record["listing_id"]),
             )
-        _validate_vm_opening(listing, listing_record, revised_terms or terms)
+        await prepare_requested_shape(repository, listing_record, revised_terms or terms)
 
     async def persist_opening(
         repository: Any,
@@ -1104,7 +1155,13 @@ def build_vm_negotiation_runtime(
             listing
         ),
         reference_amount=lambda _listing, record, terms, scalar, pinned: (
-            seller_reference_amount(record, terms.requested_duration_seconds, pinned)
+            seller_reference_amount(
+                record, terms.requested_duration_seconds, pinned,
+                requested_shape=(
+                    vm_listing_resource_shape(terms.decoded.compute_resource)
+                    if getattr(terms.decoded, "compute_resource", None) else None
+                ),
+            )
             if scalar
             else 0
         ),

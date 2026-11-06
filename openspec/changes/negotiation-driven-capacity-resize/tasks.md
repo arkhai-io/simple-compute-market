@@ -51,7 +51,7 @@ deployment boundary.
       domain sees the decoded revised shape, and carry the shape on `RoundRequest`
       and `RoundEvaluation` so `evaluate_round` and `agreement_terms` receive what
       the round proposed and what was agreed.
-- [ ] 2.4 Compose the VM `evaluate_round` in `design.md`'s order — admissibility,
+- [x] 2.4 Compose the VM `evaluate_round` in `design.md`'s order — admissibility,
       authoritative feasibility, commercial feasibility, pricing — with a distinct
       refusal reason for each, and a stated "not checked" for a check the domain
       does not compose. Implement the commercial feasibility guard here: a
@@ -60,10 +60,11 @@ deployment boundary.
       check is the envelope's predicate. Tests: a categorical mismatch declines
       without pricing; a shape outside the envelope declines before the guard runs.
       Promote "Seller feasibility precedes pricing" with this change's spec delta.
-- [ ] 2.5 Retire `_validate_vm_opening`'s shape-mismatch refusal: a round-0 shape
+- [x] 2.5 Retire `_validate_vm_opening`'s shape-mismatch refusal: a round-0 shape
       differing from the listing is evaluated by the same composition rather than
       rejected. Delete the Section 0 regression tests that assert the refusal.
-- [ ] 2.6 Focused tests: a revised shape is decoded and validated; an unreadable
+- [x] 2.6 Focused tests (existing suites plus the replayable fixture encounter;
+      no new permanent acceptance tests): a revised shape is decoded and validated; an unreadable
       shape is refused at the boundary; each refusal reason surfaces distinctly; a
       round without a revised shape is evaluated against the previously agreed
       shape.
@@ -170,6 +171,70 @@ Continuation checkpoint 2026-11-06 (2.2–2.3; still not deployment-ready):
   No PR, permanent promotion, archive, deployment boundary or package release is
   claimed at this checkpoint. The parallel registry carrier/proof dependency is
   still absent. Preserve the existing 2c boundary and resume from 2.4.
+
+Slice A plan (2026-11-06):
+
+- Resolve the requested shape's quantitative predicate in
+  `services/negotiation_shapes.py` from the listing's durable site/pool, held pool
+  hints, stored VM override, and parsed configured default, using the existing
+  listing-shape/admissibility readers. Fail closed when policy cannot be resolved.
+- Compose admissibility, explicitly uncomposed authoritative requested-shape probe
+  ("not checked"), categorical commercial checks, and pricing in the VM runtime.
+  The existing listing-source confirmation is not a requested-shape probe.
+- Widen the VM seller hook only; evaluate the requested shape through the domain
+  aggregator in the selected asset. Keep absolute base-unit scalar semantics and
+  existing truncation until the 2b deployment boundary. Flat-priced listings stay
+  shape-fixed. Retire the unconditional mismatch guard and its two regressions.
+- Validate existing VM revised-term, seller-hook, reference-price, controller,
+  escrow-normalization and hold suites, plus runtime regression and buyer-selection
+  integration. Record a reproducible first-use packet with policy precedence and
+  refusal-order observations. No new permanent acceptance tests are authorized.
+- Permanent destinations remain the promotion record's negotiation-protocol
+  feasibility/revision requirements; post-review promotion and the existing
+  eleven-part closeout remain at the end of this plan.
+
+Slice A handoff (2026-11-06; 2.4–2.6, still not deployment-ready):
+
+- Done: the VM runtime resolves the advertised shape's quantitative policy from
+  its durable site/pool, held hint, stored override and configured default.
+  Admissibility and categorical commercial checks precede pricing; policy
+  unavailable, inadmissible, commercial and pricing refusals are distinct.
+  The authoritative requested-shape probe is **not checked**; listing-source
+  confirmation is not substituted for it.
+- The VM-specific seller hook receives the effective grouped shape. Its reference
+  prices that shape in the selected asset via the domain aggregator, using the
+  exact advertised/requested price ratio to retain the materialized base-unit
+  scale. Round-zero partial flat requests normalize once; whole grouped revisions
+  remain whole, and a no-revision round resumes the persisted seller-quoted shape.
+  The unconditional shape-change guard and its two old regressions are removed;
+  flat-priced listings remain shape-fixed. New permanent tests were not added.
+- Evidence and runnable first-use setup:
+  `docs/attachments/resize-shape-pricing/index.md` and its `first_use.py`.
+  The prepared target is checkout-owned temporary SQLite, deterministic public
+  development principals, a loaded fake pool projection and injected matching
+  advertised-listing verdict. No secrets, deployed registry/site/chain, or
+  persistent server are prepared. From the root run `make check-packaging`,
+  `make -C domains/vms/storefront reinit`, then
+  `(cd domains/vms/storefront && PYTHONPATH=src:. uv run --frozen --no-sync python ../../../docs/attachments/resize-shape-pricing/first_use.py)`.
+- Validation: 94 existing focused VM and application-integration cases pass,
+  including controller and loopback buyer-selection; 62 runtime cases pass.
+  The encounter observes references 80 → 120 → 120 across opening, revision and
+  no-revision resume, quantitative-before-categorical refusal, zero seller-hook
+  calls for categorical mismatches, and override/hint/default precedence.
+  `make check-packaging` and all 12 `make check-change` checks pass, including
+  comment hygiene, citations and pinned strict OpenSpec validation. No typing,
+  deployed/e2e, or independent story-verification result is claimed.
+- Small repair: `cbe5510dc` skips reference pricing on exit; withdrawing prices
+  cannot trap a buyer in an existing thread. The fixture encounter re-drives it.
+- Restart at **2.7–2.11 as one deployment-boundary slice**. The scalar is still an
+  absolute base-unit amount and retains existing truncation. Do not carry it into
+  payment as basis points piecemeal: audit `_with_agreement`,
+  `_accepted_selection_artifacts`, stage context, core buyer Agreement checks and
+  VM/core duration-bound scaling noted in the earlier handoffs. Use the documented
+  top-level PR #349 rate carrier on `registry-as-published`; do not duplicate its
+  registry storage/proof work. Preserve the rate pin and the 2c artifact/claim
+  boundary. No PR, release, promotion, archive or deployment is claimed here;
+  the existing post-review closeout remains required for the final slice.
 
 ### 2b. The multiplier
 
