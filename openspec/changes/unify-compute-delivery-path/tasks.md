@@ -100,19 +100,66 @@ module in `kit/alkahest/src/market_alkahest/` beside `escrow_verification.py`,
 `kit/alkahest/pyproject.toml` (declare `arkhai-kit-deal-lifecycle` and its contracts
 kit, as `kit/arkhai-payments` does), its lock, and its tests.
 
-- [ ] 2.1 Implement the adapter to the `PaymentAdapter` protocol of
+- [x] 2.1 Implement the adapter to the `PaymentAdapter` protocol of
       `kit/deal-lifecycle/src/market_deal_lifecycle/adapters.py`: `authorize` and
       `start_billing` delegate to `OnceDeliveryPolicy` with an injected validator of the
       selected Alkahest stage's typed, versioned commitment evidence; `supported_commands`
       is empty, so `submit_payment` refuses every payment command; `read` reports the
       authority view as unsupported; billing start is a no-op only with activation
       evidence (D10).
-- [ ] 2.2 Verify: unit tests in `kit/alkahest/tests/unit/` for allow on valid
+      Done: `AlkahestOnceAdapter` in `kit/alkahest/src/market_alkahest/payment_adapter.py`,
+      constructed with the deal's `negotiation_id`, the stage's `commitment_ref` and the
+      composition's `validate_commitment` (`CommitmentValidator`, an async predicate
+      over `DeliveryEvidence`). As `kit/arkhai-payments`' adapter does, evidence naming
+      another negotiation or commitment is refused before the validator runs. `read`
+      answers `AuthorityView(outcome=Rejected("alkahest.v1 has no lifecycle adapter"))`,
+      the reason servicing already gives a deal with no adapter, so a read stays
+      rejected naming the mechanism as `deal-lifecycle` "A read without an adapter
+      still shows delivery" requires, whichever table a storefront composes it into;
+      `validate` and `submit` refuse every command. The module is named for a payment
+      adapter, not a lifecycle adapter: in the specs a lifecycle adapter is what makes
+      an option carry lifecycle terms, and Alkahest still has none. Sections 5 and 7
+      import `market_alkahest.payment_adapter`; it is not re-exported from the
+      package. Declared
+      `arkhai-kit-deal-lifecycle>=0.2.0` and `arkhai-kit-deal-lifecycle-contracts>=0.1.0`
+      in `kit/alkahest/pyproject.toml` (both were already transitive through the
+      settlement runtime); `make lock` added them to `kit/alkahest/uv.lock` and to the
+      dependency list of the Alkahest kit in every lock that installs it (the three
+      storefronts, `kit/storefront`, the buyers, the API-credit projects and
+      `e2e-tests`), and changed nothing else. `docs/development/RELEASING.md`'s row
+      for `arkhai-kit-alkahest` names the two new internal dependencies, as its
+      publish-matrix test requires. No version bump: `kit/alkahest` (0.11.0) and
+      `kit/site` (0.13.0) are already past their released versions on `dev`, and
+      `RELEASING.md` bumps a package at most once before it is released.
+      Handoff for sections 5 and 7: each storefront supplies the validator. It should
+      compare the evidence with the deal's verified Alkahest settlement evidence (the
+      stage's escrow reference and its schema version), not with a reference's mere
+      presence; if both storefronts would write the same check, it belongs in
+      `kit/alkahest` beside this adapter rather than twice in domain code.
+- [x] 2.2 Verify: unit tests in `kit/alkahest/tests/unit/` for allow on valid
       evidence, refuse on invalid evidence, a no-op start with activation evidence, a
       refused start without it, and every payment command refused by `submit_payment`;
       `make -C kit test-alkahest`; `make check-packaging` for the new declaration and
       lock; `make test`. End-to-end: none until section 5 composes it; no scenario is
       owed here.
+      Unit (`kit/alkahest/tests/unit/test_payment_adapter.py`, the adapter with a
+      mocked validator): allow for each of the six phases on valid evidence; refuse
+      when the validator refuses; refuse, with the validator not called, for another
+      deal's or commitment's evidence; a no-op accepted billing start with activation
+      evidence; a refused start without it (validator not called) and on invalid
+      evidence; `start`, `stop` and `reverse` each refused by `submit_payment`
+      through a `PaymentAdapterTable` that resolves this adapter, before the
+      operation store is touched, and by the adapter's own `submit`; the authority
+      view rejected naming `alkahest.v1`. Authorization and billing start are
+      `OnceDeliveryPolicy`'s, already unit-tested in `kit/deal-lifecycle`; these
+      tests hold the adapter's binding check and validator wiring to them.
+      `make -C kit test-alkahest`: 463 passed (16 new). `make check-packaging`
+      passes. `make test`'s first run with this section failed only the
+      release-guide row test (`scripts/tests/test_publish_matrix.py`), fixed as
+      above; `make test-release-tooling` then passed (2428), and a full `make test`
+      over sections 1 and 2 together passes. `make check-change` reports only the
+      citation of `openspec/specs/compute-delivery/architecture.md`, which closeout
+      (9.9) creates. End-to-end: none, confirmed. Owed by validation: none.
 
 ## 3. The family delivery library: ports, `drive` and the path through dispatch
 

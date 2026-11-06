@@ -26,7 +26,7 @@ the one its `pyproject.toml` declares.
 
 | Package | Path | Internal deps |
 |---|---|---|
-| `arkhai-kit-alkahest` | `kit/alkahest/` | `arkhai-core`, `arkhai-kit-config`, `arkhai-kit-settlement-runtime` |
+| `arkhai-kit-alkahest` | `kit/alkahest/` | `arkhai-core`, `arkhai-kit-config`, `arkhai-kit-deal-lifecycle`, `arkhai-kit-deal-lifecycle-contracts`, `arkhai-kit-settlement-runtime` |
 | `arkhai-kit-config` | `kit/config/` | `arkhai-kit-settlement-runtime` |
 | `arkhai-kit-identity` | `kit/identity/` | none |
 | `arkhai-kit-deal-lifecycle-contracts` | `kit/deal-lifecycle-contracts/` | `arkhai-kit-identity` |
