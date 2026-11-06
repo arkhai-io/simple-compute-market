@@ -77,3 +77,9 @@ VM listing shapes (`e2e_listing_shapes`, `e2e-tests/tests/e2e/roles/scenarios/vm
 The existing [Compose assembly gap](../../../openspec/changes/README.md#unowned-work-left-by-this-campaign) carries these reproductions. The tracker CLI was tried but reports `no supported tracker: canonical docs/issues/ absent`; repository rules use OpenSpec gaps rather than GitHub Issues for its own work. No separate GitHub issue was filed.
 
 Cleanup used these exact projects' `down -v --remove-orphans`; bare metal's parser refuses cleanup for the same volume error. Label-filtered inspection confirms neither project owns containers, networks or volumes. No server, browser page, tunnel or external resource remains.
+
+## Post-rebase validation and restart
+
+Rebased with dependency merge preserved onto `origin/dev` at `cf4db5b7f`. The two conflicts in `scripts/check_change.py` and its kept tests retain dev's workflow pre-commit delegation plus the terms amount-read check. Existing check-runner suite: 18 passed. Fresh packaging/locked reinstallation, both selection replays and the focused regressions above are re-run after rebase. `make check-change CHANGE=negotiate-open-ended-compute-terms CHANGE_BASE=origin/dev`, comment hygiene, architecture-change (no owned row), citations and pinned strict validation pass.
+
+Section 5 has not started: the closeout skill's route check returns `step: clone`, expecting `feat/negotiate-open-ended-compute-terms`, rather than the owner-requested existing PR branch/worktree. Pre-closeout review/triage and promotion remain pending. The next session should reconcile this route with PR #351, complete the review gate, then close out in order; no new PR or fabricated workflow success. PR #351 stays draft at this checkpoint.
