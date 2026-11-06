@@ -119,12 +119,13 @@ class VmPaymentsCoordinator:
             provision = normalize_vm_provision_terms(agreement.get("provision_terms"))
         except (MandatePolicyError, KeyError, TypeError, ValueError) as exc:
             raise PaymentSettlementError(409, "accepted payment state is invalid") from exc
+        # The stored Agreement and its bound mandate carry the payment amount;
+        # agreed_price is the negotiation scalar and may be basis points.
         if (
             agreement["negotiation_id"] != negotiation_id
             or agreement["listing_id"] != thread["our_listing_id"]
             or agreement["buyer"] != buyer.model_dump(mode="json")
             or agreement["seller"] != seller.model_dump(mode="json")
-            or str(agreement["amount"]) != str(thread["agreed_price"])
             or agreement["duration_seconds"] != thread["agreed_duration_seconds"]
             or not provision.ssh_public_key.strip()
         ):

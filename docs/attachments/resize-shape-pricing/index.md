@@ -153,6 +153,15 @@ runtime over the signed site client fixed setup. An earlier implementation tried
 to normalize durable `VmMessage` metadata as a provision payload; extracting only
 its already-decoded shape fixed that mismatch. Neither failure remains.
 
+Small payment-boundary repair: the existing successful receipt/delivery regression
+now seeds a 10,000-bps transcript scalar beside a monetary Agreement of 100.
+Hosted settlement validates the mandate bound to the exact stored Agreement,
+rather than comparing that payment to `agreed_price`. Pending, verified,
+idempotent delivery and mismatched-mandate refusal still pass; 31 focused payment,
+lifecycle-admission and multiplier cases pass after this repair. The redundant
+scalar/payment equality check was intentionally removed, not weakened into a
+permissive amount comparison.
+
 Deployed e2e remains unrun: this checkout has no `docker` executable, and the
 available Podman compose invocation selects an unconfigured mise provider shim.
 No stack was started or specs run against a down service. PR #349's registry
