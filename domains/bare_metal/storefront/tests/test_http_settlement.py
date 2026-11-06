@@ -1124,9 +1124,11 @@ PAYER = "00000000-0000-4000-8000-000000000011"
 PAYEE = "00000000-0000-4000-8000-000000000012"
 
 
-async def test_payment_evidence_gates_replay_and_rechecks_receipt_after_restart(
-    tmp_path,
-):
+async def _payment_deal(tmp_path, *, provisioning=None) -> SimpleNamespace:
+    """An accepted ``arkhai.payments.v1`` deal whose payment is not yet
+    approved: its storefront runtime, the parties' signers, the payments fake,
+    and the settlement data acceptance derived. Development keys only; never
+    used on any network."""
     buyer = Ed25519Signer(bytes.fromhex("66" * 32))
     seller = Ed25519Signer(bytes.fromhex("77" * 32))
     receipt_signer = Ed25519Signer(bytes.fromhex("55" * 32))
@@ -1179,7 +1181,8 @@ async def test_payment_evidence_gates_replay_and_rechecks_receipt_after_restart(
         accepted_escrows=[],
         settlement_options=[option.model_dump(mode="json")],
     )
-    capacity, provisioning = _CapacityClient(), _ProvisioningClient()
+    capacity = _CapacityClient()
+    provisioning = provisioning or _ProvisioningClient()
     runtime = BareMetalStorefrontRuntime(
         db=db,
         domain=domain,
@@ -1233,6 +1236,29 @@ async def test_payment_evidence_gates_replay_and_rechecks_receipt_after_restart(
         agreement_bytes=agreement_bytes,
         settlement_data=data.to_wire(),
     )
+    return SimpleNamespace(
+        runtime=runtime,
+        db=db,
+        domain=domain,
+        negotiation_id=negotiation_id,
+        buyer=buyer,
+        seller=seller,
+        receipt_signer=receipt_signer,
+        payments=payments,
+        data=data,
+        capacity=capacity,
+        provisioning=provisioning,
+    )
+
+
+async def test_payment_evidence_gates_replay_and_rechecks_receipt_after_restart(
+    tmp_path,
+):
+    deal = await _payment_deal(tmp_path)
+    runtime, db, domain = deal.runtime, deal.db, deal.domain
+    negotiation_id, buyer, data = deal.negotiation_id, deal.buyer, deal.data
+    payments, receipt_signer = deal.payments, deal.receipt_signer
+    capacity, provisioning = deal.capacity, deal.provisioning
     request = BareMetalSettleRequest(
         negotiation_id=negotiation_id, buyer_principal=buyer.identity
     )

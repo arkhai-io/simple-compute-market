@@ -136,6 +136,44 @@ class VmSettlementRepository:
 
         return await asyncio.to_thread(load)
 
+    async def load_vm_settlement_evidence_by_ref(
+        self, *, settlement_ref: str
+    ) -> SettlementEvidence | None:
+        """The evidence whose established reference is ``settlement_ref``: an
+        Alkahest escrow or an Arkhai payments transaction."""
+
+        def load():
+            with sqlite3.connect(self.db_path) as conn:
+                row = conn.execute(
+                    "SELECT negotiation_id, mechanism, status, evidence_json FROM vm_settlement_evidence WHERE settlement_ref=?",
+                    (settlement_ref,),
+                ).fetchone()
+                return (
+                    SettlementEvidence(
+                        row[0], row[1], settlement_ref, row[2], json.loads(row[3])
+                    )
+                    if row
+                    else None
+                )
+
+        return await asyncio.to_thread(load)
+
+    async def load_vm_delivery_status(
+        self, *, evidence: SettlementEvidence
+    ) -> dict[str, Any]:
+        """A settlement's delivery, as the administrator's settle wait reports it.
+
+        The delivery record under the evidence's negotiation, as
+        :meth:`load_vm_delivery` reports it, an ended deal included. A settlement
+        with no delivery record reports its evidence's own status: a deal
+        refunded before delivery, or one whose delivery has not started, which
+        no wait takes for terminal.
+        """
+        delivery = await self.load_vm_delivery(negotiation_id=evidence.negotiation_id)
+        if delivery is not None:
+            return delivery
+        return {"negotiation_id": evidence.negotiation_id, "status": evidence.status}
+
     async def save_vm_settlement_evidence(self, evidence: SettlementEvidence) -> None:
         """Record pending or verified evidence; refund states move only by transition."""
         if evidence.status not in ("pending", "verified"):

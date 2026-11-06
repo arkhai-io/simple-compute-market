@@ -20,6 +20,7 @@ from apicredits_storefront.negotiation_runtime import (
 )
 from core_storefront.stage_log import set_stage_event_db_path
 from fastapi import FastAPI
+from market_core import SettlementEvidence
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from storefront_client import StorefrontClient
 from storefront_client.client import StorefrontClientError
@@ -163,19 +164,59 @@ async def test_an_unconfigured_administrator_cannot_force_accept(storefront):
     assert thread["terminal_state"] is None
 
 
-async def test_settle_wait_through_the_client_reports_a_terminal_settlement(
-    storefront,
-):
+# The listing resource the evidence's delivery names; a development fixture.
+_OFFER = {
+    "kind": "api_credits.v1",
+    "service_name": "Acme Inference",
+    "base_url": "https://api.acme.example",
+    "resource_id": "svc-quota",
+    "capacity_site_id": "tokens",
+    "offering_mode": "api_credits",
+}
+
+
+def _evidence(negotiation_id: str, mechanism: str, settlement_ref: str) -> SettlementEvidence:
+    """Verified evidence as settlement records it, set up directly: no route
+    writes evidence without a payment or an escrow behind it."""
+    return SettlementEvidence(
+        negotiation_id, mechanism, settlement_ref, "verified",
+        {"kind": "api_credits.settlement-evidence.v1", "schema_version": 1,
+         "agreement_digest": "a" * 64, "source": {"verified_source": "fixture"},
+         "delivery": {"owner": BUYER_PRINCIPAL.model_dump(mode="json"),
+                      "listing_resource": dict(_OFFER), "quantity": 3, "key_mode": "new",
+                      "key_id": None, "listing_id": LISTING_ID}},
+    )
+
+
+async def test_settle_wait_reports_a_payments_deal_by_its_negotiation(storefront):
+    """Issuance progress, the domain's delivery status, is read under the
+    negotiation the evidence names, whichever reference the wait was given."""
     app, db, _runtime, _capacity = storefront
-    # Settlement status is the domain's issuance progress, keyed by its public reference.
+    await db.save_settlement_evidence(
+        _evidence("negotiation-paid", "arkhai.payments.v1", "txn-paid")
+    )
     await db.save_issuance_progress(
-        negotiation_id="negotiation-settled",
-        public_ref="0xsettled",
-        status="ready",
+        negotiation_id="negotiation-paid", public_ref="negotiation-paid", status="ready"
+    )
+
+    async with _admin(app) as admin:
+        by_negotiation = await admin.wait_for_settlement("negotiation-paid", timeout=1.0)
+        by_transaction = await admin.wait_for_settlement("txn-paid", timeout=1.0)
+
+    for waited in (by_negotiation, by_transaction):
+        assert (waited.ready, waited.status) == (True, "ready")
+
+
+async def test_settle_wait_reports_an_alkahest_deal_by_its_escrow(storefront):
+    app, db, _runtime, _capacity = storefront
+    await db.save_settlement_evidence(
+        _evidence("negotiation-escrow", "alkahest.v1", "0xsettled")
+    )
+    await db.save_issuance_progress(
+        negotiation_id="negotiation-escrow", public_ref="0xsettled", status="failed"
     )
 
     async with _admin(app) as admin:
         waited = await admin.wait_for_settlement("0xsettled", timeout=1.0)
 
-    assert waited.ready is True
-    assert waited.status == "ready"
+    assert (waited.ready, waited.status) == (True, "failed")

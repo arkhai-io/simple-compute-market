@@ -174,7 +174,7 @@ settlement_repository.py, utils/sqlite_client.py}` and its settle-wait tests
 `pyproject.toml` whose version or pin on `arkhai-kit-settlement-runtime` moves, and every
 lock `make lock` rewrites.
 
-- [ ] 2.1 The kit's resolution (D23). `SettlementAdminRouteService` takes the domain's two
+- [x] 2.1 The kit's resolution (D23). `SettlementAdminRouteService` takes the domain's two
   settlement-evidence lookups — by settlement reference and by negotiation, each returning
   `market_core.SettlementEvidence` or `None` — and its delivery status for a resolved
   settlement, in place of `settle_status` and `is_terminal`, which are removed. The wait
@@ -191,7 +191,19 @@ lock `make lock` rewrites.
   failing lookup is polled through and reported as `last_error` at the deadline; a refusal
   raised by the delivery status ends the wait; the existing failed-read cases pass on the
   new form.
-- [ ] 2.2 The VM storefront's binding (D23). A by-reference lookup on
+  Done. The names: `SettlementAdminRouteService(settlements=SettlementLookup(by_reference=…,
+  by_negotiation=…), delivery_status=…)`; `SettlementLookup.resolve(reference)` is the
+  public resolution; `SettlementEvidenceLookup` and `DeliveryStatusHook` are the hook
+  protocols (positional-only, so a binder names its parameter freely);
+  `TERMINAL_SETTLEMENT_STATUSES` is `{"ready", "failed"}`. All are in both `__all__`s.
+  Each poll resolves afresh, since evidence or its reference may appear while the wait
+  runs. A refusal raised by a lookup ends the wait too, as the failed-read rule says.
+  `wait`'s parameter is renamed `reference`; every caller passes it positionally. Unit
+  (`test_admin_routes.py`, injected clock, `poll_seconds=0`): every case the task names
+  passes, plus evidence recorded mid-wait being resolved and a refusal raised by a lookup;
+  `make test-kits` passed (settlement runtime 186 before the fresh-context fixes, then
+  every kit suite).
+- [x] 2.2 The VM storefront's binding (D23). A by-reference lookup on
   `vm_settlement_evidence.settlement_ref` beside `load_vm_settlement_evidence`; the delivery
   status reads the delivery record by the evidence's negotiation, as `load_vm_delivery`
   reports it (an ended deal included), and reports the evidence's own status when there is
@@ -204,7 +216,21 @@ lock `make lock` rewrites.
   deal waited on by its negotiation and by its transaction reports ready once its delivery
   is ready; an Alkahest deal waited on by its escrow reports as it did; a deal refunded
   before delivery is not terminal.
-- [ ] 2.3 The bare-metal storefront's binding (D23). The lookups read
+  Done: `load_vm_settlement_evidence_by_ref` and `load_vm_delivery_status` in
+  `payment_repository.py`, bound in `AdminSettleController`. With no delivery record the
+  delivery status reports the evidence's status (`pending`, `verified`, `refunding`,
+  `refunded`: none terminal). Application integration (`TestSettleWait`, typed admin
+  client): the payments deal waited on by negotiation and by transaction reports ready
+  with the delivery record's `provisioning_job_id`; the Alkahest deal waited on by its
+  escrow reports `failed` from its delivery record with no `escrows` row. Differed from
+  the plan: "refunded before delivery is not terminal" is proved one level lower, by
+  `test_a_deal_without_delivery_reports_its_evidence_status_to_the_wait` (the
+  repository against its real SQLite database, outside the app), because the
+  controller's wait runs on the real clock and a wait that must not end would spend its
+  deadline (`TESTING.md`, "Tests wait on events, never on durations"); that a
+  non-terminal status keeps the wait polling is 2.1's unit case. `make test-storefront`:
+  1215 unit and 530 integration passed.
+- [x] 2.3 The bare-metal storefront's binding (D23). The lookups read
   `bare_metal_settlement_records` by reference and by negotiation through the existing
   queries, adapted to `SettlementEvidence`. The delivery status keeps today's hook body,
   keyed on the evidence's negotiation: the lifecycle, the live fulfillment read and its
@@ -216,14 +242,45 @@ lock `make lock` rewrites.
   ready once its fulfillment is active, and wakes no obligation; the Alkahest cases — ready
   once the settled lease is active, a delivery conflict answered as the fulfillment reads
   answer it — pass unchanged.
-- [ ] 2.4 The API-credit storefront's binding (D23). A by-reference lookup on
+  Done in `deal_controls.py`: `_settlement_evidence` adapts a record; the wake now reads
+  `source.obligation_ref` (the Alkahest paths write it, `settlement_stages.py:417, 518`)
+  and calls the worker's `wake` directly instead of matching the aggregate's obligations
+  by escrow. Before a fulfillment decides, the record's own status is reported
+  (`accepted`, `settlement_verified`, as the escrow row's status was before). Application
+  integration (`tests/test_deal_controls.py`):
+  `test_wait_resolves_a_payments_deal_by_its_negotiation_and_its_transaction` settles
+  through the buyer's typed `settle_agreement`, then waits on the negotiation and on the
+  transaction through the typed admin client until ready. Its non-terminal waits (before
+  payment, and before the fulfillment is active) run through
+  `settlement_admin_routes(runtime, poll_seconds=0.0, clock=…)` on a clock that passes a
+  second a read, not through the client, for the same real-clock reason as 2.2. "Wakes no
+  obligation" is shown as no obligation adopted and a stepped servicing cycle processing
+  nothing; the old code would not have woken one either, so this guards the payments path
+  rather than discriminating the wake's new condition, which the existing lease-active
+  test's `processed == 1` covers for Alkahest. The two Alkahest cases pass unchanged. The
+  payments setup moved out of `test_payment_evidence_gates_replay_and_rechecks_receipt_after_restart`
+  into `_payment_deal` in `test_http_settlement.py`, shared by both. `make test-bare-metal`:
+  storefront 590 passed.
+- [x] 2.4 The API-credit storefront's binding (D23). A by-reference lookup on
   `api_credit_settlement_evidence.settlement_ref` beside `SettlementRepository.get`; the
   delivery status is its issuance progress by the evidence's negotiation. An Alkahest deal's
   escrow resolves by reference, as its evidence records it (D23). Application integration
   (its existing settle-wait cases, `test_force_accept_api.py`, through the typed admin
   client): a payments deal waited on by its negotiation and an Alkahest deal by its escrow
   report as they did.
-- [ ] 2.5 Versions and locks (D23; `docs/development/RELEASING.md`, "Versioning policy";
+  Done: `SettlementRepository.get_by_reference` (sharing `get`'s read and validation) and
+  `SQLiteClient.load_settlement_evidence_by_ref`; the delivery status is
+  `load_issuance_progress` under the evidence's negotiation, and the evidence's own status
+  when issuance has not begun. The schema admits `failed` evidence, which would end a wait;
+  nothing writes it today, and a failed settlement is one never to be delivered, so the
+  comment states it as intended. Application integration (`test_force_accept_api.py`,
+  typed admin client): the former case seeded issuance progress with no evidence, which
+  the kit's resolution rightly no longer answers, so it is replaced by
+  `test_settle_wait_reports_a_payments_deal_by_its_negotiation` (waited on by negotiation
+  and by transaction) and `test_settle_wait_reports_an_alkahest_deal_by_its_escrow`; the
+  evidence is set up directly, as no route writes it without a payment or an escrow.
+  `make test-apicredits`: storefront 255 passed.
+- [x] 2.5 Versions and locks (D23; `docs/development/RELEASING.md`, "Versioning policy";
   `AGENTS.md`, "Package and dependency discipline"). `arkhai-kit-settlement-runtime` takes
   a minor bump against `dev`, its constructor's incompatible change; each of the three
   storefronts is bumped once against `dev` as the policy reads its change, and raises its
@@ -232,7 +289,17 @@ lock `make lock` rewrites.
   `domains/vms/buyer` and `domains/bare_metal/buyer` — each package whose `pyproject.toml`
   changes bumped once against `dev`. Run `make check-uv-version` and `make lock`, and
   commit every lock it rewrites.
-- [ ] 2.6 **Verification checkpoint.** Unit: `make test-kits` (the settlement runtime's
+  Done. No package was already bumped on the branch. Kit 0.6.0 → 0.7.0. Storefronts, each
+  minor for the references its wait now answers: VM 0.26.0 → 0.27.0, bare metal 0.26.0 →
+  0.27.0, API credits 0.19.0 → 0.20.0, each `arkhai-kit-settlement-runtime>=0.7.0`. The six
+  exact pinners, patch for the pin alone: `core/buyer` 0.6.1, `kit/config` 0.5.1,
+  `kit/contact-exchange` 0.4.1, `kit/arkhai-payments` 0.6.1, `domains/vms/buyer` 0.10.2,
+  `domains/bare_metal/buyer` 0.7.2. The pins those bumps move stay inside the set:
+  contact-exchange (both storefronts' and both buyers'), arkhai-payments and core-buyer
+  (bare-metal storefront and buyer), and the VM storefront's pin on the bare-metal
+  storefront. `make check-uv-version` passed; `make lock` rewrote 29 locks, only moving
+  versions.
+- [x] 2.6 **Verification checkpoint.** Unit: `make test-kits` (the settlement runtime's
   admin-route cases). Application integration: `make test-storefront` (VM),
   `make test-bare-metal` (the bare-metal storefront), `make test-apicredits`. Run
   `make test`, `make check-packaging` (2.5 changes versions and locks) and
@@ -246,6 +313,49 @@ lock `make lock` rewrites.
   Owed by validation: `tests.yml`, jobs `test · test-kits`, `test · test-storefront`,
   `test · test-bare-metal` and `test · test-apicredits` — pass with the kit's resolution
   and the three storefronts' bindings.
+  Unit: `make test-kits` passed (every kit, the settlement runtime's admin-route cases
+  among them). Application integration: `make test-storefront` (1215 unit, 530
+  integration), `make test-bare-metal` (storefront 590) and `make test-apicredits`
+  (storefront 255) passed. `make test` passed twice, the second time on the final tree.
+  `make check-packaging` passed after the fresh-context fixes to the kit's protocols,
+  tests and comments, which changed no version or lock. `make check-change` passed all 12
+  checks, comment hygiene, version bumps and local imports among them. Before the kit's
+  wheel was rebuilt, the storefront suites failed to import `SettlementLookup` from the
+  stale `.dist` wheel; `make dist-ci`, then `make lock`, rebuilt it.
+  End-to-end scenarios, confirmed and extended: `e2e_deal` (the shared `09b` by escrow),
+  `e2e_deal_buyer_cli` (its own stage waits by escrow) and `e2e_non_erc20_settlement` (by
+  escrow), all VM lane, resolve by reference, since VM Alkahest evidence records the escrow
+  as its settlement reference (`settlement_stages.py`, `reference=source["escrow_uid"]`);
+  `e2e_vm_payment_deal` (VM lane) by negotiation; `e2e_bare_metal_mock_deal`
+  (bare-metal lane, `09b` by escrow) by reference. No API-credit scenario calls the wait.
+  Owed by validation: `tests.yml`, jobs `test · test-kits`, `test · test-storefront`,
+  `test · test-bare-metal` and `test · test-apicredits` — pass with the kit's resolution
+  and the three storefronts' bindings (confirmed).
+
+Handoff from section 2:
+
+- **For section 3.** `09b` may wait on a bare-metal payments deal by its negotiation (or
+  by its transaction). The bare-metal storefront reports `settlement_verified` while the
+  fulfillment is not yet active, and `ready` from the live fulfillment read once it is.
+  `_payment_deal` in the bare-metal storefront's `test_http_settlement.py` is a ready
+  accepted-payments-deal fixture for storefront tests, not for e2e.
+- **Real-clock waits in storefront tests.** None of the three admin wait routes takes an
+  injected clock, and the route refuses a zero timeout. So a storefront test proves a
+  non-terminal answer through the route service with a ticking clock (bare metal's
+  `settlement_admin_routes(runtime, poll_seconds=…, clock=…)`), or through the delivery
+  status read directly (VM's `load_vm_delivery_status`). Through the typed client it waits
+  only on what ends on the first poll. The bare-metal file's existing Alkahest wait tests
+  still spend `timeout=0.1` waits; they predate this section and were left alone.
+- **Outside the plan.** `tasks.md` named section 3's two new files by full path, which the
+  citation check rejects until they exist; those mentions in sections 3, 4 and 8 now name
+  each file within its existing directory. Closeout's 9.9 gains the
+  `settlement-servicing/architecture.md` settle-wait paragraph, whose sentence on bare
+  metal's "settle-status read" names the removed hook, as the fresh-context check found.
+- **Fresh-context check.** No blocking finding. Fixed: the real-clock deadlines in the new
+  VM and bare-metal tests; positional-only hook protocols; a kit test that could spin
+  forever if resolution regressed; import order; comments stating that `failed` evidence
+  ends a wait on purpose (API credits, bare metal). Recorded rather than changed: the weak
+  "wakes no obligation" discrimination (2.3's note says why).
 
 ## 3. The buyer-purchase stage set and the bare-metal lane purchase
 
@@ -261,11 +371,11 @@ buyer's delivery-end filing reaches no authority"). Replanned against the review
 design: first numbered 2, it now follows section 2, whose settle wait resolves the
 purchase's negotiation.
 
-Files: a new `e2e-tests/tests/e2e/roles/helpers/buyer_purchase_stages.py`; a bare-metal
+Files: a new `buyer_purchase_stages.py` in `e2e-tests/tests/e2e/roles/helpers/`; a bare-metal
 purchase driver in `e2e-tests/tests/e2e/roles/scenarios/bare_metal/` (beside
 `compute_deal_driver.py`); `.../bare_metal/test_bare_metal_payment_deal.py`;
 `e2e-tests/tests/e2e/roles/helpers/payments.py` if the balance read needs a helper; a new
-`e2e-tests/tests/unit/test_buyer_purchase_stages.py`; `e2e-tests/tests/unit/test_compute_deal_stages.py`
+`test_buyer_purchase_stages.py` in `e2e-tests/tests/unit/`; `e2e-tests/tests/unit/test_compute_deal_stages.py`
 (the purchase's handoff row); `e2e-tests/pyproject.toml`'s `e2e_bare_metal_payment_deal`
 description.
 
@@ -375,7 +485,7 @@ Files: a VM purchase driver in `e2e-tests/tests/e2e/roles/scenarios/vms/` (besid
 `compute_deal_driver.py`); a new `.../vms/test_vm_payment_purchase.py`;
 `.../vms/host_registry.py` (its host and pool); `e2e-tests/pyproject.toml` (marker
 `e2e_vm_payment_purchase`); `e2e-tests/Makefile` (`E2E_MODULE`);
-`e2e-tests/tests/unit/test_buyer_purchase_stages.py` (its row); `e2e-tests/README.md`'s
+section 3's `test_buyer_purchase_stages.py` (its row); `e2e-tests/README.md`'s
 marker list.
 
 - [ ] 4.1 The VM purchase driver and module (D17). The module declares its own resource id,
@@ -546,7 +656,7 @@ Files: new modules under `e2e-tests/tests/e2e/roles/scenarios/vms/` (observation
 `.../bare_metal/` (observations 4 and 5), and one for observation 6 where both domains'
 fixtures are reachable; their conftest fixtures; `e2e-tests/pyproject.toml` (markers
 `e2e_vm_qualification`, `e2e_bare_metal_qualification`, `e2e_real_provisioning_reapply`);
-`e2e-tests/tests/unit/test_buyer_purchase_stages.py` (their rows) and a unit module for
+section 3's `test_buyer_purchase_stages.py` (their rows) and a unit module for
 their wiring; `e2e-tests/README.md`'s marker list.
 
 - [ ] 8.1 Observation 2 (D1, D3, D5, D9). Two CPU-only VM purchases through the shared
@@ -674,6 +784,13 @@ and the `settlement-servicing` delta.
     observation 2's leases end through the watchdog's expiry path (D3); observation 4
     drops its GPU clause (D6); observation 5's notification is the reclaim job's recorded
     error and scheduled retry (D5); the per-observation outcome (D8);
+  - `openspec/specs/settlement-servicing/architecture.md`, its settle-wait paragraph (D23):
+    the kit resolves a waited reference by its settlement reference, then its negotiation,
+    afresh at each poll, and owns `ready` and `failed`; each storefront supplies two evidence
+    lookups and a delivery status; bare metal's delivery status wakes an adopted obligation
+    only for evidence whose source names one. The paragraph's sentence on "Bare metal's
+    settle-status read" names the hook section 2 removed (added by section 2, which found
+    it);
   - `openspec/specs/test-compatibility/spec.md`, `openspec/specs/physical-provisioning/spec.md`
     and `openspec/specs/settlement-servicing/spec.md` (D23), written by the archive in
     9.11.

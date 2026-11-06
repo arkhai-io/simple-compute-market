@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-vms-storefront"
-version = "0.26.0"
+version = "0.27.0"
 license = "MIT"
 description = "Provider-side storefront server: hosts /orders, /negotiate, /settle, /alerts/resource endpoints. The provider-side counterpart to arkhai-vms-buyer."
 authors = [
@@ -27,16 +27,16 @@ dependencies = [
     "arkhai-kit-alkahest>=0.11.0",
     "arkhai-kit-config>=0.5.0",
     "arkhai-kit-policy>=0.6.0",
-    "arkhai-kit-settlement-runtime>=0.6.0",
+    "arkhai-kit-settlement-runtime>=0.7.0",
     "arkhai-kit-storefront==0.10.0",
     "arkhai-kit-negotiation-runtime==0.5.2",
-    "arkhai-kit-contact-exchange==0.4.0",
+    "arkhai-kit-contact-exchange==0.4.1",
     "arkhai-kit-delivery==0.2.1",
     "arkhai-kit-delivery-apprise==0.1.1",
     "arkhai-kit-site>=0.10.0",
     "arkhai-kit-capability-admissibility>=0.1.0",
     "arkhai-bare-metal>=0.10.0",
-    "arkhai-bare-metal-storefront==0.26.0",
+    "arkhai-bare-metal-storefront==0.27.0",
     "arkhai-vms>=0.8.0",
     "arkhai-vms-listings[pools,overrides]>=0.8.0",
     "arkhai-vms-negotiation>=0.6.0",

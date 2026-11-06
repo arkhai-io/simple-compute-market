@@ -1,12 +1,14 @@
 """Bare metal's hooks for the kit's deal-control route services.
 
-The kit owns the routes' contracts, refusals, and wait semantics
+The kit owns the routes' contracts, refusals, and wait semantics, which
+settlement a waited reference names among them
 (``market_settlement_runtime.SettlementAdminRouteService`` and
 ``market_capacity_publication.CapacityAdminRouteService``); this module supplies
 what is bare metal's own: how an escrow is read against an accepted deal's plan, what
-fulfillment settlement would start, when a settlement is terminal, how a listing
-is reserved administratively, and what a site's capacity-released callback
-records. Verify and evaluate write nothing.
+fulfillment settlement would start, how its settlement records are found, what a
+settlement's delivery status is, how a listing is reserved administratively, and
+what a site's capacity-released callback records. Verify and evaluate write
+nothing.
 """
 
 from __future__ import annotations
@@ -19,12 +21,14 @@ from market_deal_servicing import EndSession
 from market_deal_servicing.evidence import transaction
 from core_storefront.stage_log import stage_event
 from market_capacity_publication import CapacityAdminRouteService, CapacityEffects
+from market_core import SettlementEvidence
 from market_core.schemas import EscrowProposal
 from market_identity import Identity
 from market_resource_pools_contracts.backing import CapacityNotAdmittedError
 from market_settlement_runtime import (
     SettlementAdminRouteError,
     SettlementAdminRouteService,
+    SettlementLookup,
 )
 
 from .claims import ClaimAttributesMissing, whole_machine_claim
@@ -39,6 +43,20 @@ if TYPE_CHECKING:
 # delivered or can no longer be.
 _READY_STATES = frozenset({"active"})
 _FAILED_STATES = frozenset({"failed", "torn_down", "released", "teardown_failed"})
+
+
+def _settlement_evidence(record: Mapping[str, Any] | None) -> SettlementEvidence | None:
+    """A settlement record as the evidence the kit resolves; one exists for every
+    accepted deal from acceptance, whatever its mechanism."""
+    if record is None:
+        return None
+    return SettlementEvidence(
+        negotiation_id=record["negotiation_id"],
+        mechanism=record["mechanism"],
+        settlement_ref=record["settlement_ref"],
+        status=record["status"],
+        evidence=record["evidence"],
+    )
 
 
 async def _listing_context(
@@ -130,25 +148,37 @@ def settlement_admin_routes(
             "duration_seconds": int(request.get("duration_seconds") or 0),
         }
 
-    async def settle_status(escrow_uid: str) -> dict[str, Any] | None:
-        escrow = await runtime.db.load_escrow(escrow_uid=escrow_uid)
-        if escrow is None:
-            return None
+    async def by_reference(settlement_ref: str) -> SettlementEvidence | None:
+        return _settlement_evidence(
+            await runtime.db.load_bare_metal_settlement_record_by_ref(
+                settlement_ref=settlement_ref
+            )
+        )
+
+    async def by_negotiation(negotiation_id: str) -> SettlementEvidence | None:
+        return _settlement_evidence(
+            await runtime.db.load_bare_metal_settlement_record(
+                negotiation_id=negotiation_id
+            )
+        )
+
+    async def delivery_status(evidence: SettlementEvidence) -> dict[str, Any]:
+        negotiation_id = evidence.negotiation_id
         lifecycle = await runtime.db.load_bare_metal_fulfillment_lifecycle(
-            negotiation_id=str(escrow["negotiation_id"])
+            negotiation_id=negotiation_id
         )
         previous_state = str((lifecycle or {}).get("state") or "")
         if lifecycle is not None and lifecycle.get("fulfillment_id"):
             # The site's convergence can advance while servicing is held; a
             # cached dispatch state cannot establish whether delivery is ready.
             thread = await runtime.db.load_negotiation_thread_row(
-                negotiation_id=str(escrow["negotiation_id"])
+                negotiation_id=negotiation_id
             )
             if thread is None:
                 raise LookupError("settled negotiation not found")
             try:
                 lifecycle = await runtime.fulfillment_service().status(
-                    negotiation_id=str(escrow["negotiation_id"]),
+                    negotiation_id=negotiation_id,
                     buyer_principal=Identity.model_validate(thread["buyer_principal"]),
                 )
             except BareMetalFulfillmentError as exc:
@@ -163,22 +193,28 @@ def settlement_admin_routes(
                 ) from exc
         state = str((lifecycle or {}).get("state") or "")
         if state in _READY_STATES:
+            # Delivery removes the reason servicing deferred an adopted
+            # obligation. Only a mechanism the settlement runtime services
+            # adopts one, and its evidence's source names it; an Arkhai
+            # payments deal has none to wake.
+            obligation_ref = (evidence.evidence.get("source") or {}).get(
+                "obligation_ref"
+            )
             if (
                 previous_state not in _READY_STATES
+                and obligation_ref
                 and runtime.settlement_worker is not None
             ):
-                # Delivery removes the reason servicing deferred this deal.
-                # Wake its adopted obligation without bypassing the worker.
-                aggregate = await runtime.settlement_runtime.get_status(
-                    str(escrow["negotiation_id"])
-                )
-                for obligation in aggregate.obligations:
-                    if obligation.mechanism_ref == escrow_uid:
-                        await runtime.settlement_worker.wake(obligation.obligation_ref)
+                # Woken through the worker, never stepped around it.
+                await runtime.settlement_worker.wake(str(obligation_ref))
             return {"status": "ready", "fulfillment_state": state}
         if state in _FAILED_STATES:
             return {"status": "failed", "fulfillment_state": state}
-        return {"status": str(escrow.get("status") or ""), "fulfillment_state": state}
+        # Before a fulfillment decides, the settlement record's own status is
+        # the report: accepted, verified and refund statuses keep the wait
+        # polling, and failed evidence ends it, as a settlement never to be
+        # delivered.
+        return {"status": evidence.status, "fulfillment_state": state}
 
     timing: dict[str, Any] = {}
     if poll_seconds is not None:
@@ -188,8 +224,10 @@ def settlement_admin_routes(
     return SettlementAdminRouteService(
         verify=verify,
         preview_fulfillment=preview,
-        settle_status=settle_status,
-        is_terminal=lambda status: status.get("status") in {"ready", "failed"},
+        settlements=SettlementLookup(
+            by_reference=by_reference, by_negotiation=by_negotiation
+        ),
+        delivery_status=delivery_status,
         **timing,
     )
 

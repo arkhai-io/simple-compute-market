@@ -43,11 +43,15 @@ from .jobs import (
     SettlementJobCoordinator,
 )
 from .admin_routes import (
+    DeliveryStatusHook,
     EscrowVerifyHook,
     FulfillmentPreviewHook,
     MAX_WAIT_SECONDS,
     SettlementAdminRouteError,
     SettlementAdminRouteService,
+    SettlementEvidenceLookup,
+    SettlementLookup,
+    TERMINAL_SETTLEMENT_STATUSES,
 )
 from .models import (
     ConditionDecision,
@@ -115,11 +119,15 @@ from .sqlite_repository import (
 )
 
 __all__ = [
+    "DeliveryStatusHook",
     "EscrowVerifyHook",
     "FulfillmentPreviewHook",
     "MAX_WAIT_SECONDS",
     "SettlementAdminRouteError",
     "SettlementAdminRouteService",
+    "SettlementEvidenceLookup",
+    "SettlementLookup",
+    "TERMINAL_SETTLEMENT_STATUSES",
     "SETTLEMENT_CONFIG_SCHEMA_VERSION",
     "AcceptedObligationArtifacts",
     "AcceptedObligationBuilder",
