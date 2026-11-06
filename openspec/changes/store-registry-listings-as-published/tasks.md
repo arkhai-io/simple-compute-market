@@ -17,7 +17,7 @@ Implements D-b and supplies D-d's downstream authority/carrier answer.
 - [x] 2.1 Wire `domains/vms/storefront` publication loop, terms and listing service/model through `domains/vms/listings` and schema-opaque `core/storefront/registry_publication.py`; correct the listing response comment. Publish current resolved family rates on create, refresh and reopen without moving asking_rate.
 - [x] 2.2 Declare the optional top-level rate structure in the compute filter schema; keep registry engine domain-neutral.
 - [x] 2.3 Run existing publication-loop/rate-composition application-integration suites, shared publication helpers and VM listing-model suites; try the published rate field through the registry. Existing compute e2e lanes exercise publication, but do not assert this new term. Record exact evidence and limitations here.
-- [ ] 2.4 Refresh affected wheel/lock environments with repository tooling; run `make check-packaging`, comment hygiene, scoped citations/check-change and pinned strict OpenSpec validation. Prepare a reproducible first-use recipe. Commit and open PR into dev after updating from origin/dev; promotion waits for review.
+- [x] 2.4 Refresh affected wheel/lock environments with repository tooling; run `make check-packaging`, comment hygiene, scoped citations/check-change and pinned strict OpenSpec validation. Prepare a reproducible first-use recipe. Commit and open PR into dev after updating from origin/dev; promotion waits for review.
 
 ## 3. Closeout (post code-review)
 
@@ -48,7 +48,7 @@ against the compute schema, then was removed. Existing assertions/setup follow
 the agreed contract; no new permanent tests were added.
 
 Fresh/repeated/populated migration and legacy-synthesis experiments passed.
-Base-chain repairs are separate commit `07c095789`: tolerate an already-current
+Base-chain repairs are separate commit `5fe46dd7a`: tolerate an already-current
 shape name and add missing demands/API-key schema. No existing rows are rewritten.
 `make check-packaging`, `make check-change` and pinned strict OpenSpec validation
 passed. Reinitialization used repository wheel tooling; no locks changed.
@@ -58,7 +58,10 @@ First use: after `make dist` and `make -C core/registry reinit`, run
 This is isolated in-process SQLite with deterministic development seller/registry
 identities, readiness checked, no credentials or resident services required.
 
-Full suite, PostgreSQL and external end-to-end pipeline are unrun; independent
+PR: https://github.com/arkhai-io/simple-compute-market/pull/349 targets dev;
+the branch was rebased without conflicts onto `b0b389703` before opening it.
+
+Full suite, standalone typing, PostgreSQL and external end-to-end pipeline are unrun; independent
 verification and all post-review closeout remain outstanding. No promotion or
 archival claimed. No roadmap goal is declared complete: this is a carrier
 prerequisite for downstream resize/open-ended work. The campaign row/graph now
