@@ -9,6 +9,13 @@
 # Paths below are relative to THIS file's directory (domains/vms/) — Compose
 # `include:` resolves an included file's relative paths against its own
 # location.
+#
+# This file holds topology only: service names, ports, container paths, and the
+# values the topology fixes. A deployment's identities, configuration files,
+# secret overlays and registry and site profiles are bound by its overlay
+# (compose.vms-local.yml for development), and nothing here gives one a
+# fallback, so without an overlay the registries, storefronts and provisioning
+# authorities refuse to start for want of their identities.
 
 services:
   # 1. Registry/Indexer service (vms.compute filter-spec — the image default).
@@ -40,22 +47,11 @@ services:
     image: arkhai:registry
     ports:
       - "8082:8080"
+    # Its read and write gates, admin key and bootstrap key are the deployment's,
+    # in its registry profile; never commit a key to this Compose file or the
+    # public storefront profile.
     env_file:
       - ../../core/registry/.env.docker-compose
-    environment:
-      # Private-registry config: read and write gate independently, both
-      # on here, so every non-admin request must carry
-      # ``Authorization: Bearer <key>`` matching a non-revoked row in
-      # api_keys. The BOOTSTRAP_API_KEY seeds a single write-scoped row at
-      # startup (write implies read) so the storefront can publish to
-      # registry-b on a fresh ``compose up`` without an out-of-band mint
-      # step, and the buyer can discover from it with the same token.
-      # Operator-provided secret values; never commit them to this Compose file
-      # or the public storefront profile.
-      - REGISTRY_REQUIRE_READ_API_KEY=true
-      - REGISTRY_REQUIRE_WRITE_API_KEY=true
-      - REGISTRY_ADMIN_API_KEY=${VMS_REGISTRY_ADMIN_API_KEY:?set VMS_REGISTRY_ADMIN_API_KEY}
-      - REGISTRY_BOOTSTRAP_API_KEY=${VMS_REGISTRY_BOOTSTRAP_API_KEY:?set VMS_REGISTRY_BOOTSTRAP_API_KEY}
     volumes:
       - ../../shared-env:/app/shared-env
     restart: unless-stopped
@@ -96,23 +92,12 @@ services:
       - /dev/net/tun:/dev/net/tun
     environment:
       # Sole config-bearing env var: tell the typed config loader where
-      # to find the mounted TOML. The storefront config loader resolves
-      # $XDG_CONFIG_HOME/arkhai/config.toml → /etc/arkhai/storefront.toml.
+      # to find the mounted files, /etc/arkhai/storefront.toml and its secret
+      # overlay /etc/arkhai/storefront.secrets.toml, which the overlay binds.
       - XDG_CONFIG_HOME=/etc
       # The storefront's policy discovery needs `domains/` on PYTHONPATH
       # so it can find arkhai_vms_negotiation.rl callables.
       - PYTHONPATH=/app:/app/src
-    volumes:
-      # Chain-/seller-specific config is the one environment-supplied mount;
-      # override $VMS_BOB_STOREFRONT_CONFIG to point at a different chain's
-      # TOML (the default is the dev/anvil seller config).
-      - ${VMS_BOB_STOREFRONT_CONFIG:-./storefront/storefront.bob.toml}:/etc/arkhai/storefront.toml:ro
-      # Alkahest resolves contract addresses from this file at runtime. The
-      # image contains only installed wheels -- no repository source tree --
-      # so it is bind-mounted to a fixed path rather than referenced in place.
-      # Same convention as the API-credits storefront.
-      - ../../kit/alkahest/src/market_alkahest/data/alkahest_anvil_addresses.json:/app/alkahest_anvil_addresses.json:ro
-      - ${VMS_BOB_STOREFRONT_SECRETS_FILE:?set VMS_BOB_STOREFRONT_SECRETS_FILE}:/etc/arkhai/storefront.secrets.toml:ro
     deploy:
       resources:
         limits:
@@ -162,9 +147,6 @@ services:
     environment:
       - XDG_CONFIG_HOME=/etc
       - PYTHONPATH=/app:/app/src
-    volumes:
-      - ${VMS_ALICE_STOREFRONT_CONFIG:-./storefront/storefront.alice.toml}:/etc/arkhai/storefront.toml:ro
-      - ../../kit/alkahest/src/market_alkahest/data/alkahest_anvil_addresses.json:/app/alkahest_anvil_addresses.json:ro
     deploy:
       resources:
         limits:
@@ -189,9 +171,10 @@ services:
       retries: 3
 
   # 4. Provisioning service.
-  # Configuration is bundled in the compute provisioning service wheel,
-  # plus dynaconf profile loading via ACTIVE_PROFILES). Compose-time
-  # overrides go in `environment:` below.
+  # Configuration is bundled in the compute provisioning service wheel; its
+  # `docker` profile names the image's IaC paths. A deployment's overlay points
+  # CONFIG_DIRECTORY at its own profiles, its site's identities among them, and
+  # extends ACTIVE_PROFILES with them.
   provisioning: &provisioning
     image: arkhai:compute-provisioning
     platform: linux/amd64
@@ -206,11 +189,11 @@ services:
     environment:
       - PROVISIONING_DATABASE_URL=sqlite:////app/data/provisioning.db
       - REDIS_URL=redis://redis:6379
-      # `docker`, or `mock` when the run selects mock provisioning
-      # (`PROVISIONING_MODE` in the environment targets): the mock runner in
-      # place of Ansible, and the /test/* controls the end-to-end scenarios
-      # hold jobs through. Never mock in staging or production.
-      - ACTIVE_PROFILES=${VMS_PROVISIONING_ACTIVE_PROFILES:-docker}
+      # Real provisioning. The development overlay appends its site profile and
+      # the run's mode, `mock` selecting the mock runner in place of Ansible
+      # and the /test/* controls the end-to-end scenarios hold jobs through.
+      # Never mock in staging or production.
+      - ACTIVE_PROFILES=docker
       # Storefront callback target for the lease watchdog.
       # When the watchdog releases a lease, it PATCHes this URL to mark the
       # storefront resource available. Must match the bob-storefront service
@@ -242,5 +225,5 @@ services:
       - "8083:8081"
     environment:
       - PROVISIONING_DATABASE_URL=sqlite:////app/data/provisioning.db
-      - ACTIVE_PROFILES=${VMS_PROVISIONING_ACTIVE_PROFILES:-docker}
+      - ACTIVE_PROFILES=docker
       - PROVISIONING_STOREFRONT_URL=http://alice-storefront:8002

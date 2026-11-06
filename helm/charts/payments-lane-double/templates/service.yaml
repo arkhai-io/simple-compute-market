@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "payments-lane-double.serviceName" . }}
+  labels:
+    {{- include "payments-lane-double.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "payments-lane-double.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: https
+      port: 8443
+      targetPort: https
+      protocol: TCP

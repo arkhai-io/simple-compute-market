@@ -3,7 +3,10 @@ One storefront process. The pod mounts storefront.json (the ConfigMap) and, when
 `secret` names one, storefront.secrets.toml (an existing Secret) at
 /etc/arkhai/, and points XDG_CONFIG_HOME at /etc so the storefront's loader
 finds them. Its environment carries XDG_CONFIG_HOME and the signing credential
-alone: every other setting reaches the storefront through those files. Service
+only: every setting, the payments key and the CA bundle's path among them,
+reaches the storefront through those files. The environment and the configuration
+mounts are the payments check test pod's too
+(templates/tests/payments-check-test.yaml). Service
 links are off because Kubernetes would otherwise inject variables for every
 Service in the namespace, and those named for a Service beginning `storefront`
 would land in the loader's STOREFRONT_ override layer.
@@ -41,35 +44,15 @@ spec:
             - bare-metal-storefront
             - serve
           env:
-            - name: XDG_CONFIG_HOME
-              value: /etc
-            - name: ARKHAI_IDENTITY_CREDENTIAL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ required "bare-metal storefront identity.credentialSecret.name is required" .Values.identity.credentialSecret.name | quote }}
-                  key: {{ required "bare-metal storefront identity.credentialSecret.key is required" .Values.identity.credentialSecret.key | quote }}
+            {{- include "bare-metal-storefront.env" . | nindent 12 }}
           ports:
             - name: http
               containerPort: {{ .Values.port }}
               protocol: TCP
           volumeMounts:
-            - name: config
-              mountPath: /etc/arkhai/storefront.json
-              subPath: storefront.json
-              readOnly: true
-            {{- if .Values.secret.secretName }}
-            - name: secrets
-              mountPath: /etc/arkhai/storefront.secrets.toml
-              subPath: storefront.secrets.toml
-              readOnly: true
-            {{- end }}
+            {{- include "bare-metal-storefront.configMounts" . | nindent 12 }}
             - name: data
               mountPath: {{ .Values.persistence.mountPath | quote }}
-            {{- if .Values.alkahestAddressBook.configMapName }}
-            - name: alkahest-address-book
-              mountPath: {{ .Values.alkahestAddressBook.mountPath | quote }}
-              readOnly: true
-            {{- end }}
           startupProbe:
             httpGet:
               path: /health
@@ -91,20 +74,7 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       volumes:
-        - name: config
-          configMap:
-            name: {{ include "bare-metal-storefront.configMapName" . | quote }}
-            items:
-              - key: storefront.json
-                path: storefront.json
-        {{- if .Values.secret.secretName }}
-        - name: secrets
-          secret:
-            secretName: {{ .Values.secret.secretName | quote }}
-            items:
-              - key: {{ .Values.secret.configKey | quote }}
-                path: storefront.secrets.toml
-        {{- end }}
+        {{- include "bare-metal-storefront.configVolumes" . | nindent 8 }}
         - name: data
           {{- if or .Values.persistence.enabled .Values.persistence.existingClaim }}
           persistentVolumeClaim:
@@ -112,14 +82,6 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
-        {{- if .Values.alkahestAddressBook.configMapName }}
-        - name: alkahest-address-book
-          configMap:
-            name: {{ .Values.alkahestAddressBook.configMapName | quote }}
-            items:
-              - key: {{ .Values.alkahestAddressBook.key | quote }}
-                path: {{ .Values.alkahestAddressBook.key | quote }}
-        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

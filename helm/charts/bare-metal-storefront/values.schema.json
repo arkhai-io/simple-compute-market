@@ -105,6 +105,32 @@
         }
       }
     },
+    "caBundle": {
+      "description": "The CA bundle the payments client trusts, from an existing ConfigMap key or Secret key, mounted and named by the derived Settlement.arkhai_payments.ca_bundle_path; empty names mount none.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "configMapName": {
+          "type": "string"
+        },
+        "secretName": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "tests": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "paymentsAccount": {
+          "type": "string"
+        }
+      }
+    },
     "internalRegistryTrust": {
       "anyOf": [
         {
@@ -767,7 +793,9 @@
                     }
                   ]
                 },
-                "^[aA][pP][iI]_[kK][eE][yY]_[eE][nN][vV]$": {
+                "^[aA][pP][iI]_[kK][eE][yY]$": false,
+                "^[aA][pP][iI]_[kK][eE][yY]_[eE][nN][vV]$": false,
+                "^[cC][aA]_[bB][uU][nN][dD][lL][eE]_[pP][aA][tT][hH]$": {
                   "anyOf": [
                     {
                       "type": "string"
@@ -916,16 +944,7 @@
             "null"
           ]
         },
-        "^[dD][iI][sS][pP][uU][tT][eE][cC][rR][eE][dD][eE][nN][tT][iI][aA][lL]$": {
-          "items": {
-            "additionalProperties": true,
-            "type": "object"
-          },
-          "type": [
-            "array",
-            "null"
-          ]
-        },
+        "^[dD][iI][sS][pP][uU][tT][eE][cC][rR][eE][dD][eE][nN][tT][iI][aA][lL]$": false,
         "^[uU][sS][eE]_[rR][eE][gG][iI][sS][tT][rR][yY]_[dD][iI][sS][pP][uU][tT][eE]_[aA][uU][tT][hH][oO][rR][iI][tT][iI][eE][sS]$": {
           "type": [
             "boolean",

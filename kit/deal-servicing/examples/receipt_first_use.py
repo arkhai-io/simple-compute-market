@@ -18,6 +18,7 @@ from market_deal_lifecycle.terms import DisputeAuthority
 from market_deal_lifecycle_contracts.models import SubmitResponse, Accepted
 from market_deal_lifecycle_client import LifecycleClient
 from market_identity import Ed25519Signer, TrustedIdentitySet
+from pydantic import SecretStr
 
 from market_deal_servicing import (
     DealWatch, DeliveryIngress, DeliveryRecord, EndService, EndSession, LifecycleRouteBinding,
@@ -42,8 +43,8 @@ async def main():
         commitment = peer.data["filing"]["request"]["transaction"]
         binding = DisputeBinding("example", commitment, authority)
         async with MediationClient(
-            authority, MediationCredential(authority.identity, "DEMO_PAYEE"),
-            environ={"DEMO_PAYEE": "fixture-payee"}, transport=peer.transport(),
+            authority, MediationCredential(authority.identity, token=SecretStr("fixture-payee")),
+            transport=peer.transport(),
         ) as mediation:
             adapter = MediationAdapter(binding, agreement, mediation)
             with TemporaryDirectory(prefix="receipt-claims-") as root:

@@ -1,33 +1,96 @@
 # Development overlay for the bare-metal end-to-end lane.
 #
-# Layered over compose.bare-metal.yml and compose.dev.yml, which supplies the
-# dev chain:
+# Layered over compose.bare-metal.yml, compose.dev.yml, which supplies the dev
+# chain, and compose.payments-double.yml, which supplies the payments lane double:
 #
-#     docker compose -p simple-market-bare-metal --env-file <file> \
-#       -f compose.bare-metal.yml -f compose.dev.yml -f compose.bare-metal-local.yml up -d
+#     docker compose -p simple-market-bare-metal \
+#       -f compose.bare-metal.yml -f compose.dev.yml \
+#       -f compose.payments-double.yml -f compose.bare-metal-local.yml up -d
 #
-# `make -C e2e-tests test-e2e-bare-metal` does exactly this, with the values
-# `make e2e-bare-metal-dev-env` prints. Every value it binds is a well-known
-# development value that must never be used on a public network; see
-# dev-env/identities/README.md.
+# `make -C e2e-tests test-e2e-bare-metal` does exactly this. Every path is
+# relative to the repository root, the project directory of every `-f` file, and
+# every value it binds is committed: a well-known development value that must
+# never be used on a public network; see dev-env/identities/README.md, "The
+# bare-metal lane". The lane reuses the committed Anvil development credentials
+# under the assignments recorded there.
 #
-# It changes only the storefront and its mail sink: the storefront waits for the
-# dev chain and for Mailpit, and mounts the dev chain's Alkahest address book
-# where the lane's storefront.toml names it. The storefront's own configuration
-# is the lane's development storefront.toml and secrets overlay, which the
-# environment file names. Whether the site provisions through its mock profile
-# is the run's choice, not this overlay's: the environment file's
-# BARE_METAL_PROVISIONING_ACTIVE_PROFILES, from `PROVISIONING_MODE`.
+# It binds every service's identity, the registry's profiles, the site's
+# profiles and definition documents, and the storefront's development
+# storefront.toml and secret overlay, and adds the buyer service and the mail
+# sink. The storefront waits for the dev chain, Mailpit and the payments double,
+# mounts the dev chain's Alkahest address book where its storefront.toml names
+# it, and the lane CA at the ca_bundle_path it names; the registry layers the
+# lane's profile recommending its pinned dispute authority. Whether the site
+# provisions through its mock profile is the run's choice, not this overlay's:
+# PROVISIONING_MODE, `mock` unless the run says `real`, is the site's last
+# profile.
 services:
+  bare-metal-registry:
+    environment:
+      - CONFIG_DIRECTORY=/etc/arkhai/registry
+      - ACTIVE_PROFILES=bare-metal-registry,payments-lane
+    volumes:
+      - ./dev-env/registry:/etc/arkhai/registry:ro
+      - ./dev-env/identities/registry-a.eip191:/run/secrets/arkhai/registry-identity/credential:ro
+
+  # The site loads the packaged base and container profiles from their source,
+  # then its own profile -- the site's, storefront's and administrator's
+  # identities and its site id -- then the run's mode. A mode with no profile
+  # file, `real`, is skipped by the loader, and `mock` is selected by its name.
+  bare-metal-provisioning:
+    env_file:
+      - ./dev-env/identities/provisioning.identity.env
+    environment:
+      - CONFIG_DIRECTORY=/app/config
+      - ACTIVE_PROFILES=docker,bare-metal-site,${PROVISIONING_MODE:-mock}
+    volumes:
+      - ./provisioning/compute/service/src/compute_provisioning_service/config/config.yml:/app/config/config.yml:ro
+      - ./provisioning/compute/service/src/compute_provisioning_service/config/config-docker.yml:/app/config/config-docker.yml:ro
+      - ./dev-env/provisioning/config-bare-metal-site.yml:/app/config/config-bare-metal-site.yml:ro
+      - ./dev-env/bare-metal/hosts.yaml:/run/config/host-definitions.yaml:ro
+      - ./dev-env/bare-metal/resource-pools.yaml:/run/config/resource-pools.yaml:ro
+      # A placeholder, not a key: under the mock profile the site never opens
+      # an SSH connection.
+      - ./dev-env/bare-metal/ssh-key-placeholder:/home/appuser/.ssh/id_ed25519:ro
+
   bare-metal-storefront:
     depends_on:
       anvil:
         condition: service_healthy
       mailpit:
         condition: service_healthy
+      payments-double:
+        condition: service_healthy
+    # The signer credential, ARKHAI_IDENTITY_CREDENTIAL, is the only value the
+    # storefront reads from its environment; every setting is in its files.
+    env_file:
+      - ./dev-env/identities/bob.identity.env
     volumes:
+      - ./domains/bare_metal/storefront/storefront.dev.toml:/etc/arkhai/storefront.toml:ro
+      # The wallet key and the payments key, kept apart from the public
+      # storefront.toml.
+      - ./dev-env/identities/bare-metal.storefront.secrets.toml:/etc/arkhai/storefront.secrets.toml:ro
       # The dev chain's Alkahest address book, generated by `make build-anvil-state`.
       - ./kit/alkahest/src/market_alkahest/data/alkahest_anvil_addresses.json:/app/alkahest_anvil_addresses.json:ro
+      # The lane CA, at the ca_bundle_path the storefront's configuration names:
+      # the only authority its payments client trusts for the double.
+      - ./tools/payments-lane-double/tls/lane-ca.pem:/run/payments-lane-double/lane-ca.pem:ro
+
+  # A one-shot buyer in the `buyer` profile, which the lane never starts: the
+  # lane's scenarios drive the buyer through typed clients from the test runner.
+  bare-metal-buyer:
+    image: arkhai:e2e-tests
+    profiles: [buyer]
+    command: ["market", "bare-metal", "list", "--config", "/run/config/buyer.toml"]
+    env_file:
+      - ./dev-env/bare-metal/buyer.identity.env
+    environment:
+      - BARE_METAL_BUYER_CONFIG=/run/config/buyer.toml
+      - XDG_CONFIG_HOME=/var/lib/arkhai/config
+      - XDG_STATE_HOME=/var/lib/arkhai/state
+    volumes:
+      - ./dev-env/bare-metal/buyer.toml:/run/config/buyer.toml:ro
+      - bare-metal-buyer-state:/var/lib/arkhai
 
   # Mailpit receives the storefront's seller-side introduction mail: an
   # off-the-shelf SMTP server with a query API, so a scenario can read what the
@@ -41,3 +104,6 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+volumes:
+  bare-metal-buyer-state:

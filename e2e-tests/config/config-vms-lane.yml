@@ -1,0 +1,14 @@
+# ---------------------------------------------------------------------------
+# Profile: vms-lane
+#
+# The VM end-to-end lane's own payments settings, over config-payments-lane.yml:
+# the seller credential the VM payment scenario signs its seller's requests with,
+# Bob's storefront key in its own scheme, eip191 (Anvil 2). A public
+# deterministic development value, never for a public network; it restates
+# dev-env/identities/bob.identity.env, and
+# tools/payments-lane-double/tests/integration/test_lane_env.py holds the two
+# equal.
+# ---------------------------------------------------------------------------
+
+payments:
+  seller_marketplace_credential: "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"

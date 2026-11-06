@@ -174,6 +174,180 @@ the umbrella's `global.provisioning` and `global.provisioningIdentity`, or "".
 {{- end -}}
 
 {{/*
+The storefront's CA bundle, as JSON for fromJson: `configMapName` or
+`secretName`, whichever names the source ("" for the other), and its `key`. Both
+empty is no bundle. The chart names no CA of its own: a deployment supplies the
+ConfigMap or Secret, and the storefront's payments client trusts its payments
+service under it, through the `[Settlement.arkhai_payments].ca_bundle_path` the
+chart derives from the mount (`bare-metal-storefront.deriveCaBundlePath`).
+Naming both sources is refused, as is a source without its key.
+*/}}
+{{- define "bare-metal-storefront.caBundle" -}}
+{{- $bundle := .Values.caBundle | default dict -}}
+{{- $configMap := $bundle.configMapName | default "" -}}
+{{- $secret := $bundle.secretName | default "" -}}
+{{- if and $configMap $secret -}}
+  {{- fail (printf "bare-metal storefront caBundle names both configMapName %q and secretName %q; name one" $configMap $secret) -}}
+{{- end -}}
+{{- $key := "" -}}
+{{- if or $configMap $secret -}}
+  {{- $key = required "bare-metal storefront caBundle.key is required with its source" $bundle.key -}}
+{{- end -}}
+{{- toJson (dict "configMapName" $configMap "secretName" $secret "key" $key) -}}
+{{- end -}}
+
+{{/*
+Where the CA bundle mounts, the file the derived ca_bundle_path names.
+*/}}
+{{- define "bare-metal-storefront.caBundleDirectory" -}}/etc/arkhai/ca{{- end -}}
+{{- define "bare-metal-storefront.caBundleFile" -}}/etc/arkhai/ca/ca-bundle.pem{{- end -}}
+
+{{/*
+The configuration's `[Settlement.arkhai_payments]` section, matched in any
+spelling at each level and with its nulls removed, as JSON for fromJson, or {}
+when the configuration has none.
+*/}}
+{{- define "bare-metal-storefront.paymentsSection" -}}
+{{- $cfg := deepCopy (.Values.config | default dict) -}}
+{{- include "bare-metal-storefront.dropNulls" $cfg -}}
+{{- $settlement := include "bare-metal-storefront.foldedMap" (dict "doc" $cfg "name" "settlement") | fromJson -}}
+{{- include "bare-metal-storefront.foldedMap" (dict "doc" $settlement "name" "arkhai_payments") -}}
+{{- end -}}
+
+{{/*
+`bare-metal-storefront.deriveCaBundlePath`: where the values name a CA bundle,
+set `[Settlement.arkhai_payments].ca_bundle_path` in `cfg`, in place, to the file
+the chart mounts it as; where `cfg` states another path, refuse it naming both.
+The path is derived from the mount's presence rather than configured beside it,
+so the two cannot disagree: a path naming no mounted file would leave the
+payments client with no bundle to load. Only the payments client reads the
+bundle, so one named while `cfg` has no `[Settlement.arkhai_payments]` section is
+refused rather than given a section of its own. Keys are matched in any
+spelling, as the loader matches them. With no bundle named, `cfg` is left as it
+is.
+Argument: dict with `root` (the chart root) and `cfg` (the configuration, nulls
+removed).
+*/}}
+{{- define "bare-metal-storefront.deriveCaBundlePath" -}}
+{{- $bundle := include "bare-metal-storefront.caBundle" .root | fromJson -}}
+{{- if or $bundle.configMapName $bundle.secretName -}}
+  {{- $file := include "bare-metal-storefront.caBundleFile" .root -}}
+  {{- $settlement := index .cfg (include "bare-metal-storefront.foldedKey" (dict "doc" .cfg "name" "settlement")) | default dict -}}
+  {{- $sectionKey := include "bare-metal-storefront.foldedKey" (dict "doc" $settlement "name" "arkhai_payments") -}}
+  {{- $payments := dict -}}
+  {{- if $sectionKey -}}{{- $payments = index $settlement $sectionKey | default dict -}}{{- end -}}
+  {{- if not $payments -}}
+    {{- fail "bare-metal storefront names caBundle, which only its payments client reads, but its config states no Settlement.arkhai_payments section" -}}
+  {{- end -}}
+  {{- $pathKey := include "bare-metal-storefront.foldedKey" (dict "doc" $payments "name" "ca_bundle_path") -}}
+  {{- if $pathKey -}}
+    {{- $stated := toString (index $payments $pathKey) -}}
+    {{- if ne $stated $file -}}
+      {{- fail (printf "bare-metal storefront config Settlement.%s.%s %q differs from %q, where the chart mounts its caBundle; state that path or none" $sectionKey $pathKey $stated $file) -}}
+    {{- end -}}
+  {{- else -}}
+    {{- $_ := set $payments "ca_bundle_path" $file -}}
+  {{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+What decides how the storefront process loads its configuration and reaches its
+payments service, rendered once for its Deployment and once for its payments
+check test pod, so the two cannot drift: the container's environment, the
+configuration, overlay, address-book, and CA-bundle mounts, and their volumes.
+Each takes the chart root and renders list items at column zero.
+
+`bare-metal-storefront.env`: XDG_CONFIG_HOME and the signing credential, neither
+a storefront setting: XDG_CONFIG_HOME selects the configuration loaded, and the
+credential must be kept from the loader. Every other value, the payments key and
+the CA bundle's path among them, is in a mounted file.
+*/}}
+{{- define "bare-metal-storefront.env" -}}
+- name: XDG_CONFIG_HOME
+  value: /etc
+- name: ARKHAI_IDENTITY_CREDENTIAL
+  valueFrom:
+    secretKeyRef:
+      name: {{ required "bare-metal storefront identity.credentialSecret.name is required" .Values.identity.credentialSecret.name | quote }}
+      key: {{ required "bare-metal storefront identity.credentialSecret.key is required" .Values.identity.credentialSecret.key | quote }}
+{{- end -}}
+
+{{/*
+`bare-metal-storefront.configMounts`: storefront.json, the Secret overlay when
+`secret` names one, the Alkahest address book when one is named, and the CA
+bundle when one is named, each read-only.
+*/}}
+{{- define "bare-metal-storefront.configMounts" -}}
+{{- $bundle := include "bare-metal-storefront.caBundle" . | fromJson -}}
+- name: config
+  mountPath: /etc/arkhai/storefront.json
+  subPath: storefront.json
+  readOnly: true
+{{- if .Values.secret.secretName }}
+- name: secrets
+  mountPath: /etc/arkhai/storefront.secrets.toml
+  subPath: storefront.secrets.toml
+  readOnly: true
+{{- end }}
+{{- if .Values.alkahestAddressBook.configMapName }}
+- name: alkahest-address-book
+  mountPath: {{ .Values.alkahestAddressBook.mountPath | quote }}
+  readOnly: true
+{{- end }}
+{{- if or $bundle.configMapName $bundle.secretName }}
+- name: ca-bundle
+  mountPath: {{ include "bare-metal-storefront.caBundleDirectory" . | quote }}
+  readOnly: true
+{{- end }}
+{{- end -}}
+
+{{/*
+`bare-metal-storefront.configVolumes`: the volumes
+`bare-metal-storefront.configMounts` mounts.
+*/}}
+{{- define "bare-metal-storefront.configVolumes" -}}
+{{- $bundle := include "bare-metal-storefront.caBundle" . | fromJson -}}
+- name: config
+  configMap:
+    name: {{ include "bare-metal-storefront.configMapName" . | quote }}
+    items:
+      - key: storefront.json
+        path: storefront.json
+{{- if .Values.secret.secretName }}
+- name: secrets
+  secret:
+    secretName: {{ .Values.secret.secretName | quote }}
+    items:
+      - key: {{ .Values.secret.configKey | quote }}
+        path: storefront.secrets.toml
+{{- end }}
+{{- if .Values.alkahestAddressBook.configMapName }}
+- name: alkahest-address-book
+  configMap:
+    name: {{ .Values.alkahestAddressBook.configMapName | quote }}
+    items:
+      - key: {{ .Values.alkahestAddressBook.key | quote }}
+        path: {{ .Values.alkahestAddressBook.key | quote }}
+{{- end }}
+{{- if $bundle.configMapName }}
+- name: ca-bundle
+  configMap:
+    name: {{ $bundle.configMapName | quote }}
+    items:
+      - key: {{ $bundle.key | quote }}
+        path: ca-bundle.pem
+{{- else if $bundle.secretName }}
+- name: ca-bundle
+  secret:
+    secretName: {{ $bundle.secretName | quote }}
+    items:
+      - key: {{ $bundle.key | quote }}
+        path: ca-bundle.pem
+{{- end }}
+{{- end -}}
+
+{{/*
 A values file's `null` removes what it names, whether or not Helm's merge removed
 it: under the supported Helm release, a parent's `null` for a subchart is dropped
 only where the subchart's own defaults define the key, and the umbrella or an
@@ -308,6 +482,7 @@ site bound to it trusted through a service peer naming its principal. */ -}}
     {{- end -}}
   {{- end -}}
 {{- end -}}
+{{- include "bare-metal-storefront.deriveCaBundlePath" (dict "root" . "cfg" $cfg) -}}
 {{- /* JSON, not YAML: Helm's YAML encoder leaves a string bare unless it
 would read back as a 64-bit number, so a 160-bit EVM address is emitted
 unquoted and a YAML loader reads it as an integer. JSON quotes every string. */ -}}

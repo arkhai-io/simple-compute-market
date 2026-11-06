@@ -275,9 +275,11 @@ class BareMetalStorefrontSettings(_Section):
     settlement_servicing_interval_seconds: PositiveSeconds
     payment_reconciliation_interval: PositiveSeconds
     identity: StorefrontIdentitySettings = Field(default_factory=StorefrontIdentitySettings)
-    settlement: dict[str, Any] = Field(default_factory=dict)
+    # The payments key and the dispute credentials' tokens sit in these two when
+    # the overlay states them.
+    settlement: dict[str, Any] = Field(default_factory=dict, repr=False)
     dispute: list[dict[str, Any]] = Field(default_factory=list)
-    disputecredential: list[dict[str, Any]] = Field(default_factory=list)
+    disputecredential: list[dict[str, Any]] = Field(default_factory=list, repr=False)
     use_registry_dispute_authorities: bool = True
     registry: RegistrySettings = Field(default_factory=RegistrySettings)
     capacity: CapacitySettings

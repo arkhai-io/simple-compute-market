@@ -3,8 +3,11 @@ One Deployment per agent in .Values.agents, named for its key. Each pod mounts
 two files at /etc/arkhai/ — storefront.json (ConfigMap, non-sensitive) and
 storefront.secrets.toml (Secret, sensitive) — and points XDG_CONFIG_HOME at /etc
 so dynaconf picks them up via its layered discovery and merge. An agent naming
-an Alkahest address-book ConfigMap mounts it read-only too. No env-var-based
-config.
+an Alkahest address-book ConfigMap mounts it read-only too, and one naming a CA
+bundle mounts it read-only, its rendered configuration's
+[Settlement.arkhai_payments].ca_bundle_path naming the file. No env-var-based
+config: the environment carries only the configuration directory and the signing
+credential; the payments key is a setting in the Secret overlay.
 
 checksum/config + checksum/secrets annotations force a rollout when
 either source object changes, independently — flipping a log level
@@ -25,7 +28,6 @@ when zerotier_network is absent.
 {{- range $name, $entry := $agents }}
 {{- /* An agent states no runtime overlay by omitting `secret`. */}}
 {{- $agent := mergeOverwrite (dict "secret" (dict)) $entry (dict "name" $name) }}
-{{- $addressBook := include "storefront.agentAddressBook" $agent | fromJson }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -94,39 +96,21 @@ spec:
                 - NET_ADMIN
                 - SYS_MODULE
           {{- end }}
+          # Public identity stays in storefront.json. The credential and the
+          # payments key are injected from Secrets and never rendered into a
+          # ConfigMap, command argument, or chart-generated Secret. The
+          # environment and the configuration mounts are the payments check test
+          # pod's too (templates/tests/payments-check-test.yaml).
           env:
-            # Public identity stays in storefront.json. The credential is
-            # injected from a dedicated Secret and is never rendered into a
-            # ConfigMap, command argument, or chart-generated Secret.
-            - name: XDG_CONFIG_HOME
-              value: /etc
-            - name: ARKHAI_IDENTITY_CREDENTIAL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ required "storefront agent identity.credentialSecret.name is required" $agent.identity.credentialSecret.name | quote }}
-                  key: {{ required "storefront agent identity.credentialSecret.key is required" $agent.identity.credentialSecret.key | quote }}
+            {{- include "storefront.agentEnv" (dict "root" $ "agent" $agent) | nindent 12 }}
           volumeMounts:
             {{- if $.Values.zerotierEnabled }}
             - name: tun-device
               mountPath: /dev/net/tun
             {{- end }}
-            - name: arkhai-config
-              mountPath: /etc/arkhai/storefront.json
-              subPath: storefront.json
-              readOnly: true
-            {{- if $agent.secret.secretName }}
-            - name: arkhai-secrets
-              mountPath: /etc/arkhai/storefront.secrets.toml
-              subPath: {{ $agent.secret.configKey | default "storefront.secrets.toml" }}
-              readOnly: true
-            {{- end }}
+            {{- include "storefront.agentConfigMounts" (dict "root" $ "agent" $agent) | nindent 12 }}
             - name: arkhai-data
               mountPath: {{ $.Values.persistence.mountPath | quote }}
-            {{- if $addressBook.configMapName }}
-            - name: alkahest-address-book
-              mountPath: {{ $addressBook.mountPath | quote }}
-              readOnly: true
-            {{- end }}
           # /health performs only a fast SQLite ping — safe as a Kubernetes
           # probe with no outbound calls or blocking I/O. The startup probe
           # holds the liveness and readiness probes off until the process
@@ -158,20 +142,7 @@ spec:
           hostPath:
             path: /dev/net/tun
         {{- end }}
-        - name: arkhai-config
-          configMap:
-            name: {{ include "storefront.agentConfigMapName" (dict "root" $ "agent" $agent) }}
-            items:
-              - key: storefront.json
-                path: storefront.json
-        {{- if $agent.secret.secretName }}
-        - name: arkhai-secrets
-          secret:
-            secretName: {{ $agent.secret.secretName | quote }}
-            items:
-              - key: {{ $agent.secret.configKey | default "storefront.secrets.toml" }}
-                path: storefront.secrets.toml
-        {{- end }}
+        {{- include "storefront.agentConfigVolumes" (dict "root" $ "agent" $agent) | nindent 8 }}
         # SQLite agent.db storage. Three modes:
         #   existingClaim set → mount a Terraform-managed PVC by name
         #   persistence.enabled → chart creates and owns the PVC
@@ -186,14 +157,6 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
-        {{- if $addressBook.configMapName }}
-        - name: alkahest-address-book
-          configMap:
-            name: {{ $addressBook.configMapName | quote }}
-            items:
-              - key: {{ $addressBook.key | quote }}
-                path: {{ $addressBook.key | quote }}
-        {{- end }}
       {{- with $.Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

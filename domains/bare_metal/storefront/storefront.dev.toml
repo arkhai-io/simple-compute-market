@@ -6,8 +6,8 @@
 # "The bare-metal lane", and the lane's own Compose service names. None of them
 # may be used on a public network. Signing material is not here:
 # ARKHAI_IDENTITY_CREDENTIAL arrives through the lane's identity environment
-# file, and the wallet key through the secrets overlay the lane mounts
-# (dev-env/identities/bare-metal.storefront.secrets.toml).
+# file, and the wallet key and payments key through the secrets overlay the lane
+# mounts (dev-env/identities/bare-metal.storefront.secrets.toml).
 
 base_url = "http://bare-metal-storefront:8000"
 # The port `serve` binds: the packaged default, stated because
@@ -72,7 +72,7 @@ principals = [
 
 [Settlement]
 schema_version = 1
-priority = ["alkahest.v1", "contact-exchange.v1"]
+priority = ["alkahest.v1", "contact-exchange.v1", "arkhai.payments.v1"]
 
 [Settlement.alkahest]
 enabled = true
@@ -97,6 +97,23 @@ retention_sweep_interval_seconds = 86400
 [Settlement.contact.profiles.default]
 channel = "email"
 terms = "Development introduction; no commercial terms."
+
+# Payments, settled against the lane's payments double over HTTPS, trusting the
+# lane CA alone, which compose.bare-metal-local.yml mounts at ca_bundle_path.
+# Offered only on listings whose publication clauses select it, as the payment
+# scenario's pool override does; the clauses below stay Alkahest-only. The
+# receipt identity is the double's, from
+# tools/payments-lane-double/fixtures/accounts.toml, and the double signs test
+# receipts only, so livemode stays false. The seller's token at the double is
+# api_key in the secrets overlay. The dispute authority comes from the lane
+# registry's recommendation.
+[Settlement.arkhai_payments]
+enabled = true
+service_url = "https://payments-double:8443"
+service_identity = { scheme = "ed25519", identifier = "kaKKC3Q4FZOk2UaVeSCJJq_IrYLIg5t2RDWbnrqaSzo" }
+fee_bps = 250
+livemode = false
+ca_bundle_path = "/run/payments-lane-double/lane-ca.pem"
 
 # Seller-side delivery of each revealed buyer contact, to the lane's Mailpit
 # (compose.bare-metal-local.yml), which scenarios read back through its API.

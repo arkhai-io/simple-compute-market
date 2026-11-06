@@ -480,8 +480,7 @@ project of its own:
   transaction for an operator. Each cleanup step is
   attempted even after an earlier one fails, and the module's holds are
   released last.
-  Unconfigured payments remain a named blocked prerequisite; no real SSH claim
-  is made. Its `e2e_bare_metal_unbacked_introduction` scenario is the compute
+  It settles against the lane's payments double; no real SSH claim is made. Its `e2e_bare_metal_unbacked_introduction` scenario is the compute
   family's introduction scenario on bare metal: the site's operator declares a
   whole machine in a capacity-backed pool naming its host, one in an unbacked
   pool naming none, each at an asking rate, and one in a backed pool stating no
@@ -499,10 +498,19 @@ project of its own:
   of the lane's own that the credits deal's discovery is routed away from, and
   the dev chain.
 
+Each lane also runs the payments double (`compose.payments-double.yml`), which
+its payment storefront — Bob, the bare-metal storefront, the credits storefront
+— settles against; see [Private Service Dependencies](#private-service-dependencies).
+A lane target names only its Compose files, its project, and the run's
+provisioning mode: every value its stack reads is in a committed overlay,
+registry or site profile, or secret overlay, and the runner takes the lane's
+committed profiles (`RUNNER_PROFILES`).
+
 The compute lanes' provisioning services run their mock profile because the
-run selects it: `PROVISIONING_MODE` (`mock` or `real`, default `mock`) is read
-by each lane's environment target, which prints the stack's provisioning
-profiles, never by a storefront. Under the `mock` profile each compute adapter
+run selects it: `PROVISIONING_MODE` (`mock` or `real`, default `mock`) is
+checked and exported to Compose by each lane target in `e2e-tests/Makefile`, and
+each overlay places it last in the provisioning service's profiles
+(`docker,<site>,${PROVISIONING_MODE:-mock}`); no storefront reads it. Under the `mock` profile each compute adapter
 runs its jobs through a mock executor of its own, resolved by the same
 `(offering_mode, action)` table as its real one, and the playbook output the
 mock returns is parsed by the adapter's real result path. The rule and gate
@@ -544,6 +552,16 @@ passes when its filter matches no test. A scenario on that list reads only what 
 `e2e-tests` image copies — `src`, `tests`, `config`, `conftest.py`, and
 `settings.toml` — never a file from the checkout. Every other pipeline scenario is
 reported as not run against Helm.
+
+After the scenario pod, validation runs every storefront payments-check test pod
+the release's hooks render (`helm get hooks`, each pod named
+`<release>-…-payments-check`), each as its own step and likewise counted as
+passed only on its own exit status of 0; a pod with no exit status is stopped.
+Each pod's log is kept as evidence beside the scenario pod's, and a release
+that renders no check pod is warned, never passed. The check pod runs the
+storefront's `check-payments` against the release's payments double, so it
+shows the storefront's CA mount, derived `ca_bundle_path`, overlay key and
+service URL working together; the release serves no payment scenario.
 
 A mock-provisioned deal proves the services compose into a working deal, not
 that a real resource was delivered. Bare metal's release-qualified deal
@@ -1208,6 +1226,32 @@ passing render is not deployment evidence, just as it is not deal evidence.
   `app.kubernetes.io/name`, which every selector requires — and that each release
   renders exactly its expected test templates, so a test pod that stops rendering
   fails rather than leaving nothing to check.
+- Both storefront charts' render tests assert the payments interface: the CA
+  bundle option (`caBundle`) mounted from a ConfigMap or a Secret together with
+  the `ca_bundle_path` it derives into the rendered configuration, neither
+  rendered without it, and the option refused without a payments section; the
+  values schema refusing in public `config` the payments `api_key`, its
+  `api_key_env`, and every `[[DisputeCredential]]` entry; a payments-only
+  storefront rendering with nothing for its removed settings; and the
+  payments-check test pod running the storefront's own command with the
+  Deployment's image, environment, and configuration mounts but no data volume,
+  probes, or ZeroTier device, rendered only with payments and an account.
+  `helm/charts/payments-lane-double/tests/test_render.py` asserts the double is
+  off by default, runs once behind the Service `payments-double` in the local
+  release and not at all in the bare-metal release, and serves a named TLS
+  Secret over the image's files.
+- `helm/tests/test_release_topology.py` also holds the local release's payments
+  values to the double's committed fixtures, and asserts the registry chart
+  renders its settings as the profile `config-production.env`, sets only
+  `CONFIG_DIRECTORY` and `ACTIVE_PROFILES` in the pod environment, layers a
+  `secretProfile` after it, and refuses the retired `auth.*KeySecret` values
+  naming `secretProfile`. Through the interpreter `REGISTRY_PYTHON` names, which
+  `test-render.sh` sets when `core/registry/.venv` exists, it loads the rendered
+  profile with the registry's own loader; without it that check reports a skip.
+- Release tooling (`make test-release-tooling`) reads back the secret overlays
+  `topology-secrets` writes: the seller payments key in each storefront's
+  runtime overlay, and Bob's `[[DisputeCredential]]` equal to his Compose
+  secret overlay's (`scripts/tests/test_change_build_and_helm_targets.py`).
 
 **How to write one:**
 
@@ -1281,21 +1325,62 @@ and `domains/apicredits/middleware/rust/tests/conformance.rs`.
 
 This repository is public, and every test target it runs in public CI or a public build MUST pass without credentials for a private repository, image or package. A scenario that needs a private service's internals (its source, images, development-mode auth, operator test funds, or ledger reads) lives in that service's repository, which may depend on SCM's public artifacts. SCM's own e2e may run against a service's public test deployment, readiness-gated: it reports the unmet prerequisite when no target is configured or reachable. Otherwise SCM tests the client side against the service's published contract (schemas and test vectors) and a test double at the client kit's boundary.
 
-The API-credit payment scenario reads its payments policy through
-`e2e-tests/tests/e2e/roles/helpers/payments.py`, which other payment scenarios
-may reuse. A blank PAYMENTS.SERVICE_URL means no payments target is configured,
-and the scenario reports a blocked skip, never an Alkahest fallback: that is
-what the pipeline runs. With SERVICE_URL set, SERVICE_IDENTITY,
-BUYER_ACCOUNT, BUYER_MARKETPLACE_CREDENTIAL and
-SELLER_MARKETPLACE_CREDENTIAL are required, and a missing one fails the
-scenario by name before the target's `/health` is checked (timeout 5 seconds,
-environment proxies disabled); an unready target is again a blocked skip.
-FEE_BPS defaults to 250; LIVEMODE and DEVELOPMENT_AUTH default to false, are
-read as strict booleans, and LIVEMODE is emitted explicitly in buyer TOML.
-DEVELOPMENT_AUTH and API_KEY_ENV are mutually exclusive. The helper serializes
-only the named payments table, not domain configuration or payer selection.
+A double of a private service mirrors its producer's API — routes,
+authentication, admission, read authorization, idempotency and error codes —
+unless there is a compelling reason to deviate, and states the deviation; a
+double that answers differently proves only that the client agrees with the
+double. Where it wraps a kit's engine it serves what that engine serves, and it
+narrows its claims rather than its behaviour.
+
+**The lanes' payments target.** Every end-to-end lane runs the payments double,
+`tools/payments-lane-double`: an HTTPS service at `https://payments-double:8443`
+over the payments kit's `PaymentsAuthority` engine, mirroring the payments
+service's API, signing only `livemode: false` receipts, and holding only
+labelled public development fixtures (its [README](../../tools/payments-lane-double/README.md)
+says what it serves and claims). Its callers trust its committed lane CA through
+their payments configuration's `ca_bundle_path`, never `SSL_CERT_FILE`. Each lane
+target runs the runner under `ACTIVE_PROFILES=docker,payments-lane,<lane>-lane`
+(`RUNNER_PROFILES` in `e2e-tests/Makefile`): `config-payments-lane.yml` holds the
+double's target, receipt identity, fee policy, CA bundle path, accounts and the
+buyer's credentials, and `config-<lane>-lane.yml` only what differs by lane — the
+seller's marketplace credential, and in the bare-metal lane its price and
+dispute window — Dynaconf merging the
+`payments` section key by key. Unset, the runner runs under `docker` alone and
+has no payments target. The runner's environment carries no payments value; the
+lane CA reaches it as one mount. Tests hold every value a lane profile restates
+to the fixture or identity file it comes from. Once the stack is up, each lane
+runs its payment storefront's `check-payments` from the storefront's own
+container, an authenticated read of the seller's balance at the double, and a
+failed check fails lane setup by name before any scenario.
+
+The lanes' registries recommend one pinned dispute authority nobody can answer —
+its origin under `.invalid`, its record key without a usable private half, its
+account without a token at the double — which sellers and buyers take from the
+registry rather than from a `[[Dispute]]` entry of their own. The VM payment
+scenario's case and refund stages need an authority that accepts a filed case,
+`MEDIATION.SERVICE_URL`, blank by default, and report a blocked skip naming it;
+its commit and servicing stages run against the double.
+
+**The payments helper.** Payment scenarios read their payments policy through
+`e2e-tests/tests/e2e/roles/helpers/payments.py`. A blank PAYMENTS.SERVICE_URL
+means no payments target is configured, and the scenario reports a blocked skip,
+never an Alkahest fallback. With SERVICE_URL set, SERVICE_IDENTITY,
+BUYER_ACCOUNT, BUYER_MARKETPLACE_CREDENTIAL and SELLER_MARKETPLACE_CREDENTIAL
+are required, and a missing one fails the scenario by name before the target's
+`/health` is checked (timeout 5 seconds, environment proxies disabled, trusting
+CA_BUNDLE_PATH alone when it is set). An unready target is a blocked skip when
+it is external and a failure naming its URL when the run marks it its own
+(LANE_OWNED, as every lane profile does); LANE_OWNED with no SERVICE_URL fails
+too. FEE_BPS defaults to 250; LIVEMODE, DEVELOPMENT_AUTH and LANE_OWNED default
+to false and are read as strict booleans, and LIVEMODE is emitted explicitly in
+buyer TOML. API_KEY_ENV is required without DEVELOPMENT_AUTH, and the two are
+mutually exclusive. The buyer's token is the setting BUYER_API_KEY, never a
+runner variable: the harness writes it into each `market` process's environment
+under the variable API_KEY_ENV names, as the buyer's own provider reads it. The
+helper serializes only the named payments table, its `ca_bundle_path` included,
+not domain configuration or payer selection.
 See [shared payment-scenario configuration](../../e2e-tests/README.md#shared-payment-scenario-configuration)
-for environment and runner setup.
+for an external run's setup.
 
 **Current example:** complete deals settled through the Arkhai payments service are qualified by that service's own suite. Here, `kit/arkhai-payments` generates its models from the service's published schema and checks the published vectors, all vendored and identified by content hash in `kit/arkhai-payments/schema/SOURCE.md`: the current producer vectors through the strict models, signatures and transaction identities, and the historical vectors as raw transaction identities, receipt framing, signatures and attachment hashes only, which the current models refuse, as "Payment Receipts in Tests" describes. Neither proves live service responses, provider funding or physical delivery.
 

@@ -92,6 +92,14 @@
         }
       }
     },
+    "payments-lane-double": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
     "provisioning": {
       "type": "object",
       "required": [
@@ -204,6 +212,19 @@
             },
             "rootPath": {
               "type": "string"
+            }
+          }
+        },
+        "secretProfile": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "secretName": {
+              "type": "string"
+            },
+            "profile": {
+              "type": "string",
+              "pattern": "^([A-Za-z0-9][A-Za-z0-9_.-]*)?$"
             }
           }
         }
@@ -604,6 +625,51 @@
               ],
               "minLength": 1,
               "pattern": "^/"
+            }
+          }
+        },
+        "caBundle": {
+          "description": "The CA bundle the payments client trusts, from an existing ConfigMap key or Secret key, mounted and named by the derived Settlement.arkhai_payments.ca_bundle_path; empty names mount none.",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "configMapName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "secretName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "key": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1
+            }
+          }
+        },
+        "paymentsKey": false,
+        "tests": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "paymentsAccount": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         },
@@ -1229,6 +1295,7 @@
             }
           }
         },
+        "^[dD][iI][sS][pP][uU][tT][eE][cC][rR][eE][dD][eE][nN][tT][iI][aA][lL]$": false,
         "^[iI][dD][eE][nN][tT][iI][tT][yY]$": {
           "additionalProperties": false,
           "type": [
@@ -1625,7 +1692,9 @@
                     }
                   ]
                 },
-                "^[aA][pP][iI]_[kK][eE][yY]_[eE][nN][vV]$": {
+                "^[aA][pP][iI]_[kK][eE][yY]$": false,
+                "^[aA][pP][iI]_[kK][eE][yY]_[eE][nN][vV]$": false,
+                "^[cC][aA]_[bB][uU][nN][dD][lL][eE]_[pP][aA][tT][hH]$": {
                   "anyOf": [
                     {
                       "type": "string"

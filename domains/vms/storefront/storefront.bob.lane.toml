@@ -1,0 +1,201 @@
+# Bob (seller) in the VM end-to-end lane: storefront.bob.toml, the full local
+# stack's profile, plus payments settled against the lane's payments double. The
+# two files differ only in that addition, which
+# e2e-tests/tests/unit/test_domain_stack_configuration.py holds them to, so a
+# change to one is made to both. compose.vms-lane.yml mounts this file in place
+# of storefront.bob.toml, which the full local stack keeps.
+#
+# Public marketplace identity and EVM mechanism address are configuration; the
+# signing credential arrives as ARKHAI_IDENTITY_CREDENTIAL, and the wallet key,
+# the payments key and the dispute credential for the authority the lane's
+# registries recommend in the secret overlay,
+# dev-env/identities/bob.storefront.secrets.toml. Every value is a public
+# development value, never for a public network.
+
+agent_id            = "bob"
+port                = 8001
+base_url            = "http://bob-storefront:8001/"
+db_path             = "./src/market_storefront/data/storefront/agent.db"
+log_file_path       = "./logs/bob.log"
+
+# Timer-loop intervals, shortened for this stack only. A scenario pauses the
+# storefront and then advances each loop deliberately, and a pause is observed
+# when a loop next reaches its gate -- which it can only do at the end of an
+# interval. The shipped defaults (60s watchdog, 30s sweeps) exceed the pause's
+# own bounded wait, so every loop reports `pausing` and a scenario can never
+# assert that the storefront is idle. Shortening them changes nothing about
+# what a loop does, only how soon it notices it has been asked to stop.
+# Production keeps the shipped values.
+negotiation_watchdog_interval         = 2
+settlement_servicing_interval_seconds = 2
+fulfillment_resume_sweep_interval     = 2
+
+[[storefront_domains]]
+contribution = "vms"
+offering_mode = "vm"
+domain_identity = "compute.v1"
+contract_version = "1.0"
+
+[[storefront_domains]]
+contribution = "bare_metal"
+offering_mode = "bare_metal"
+domain_identity = "bare_metal.v1"
+contract_version = "1.0"
+
+
+[Identity.principal]
+scheme = "eip191"
+identifier = "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+
+[Identity.administrators.operator]
+# Anvil account 6. The operator is deliberately a different principal
+# from Identity.principal above: the seller publishes and the administrator
+# operates, and the two are separately authorized rather than conflated.
+# The loader requires a list: a stable administrator may hold more than one
+# principal, and `principal = {...}` is the pre-list spelling.
+principals = [
+  { scheme = "eip191", identifier = "0x976ea74026e726554db657fa54763abd0c3a0aa9" },
+]
+
+[Identity.service_peers.provisioning_default]
+role = "service"
+site_id = "default"
+principals = [
+  { scheme = "eip191", identifier = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266" },
+]
+[Settlement]
+schema_version = 1
+priority = ["alkahest.v1", "contact-exchange.v1", "arkhai.payments.v1"]
+
+[Settlement.alkahest]
+enabled = true
+# Each chain's Alkahest address book; the dev chain's is mounted by Compose.
+address_books = { anvil = "/app/alkahest_anvil_addresses.json" }
+release_models = ["recipient"]
+trusted_oracle_addresses = []
+interruptible_oracle_addresses = []
+
+# Settlement by introduction. Offered only on listings whose publication
+# clauses select it, such as a pool override's. The contact is ordinary
+# configuration -- never published, revealed only to the accepted buyer --
+# and is keyed by the listing's origin site. A dev value on a reserved domain.
+[Settlement.contact]
+enabled = true
+
+[Settlement.contact.origins.default]
+contact_payload = { email = "bob-sales@seller.invalid" }
+
+[Settlement.contact.profiles.default]
+channel = "email"
+terms = "Quoted per engagement; reply within one business day."
+
+# Payments, settled against the lane's payments double over HTTPS, trusting the
+# lane CA alone, which compose.vms-lane.yml mounts at ca_bundle_path. Offered only
+# on listings whose publication clauses select it, as the VM payment scenario's
+# listing does. The receipt identity is the double's, from
+# tools/payments-lane-double/fixtures/accounts.toml, and the double signs test
+# receipts only, so livemode stays false. The seller's token at the double is
+# api_key in the secret overlay.
+[Settlement.arkhai_payments]
+enabled = true
+service_url = "https://payments-double:8443"
+service_identity = { scheme = "ed25519", identifier = "kaKKC3Q4FZOk2UaVeSCJJq_IrYLIg5t2RDWbnrqaSzo" }
+fee_bps = 250
+livemode = false
+ca_bundle_path = "/run/payments-lane-double/lane-ca.pem"
+
+# Seller-side delivery of each revealed buyer contact. Mailpit receives it in
+# this lane; scenarios read it back through Mailpit's API.
+[Delivery]
+enabled = ["seller-mail"]
+
+[Delivery.seller-mail]
+sink = "smtp"
+host = "mailpit"
+port = 1025
+start_tls = false
+sender = "storefront-bob@seller.invalid"
+recipients = ["bob-sales@seller.invalid"]
+
+[Wallet]
+address     = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
+ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess bob@example.com"
+
+[Chains.anvil]
+rpc_url = "ws://anvil:8545"
+chain_id = 31337
+
+[registry]
+# Two registry instances: ``registry`` is the public one,
+# ``registry-b`` simulates a private/secondary registry that gates
+# read + write access via Authorization: Bearer (both gates on in its
+# container). The seller fans publishes/heartbeats out to both;
+# buyers discover the union. Drop registry-b from urls + auth to
+# fall back to single-public-registry behaviour.
+urls                      = ["http://registry:8080", "http://registry-b:8080"]
+
+[registry.authorities."http://registry:8080"]
+authority = "registry"
+principals = [
+  { scheme = "eip191", identifier = "0x90f79bf6eb2c4f870365e785982e1f101e93b906" },
+]
+
+[registry.authorities."http://registry-b:8080"]
+authority = "registry-b"
+principals = [
+  { scheme = "eip191", identifier = "0x15d34aaf54267db7d7c367839aaf71a00a2c6a65" },
+]
+
+# The private registry bearer token belongs in the mounted
+# storefront.secrets.toml under [registry.auth].
+
+# The site authority is hosted by the provisioning service. Poll fast —
+# the suite waits on delta-driven listing reconciliation.
+[capacity]
+poll_interval    = 1
+# How long a confirmed projection poll lets the inventory guard confirm a
+# listing, widened for this stack only. A scenario that holds the loops keeps
+# trading, and with the shipped window -- three poll intervals -- a round it
+# sends more than a few seconds after its last `site-projections` step would be
+# refused as retryable. An hour covers any one scenario's run; production
+# keeps the shipped window.
+source_confirmation_seconds = 3600
+# Two-phase reserve: acceptance holds capacity until the buyer settles
+# (the e2e deals settle within seconds; 900s is headroom, and unsettled
+# holds lapse on their own). Deliberately overrides the shipped default
+# of 0 — this local profile has no untrusted buyers, and keeping holds
+# on here is what keeps the two-phase reserve path under e2e coverage
+# while production defaults to placing no pre-settlement hold.
+hold_ttl_seconds = 900
+
+# Site name -> authority URL. Required: the shipped settings.toml documents
+# this table but does not default it, and `_capacity_settings()` raises when it
+# is empty. The name matches `Identity.service_peers.provisioning_default`'s
+# `site_id`, and the URL is the same provisioning service `[provisioning]`
+# names below.
+[capacity.sites]
+default = "http://provisioning:8081"
+
+[provisioning]
+service_url = "http://provisioning:8081"
+# Mock provisioning responds in milliseconds; poll frequently so the
+# storefront sees job completion quickly without waiting the 15s production default.
+poll_interval = 1
+
+[negotiation]
+# Ordered policies run per round. Guards short-circuit with
+# `reject`/`exit` when their preconditions fail; the terminal policy
+# (`bisection` here; `rl` requires torch and isn't installed in the test
+# env) always returns a counter/accept/exit. The legacy `policy_mode`
+# key still works (synthesizes the same default chain).
+policies = ["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]
+
+[pricing]
+settlements = [
+  { mechanism = "alkahest.v1", asset = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0", rate = "100", per = "hour", mechanism_input = { chain = "anvil", escrow_kind = "erc20_escrow_obligation_default" } },
+]
+# Defaults applied to inventory rows that don't carry their own
+# min_price/token/max_duration_seconds. Per-row CSV columns override.
+# default_max_duration_seconds = 0 (or omitted) means "unlimited".
+default_min_price            = "100"
+default_max_duration_seconds = 0

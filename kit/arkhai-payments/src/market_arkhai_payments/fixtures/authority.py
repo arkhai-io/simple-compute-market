@@ -19,16 +19,15 @@ from market_identity import Signer
 from market_arkhai_payments.canonical import jcs_bytes, jcs_sha256
 from market_arkhai_payments.errors import PaymentsAPIError
 from market_arkhai_payments.models import (
-    EventRequest, Mandate, SignedReceipt, SignedTransactionSnapshot, StoredDealAttachment,
+    Balance, EventRequest, Mandate, SignedReceipt, SignedTransactionSnapshot, StoredDealAttachment,
 )
 from market_arkhai_payments.receipts import snapshot_message, transaction_id
 from market_arkhai_payments.fixtures.receipts import build_signed_receipt
 from market_arkhai_payments.fixtures.arithmetic import add_duration, periods_through
 
 
-
-
-
+def _release_at(due: int) -> str:
+    return datetime.fromtimestamp(due, timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def sign_snapshot(signer: Signer, snapshot: Mapping[str, Any]) -> SignedTransactionSnapshot:
@@ -514,7 +513,7 @@ class PaymentsAuthority:
                 dues = [part.maturity(tx.receipt.receipt.approvedAt)]
             if dues and all(due is not None for due in dues):
                 due = min(d for d in dues if d is not None)
-                view["releaseAt"] = datetime.fromtimestamp(due, timezone.utc).isoformat().replace("+00:00", "Z")
+                view["releaseAt"] = _release_at(due)
             if rate:
                 progress: dict[str, Any] = {
                     "periodsEarned": str(part.earned), "grossEarned": str(part.gross_earned)}
@@ -533,3 +532,50 @@ class PaymentsAuthority:
         if boundaries:
             body["fundedThrough"] = min(boundaries)
         return sign_snapshot(self.signer, body)
+
+    def balance(self, account: str) -> Balance:
+        """One account's own balance, as the payments service's balance read reports it.
+
+        Every transaction the account is a party to is first brought to the clock
+        as a snapshot read brings it, so money matured since the last operation is
+        already in the payee's ``available`` and a read never shows it held.
+        """
+
+        for transaction, tx in list(self._transactions.items()):
+            if account in (tx.mandate["from"], tx.mandate["to"]):
+                self.advance(transaction, refill=False)
+        held: list[dict[str, Any]] = []
+        for transaction, tx in self._transactions.items():
+            if tx.mandate["to"] != account:
+                continue
+            for index, part in enumerate(tx.parts):
+                held.extend(self._held_entries(tx, transaction, index, part))
+        available = {asset: str(amount) for asset, amount in self.balances.get(account, {}).items()}
+        return Balance.model_validate({"available": available, "held": held})
+
+    @staticmethod
+    def _held_entries(tx: _Transaction, transaction: str, index: int,
+                      part: _Part) -> list[dict[str, Any]]:
+        # A rate part's periods mature one by one, so one entry per maturity keeps
+        # later money from reading as releasing at the earliest date.
+        timed: dict[int, int] = {}
+        open_ended = 0
+        for earned_at, amount in part.lots:
+            due = part.maturity(earned_at)
+            if due is None:
+                open_ended += amount
+            else:
+                timed[due] = timed.get(due, 0) + amount
+        common = {"transaction": transaction, "part": index, "from": tx.mandate["from"],
+                  "to": tx.mandate["to"], "asset": part.terms["asset"], "fee": tx.mandate["fee"]}
+        entries = [common | {"address": f"hold:{transaction}:{index}:{due}",
+                             "balance": str(amount), "releaseAt": _release_at(due)}
+                   for due, amount in sorted(timed.items()) if amount]
+        if open_ended:
+            # An after-stop hold has no maturity until its stop, whatever extensions
+            # are open; otherwise an unbounded open extension is what holds the lots.
+            awaiting_stop = "afterStop" in part.terms["hold"] and part.stop is None
+            until = "lift" if part.extensions and not awaiting_stop else "stop"
+            entries.append(common | {"address": f"hold:{transaction}:{index}:until",
+                                     "balance": str(open_ended), "until": until})
+        return entries

@@ -19,9 +19,25 @@ LOCAL_VALUES := local-values.yaml
 # Secrets the release's workloads read with the default values, which the chart
 # never creates: they are provisioned out of band (for local development,
 # `make topology-secrets` creates them). Enabling api-credits-registry adds
-# arkhai-api-credits-registry-identity.
+# arkhai-api-credits-registry-identity. Under $(LOCAL_VALUES), which configures
+# Bob for payments, arkhai-bob-runtime's overlay also holds his payments key and
+# his credential toward the pinned dispute authority.
 LOCAL_SECRETS := arkhai-registry-identity arkhai-bob-identity arkhai-bob-runtime \
 	arkhai-provisioning-identity arkhai-provisioning-runtime arkhai-provisioning-ssh
+# ConfigMaps the release's workloads read under $(LOCAL_VALUES) and no chart
+# creates, provisioned out of band the same way: the storefronts' CA bundle,
+# which holds the payments lane double's committed lane CA.
+LOCAL_CONFIGMAPS := payments-ca-bundle
+# The payments lane double's committed fixtures topology-secrets reads: the lane
+# CA, and the script that prints the seller's token from its account directory.
+# Public development values, never for a public network.
+PAYMENTS_LANE_CA_FILE := ../tools/payments-lane-double/tls/lane-ca.pem
+PAYMENTS_LANE_ENV := ../tools/payments-lane-double/scripts/lane_env.py
+# Bob's secret overlay in the Compose stacks, whose [[DisputeCredential]] toward
+# the double's pinned dispute authority topology-secrets copies into his runtime
+# Secret's overlay, so one committed copy serves both. A public development
+# value, never for a public network.
+BOB_COMPOSE_SECRETS_FILE := ../dev-env/identities/bob.storefront.secrets.toml
 
 # The Secrets the release's `helm test` reads beyond a deploy's: the e2e-tests
 # chart's deal test credentials, which under local-values.yaml the registry smoke
@@ -87,8 +103,11 @@ deploy: init
 		--wait
 
 ## Deploy for local development: as deploy, with local-values.yaml layered on,
-## so the release's volumes are deleted when it is uninstalled.
+## so the release's volumes are deleted when it is uninstalled. It first checks
+## that every out-of-band Secret and ConfigMap the release reads exists, since the
+## chart creates none of them and a pod naming a missing one never starts.
 deploy-local:
+	@$(MAKE) --no-print-directory check-local-secrets
 	@$(MAKE) --no-print-directory deploy EXTRA_VALUES="--values $(LOCAL_VALUES)"
 
 ## Uninstall the release, waiting for its resources to go. Succeeds when no
@@ -119,12 +138,16 @@ endif
 	done; \
 	exit $$status
 
-## Fail, naming each one, unless every out-of-band Secret in LOCAL_SECRETS and
-## every PersistentVolumeClaim in LOCAL_VOLUMES (none unless given) exists.
+## Fail, naming each one, unless every out-of-band Secret in LOCAL_SECRETS, every
+## ConfigMap in LOCAL_CONFIGMAPS, and every PersistentVolumeClaim in LOCAL_VOLUMES
+## (none unless given) exists.
 check-local-secrets:
 	@missing=""; \
 	for secret in $(LOCAL_SECRETS); do \
 		kubectl get secret --namespace $(NAMESPACE) "$$secret" >/dev/null 2>&1 || missing="$$missing Secret/$$secret"; \
+	done; \
+	for configmap in $(LOCAL_CONFIGMAPS); do \
+		kubectl get configmap --namespace $(NAMESPACE) "$$configmap" >/dev/null 2>&1 || missing="$$missing ConfigMap/$$configmap"; \
 	done; \
 	for claim in $(LOCAL_VOLUMES); do \
 		kubectl get pvc --namespace $(NAMESPACE) "$$claim" >/dev/null 2>&1 || missing="$$missing PersistentVolumeClaim/$$claim"; \
@@ -134,7 +157,7 @@ check-local-secrets:
 		echo "For local development, \`make -C helm topology-secrets\` (\`make helm-topology-secrets\`) creates every one from development values." >&2; \
 		exit 1; \
 	fi; \
-	echo "Every out-of-band Secret and volume required here exists in namespace $(NAMESPACE)."
+	echo "Every out-of-band Secret, ConfigMap, and volume required here exists in namespace $(NAMESPACE)."
 
 # ---------------------------------------------------------------------------
 # The local two-release topology: several storefronts per registry, each in its
@@ -165,8 +188,10 @@ TOPOLOGY_SECRETS := arkhai-bare-metal-storefront-identity arkhai-bare-metal-stor
 # not among them: its Anvil reloads its state file, so the contracts survive a
 # restart, but every transaction since start-up -- escrows, attestations,
 # balances -- is lost while the other services' volumes still refer to them. A
-# rebuilt dev-env image therefore does not roll. A render test holds this list
-# to the Deployments both releases render.
+# rebuilt dev-env image therefore does not roll. Nor is payments-lane-double: it
+# keeps every payment in memory, so a restart loses each transaction the
+# storefronts' databases refer to, and its image does not roll either. A render
+# test holds this list to the Deployments both releases render.
 TOPOLOGY_ROLLOUT_ORDER := registry provisioning storefront bare-metal-storefront
 
 # Development values topology-secrets derives every key from, never for a public
@@ -232,14 +257,19 @@ topology-up:
 	done
 
 ## Create, or replace the contents of, every out-of-band Secret the topology
-## reads -- $(LOCAL_SECRETS), $(TOPOLOGY_SECRETS), and $(TEST_SECRETS) -- from
-## the development values above, and the buyer-profile volume the deal test
-## mounts ($(TEST_VOLUMES), created if absent), idempotently, in $(NAMESPACE),
-## which it creates if absent (CHANGE=<change> for a change's validation namespace)
-## (scripts/topology-secrets.sh says what each holds). Needs cast (Foundry) and
-## kubectl. Development only, never for a public network.
+## reads -- $(LOCAL_SECRETS), $(TOPOLOGY_SECRETS), and $(TEST_SECRETS) -- and
+## ConfigMap -- $(LOCAL_CONFIGMAPS) -- from the development values above, the
+## payments lane double's committed fixtures, and Bob's Compose secret overlay
+## ($(BOB_COMPOSE_SECRETS_FILE)), and the buyer-profile volume the
+## deal test mounts ($(TEST_VOLUMES), created if absent), idempotently, in
+## $(NAMESPACE), which it creates if absent (CHANGE=<change> for a change's
+## validation namespace) (scripts/topology-secrets.sh says what each holds).
+## Needs cast (Foundry), kubectl, and python3 3.11 or newer. Development only,
+## never for a public network.
 topology-secrets:
 	NAMESPACE="$(NAMESPACE)" DEV_MNEMONIC="$(DEV_MNEMONIC)" \
+	PAYMENTS_LANE_CA_FILE="$(PAYMENTS_LANE_CA_FILE)" PAYMENTS_LANE_ENV="$(PAYMENTS_LANE_ENV)" \
+	BOB_COMPOSE_SECRETS_FILE="$(BOB_COMPOSE_SECRETS_FILE)" \
 	DEV_ACCOUNT_PROVISIONING="$(DEV_ACCOUNT_PROVISIONING)" DEV_ACCOUNT_BUYER="$(DEV_ACCOUNT_BUYER)" \
 	DEV_ACCOUNT_BOB="$(DEV_ACCOUNT_BOB)" DEV_ACCOUNT_REGISTRY="$(DEV_ACCOUNT_REGISTRY)" \
 	DEV_ACCOUNT_PROVISIONING_ADMIN="$(DEV_ACCOUNT_PROVISIONING_ADMIN)" \
@@ -267,9 +297,12 @@ topology-down:
 ## arkhai-bob-runtime's seller profile; the provisioning smoke test, whose
 ## signed cases skip without an administrator credential, the one input its
 ## profile does not carry (it pins the service's signer from
-## global.provisioningIdentity); and the e2e-tests chart's deal test. Release 2's: its
-## provisioning smoke test, which skips the same way, and the bare-metal
-## storefront's /health check, the one that proves release 2 answers. None
+## global.provisioningIdentity); Bob's payments check, `market-storefront
+## check-payments` reading the seller's balance at the payments lane double with
+## Bob's own configuration, CA bundle, and payments key; and the e2e-tests chart's
+## deal test. Release 2's: its provisioning smoke test, which skips the same way,
+## the bare-metal storefront's /health check, the one that proves release 2
+## answers, and its payments check, against release 1's double. None
 ## shows the storefronts trade: the topology's evidence (signed requests
 ## admitted, callbacks reaching the bare-metal storefront, projections
 ## loaded, a publication on release 1's registry) is gathered against the

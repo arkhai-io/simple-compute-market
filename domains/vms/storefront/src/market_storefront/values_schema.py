@@ -21,8 +21,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+from market_arkhai_payments import ARKHAI_PAYMENTS_CONFIG_KEY
 from market_config.values_schema import (
     accepting_null,
+    any_case,
     config_definition,
     main as generator_main,
     model_fragment,
@@ -67,6 +69,26 @@ _DELIVERY_SETTINGS: dict[str, Any] = {
 }
 
 
+def _settlement_section(role: str) -> dict[str, Any]:
+    """``[Settlement]`` as the storefront registers it, its payments key by
+    reference refused.
+
+    A storefront's payments key reaches it only through its secret overlay,
+    never through a variable its configuration names; the chart sets no
+    variable but the configuration directory and the signing credential, so a
+    public ``api_key_env`` could name no key. ``api_key_env`` stays a field
+    of the shared payments model, the form a buyer's provider reads, so it is
+    refused here rather than in the model, whose roles the settlement runtime
+    also enforces at startup.
+    """
+    settlement = settlement_fragment(
+        build_storefront_settlement_registry().registrations, role=role
+    )
+    payments = settlement["patternProperties"][any_case(ARKHAI_PAYMENTS_CONFIG_KEY)]
+    payments["patternProperties"][any_case("api_key_env")] = False
+    return settlement
+
+
 def storefront_config_definition(role: str = ROLE) -> dict[str, Any]:
     """Return the generated definition for an agent's ``config``.
 
@@ -78,11 +100,13 @@ def storefront_config_definition(role: str = ROLE) -> dict[str, Any]:
         "delivery": sink_typed_section(
             sinks, sink_key=SINK_KEY, section_fields=_DELIVERY_SETTINGS, role=role
         ),
+        # A dispute credential binds a token to an authority, and an entry is
+        # incomplete without one, so the whole entry belongs in the storefront's
+        # secret overlay and none is accepted here.
+        "disputecredential": False,
         "identity": model_fragment(IdentityConfigDeclaration, role=role),
         "registry": model_fragment(RegistryConfigDeclaration, role=role),
-        "settlement": settlement_fragment(
-            build_storefront_settlement_registry().registrations, role=role
-        ),
+        "settlement": _settlement_section(role),
         "wallet": model_fragment(WalletConfigDeclaration, role=role),
     }
     return accepting_null(config_definition(sections, retired=RETIRED_KEYS))

@@ -1,4 +1,4 @@
-"""Role-owned dispute preferences and identity-bound credential references."""
+"""Role-owned dispute preferences and identity-bound credentials."""
 
 from __future__ import annotations
 
@@ -6,7 +6,9 @@ import os
 from collections.abc import Callable, Iterable, Mapping
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, SecretStr
+from pydantic import (
+    BaseModel, ConfigDict, Field, JsonValue, SecretStr, field_validator, model_validator,
+)
 
 from .terms import AuthorityRequirements, DisputeAuthority, NonnegativeSeconds
 
@@ -61,19 +63,63 @@ class DisputeEntry(DisputeAuthority):
 
 
 class DisputeCredential(AuthorityIdentity):
-    api_key_env: Annotated[str, Field(pattern=r"^[A-Z_][A-Z0-9_]*$")]
+    """One credential bound to an authority's whole identity, in exactly one form.
+
+    ``api_key`` is the token itself, a secret setting a service states in its
+    secret overlay; ``api_key_env`` names the environment variable holding it.
+    """
+
+    # A validation error never shows the entry's input, which may hold the token.
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, strict=True, hide_input_in_errors=True,
+    )
+
+    # Marked secret, as every credential setting is.
+    api_key: SecretStr | None = Field(default=None, json_schema_extra={"secret": True})
+    api_key_env: Annotated[str, Field(pattern=r"^[A-Z_][A-Z0-9_]*$")] | None = None
+
+    @field_validator("api_key")
+    @classmethod
+    def _refuse_unusable_key(cls, value: SecretStr | None) -> SecretStr | None:
+        # The rules a mediation credential applies to its token, so a stated key
+        # that resolves is one a client can send. The message never quotes it.
+        token = value.get_secret_value() if value is not None else None
+        if token is not None and (
+            not token or token != token.strip() or "\r" in token or "\n" in token
+        ):
+            raise ValueError("api_key must be nonempty, unpadded and on one line")
+        return value
+
+    @model_validator(mode="after")
+    def _one_form(self) -> DisputeCredential:
+        if self.api_key is not None and self.api_key_env is not None:
+            raise ValueError("api_key and api_key_env are mutually exclusive")
+        if self.api_key is None and self.api_key_env is None:
+            raise ValueError("a dispute credential requires api_key or api_key_env")
+        return self
 
     def resolve(self, environment: Mapping[str, str] | None = None) -> SecretStr:
-        value = (os.environ if environment is None else environment).get(self.api_key_env)
+        """The token, from whichever form the entry states.
+
+        Raises ``ValueError`` naming the variable when it is unset or empty, which
+        a role reads as holding no usable credential for the authority.
+        """
+        if self.api_key is not None:
+            return self.api_key
+        source = os.environ if environment is None else environment
+        value = source.get(self.api_key_env) if self.api_key_env is not None else None
         if not value:
             raise ValueError(f"dispute credential requires environment variable {self.api_key_env}")
         return SecretStr(value)
 
 
 class DisputeConfig(BaseModel):
-    """Configuration contains references only; no resolved credential is stored."""
+    """Preferences and credentials; a credential is resolved only when it is used."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    # A credential entry may hold its token, so no validation error shows input.
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, strict=True, hide_input_in_errors=True,
+    )
 
     entries: list[DisputeEntry] = Field(default_factory=list)
     credentials: list[DisputeCredential] = Field(default_factory=list)

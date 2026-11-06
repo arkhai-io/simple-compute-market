@@ -45,9 +45,10 @@ service:
   port: 8080
 
 # ---------------------------------------------------------------------------
-# Application settings — map directly to env vars in the container.
-# Values sourced from global (chainId, rpcUrl, contract addresses) are
-# injected in the deployment template and do not appear here.
+# Application settings. The chart renders these, with the identity, the
+# descriptor and service.port, into the registry's profile env file,
+# config-production.env, mounted under its configuration directory; the pod's
+# environment carries only CONFIG_DIRECTORY and ACTIVE_PROFILES.
 # ---------------------------------------------------------------------------
 config:
   # Select exactly one filter specification packaged in the registry image.
@@ -56,10 +57,6 @@ config:
   # Override with an external DSN (e.g. Postgres) when moving off SQLite.
   databaseUrl: "sqlite:////var/lib/arkhai-registry/indexer.db"
   host: "0.0.0.0"
-  enableHealthChecks: true
-  healthCheckInterval: 60
-  endpointCheckTimeout: 10
-  heartbeatTtlSecs: 60
   logLevel: "info"
   # Gateway path prefix. Empty for host-routed or direct deployments.
   rootPath: ""
@@ -68,19 +65,18 @@ config:
   requireReadApiKey: false
   requireWriteApiKey: false
 
-# Optional bootstrap API key sourced from an existing Kubernetes Secret
-# (e.g. ESO-synced from Secret Manager) — never from values. When set and
-# the api_keys table is empty at startup, the registry seeds one
-# write-scoped operator key with this value.
-auth:
-  bootstrapKeySecret:
-    name: ""
-    key: ""
-  # Optional shared admin key (REGISTRY_ADMIN_API_KEY) enabling the
-  # /admin/api-keys mint/list/revoke endpoints. Same sourcing rule.
-  adminKeySecret:
-    name: ""
-    key: ""
+# Secret settings, such as the bootstrap API key (REGISTRY_BOOTSTRAP_API_KEY,
+# seeding one write-scoped operator key when the api_keys table is empty at
+# startup) and the shared administrator key (REGISTRY_ADMIN_API_KEY, enabling
+# the /admin/api-keys routes). They arrive as a profile env file,
+# config-<profile>.env, in an existing Secret -- as External Secrets writes one
+# -- never from values: the chart mounts it beside the rendered profile and
+# appends the profile to ACTIVE_PROFILES, so a setting it states overrides the
+# rendered one. With no secretName nothing is mounted. auth.bootstrapKeySecret
+# and auth.adminKeySecret are refused, naming this value.
+secretProfile:
+  secretName: ""
+  profile: ""
 
 # ---------------------------------------------------------------------------
 # Helm smoke-test configuration. Empty activeProfiles derives from

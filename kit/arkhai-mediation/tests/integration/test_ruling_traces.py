@@ -14,6 +14,7 @@ from market_deal_lifecycle.terms import DisputeAuthority
 from market_deal_lifecycle_contracts.models import Accepted, LifecycleCommand, Rejected, Unknown
 from market_identity import Ed25519Signer, Identity, canonical_json
 from market_arkhai_payments.fixtures.authority import PaymentsAuthority
+from pydantic import SecretStr
 
 from market_arkhai_mediation.adapter import MediationAdapter
 from market_arkhai_mediation.claims import sign_claim, verify_claim
@@ -102,8 +103,8 @@ def test_published_ruling_trace(trace, surface):
         adapters = {}
         for actor, token in [(peer.payer, "fixture-payer"), (peer.payee, "fixture-payee")]:
             client = MediationClient(
-                authority, MediationCredential(authority.identity, "MEDIATION_TEST_CREDENTIAL"),
-                environ={"MEDIATION_TEST_CREDENTIAL": token}, transport=peer.transport(), capture=captured.append,
+                authority, MediationCredential(authority.identity, token=SecretStr(token)),
+                transport=peer.transport(), capture=captured.append,
             )
             clients[actor] = client
             adapters[actor] = MediationAdapter(binding, trace["agreement"], client, clock=lambda: payments.at)

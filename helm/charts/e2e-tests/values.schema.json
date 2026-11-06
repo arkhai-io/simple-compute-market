@@ -24,7 +24,22 @@
       }
     },
     "seller": {"$ref": "#/definitions/publicPrincipal"},
-    "buyer": {"$ref": "#/definitions/buyerRuntime"}
+    "buyer": {"$ref": "#/definitions/buyerRuntime"},
+    "payments": {
+      "description": "Public PAYMENTS settings for the helm test profile; credentials are refused.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "service_url": {"type": "string", "pattern": "^https://\\S+$"},
+        "service_identity": {"type": "string", "minLength": 1},
+        "fee_bps": {"type": "integer", "minimum": 0},
+        "livemode": {"type": "boolean"},
+        "lane_owned": {"type": "boolean"},
+        "api_key_env": {"type": "string", "minLength": 1},
+        "buyer_account": {"type": "string", "minLength": 1},
+        "seller_account": {"type": "string", "minLength": 1}
+      }
+    }
   },
   "definitions": {
     "buyerRuntime": {

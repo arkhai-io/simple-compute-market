@@ -12,6 +12,7 @@ from market_deal_lifecycle.adapters import DisputeAdapterTable, PaymentAdapterTa
 from market_deal_lifecycle.terms import DisputeAuthority
 from market_deal_lifecycle_contracts.models import LifecycleCommand, ListDealsRequest
 from market_identity import Ed25519Signer, Identity
+from pydantic import SecretStr
 
 from market_deal_servicing import (
     DealWatch, DeliveryRecord, EndService, EndSession, PhysicalResult,
@@ -43,8 +44,8 @@ async def main():
         end = EndService(path, physical, clock=lambda: now[0])
         # Public deterministic fixture credential; never use on a public network.
         async with MediationClient(
-            authority, MediationCredential(authority.identity, "DEMO_PAYEE"),
-            environ={"DEMO_PAYEE": "fixture-payee"}, transport=peer.transport(),
+            authority, MediationCredential(authority.identity, token=SecretStr("fixture-payee")),
+            transport=peer.transport(),
         ) as client:
             def make_watch(deal, payment, dispute):
                 return DealWatch(

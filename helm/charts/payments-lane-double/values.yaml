@@ -1,0 +1,32 @@
+# The payments lane double (tools/payments-lane-double): an in-memory stand-in for
+# the arkhai.payments.v1 payments service, for a local release only. Its image
+# carries the double's committed fixtures and TLS files, public development values
+# never for a public network, so it needs no configuration. Its state lives in the
+# pod's memory and is lost when the pod restarts.
+#
+# The umbrella enables it in helm/local-values.yaml, never in release values. Its
+# Service is named `payments-double` in every release, the name its certificate is
+# issued for, so one namespace runs one double: the local two-release topology
+# enables it in release 1 alone.
+
+global:
+  imageRepository: ""
+
+image:
+  repository: ""
+  name: arkhai
+  tag: payments-lane-double
+  digest: ""
+  pullPolicy: IfNotPresent
+
+# The double's server certificate and key. Empty serves the image's committed
+# leaf, issued under the committed lane CA for `payments-double`. A release
+# naming an existing kubernetes.io/tls Secret serves its `tls.crt` and `tls.key`
+# instead, mounted over the image's files.
+tls:
+  existingSecret: ""
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

@@ -3,11 +3,15 @@
 # This stack runs the dedicated wheel-only storefront, one compute-family
 # registry, and the ordinary selected-site provisioning authority. The
 # provisioning service runs its container profile, real fulfillment with no
-# test controller, unless a run selects its mock profile through
-# BARE_METAL_PROVISIONING_ACTIVE_PROFILES, as the end-to-end lane does from
-# `PROVISIONING_MODE`.
-# Deployment-specific principals and signer credentials are supplied by the
-# root compose.bare-metal.yml wrapper.
+# test controller; a deployment's overlay appends its site profile, and the
+# end-to-end lane's the run's mode, which may select the mock profile.
+#
+# This file holds topology only. The root compose.bare-metal.yml wrapper extends
+# each service; a deployment's overlay (compose.bare-metal-local.yml for the
+# lane) binds its identities, configuration and secret overlay, its registry
+# and site profiles, and its host and pool definitions. Nothing here gives one a
+# fallback, so without an overlay the registry, the site and the storefront
+# refuse to start for want of them.
 
 services:
   bare-metal-registry:
@@ -50,10 +54,10 @@ services:
     ports:
       - "${BARE_METAL_PROVISIONING_PORT:-8081}:8081"
     environment:
-      # `docker`, or `mock` when a run selects mock provisioning: the mock
-      # runner in place of Ansible, and the /test/* controls. Never mock in
-      # production.
-      - ACTIVE_PROFILES=${BARE_METAL_PROVISIONING_ACTIVE_PROFILES:-docker}
+      # Real provisioning. The lane's overlay appends its site profile and the
+      # run's mode, `mock` selecting the mock runner in place of Ansible and the
+      # /test/* controls. Never mock in production.
+      - ACTIVE_PROFILES=docker
       - PROVISIONING_DATABASE_URL=sqlite:////app/data/provisioning.db
       - REDIS_URL=redis://bare-metal-redis:6379
       - PROVISIONING_STOREFRONT_URL=http://bare-metal-storefront:8000
@@ -61,11 +65,11 @@ services:
       # The site's host definitions document, reconciled at startup whenever
       # it changes, after the pool document whose pools its entries name.
       - PROVISIONING_HOST_DEFINITIONS_PATH=/run/config/host-definitions.yaml
+    # Both definition documents, at the paths above, and the SSH key the site
+    # reaches its hosts with, at /home/appuser/.ssh/id_ed25519, are the
+    # deployment's, bound by its overlay.
     volumes:
       - ./provisioning/iac:/opt/domains/bare_metal/provisioning/iac:ro
-      - ${BARE_METAL_PROVISIONING_HOST_DEFINITIONS_FILE:?set the selected site's host definitions document}:/run/config/host-definitions.yaml:ro
-      - ${BARE_METAL_POOL_DEFINITIONS_FILE:?set explicit resource-pool definitions file}:/run/config/resource-pools.yaml:ro
-      - ${BARE_METAL_PROVISIONING_SSH_PRIVATE_KEY_FILE:?set provisioning SSH private key file}:/home/appuser/.ssh/id_ed25519:ro
       - bare-metal-provisioning-data:/app/data
     restart: unless-stopped
     healthcheck:
@@ -88,12 +92,12 @@ services:
       - "${BARE_METAL_STOREFRONT_PORT:-8000}:8000"
     environment:
       # The storefront's one configuration-bearing variable: where its loader
-      # finds the mounted files, $XDG_CONFIG_HOME/arkhai/ = /etc/arkhai/. Every
-      # setting is in those files, never in this environment.
+      # finds the mounted files, $XDG_CONFIG_HOME/arkhai/ = /etc/arkhai/: the
+      # operator's storefront.toml (sites, registries, settlement, terms) and its
+      # secret overlay, both bound by the deployment's overlay. Every setting is
+      # in those files, never in this environment.
       - XDG_CONFIG_HOME=/etc
     volumes:
-      # The operator's storefront.toml: sites, registries, settlement, terms.
-      - ${BARE_METAL_STOREFRONT_CONFIG_FILE:?set the storefront configuration file}:/etc/arkhai/storefront.toml:ro
       # The storefront's working directory; its database defaults to a file here.
       - bare-metal-storefront-data:/var/lib/arkhai
     restart: unless-stopped

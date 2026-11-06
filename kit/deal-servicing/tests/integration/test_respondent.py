@@ -12,6 +12,7 @@ from market_deal_lifecycle.adapters import DisputeBinding
 from market_deal_lifecycle.terms import DisputeAuthority
 from market_deal_servicing import Classification, DealWatch, EndSession, FinalRequest, RespondentPoller
 from market_deal_servicing.evidence import transaction
+from pydantic import SecretStr
 
 
 @pytest.fixture
@@ -39,11 +40,11 @@ async def respondent(rig):
         ), now=now, classification=Classification(kind="buyer_surrender", evidence_refs=["surrender"]))
     # Public deterministic contract-fake credentials; never use on a public network.
     async with MediationClient(
-        authority, MediationCredential(authority.identity, "PAYER"),
-        environ={"PAYER": "fixture-payer"}, transport=peer.transport(),
+        authority, MediationCredential(authority.identity, token=SecretStr("fixture-payer")),
+        transport=peer.transport(),
     ) as payer, MediationClient(
-        authority, MediationCredential(authority.identity, "PAYEE"),
-        environ={"PAYEE": "fixture-payee"}, transport=peer.transport(),
+        authority, MediationCredential(authority.identity, token=SecretStr("fixture-payee")),
+        transport=peer.transport(),
     ) as payee:
         adapter = MediationAdapter(binding, agreement, payee, clock=lambda: now)
         for key, ended_at in (("match", now), ("contest", now - 1)):

@@ -24,6 +24,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+from market_arkhai_payments import ARKHAI_PAYMENTS_CONFIG_KEY
 from market_config.values_schema import (
     accepting_null,
     any_case,
@@ -60,19 +61,36 @@ def storefront_config_definition(role: str = ROLE) -> dict[str, Any]:
 
     The settings model types the whole document; its two open mappings,
     ``[Settlement]`` and ``[Delivery]``, which the settlement and delivery kits
-    read, are typed here by what those kits register and discover. It accepts
-    ``null`` wherever it accepts a key, since a values file's ``null`` removes the
-    key; a key it refuses stays refused.
+    read, are typed here by what those kits register and discover. Two
+    credential paths the models accept are refused, since a storefront's
+    credentials reach it only through its secret overlay, never through a
+    variable its configuration names; the chart sets no variable but the
+    configuration directory and the signing credential, so such a name could
+    reach no key:
+
+    * ``[Settlement.arkhai_payments].api_key_env``. It stays a field of the
+      shared payments model, the form a buyer's provider reads, so it is
+      refused here rather than in the model, whose roles the settlement runtime
+      also enforces at startup.
+    * ``[[DisputeCredential]]``, whole. An entry binds a token to an authority
+      and is incomplete without one, so the entry belongs in the secret overlay.
+
+    It accepts ``null`` wherever it accepts a key, since a values file's ``null``
+    removes the key; a key it refuses stays refused.
     """
     definition = model_fragment(BareMetalStorefrontSettings, role=role)
     sinks, _warnings = discover_sink_settings_models()
     fields = definition["patternProperties"]
-    fields[any_case("settlement")] = settlement_fragment(
+    settlement = settlement_fragment(
         build_bare_metal_settlement_registry().registrations, role=role
     )
+    payments = settlement["patternProperties"][any_case(ARKHAI_PAYMENTS_CONFIG_KEY)]
+    payments["patternProperties"][any_case("api_key_env")] = False
+    fields[any_case("settlement")] = settlement
     fields[any_case("delivery")] = sink_typed_section(
         sinks, sink_key=SINK_KEY, section_fields=DELIVERY_SETTINGS, role=role
     )
+    fields[any_case("disputecredential")] = False
     return accepting_null(definition)
 
 

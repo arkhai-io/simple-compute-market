@@ -109,13 +109,30 @@ included in the option hash. An empty list builds no hosted option. The payments
 kit names no concrete dispute interface.
 
 `ArkhaiPaymentsConfig` keeps the service origin, pinned Ed25519 receipt identity,
-fee policy, optional receipt identity history, API-key environment-variable name, local
-development-auth switch, and the buyer-only `attach_agreement` setting (off by
-default; a seller configuration that sets it fails preflight) in trusted role
-configuration. The API key value is read
-only when a client is created. `payments_client_for_owner(config, owner_account)`
+fee policy, optional receipt identity history, the API key, an optional CA bundle,
+the local development-auth switch, and the buyer-only `attach_agreement` setting
+(off by default; a seller configuration that sets it fails preflight) in trusted
+role configuration. The key takes one of two forms, which are mutually exclusive
+and each exclusive with `development_auth`:
+
+- `api_key`, the key itself, a secret setting a service states in its secret
+  overlay (a storefront's `storefront.secrets.toml`). It is a `SecretStr`, so it
+  never appears in the model's `repr` or a dump, and it is marked secret, so a
+  storefront chart's generated values schema refuses it in public `config`.
+- `api_key_env`, the name of the environment variable a buyer's credential
+  provider reads the key from.
+
+`resolve_payments_api_key(config)` is the one resolution of the key: `api_key`
+when stated, otherwise the variable `api_key_env` names, read only when it is
+called. Client construction, readiness and the access check all use it, and it
+raises `ArkhaiPaymentsConfigurationError` naming the form that is missing or
+unavailable, never the key. `ca_bundle_path` names a PEM bundle the payments
+client verifies the service against instead of the default trust store, for that
+client alone: no other client's trust, and no process setting such as
+`SSL_CERT_FILE`, changes. `payments_client_for_owner(config, owner_account)`
 validates the owner account and uses it for loopback development authentication;
-normal service calls use the configured environment variable:
+normal service calls use the resolved key, and the client is given the configured
+bundle as `PaymentsClient(..., ca_bundle=...)`:
 
 ```python
 from market_arkhai_payments import create_arkhai_payments_registration
@@ -125,6 +142,36 @@ registration = create_arkhai_payments_registration()
 with payments_client_for_owner(config, owner_account) as client:
     snapshot = client.get_transaction(transaction_id)
 ```
+
+`client.get_balance(account)` reads `GET /balances/{account}` and returns the
+generated `Balance`: spendable `available` by asset, from which outgoing escrow
+has already left, and the `held` money the account is owed as payee. The service
+answers only for the credential's own account and refuses any other with 403
+`caller_not_authorized`, which the client raises as a `PaymentsAPIError`.
+
+Readiness never contacts the service, so `check_payments_access(section,
+account)` is how a role proves its payments access: it builds the client exactly
+as `payments_client_for_owner` does, from the role's own configuration and
+environment, reads the account's balance, and returns a `PaymentsAccessOutcome`.
+A failure names its step — `configuration` (no section, an invalid or disabled
+one, no `service_url`, neither key form, or a `ca_bundle_path` that is missing,
+unreadable or malformed, reported before any request), `credential` (the key
+variable unset, empty or not a single line), `transport` (unreachable, an
+untrusted certificate, a process `SSL_CERT_FILE` that cannot be loaded, or an
+answer outside the contract), or `refused` with the service's code.
+`outcome.json_line()` renders it as one JSON line that never contains the key or
+a bundle's path:
+
+```console
+{"check": "payments", "outcome": "ok", "service_url": "https://payments.example",
+ "account": "00000000-0000-4000-8000-000000000012", "assets": ["USD/6"], "held": 0}
+```
+
+A role's command runs it through `check_configured_payments_access(read_section,
+account)`, giving it the function that reads the section from the configuration
+the role serves with: a configuration that cannot be read at all is the
+`configuration` step too, its message withheld since it may quote a value. Each
+storefront CLI's `check-payments --account <id>` is this call.
 
 ## Seller servicing
 
@@ -271,6 +318,13 @@ authority used by `FakePaymentsClient` and available for an HTTP double to wrap.
 Inject a signer and integer-second `clock`, explicitly `fund(account, asset,
 amount)`, then `approve(mandate, account=payer)` and `submit(transaction,
 {account, requestId, event})`. `snapshot(transaction)` signs the published frame.
+`balance(account)` first brings every transaction the account is a party to up to
+the clock, as a snapshot does, then returns the published `Balance`: the
+account's `available` funds, matured earnings net of fee included, and, where it
+is the payee, one `held` entry per part and maturity, addressed
+`hold:<transaction>:<part>:<releaseAt seconds>`, with a part's lots that have no
+maturity yet in one `hold:<transaction>:<part>:until` entry held until `stop` or
+`lift`. `FakePaymentsClient.get_balance` serves the same view.
 `advance(transaction)` performs due stops, maturity and reservation refill;
 reads/commands apply due stops without driving the refill scheduler, matching the
 producer's read boundary. The caller owns HTTP, authentication, controls and

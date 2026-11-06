@@ -63,7 +63,9 @@ def test_the_document_is_closed_to_the_settings_the_storefront_reads() -> None:
     definition = values_schema.storefront_config_definition()
 
     assert definition["additionalProperties"] is False
-    assert _allowed(definition, *BareMetalStorefrontSettings.model_fields)
+    # The storefront reads its dispute credentials from its secret overlay
+    # alone, so that one setting it reads is refused here.
+    assert _allowed(definition, *(set(BareMetalStorefrontSettings.model_fields) - {"disputecredential"}))
     for section in ("Identity", "registry", "capacity", "pricing", "negotiation", "Wallet"):
         assert _field(definition, section)["additionalProperties"] is False, section
     peer = _field(_field(definition, "Identity"), "service_peers")["additionalProperties"]
@@ -127,6 +129,47 @@ def test_delivery_states_the_settings_the_vm_chart_does() -> None:
 def _refusals(config: dict) -> list[str]:
     validator = Draft7Validator(values_schema.storefront_config_definition())
     return [error.message for error in validator.iter_errors(config)]
+
+
+_DISPUTE_CREDENTIAL = {
+    "interface": "arkhai.mediation.v1",
+    "origin": "https://dispute.example",
+    "account": "acct_example",
+    "record_key": "ed25519:example",
+}
+
+
+def test_a_dispute_credential_is_refused_whole() -> None:
+    """A dispute credential reaches the storefront only through its secret
+    overlay, never by a variable its configuration names, so no entry is
+    accepted in ``config``: not with its token, not naming a variable, not
+    without either, and not as null, in any spelling of the section."""
+    assert _field(values_schema.storefront_config_definition(), "DisputeCredential") is False
+    for section in ("DisputeCredential", "disputecredential", "DISPUTECREDENTIAL"):
+        for stated in (
+            [{**_DISPUTE_CREDENTIAL, "api_key": "a-token"}],
+            [{**_DISPUTE_CREDENTIAL, "api_key_env": "DISPUTE_API_KEY"}],
+            [_DISPUTE_CREDENTIAL],
+            [],
+            None,
+        ):
+            assert _refusals({section: stated}), (section, stated)
+
+
+def test_a_payments_key_named_by_variable_is_refused() -> None:
+    """The payments key reaches the storefront only through its secret overlay,
+    so ``api_key_env`` is refused beside ``api_key``, in any spelling and as
+    null; the rest of the section stays accepted."""
+    settlement = _field(values_schema.storefront_config_definition(), "Settlement")
+    payments = _field(settlement, "arkhai_payments")
+    assert _field(payments, "api_key") is False
+    assert _field(payments, "api_key_env") is False
+    accepted = {"enabled": True, "service_url": "https://payments.example"}
+    assert not _refusals({"Settlement": {"arkhai_payments": accepted}})
+    for spelling in ("api_key_env", "API_KEY_ENV", "Api_Key_Env"):
+        for value in ("ARKHAI_PAYMENTS_API_KEY", None):
+            stated = {"Settlement": {"Arkhai_Payments": {**accepted, spelling: value}}}
+            assert _refusals(stated), (spelling, value)
 
 
 def test_a_null_removing_a_section_a_field_or_a_delivery_instance_validates() -> None:

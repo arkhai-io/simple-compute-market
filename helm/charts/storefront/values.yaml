@@ -79,6 +79,26 @@ image:
 #         configMapName: ""
 #         key: alkahest_addresses.json
 #         mountPath: /etc/arkhai/alkahest
+#       # The CA bundle the storefront's payments client trusts its payments
+#       # service under, from an existing ConfigMap key, or alternatively an
+#       # existing Secret key, never both, mounted read-only. The chart sets
+#       # [Settlement.arkhai_payments].ca_bundle_path in the rendered
+#       # configuration to the mounted file, and refuses a config stating
+#       # another path or no such section. Only the payments client reads it;
+#       # the process's own trust store is left as it is. The chart names no CA
+#       # of its own; empty names mount none and set nothing. The payments key
+#       # itself is [Settlement.arkhai_payments].api_key in the runtime secret
+#       # overlay.
+#       caBundle:
+#         configMapName: payments-ca-bundle
+#         secretName: ""
+#         key: ca-bundle.pem
+#       # The account the agent's payments check test pod reads the balance of,
+#       # with `market-storefront check-payments --account`: the seller's payee
+#       # account. The pod renders only when config has
+#       # [Settlement.arkhai_payments] and this names an account.
+#       tests:
+#         paymentsAccount: ""
 #       config:
 #         agent_id: bob
 #         Identity:

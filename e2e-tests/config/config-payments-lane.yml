@@ -1,0 +1,39 @@
+# ---------------------------------------------------------------------------
+# Profile: payments-lane
+#
+# The payments target every end-to-end lane runs, the payments lane double, and
+# what the payment scenarios need of it, shared by the three lanes. A lane target
+# runs the runner with ACTIVE_PROFILES=docker,payments-lane,<lane>-lane, and the
+# lane's own profile adds only what differs by lane; Dynaconf merges the
+# `payments` section key by key.
+#
+# Every value is a public deterministic development value, never for a public
+# network. The double's own values restate tools/payments-lane-double/fixtures/
+# accounts.toml, and tools/payments-lane-double/tests/integration/test_lane_env.py
+# holds them equal. Strings are quoted, so an identifier or token stays a string.
+# ---------------------------------------------------------------------------
+
+payments:
+  # The double's service name on the lane's network and port, which its leaf
+  # certificate is issued for.
+  service_url: "https://payments-double:8443"
+  # The double's receipt-signing identity, and its fee policy.
+  service_identity: "kaKKC3Q4FZOk2UaVeSCJJq_IrYLIg5t2RDWbnrqaSzo"
+  fee_bps: 250
+  # The double signs test receipts only.
+  livemode: false
+  # The lane runs this target itself, so an unready one fails a scenario by name.
+  lane_owned: true
+  # The lane CA, which test-buyer-machine mounts here: the only authority the
+  # probe and the buyer's payments client trust for the double.
+  ca_bundle_path: "/run/payments-lane-double/lane-ca.pem"
+  # The buyer's bearer token at the double, which the harness hands the buyer
+  # process under the variable api_key_env names.
+  api_key_env: "PAYMENTS_BUYER_API_KEY"
+  buyer_api_key: "payments-lane-double-buyer-public-development-token"
+  buyer_account: "00000000-0000-4000-8000-0000000000b1"
+  seller_account: "00000000-0000-4000-8000-0000000000b2"
+  # The payment scenarios' wallet-free Ed25519 buyer marketplace seed: 32 bytes
+  # of 0xb1, as the unpadded base64url an Ed25519 credential is written in. Its
+  # byte echoes the buyer's payments account, which it is independent of.
+  buyer_marketplace_credential: "sbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbE"

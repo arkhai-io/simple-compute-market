@@ -8,7 +8,9 @@ below is a development fixture and must never be used on a public network.
 from __future__ import annotations
 
 import pytest
+from market_arkhai_payments import resolve_payments_api_key
 from market_identity import Ed25519Signer
+from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
 
 from arkhai_bare_metal_storefront.config import (
     IDENTITY_CREDENTIAL_ENV,
@@ -123,6 +125,43 @@ def test_the_secret_overlay_wins_on_a_conflicting_key(monkeypatch, tmp_path):
     assert settings.wallet.private_key == WALLET_KEY
     # The key is a secret: it is never part of the settings' representation.
     assert WALLET_KEY not in repr(settings)
+
+
+#: Development-only payments key and dispute token; they authorize nothing anywhere.
+PAYMENTS_KEY = "dev-only-payments-key-not-a-secret"
+DISPUTE_TOKEN = "dev-only-dispute-token-not-a-secret"
+
+
+def test_payments_and_dispute_keys_are_read_from_the_secret_overlay(monkeypatch, tmp_path):
+    document = publishable_configuration(tmp_path / "storefront.db")
+    section = {key: value for key, value in _payments_section().items()
+               if key != "development_auth"} | {"service_url": "https://payments.test"}
+    document["Settlement"] = {
+        "schema_version": 1, "priority": ["arkhai.payments.v1"], "arkhai_payments": section,
+    }
+    authority = {
+        "interface": "arkhai.mediation.v1", "origin": "https://dispute.test",
+        "account": DISPUTE_ACCOUNT, "record_key": "ed25519:" + "A" * 43,
+    }
+    write_configuration(
+        monkeypatch, tmp_path, document,
+        secrets=(
+            f'[Settlement.arkhai_payments]\napi_key = "{PAYMENTS_KEY}"\n\n[[DisputeCredential]]\n'
+            + "".join(f'{key} = "{value}"\n' for key, value in authority.items())
+            + f'api_key = "{DISPUTE_TOKEN}"\n'
+        ),
+    )
+
+    settings = load_storefront_settings()
+    composition = BareMetalStorefrontSettlementComposition.from_raw_config(settings.settlement)
+    disputes = RegistryDisputePolicy.from_document(settings.model_dump())
+
+    stage_config = composition.arkhai_payments_stage().config
+    assert resolve_payments_api_key(stage_config, environment={}).get_secret_value() == PAYMENTS_KEY
+    [credential] = disputes.config.credentials
+    assert credential.resolve({}).get_secret_value() == DISPUTE_TOKEN
+    assert PAYMENTS_KEY not in repr(settings)
+    assert DISPUTE_TOKEN not in repr(settings)
 
 
 #: Development-only registry token; it authorizes nothing anywhere.

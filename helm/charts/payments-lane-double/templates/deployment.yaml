@@ -1,0 +1,94 @@
+{{/*
+One process holding every transaction in memory, so one replica: a second would
+be a second ledger. Recreate, because an overlapping new pod would answer with
+an empty ledger beside the old one.
+
+The image's own fixtures and TLS files are what it serves unless tls.existingSecret
+names a Secret, whose certificate and key mount over the image's leaf at the
+paths the double reads. The probes ask over HTTPS, which the kubelet does not
+verify, so they hold whichever certificate is served.
+*/}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "payments-lane-double.fullname" . }}
+  labels:
+    {{- include "payments-lane-double.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "payments-lane-double.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "payments-lane-double.selectorLabels" . | nindent 8 }}
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: payments-lane-double
+          image: {{ include "payments-lane-double.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: https
+              containerPort: 8443
+              protocol: TCP
+          {{- if .Values.tls.existingSecret }}
+          volumeMounts:
+            - name: server-tls
+              mountPath: /opt/payments-lane-double/tls/double.pem
+              subPath: double.pem
+              readOnly: true
+            - name: server-tls
+              mountPath: /opt/payments-lane-double/tls/double.key.pem
+              subPath: double.key.pem
+              readOnly: true
+          {{- end }}
+          startupProbe:
+            httpGet:
+              path: /health
+              port: https
+              scheme: HTTPS
+            failureThreshold: 30
+            periodSeconds: 2
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: https
+              scheme: HTTPS
+            periodSeconds: 15
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: https
+              scheme: HTTPS
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- if .Values.tls.existingSecret }}
+      volumes:
+        - name: server-tls
+          secret:
+            secretName: {{ .Values.tls.existingSecret | quote }}
+            items:
+              - key: tls.crt
+                path: double.pem
+              - key: tls.key
+                path: double.key.pem
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

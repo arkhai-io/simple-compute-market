@@ -1,8 +1,9 @@
 """Filter-spec loader and `/filter-spec` endpoint.
 
 The registry self-describes via a YAML file (``filter-spec.yaml`` by
-default, path overridable through ``REGISTRY_FILTER_SPEC_PATH``).  The
-spec carries two things:
+default, another named by the ``registry_filter_spec_path`` setting, which a
+profile env file or ``REGISTRY_FILTER_SPEC_PATH`` carries).  The spec
+carries two things:
 
 * ``listing_shape`` — JSON Schema (draft 2020-12) for a publishable
   listing.  Drives the structural check on ``POST /agents/{id}/listings``
@@ -21,7 +22,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 from functools import lru_cache
 from pathlib import Path
@@ -41,6 +41,8 @@ from core_registry.api.publisher_auth import (
     registry_authority_signer,
     signed_response,
 )
+from core_registry.config import Settings
+from core_registry.config import settings as process_settings
 from core_registry.db.database import get_db
 
 
@@ -130,9 +132,10 @@ class FilterSpec(BaseModel):
 _DEFAULT_SPEC_PATH = Path(__file__).resolve().parents[3] / "filter-spec.yaml"
 
 
-def _resolve_spec_path() -> Path:
-    override = os.environ.get("REGISTRY_FILTER_SPEC_PATH")
-    return Path(override) if override else _DEFAULT_SPEC_PATH
+def resolve_spec_path(settings: Settings | None = None) -> Path:
+    """The specification ``settings`` names, the process's settings by default."""
+    configured = (settings or process_settings).registry_filter_spec_path
+    return Path(configured) if configured else _DEFAULT_SPEC_PATH
 
 
 def compute_etag(spec: FilterSpec) -> str:
@@ -156,14 +159,16 @@ def compute_etag(spec: FilterSpec) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def load_filter_spec(path: Path | None = None) -> FilterSpec:
-    """Load and validate the spec from ``path`` (or the configured default).
+def load_filter_spec(
+    path: Path | None = None, *, settings: Settings | None = None,
+) -> FilterSpec:
+    """Load and validate the spec from ``path``, else the one ``settings`` names.
 
     Raises ``FileNotFoundError`` if the file is missing, ``yaml.YAMLError``
     on parse failure, ``pydantic.ValidationError`` on shape problems, and
     ``ValueError`` on duplicate filter names.
     """
-    target = path or _resolve_spec_path()
+    target = path or resolve_spec_path(settings)
     with open(target, encoding="utf-8") as fh:
         raw = yaml.safe_load(fh)
     spec = FilterSpec.model_validate(raw)
@@ -242,14 +247,23 @@ def _dump_filter(declaration: FilterDecl) -> dict[str, Any]:
     return dumped
 
 
+_served_settings: Settings | None = None
+
+
 @lru_cache(maxsize=1)
 def get_loaded_spec() -> FilterSpec:
-    """Module-level cache of the loaded spec (one read per process)."""
-    return load_filter_spec()
+    """Module-level cache of the served spec (one read per process)."""
+    return load_filter_spec(settings=_served_settings)
 
 
-def reset_cache() -> None:
-    """Drop the cached spec — called from tests that swap the spec file."""
+def reset_cache(settings: Settings | None = None) -> None:
+    """Drop the cached spec, so the next read loads the one ``settings`` names.
+
+    With no ``settings`` the served spec is the one the process's settings name.
+    Tests that serve another specification pass the settings naming it.
+    """
+    global _served_settings
+    _served_settings = settings
     get_loaded_spec.cache_clear()
 
 
