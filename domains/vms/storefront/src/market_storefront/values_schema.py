@@ -76,12 +76,15 @@ def storefront_config_definition(role: str = ROLE) -> dict[str, Any]:
     """
     sinks, _warnings = discover_sink_settings_models()
     sections: dict[str, Any] = {
-        "DisputeCredential": {
-            "type": "array", "items": model_fragment(DisputeCredential, role=role)
-        },
         "delivery": sink_typed_section(
             sinks, sink_key=SINK_KEY, section_fields=_DELIVERY_SETTINGS, role=role
         ),
+        # Each entry's token is a secret setting, refused here so it reaches the
+        # storefront only through its secret overlay.
+        "disputecredential": {
+            "type": "array",
+            "items": model_fragment(DisputeCredential, role=role),
+        },
         "identity": model_fragment(IdentityConfigDeclaration, role=role),
         "registry": model_fragment(RegistryConfigDeclaration, role=role),
         "settlement": settlement_fragment(

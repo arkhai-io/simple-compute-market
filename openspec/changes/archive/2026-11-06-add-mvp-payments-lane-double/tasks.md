@@ -2101,6 +2101,65 @@ Independent Standards/Spec review and its incremental rechecks have no unresolve
 finding. Existing deployment-state requirements own the credential-schema correction;
 no new production behavior or design decision was introduced by these integration fixes.
 
+  Settled by the round's triage (review 61, validation 62, owner's notes 63): the CA
+  bundle without a payments section stays refused, now in D3 and the delta with its
+  scenario (61, CA bundle); D3 and D11 are reworded so the deploy guard checks only that
+  the ConfigMap and runtime Secrets exist, a missing token being the storefront's to
+  report through its readiness blocker and the payments check (61, token check); the
+  dispute-credential schema gap is fixed in 12.6 (61 F1).
+- [x] 12.6 Triage fixes (61 F1, 63 O1).
+  - **61 F1, the dispute credential's token refused in public `config`.** Both
+    storefront schema generators type `[[DisputeCredential]]` as an array of
+    `model_fragment(DisputeCredential)` from `market_deal_lifecycle.configuration`, a
+    distribution both already declare. Its `api_key`, marked secret, is refused in any
+    spelling and as null, and the entry is closed to its other fields. The three
+    committed schemas (`helm/values.schema.json`, `helm/charts/storefront/` and
+    `helm/charts/bare-metal-storefront/values.schema.json`) were written with the Edit
+    tool, since the triage step may not run `make helm-values-schema`; both drift tests
+    pass, so they equal the generators' output as parsed JSON. A later `make
+    helm-values-schema` may reorder keys, nothing else. Tests: a unit case per
+    storefront's `test_values_schema.py`, and a render refusal per chart's
+    `tests/test_render.py`, the VM one through the umbrella and through the chart alone.
+    The delta gains the scenario "The public configuration states a dispute credential's
+    token".
+  - **63 O1, Bob's dispute credential in the local release.** `topology-secrets.sh`
+    copies Bob's `[[DisputeCredential]]` from the committed Compose overlay
+    `dev-env/identities/bob.storefront.secrets.toml` (new input
+    `BOB_COMPOSE_SECRETS_FILE`, set in `helm/Makefile`) into `arkhai-bob-runtime`'s
+    overlay, rewriting each setting as a TOML basic string and refusing a non-string
+    value or a rewrite that does not read back as the file's entries. The bare-metal
+    release's overlay gets none, as D2 says of its lane. Release tooling:
+    `test_topology_secrets_gives_bob_his_compose_dispute_credential` asserts Bob's
+    entries equal the Compose overlay's, their authority binding equals
+    `fixtures/dispute-authority.toml`'s, and the bare-metal overlay has none. D11 and
+    the delta's local-release requirement and scenario name the credential. Comments
+    updated: `helm/local-values.yaml`, `helm/Makefile`, the overlay's header and
+    `dev-env/identities/README.md`.
+  Evidence:
+  - Unit: `make test-storefront`, 1214 unit passed (1 skipped, as before) and 526
+    application-integration passed, drift test and new case included; `make test-bare-metal`, storefront 584 passed, drift test
+    included.
+  - Chart render: `make -C helm test-render` passes, with both new cases.
+  - Release tooling: `make test-release-tooling`, 2228 passed.
+  - `make check-packaging` all OK; `make test` exited 0.
+  Fresh-context check of the diff: no defect in the script, imports or comment hygiene.
+  Fixed from it: D3 said the deploy target creates the CA ConfigMap (the out-of-band
+  step does) and that it checks each storefront's runtime Secret (the deploy and
+  topology targets check their own releases'); the new delta scenario and the render
+  cases asserted that a public entry naming `api_key_env` renders, which the
+  requirement's "never as an environment variable its configuration names" contradicts,
+  so the scenario now says the whole entry belongs in the overlay and the positive
+  render cases are gone; the script now refuses a rewrite that does not read back, since
+  `json.dumps` escapes a character outside the Basic Multilingual Plane as a surrogate
+  pair TOML refuses; the Makefile help text, the overlay's header and the identities
+  README now name the copy. After the fixes, `make -C helm test-render`, `make
+  test-release-tooling` (2228), `make test-storefront` and `make test-bare-metal` were
+  rerun.
+  Handoff to closeout, beyond 12.5's: `DEPLOYMENT_AND_CONFIG.md`'s account of what
+  `arkhai-bob-runtime` carries should name Bob's `[[DisputeCredential]]` beside the
+  payments `api_key`, and its list of what the storefront values schema refuses should
+  name a dispute credential's `api_key`.
+
 ## 13. Closeout
 
 Replanned against the redesign: replaces the unstarted section-6 closeout this plan first
@@ -2270,3 +2329,17 @@ The registry quickstart was aligned to those same committed full-stack overlays.
 | D22 Implementation cadence | change history only |
 | D23 Storefront wallet keys in the secret overlays | `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Per-domain stack composition"; `dev-env/identities/README.md` |
 | D4 integration clarification: exact public TLS fixture publication | `openspec/specs/market-change-workflow/README.md`, "Secret scanning" |
+
+
+### Subsequent source integration
+
+The authoritative feature's later dispute-credential and schema-generation
+permission commits are incorporated. Duplicate dispute-schema declarations were
+removed in favor of the feature's declarations. Its three amended deployment
+requirements are also present in the permanent specification; local runtime-overlay
+and CA-section guidance reflects them. Focused source checks passed: VM schema
+35, bare-metal schema13, chart/render and release-tooling147; packaging passed.
+The first combined chart invocation hit a pytest module-name collision before
+execution; importlib collection passed all147. Full CI, three Compose lanes,
+affected deployed Helm proof and independent review of this new executable
+candidate remain pending; earlier source evidence is retained as historical proof.

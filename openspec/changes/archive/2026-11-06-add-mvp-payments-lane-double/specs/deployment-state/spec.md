@@ -2,7 +2,7 @@
 
 ### Requirement: A storefront chart trusts a deployment-supplied CA bundle
 
-The storefront and bare-metal storefront charts MUST offer an option that mounts a CA bundle from a deployment-supplied ConfigMap key, or alternatively a Secret key, into the storefront container and derives the agent configuration's `[Settlement.arkhai_payments].ca_bundle_path` from the option's presence, naming the mounted file. The chart MUST refuse a configuration that states a different `ca_bundle_path` while the option is set, MUST name no CA itself and supply no default, MUST NOT set `SSL_CERT_FILE`, and MUST render neither the mount nor the setting when the option is unset.
+The storefront and bare-metal storefront charts MUST offer an option that mounts a CA bundle from a deployment-supplied ConfigMap key, or alternatively a Secret key, into the storefront container and derives the agent configuration's `[Settlement.arkhai_payments].ca_bundle_path` from the option's presence, naming the mounted file. The chart MUST refuse a configuration that states a different `ca_bundle_path` while the option is set, MUST refuse the option, naming the section, when the configuration has no `[Settlement.arkhai_payments]` section or an empty one, MUST name no CA itself and supply no default, MUST NOT set `SSL_CERT_FILE`, and MUST render neither the mount nor the setting when the option is unset.
 
 #### Scenario: The option names a ConfigMap key
 
@@ -18,6 +18,11 @@ The storefront and bare-metal storefront charts MUST offer an option that mounts
 
 - **WHEN** a release sets the CA bundle option and its agent configuration states a different `ca_bundle_path`
 - **THEN** rendering fails naming both paths
+
+#### Scenario: The option is set without a payments section
+
+- **WHEN** a release sets the CA bundle option and its agent configuration has no `[Settlement.arkhai_payments]` section, or an empty one
+- **THEN** rendering fails naming the section, and the chart creates no payments configuration
 
 #### Scenario: The option is unset
 
@@ -38,6 +43,11 @@ A storefront's payments key, dispute credentials and wallet key MUST reach it as
 - **WHEN** a release's agent `config` states `[Settlement.arkhai_payments].api_key`
 - **THEN** the values schema refuses it before anything renders
 
+#### Scenario: The public configuration states a dispute credential's token
+
+- **WHEN** a release's agent `config` states a `[[DisputeCredential]]` entry with its `api_key`
+- **THEN** the values schema refuses it before anything renders: the whole entry, its token included, belongs in the secret overlay
+
 #### Scenario: A storefront offers only payments
 
 - **WHEN** a release configures a storefront with payments and with Wallet, Chains and Alkahest removed and RPC off
@@ -45,12 +55,12 @@ A storefront's payments key, dispute credentials and wallet key MUST reach it as
 
 ### Requirement: The local release rehearses a deployment's payments interface
 
-The local Helm release MUST configure payments through the same values a deployment supplies — the agent's payments configuration, the runtime secret overlay and the CA bundle option — and MUST NOT use `development_auth`. Its deploy target MUST enable the payments double's subchart, which release values never enable, once per namespace, and the local deployment MUST supply the seller token in each storefront's runtime secret overlay and the CA ConfigMap from the committed development fixtures by default, through its out-of-band step for local Secrets rather than through chart values. The subchart MUST take its server certificate and key from a named existing Secret when one is given.
+The local Helm release MUST configure payments through the same values a deployment supplies — the agent's payments configuration, the runtime secret overlay and the CA bundle option — and MUST NOT use `development_auth`. Its deploy target MUST enable the payments double's subchart, which release values never enable, once per namespace, and the local deployment MUST supply the seller token in each storefront's runtime secret overlay, the VM storefront's dispute credential for the pinned dispute authority its registry recommends in that storefront's overlay, and the CA ConfigMap from the committed development fixtures by default, through its out-of-band step for local Secrets rather than through chart values. The subchart MUST take its server certificate and key from a named existing Secret when one is given.
 
 #### Scenario: The local release is deployed
 
 - **WHEN** the local deploy target installs the release
-- **THEN** the payments double runs, the storefronts are configured for payments through the deployment-facing values, and no storefront uses development authentication
+- **THEN** the payments double runs, the storefronts are configured for payments through the deployment-facing values, the VM storefront's secret overlay holds its credential for the pinned dispute authority, and no storefront uses development authentication
 
 #### Scenario: A deployment supplies its own TLS
 

@@ -20,7 +20,8 @@ LOCAL_VALUES := local-values.yaml
 # never creates: they are provisioned out of band (for local development,
 # `make topology-secrets` creates them). Enabling api-credits-registry adds
 # arkhai-api-credits-registry-identity. Under $(LOCAL_VALUES), which configures
-# Bob for payments, arkhai-bob-runtime's overlay also holds his payments key.
+# Bob for payments, arkhai-bob-runtime's overlay also holds his payments key and
+# his credential toward the pinned dispute authority.
 LOCAL_SECRETS := arkhai-registry-identity arkhai-bob-identity arkhai-bob-runtime \
 	arkhai-provisioning-identity arkhai-provisioning-runtime arkhai-provisioning-ssh
 # ConfigMaps the release's workloads read under $(LOCAL_VALUES) and no chart
@@ -32,6 +33,11 @@ LOCAL_CONFIGMAPS := payments-ca-bundle
 # Public development values, never for a public network.
 PAYMENTS_LANE_CA_FILE := ../tools/payments-lane-double/tls/lane-ca.pem
 PAYMENTS_LANE_ENV := ../tools/payments-lane-double/scripts/lane_env.py
+# Bob's secret overlay in the Compose stacks, whose [[DisputeCredential]] toward
+# the double's pinned dispute authority topology-secrets copies into his runtime
+# Secret's overlay, so one committed copy serves both. A public development
+# value, never for a public network.
+BOB_COMPOSE_SECRETS_FILE := ../dev-env/identities/bob.storefront.secrets.toml
 
 # The Secrets the release's `helm test` reads beyond a deploy's: the e2e-tests
 # chart's deal test credentials, which under local-values.yaml the registry smoke
@@ -252,8 +258,9 @@ topology-up:
 
 ## Create, or replace the contents of, every out-of-band Secret the topology
 ## reads -- $(LOCAL_SECRETS), $(TOPOLOGY_SECRETS), and $(TEST_SECRETS) -- and
-## ConfigMap -- $(LOCAL_CONFIGMAPS) -- from the development values above and the
-## payments lane double's committed fixtures, and the buyer-profile volume the
+## ConfigMap -- $(LOCAL_CONFIGMAPS) -- from the development values above, the
+## payments lane double's committed fixtures, and Bob's Compose secret overlay
+## ($(BOB_COMPOSE_SECRETS_FILE)), and the buyer-profile volume the
 ## deal test mounts ($(TEST_VOLUMES), created if absent), idempotently, in
 ## $(NAMESPACE), which it creates if absent (CHANGE=<change> for a change's
 ## validation namespace) (scripts/topology-secrets.sh says what each holds).
@@ -262,6 +269,7 @@ topology-up:
 topology-secrets:
 	NAMESPACE="$(NAMESPACE)" DEV_MNEMONIC="$(DEV_MNEMONIC)" \
 	PAYMENTS_LANE_CA_FILE="$(PAYMENTS_LANE_CA_FILE)" PAYMENTS_LANE_ENV="$(PAYMENTS_LANE_ENV)" \
+	BOB_COMPOSE_SECRETS_FILE="$(BOB_COMPOSE_SECRETS_FILE)" \
 	DEV_ACCOUNT_PROVISIONING="$(DEV_ACCOUNT_PROVISIONING)" DEV_ACCOUNT_BUYER="$(DEV_ACCOUNT_BUYER)" \
 	DEV_ACCOUNT_BOB="$(DEV_ACCOUNT_BOB)" DEV_ACCOUNT_REGISTRY="$(DEV_ACCOUNT_REGISTRY)" \
 	DEV_ACCOUNT_PROVISIONING_ADMIN="$(DEV_ACCOUNT_PROVISIONING_ADMIN)" \

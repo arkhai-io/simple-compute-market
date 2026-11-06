@@ -194,8 +194,12 @@ In Helm:
   supplies `payments-ca-bundle` / `ca-bundle.pem` — and a Secret key as a secondary one,
   mounts it, and derives `[Settlement.arkhai_payments].ca_bundle_path` in the agent's
   rendered configuration from the option's presence, refusing a configuration stating a
-  different path. The chart has no default.
-- The local deploy target creates that ConfigMap from the committed lane CA by default.
+  different path. The chart has no default. The option is refused, naming the section,
+  when the configuration has no `[Settlement.arkhai_payments]` section or an empty one:
+  only the payments client reads the bundle, and a section the chart created for it
+  would put payments configuration into a storefront that stated none (61, CA bundle).
+- The local out-of-band step creates that ConfigMap from the committed lane CA by
+  default, and the local deploy target checks that it exists.
 - The double's subchart takes its server certificate and key from an existing Secret
   when one is named, and otherwise from the committed files.
 
@@ -211,8 +215,12 @@ that a chart accepts only names of existing Secrets and never reads credential f
 values (`helm/Makefile`): the CA ConfigMap and the seller token, written into each
 storefront's runtime Secret's `storefront.secrets.toml`, come from the committed fixtures
 through the local out-of-band step that creates every other local Secret,
-`make -C helm topology-secrets` (`helm/scripts/topology-secrets.sh`), and the local deploy
-target checks for them before installing.
+`make -C helm topology-secrets` (`helm/scripts/topology-secrets.sh`). The local deploy
+and topology targets check that the CA ConfigMap and the runtime Secrets their releases
+read exist before installing, not what a Secret's overlay holds: a missing token is the service's to
+report, and it does, the storefront's payments readiness blocked by
+`arkhai_payments.api_key_missing` and its payments check failing at the configuration
+step (61, token check).
 
 **Rejected:**
 
@@ -395,7 +403,13 @@ The local release is where the external round's deployment shape is rehearsed:
   values a deployment uses — `[Settlement.arkhai_payments]` in agent configuration, the
   runtime secret overlay, the CA option — never `development_auth`. The local out-of-band
   step writes the token and creates the CA ConfigMap from the committed fixtures, and the
-  deploy target checks for them (D3).
+  deploy target checks that the ConfigMap and the runtime Secret exist (D3).
+- **The dispute credential.** The local release's registry recommends the pinned dispute
+  authority, so Bob's runtime overlay also states his `[[DisputeCredential]]` for it, as
+  the VM lane's Compose overlay does (D2). The out-of-band step copies it from that
+  committed overlay, `dev-env/identities/bob.storefront.secrets.toml`, so both stacks
+  hold one value; the bare-metal release's storefront carries none, as its lane does
+  (63 O1).
 - **The double.** The `payments-lane-double` subchart is enabled by the local deploy
   target, never in release values, as `dev-env` is.
 - **A rerunnable check.** A `helm test` pod runs D12's `check-payments`, reading the

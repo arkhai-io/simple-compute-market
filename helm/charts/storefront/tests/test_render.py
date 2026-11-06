@@ -1087,6 +1087,31 @@ def test_no_payments_key_option_or_public_payments_key_is_accepted() -> None:
         assert _names_path(rendered.stderr, dotted), rendered.stderr
 
 
+# A development dispute authority's public binding, on a reserved domain.
+DISPUTE_CREDENTIAL = {
+    "interface": "arkhai.mediation.v1",
+    "origin": "https://dispute.example",
+    "account": "acct_example",
+    "record_key": "ed25519:example",
+}
+
+
+def test_a_dispute_credentials_token_is_refused_in_public_configuration() -> None:
+    """The deployment-state requirement "A storefront's secrets reach it through
+    its secret overlay": a dispute credential's token is refused in `config`, by
+    the umbrella's copy of the definition and the chart's own."""
+    token = [{**DISPUTE_CREDENTIAL, "api_key": "x"}]
+    for rendered, dotted in (
+        (_render(agent=_with_config(DisputeCredential=token)), "agents.bob.config.DisputeCredential.0.api_key"),
+        (
+            _render_chart({"agents": {"carol": {**CAROL, "config": {**CAROL["config"], "DisputeCredential": token}}}}),
+            "agents.carol.config.DisputeCredential.0.api_key",
+        ),
+    ):
+        assert rendered.returncode != 0, dotted
+        assert _names_path(rendered.stderr, dotted), rendered.stderr
+
+
 def _payments_only() -> subprocess.CompletedProcess[str]:
     """The local release with Bob selling through payments alone: Wallet, Chains,
     and Alkahest removed, with the Alkahest clause and address book that need

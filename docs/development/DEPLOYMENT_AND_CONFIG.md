@@ -213,7 +213,9 @@ Both compute storefront charts accept `caBundle.configMapName` or, alternatively
 bare-metal chart root. The charts mount that key as
 `/etc/arkhai/ca/ca-bundle.pem` and derive
 `config.Settlement.arkhai_payments.ca_bundle_path`. Naming both sources or stating
-a different path is refused. With no source there is no mount or derived setting;
+a different path is refused. The option also requires a nonempty
+`Settlement.arkhai_payments` section; the chart never creates one just to hold
+the CA setting. With no source there is no mount or derived setting;
 the charts select no CA by default and never set `SSL_CERT_FILE`.
 
 The payments `api_key`, dispute `api_key` entries and wallet `private_key` belong
@@ -317,7 +319,11 @@ it is a well-known development value never for a public network. For the local
 release to build Bob's Alkahest client, the out-of-band `arkhai-bob-runtime`
 Secret's `storefront.secrets.toml` must carry `[Wallet] private_key`, Anvil account
 2's published development key, and `[Settlement.arkhai_payments] api_key`, the
-local double's seller token; it needs `[registry.auth]` only for a registry that
+local double's seller token. It also carries Bob's `[[DisputeCredential]]` for
+the pinned dispute authority recommended by the local registry. The out-of-band
+step copies those entries from his committed Compose secret overlay, so the
+Compose lane and local release share the same development credential. It needs
+`[registry.auth]` only for a registry that
 requires write keys, which the local registry does not. The storefront validates its typed sections at startup; untyped
 sections are not checked key by key (see below). Because the Deployment uses
 the `Recreate` strategy, a configuration the storefront refuses leaves no

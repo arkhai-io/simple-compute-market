@@ -637,6 +637,24 @@ def test_no_payments_key_option_or_public_payments_key_is_accepted() -> None:
     _refused_at(_render({"paymentsKey": {"secretName": "payments-key", "key": "api-key"}}), "paymentsKey")
 
 
+# A development dispute authority's public binding, on a reserved domain.
+DISPUTE_CREDENTIAL = {
+    "interface": "arkhai.mediation.v1",
+    "origin": "https://dispute.example",
+    "account": "acct_example",
+    "record_key": "ed25519:example",
+}
+
+
+def test_a_dispute_credentials_token_is_refused_in_public_configuration() -> None:
+    """The deployment-state requirement "A storefront's secrets reach it through
+    its secret overlay": a dispute credential's token is refused in `config`."""
+    _refused_at(
+        _render(_with_config(DisputeCredential=[{**DISPUTE_CREDENTIAL, "api_key": "x"}])),
+        "config.DisputeCredential.0.api_key",
+    )
+
+
 def _payments_access(**changes) -> dict:
     """An overlay of the example selling through payments, with its CA bundle
     and check account, and ``changes`` to its config."""
