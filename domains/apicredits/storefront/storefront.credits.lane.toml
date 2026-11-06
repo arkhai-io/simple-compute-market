@@ -3,9 +3,9 @@
 # payments double and a payment publication clause, so the seeded listing offers
 # a payment option beside its Alkahest one. The two files differ only in those
 # additions, which e2e-tests/tests/unit/test_domain_stack_configuration.py holds
-# them to, so a change to one is made to both. `make e2e-apicredits-dev-env`
-# selects this file as APICREDITS_STOREFRONT_CONFIG; the full local stack keeps
-# storefront.credits.toml.
+# them to, so a change to one is made to both. compose.apicredits-lane.yml mounts
+# this file in place of storefront.credits.toml, which the full local stack
+# keeps.
 #
 # Anvil default account #3; deterministic local chain. DO NOT use these
 # keys on any public network. Every payments value below is likewise a public
@@ -36,7 +36,7 @@ identities = [
 
 [wallet]
 address     = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
-private_key = "" # APICREDITS_STOREFRONT_WALLET__PRIVATE_KEY secret environment input
+private_key = "" # stated in the secret overlay, storefront.secrets.toml
 
 # Which settlement mechanisms this seller will actually service. Without
 # this section `mechanism_config("alkahest")` is None, `alkahest_enabled`
@@ -62,19 +62,20 @@ trusted_oracle_addresses = []
 # They configure VM spot interruption, which this domain does not sell, and
 # `AlkahestSettlementConfig` defaults both to off.
 
-# Payments, settled against the lane's payments double over HTTPS under the lane
-# CA (SSL_CERT_FILE, set by compose.apicredits-lane.yml). The receipt identity is
-# the double's, from tools/payments-lane-double/fixtures/accounts.toml, and the
-# double signs test receipts only, so livemode stays false. The seller's token at
-# the double arrives in ARKHAI_PAYMENTS_API_KEY. The dispute authority comes from
-# the lane registry's recommendation.
+# Payments, settled against the lane's payments double over HTTPS, trusting the
+# lane CA alone, which compose.apicredits-lane.yml mounts at ca_bundle_path. The
+# receipt identity is the double's, from
+# tools/payments-lane-double/fixtures/accounts.toml, and the double signs test
+# receipts only, so livemode stays false. The seller's token at the double is
+# api_key in the secret overlay, dev-env/identities/api-credits.storefront.secrets.toml.
+# The dispute authority comes from the lane registry's recommendation.
 [settlement.arkhai_payments]
 enabled = true
 service_url = "https://payments-double:8443"
 service_identity = { scheme = "ed25519", identifier = "kaKKC3Q4FZOk2UaVeSCJJq_IrYLIg5t2RDWbnrqaSzo" }
 fee_bps = 250
 livemode = false
-api_key_env = "ARKHAI_PAYMENTS_API_KEY"
+ca_bundle_path = "/run/payments-lane-double/lane-ca.pem"
 
 [chains.anvil]
 rpc_url  = "ws://anvil:8545"

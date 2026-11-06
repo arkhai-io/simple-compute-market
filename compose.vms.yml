@@ -5,10 +5,12 @@ include:
   - compose.dev.yml
   - domains/vms/compose.yml
 
-# This file composes base topology only. The development signer, wallet, and
-# buyer-path bindings live in compose.vms-local.yml, layered with `-f` because
-# an including file cannot redefine a service it imported:
+# This file composes base topology only, and its services refuse to start alone.
+# The development identities, configuration, secret overlays, profiles and
+# buyer service live in compose.vms-local.yml, layered with `-f` because an
+# including file cannot redefine a service it imported:
 #
-#     make -s --no-print-directory e2e-vms-dev-env > .e2e-vms.env
-#     docker compose --env-file .e2e-vms.env \
-#       -f compose.vms.yml -f compose.vms-local.yml up -d
+#     docker compose -f compose.vms.yml -f compose.vms-local.yml up -d
+#
+# PROVISIONING_MODE=real in the environment provisions for real; the default
+# is the mock profile.

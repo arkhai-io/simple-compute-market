@@ -1,16 +1,16 @@
 # Bob (seller) in the VM end-to-end lane: storefront.bob.toml, the full local
-# stack's profile, plus payments settled against the lane's payments double and
-# a dispute credential for the authority the lane's registries recommend. The
-# two files differ only in those additions, which
+# stack's profile, plus payments settled against the lane's payments double. The
+# two files differ only in that addition, which
 # e2e-tests/tests/unit/test_domain_stack_configuration.py holds them to, so a
-# change to one is made to both. `make e2e-vms-dev-env` selects this file as
-# VMS_BOB_STOREFRONT_CONFIG; the full local stack keeps storefront.bob.toml.
+# change to one is made to both. compose.vms-lane.yml mounts this file in place
+# of storefront.bob.toml, which the full local stack keeps.
 #
-# Public marketplace identity and EVM mechanism address are configuration;
-# signing credentials are injected by Compose Secrets through
-# ARKHAI_IDENTITY_CREDENTIAL and STOREFRONT_WALLET__PRIVATE_KEY, and the payments
-# and dispute credentials by compose.vms-lane.yml under the variables named
-# below. Every value is a public development value, never for a public network.
+# Public marketplace identity and EVM mechanism address are configuration; the
+# signing credential arrives as ARKHAI_IDENTITY_CREDENTIAL, and the wallet key,
+# the payments key and the dispute credential for the authority the lane's
+# registries recommend in the secret overlay,
+# dev-env/identities/bob.storefront.secrets.toml. Every value is a public
+# development value, never for a public network.
 
 agent_id            = "bob"
 port                = 8001
@@ -89,20 +89,20 @@ contact_payload = { email = "bob-sales@seller.invalid" }
 channel = "email"
 terms = "Quoted per engagement; reply within one business day."
 
-# Payments, settled against the lane's payments double over HTTPS under the lane
-# CA (SSL_CERT_FILE, set by compose.vms-lane.yml). Offered only on listings whose
-# publication clauses select it, as the VM payment scenario's listing does. The
-# receipt identity is the double's, from
+# Payments, settled against the lane's payments double over HTTPS, trusting the
+# lane CA alone, which compose.vms-lane.yml mounts at ca_bundle_path. Offered only
+# on listings whose publication clauses select it, as the VM payment scenario's
+# listing does. The receipt identity is the double's, from
 # tools/payments-lane-double/fixtures/accounts.toml, and the double signs test
-# receipts only, so livemode stays false. The seller's token at the double
-# arrives in ARKHAI_PAYMENTS_API_KEY.
+# receipts only, so livemode stays false. The seller's token at the double is
+# api_key in the secret overlay.
 [Settlement.arkhai_payments]
 enabled = true
 service_url = "https://payments-double:8443"
 service_identity = { scheme = "ed25519", identifier = "kaKKC3Q4FZOk2UaVeSCJJq_IrYLIg5t2RDWbnrqaSzo" }
 fee_bps = 250
 livemode = false
-api_key_env = "ARKHAI_PAYMENTS_API_KEY"
+ca_bundle_path = "/run/payments-lane-double/lane-ca.pem"
 
 # Seller-side delivery of each revealed buyer contact. Mailpit receives it in
 # this lane; scenarios read it back through Mailpit's API.
@@ -199,16 +199,3 @@ settlements = [
 # default_max_duration_seconds = 0 (or omitted) means "unlimited".
 default_min_price            = "100"
 default_max_duration_seconds = 0
-
-# The seller's credential toward the dispute authority the lane's registries
-# recommend (tools/payments-lane-double/fixtures/dispute-authority.toml), bound
-# to its identity. A payment deal's servicing reports it repair_required while
-# the storefront holds no usable credential for the deal's authority; with this
-# one it reports the deal running though the authority, under .invalid, never
-# answers. compose.vms-lane.yml sets the variable to a public development value.
-[[DisputeCredential]]
-interface = "arkhai.mediation.v1"
-origin = "https://dispute.invalid"
-account = "00000000-0000-4000-8000-0000000000d1"
-record_key = "ed25519:lMg0OhYvDsBJf2G3MtLHgbPX3spRLUCV20o7HY7AFOI"
-api_key_env = "VM_LANE_DISPUTE_API_KEY"

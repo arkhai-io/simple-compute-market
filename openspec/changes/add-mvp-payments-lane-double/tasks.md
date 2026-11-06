@@ -1932,21 +1932,66 @@ api-credits.storefront.secrets.toml}`; deleted
 `domains/bare_metal/storefront/storefront.dev.toml`; `scripts/tests/{test_lane_compose.py,
 test_bare_metal_compose.py, test_multi_storefront_compose.py}`.
 
-- [ ] 9.1 Base files keep topology (D15). Every development bind and every `${VAR:?…}`
+- [x] 9.1 Base files keep topology (D15). Every development bind and every `${VAR:?…}`
   guard for one leaves `domains/{vms,apicredits,bare_metal}/compose.yml` and
   `compose.bare-metal.yml`; values the topology fixes — service names, ports, data paths,
   the definition documents' container paths, `REDIS_URL`, callback URLs — stay. First
   confirm, by bringing each affected service up without its binds, that it refuses to
   start; a service that starts without one keeps that guard, recorded here with the
   service and what it started without.
-- [ ] 9.2 Literal overlays (D15). The `-local` and `-lane` overlays bind every committed
+  Done. No base file reads a variable but the domain files' pre-existing defaulted
+  operator knobs (`BARE_METAL_*_PORT`, `BARE_METAL_STOREFRONT_IMAGE`) and the VM
+  provisioning's `${HOME}/.ssh/id_ed25519`, an operator's real-provisioning key, not a
+  committed value, which stays. The configuration binds (`VMS_*_STOREFRONT_CONFIG`,
+  `APICREDITS_STOREFRONT_CONFIG`, whose defaults were committed fallbacks), the
+  Alkahest address-book binds, every credential, admin-key and secret-overlay bind, the
+  bare-metal definition documents and SSH key, and registry-b's key variables left the
+  base files. `compose.bare-metal.yml` keeps only `DATABASE_URL` and its `extends`; its
+  buyer service moved whole into `compose.bare-metal-local.yml`, as the VM and
+  API-credit buyer services already live in their overlays, because its guarded
+  `image:` and binds could not be satisfied by a later file (Compose interpolates each
+  file before merging). The provisioning services' `ACTIVE_PROFILES` is the literal
+  `docker`.
+  The bring-up without binds is **unrun**: the implement step may run `docker` only
+  through the lane targets (`make -C e2e-tests test-e2e-<lane>`, 9.7), never directly.
+  The refusal rests on code reading instead, each service without its overlay's binds:
+  a registry rejects missing `REGISTRY_AUTHORITY_*` at startup (`core_registry`'s
+  settings); each storefront and provisioning service resolves its signer from
+  `ARKHAI_IDENTITY_CREDENTIAL`, which only the overlays' identity files supply; the
+  credits service refuses an unreadable `storefront_admin_key_file`
+  (`apicredits_service/config.py`) and the sample app an unreadable `*_FILE`
+  (`apicredits_middleware/config.py`); the bare-metal site raises `FileNotFoundError`
+  for its configured host and pool documents (`services/definition_documents.py`). One
+  bind does not stop its service: the bare-metal site starts without its SSH key, which
+  only Ansible reads, per job. The site still refuses to start without its overlay as a
+  whole, so its guard went with the others, as 9.2's list of overlay binds requires;
+  a real-mode deployment that binds its documents and not its key fails at its first
+  job instead. Static evidence: unit
+  `test_a_base_file_renders_alone_with_no_development_bind` (`scripts/tests/test_lane_compose.py`,
+  Compose render): each base file renders with no environment file (and the caller's
+  environment less `PROVISIONING_MODE`), mounts nothing under `dev-env/`, `tools/`,
+  `kit/`, `provisioning/` or `.e2e-buyer/` and no `.toml`, `.env` or credential file, and
+  carries neither `ARKHAI_IDENTITY_CREDENTIAL` nor a `REGISTRY_AUTHORITY_*` value; pass.
+  The base registries still load `core/registry/.env.docker-compose` (database, port,
+  log level) through `env_file`, which is the registry's defaults, not a deployment's.
+- [x] 9.2 Literal overlays (D15). The `-local` and `-lane` overlays bind every committed
   file the base files no longer name, stated relative to the repository root: credential
   and identity files, storefront configurations and secret overlays, the bare-metal host
   and pool documents and SSH placeholder, the lane CA, and the buyer runtime directories
   as `./.e2e-buyer/…` (D18). The VM lane's Bob configuration and the API-credit lane's
   storefront configuration replace the base mount by its target. No overlay reads a
   variable but `PROVISIONING_MODE` (9.4).
-- [ ] 9.3 Registry profiles (D16, D7). Each of the five lane registries sets
+  Done. The overlays also bind the dev chain's Alkahest address book, which left the VM
+  and API-credit domain files as a development bind (the bare-metal overlay already
+  bound it). The buyer services' `image` and `user` are literal (`arkhai:e2e-tests`,
+  `1000:1000`), retiring `VMS_BUYER_*`/`APICREDITS_BUYER_*` image and uid variables;
+  their comments say the runtime directories must exist first. Unit, Compose render
+  (`make test-release-tooling`, pass): `test_every_overlay_bind_names_a_committed_file`
+  (each overlay's bind and `env_file` sources contain no `$` and exist, but
+  `./.e2e-buyer/…`), and the rendered mount cases in `test_lane_compose.py`,
+  `test_bare_metal_compose.py` and `test_committed_stack_values.py`, every stack rendered
+  with no environment file.
+- [x] 9.3 Registry profiles (D16, D7). Each of the five lane registries sets
   `CONFIG_DIRECTORY=/etc/arkhai/registry` and its `ACTIVE_PROFILES`, binds
   `./dev-env/registry`, and keeps only its credential bind; its `REGISTRY_*` values move
   from `environment:` and from the bare-metal wrapper's variables into its
@@ -1958,7 +2003,21 @@ test_bare_metal_compose.py, test_multi_storefront_compose.py}`.
   compute registries, the bare-metal registry). The full local stack's registries load
   their own profiles without `payments-lane`. Each file carries the public-development
   label.
-- [ ] 9.4 Provisioning site profiles and the mode (D17, D20). `provisioning`,
+  Done: `dev-env/registry/config-{registry-a, registry-b, api-credits-registry,
+  compute-registry, bare-metal-registry, payments-lane}.env`. Values with spaces are
+  double-quoted for the dotenv reader. registry-b's profile also carries its read and
+  write gates (`REGISTRY_REQUIRE_*_API_KEY`), which were `environment:` values of the
+  domain file. `compute-registry` no longer binds `./shared-env`, which only the base
+  files' registries keep. The base API-credit registry keeps the bind of its
+  specification file; only the path setting moved. Unit, Compose render (pass):
+  `test_each_registry_profile_pins_the_credential_its_registry_mounts` (every registry of
+  every stack: each `ACTIVE_PROFILES` file exists, and the first one's identifier is
+  derived from the mounted credential with `create_signer`),
+  `test_the_lane_profile_recommends_the_double_pinned_authority`, and the profile cases
+  in `test_lane_compose.py` (lanes end in `payments-lane`, the full stack never loads it).
+  System: in all three lane runs (9.7) every registry started from its profiles, and
+  each lane's payment option needs the recommendation to be published.
+- [x] 9.4 Provisioning site profiles and the mode (D17, D20). `provisioning`,
   `alice-provisioning` and `bare-metal-provisioning` set `CONFIG_DIRECTORY=/app/config`,
   bind the packaged `config.yml` and `config-docker.yml` from
   `provisioning/compute/service/src/compute_provisioning_service/config/` and their site
@@ -1966,7 +2025,24 @@ test_bare_metal_compose.py, test_multi_storefront_compose.py}`.
   their `PROVISIONING_*` identity, storefront-identity, site-id and admin-identity
   variables move into the site profiles as quoted YAML strings, and the `@str` comments go.
   The base files keep `ACTIVE_PROFILES=docker`.
-- [ ] 9.5 Storefront secrets and trust (D19, D23, D2, D3). The lane storefronts' payments
+  Done: `dev-env/provisioning/config-{vms-bob-site, vms-alice-site, bare-metal-site}.yml`.
+  `config-mock.yml` is not bound: the service selects mock delivery by the profile name
+  (`container.py`'s `_mock_profile_active`, `main.py`), and the mock runner never reads the
+  playbook paths `config-docker.yml` sets, so the lanes now run `docker,<site>,mock`
+  where they ran `mock` alone. The storefront callback URLs stay in the base files'
+  `environment:`, which overrides `config-docker.yml`'s Bob URL. Until section 10 exports
+  it, `PROVISIONING_MODE` reaches Compose only from the caller's environment, as the
+  pipeline's `e2e.yml` sets it; unset, it is `mock`. Unit, Compose render (pass):
+  `test_vm_provisioning_takes_its_site_profile_then_the_run_mode` (VM lane and full stack,
+  mode unset, `mock` and `real`; no `PROVISIONING_*` variable left but the database and
+  callback URLs), `test_bare_metal_compose_merges_bindings_and_preserves_mount_paths`
+  (base `docker`, overlay `docker,bare-metal-site,<mode>`, the documents bound only by
+  the overlay), `test_storefront_authorities_are_isolated` (each VM site profile's
+  identity, storefront identity and site id against the storefront profile's peer pins),
+  and `test_each_site_profile_pins_its_signer_and_the_runner_pins_the_same`. System: the
+  three provisioning services started under mock in the VM and bare-metal runs (9.7),
+  whose scenarios hold jobs through the mock's `/test` controls.
+- [x] 9.5 Storefront secrets and trust (D19, D23, D2, D3). The lane storefronts' payments
   key is `[Settlement.arkhai_payments].api_key` in their secret overlay (Bob's, the
   bare-metal storefront's, the API-credit storefront's new one), restating the seller token
   in `tools/payments-lane-double/fixtures/accounts.toml`; their lane configurations drop
@@ -1977,7 +2053,37 @@ test_bare_metal_compose.py, test_multi_storefront_compose.py}`.
   `STOREFRONT_`/`APICREDITS_STOREFRONT_` override variables into their secret overlays,
   Alice's new; the wallet env files are deleted once a search confirms no other reader.
   No `SSL_CERT_FILE`, `ARKHAI_PAYMENTS_API_KEY` or wallet variable is left in any overlay.
-- [ ] 9.6 Restated values held to their sources (D21, the stack half). In
+  Done. The search found no reader of `.env.bob.docker`, `.env.alice.docker` or
+  `api-credits.wallet.env` but the overlays and the root `Makefile`'s environment targets,
+  which still print their paths until section 10 retires them; all three are removed.
+  The full local stack mounts the same three secret overlays: its configurations leave
+  payments off (a section holding only `api_key` builds no seller stage,
+  `servicing_stage`) and its registries recommend no authority, so the key and Bob's
+  credential are inert there; the overlays' comments say so. That needed one more edit,
+  found by the fresh-context check: `storefront.credits.toml`'s disabled payments section
+  still stated `api_key_env`, and the payments section refuses two key forms whether or
+  not it is enabled, so the full stack's credits storefront would have refused its merged
+  configuration. The profile now states no key form. `storefront.credits.toml`
+  keeps `private_key = ""`, which the overlay overrides. Comments in
+  `storefront.bob.toml`, `storefront.alice.toml` and both lane copies that named the
+  override variables now name the overlays. Unit (pass): the lane configuration cases in
+  `e2e-tests/tests/unit/test_domain_stack_configuration.py` (each lane section states
+  `ca_bundle_path` and no key; each lane overlay sets no payments variable and binds the
+  CA and its configuration; the shared overlays carry neither the double nor the lane
+  profile), `test_no_storefront_reads_a_secret_from_its_environment` (every storefront of
+  every stack: environment within `XDG_CONFIG_HOME`, `PYTHONPATH` and the signing
+  credential, and a mounted secret overlay), and
+  `test_each_storefront_secret_overlay_fits_the_configuration_beside_it` (every storefront
+  of every stack, the files its render mounts: the overlay's wallet key signs as the
+  configuration's `[Wallet].address`, and beside a payments `api_key` the configuration
+  states no other key form). With `api_key_env` put back in `storefront.credits.toml` that
+  case fails for the full stack, and passes without it; no test loads the merged
+  configuration through a storefront's own loader. System (9.7), the lane runs made
+  through the lane targets: in each lane the storefront's
+  `check-payments` read the seller's balance with the overlay's key and the configured
+  CA, the API-credit storefront settled with its overlay's wallet key, and the VM payment
+  deal's stage 2 read `running`, which needs Bob's overlay's dispute credential.
+- [x] 9.6 Restated values held to their sources (D21, the stack half). In
   `scripts/tests/`, replacing the compose test modules' checks of variables: each
   registry profile's principal derives from its credential file; the provisioning site
   profiles' pins equal the runner's `config-docker.yml` pins; the secret overlays' tokens
@@ -1986,7 +2092,26 @@ test_bare_metal_compose.py, test_multi_storefront_compose.py}`.
   every overlay bind's source exists; `docker compose config` renders every lane's and the
   full stack's file list with no environment file, and no rendered base file carries a
   development bind.
-- [ ] 9.7 **Verification checkpoint.** Unit: `make test-release-tooling` (the compose test
+  Done: a new `scripts/tests/test_committed_stack_values.py` (unit; the registry, site
+  and CA cases render with Compose and skip without it, the others read files), and
+  `test_lane_compose.py`, `test_bare_metal_compose.py` and
+  `test_multi_storefront_compose.py` rewritten to render with no environment file. The
+  site-profile case also derives each site's identity from the credential its environment
+  file supplies, and for the bare-metal site checks the runner's storefront pin and site
+  id. The VM lane's dispute credential is held to the fixture authority there too.
+  `make test-release-tooling` gains `--with pyyaml` for the site profiles and the runner's
+  pins. `test_an_unknown_provisioning_mode_fails_the_environment_target` stays, since the
+  environment targets do until section 10. Beyond the plan, after the fresh-context check:
+  registry-b's bootstrap key held equal across its profile, Bob's overlay,
+  `buyer.config.toml` and the runner's `config-docker.yml`, where it once came from one
+  Makefile constant; the wallet and key-form case under 9.5; and the registry case now
+  selects every `arkhai:registry` service and reads its profiles from its mount. Limits:
+  the renders run with the caller's environment less `PROVISIONING_MODE`, not an empty
+  one; "exists" means present in the checkout, not tracked; and no test checks overlay
+  `environment:` values for a variable (only bind and `env_file` sources), which a read
+  of the five overlays confirms. Unit, `make test-release-tooling`: 2222 passed, none
+  skipped, so every render ran (the host has Docker Compose).
+- [x] 9.7 **Verification checkpoint.** Unit: `make test-release-tooling` (the compose test
   modules and 9.6's cases). System, from this checkout: each lane's stack comes up from its
   Compose files alone (`docker compose -p <project> -f … up -d --wait`) and its storefront's
   `check-payments` prints `ok`; the full local stack comes up with its documented file list.
@@ -1997,6 +2122,88 @@ test_bare_metal_compose.py, test_multi_storefront_compose.py}`.
   credential.
   Owed by validation: `tests.yml`, job `test · test-deployment-packaging` — `make
   test-release-tooling`'s compose render cases pass.
+
+  Evidence, local:
+  - Unit: `make test-release-tooling` 2222 passed, none skipped (after the fresh-context
+    fixes); `make test-e2e-unit` 538 passed; `make -C helm test-render` passes (it
+    validates the edited `storefront.dev.toml` against the bare-metal chart's schema).
+  - `make test`: exit 0, every suite, including `test_change_workflow_assumptions`, which
+    sections 6–8 recorded failing and `fbe70e3eb` fixed. It ran before the fresh-context
+    fixes, which touched `storefront.credits.toml`, `test_committed_stack_values.py`, the
+    quickstart, two issue-discovery phase files and these notes; release tooling was
+    rerun after them.
+  - `make check-change`: everything passes but the documentation citations, which report
+    only `e2e-tests/config/config-payments-lane.yml` and `config-bare-metal-lane.yml`,
+    which section 10 creates.
+  - System, through the lane targets, before the fresh-context fixes (none touches a lane
+    run's files but `storefront.credits.toml`, which the API-credit lane replaces with
+    its lane copy). The lane targets still write and pass their environment files, which
+    the Compose files no longer read: the files interpolate only `PROVISIONING_MODE`,
+    which those files do not set, so each stack came up from its Compose files alone,
+    under mock. The plan's direct `docker compose … up -d --wait` and the full local
+    stack's bring-up are unrun, since the step may not run `docker` directly.
+    - `make -C e2e-tests test-e2e-apicredits`: stack up, `credits-storefront`'s
+      `check-payments` printed `"outcome": "ok"` for the seller's account; 4 passed —
+      `e2e_credits_deal` and all three `e2e_credits_payment_deal` stages, the first run of
+      that scenario in a lane, so the refund signer path 4.4 left unrun now passes.
+    - `make -C e2e-tests test-e2e-bare-metal`: `check-payments` ok; 64 passed, 2 failed,
+      2 skipped. `e2e_bare_metal_payment_deal`'s three stages pass. The failures are
+      the two introduction cases 4.9 recorded as `dev`'s #314 fallout (`KeyError:
+      'mechanism'`), and the skips follow the first.
+    - `make -C e2e-tests test-e2e-vm`: `bob-storefront`'s `check-payments` ok; 152
+      passed, 1 failed, 2 skipped. `e2e_vm_payment_deal`'s stages 1–2 pass, past the
+      listing for the first time (30 V2's fix), stage 2 reading `running`; stages 3–4
+      skip (the run printed no skip reasons; their one skip path is the
+      `mediation_target` fixture, 4.6). The failure is `e2e_vm_introduction`'s
+      `test_03_the_unbacked_listing_offers_only_an_introduction`, the same #314
+      `KeyError: 'mechanism'` 4.9 predicted. Every other VM marker passed.
+
+  End-to-end confirmed: `e2e_credits_payment_deal`, `e2e_bare_metal_payment_deal` and
+  `e2e_vm_payment_deal` (stages 1–2) exercise this section's secret overlays,
+  `ca_bundle_path` and Bob's dispute credential, and pass; every lane marker runs on these
+  stacks. The introduction failures predate the change.
+  Owed by validation, confirmed and extended: `tests.yml`, job
+  `test · test-deployment-packaging` — `make test-release-tooling`'s compose render cases
+  and `test_committed_stack_values.py` pass; `tests.yml`, job `test · test-e2e-unit` — the
+  reworked static stack cases pass.
+
+  Fresh-context check. Fixed:
+  - The full stack's credits storefront would have refused its configuration
+    (`api_key_env` beside the overlay's `api_key`, 9.5), with a test that catches it.
+  - `docs/bare-metal-seller-quickstart.md` told operators to export variables the wrapper
+    no longer reads; it now gives an operator overlay, registry profile and site profile.
+    No task named the quickstart; closeout's documentation compliance should confirm it.
+  - `tools/issue-discovery`'s two `compose_up` phases set the retired
+    `VMS_PROVISIONING_ACTIVE_PROFILES`; they set `PROVISIONING_MODE` now. Their default
+    compose arguments still name `docker-compose.yml` alone, which never started bare and
+    still does not; left as it was.
+  - Tests for registry-b's bootstrap key, the wallet keys and the registry selection, and
+    notes that overstated (9.1, 9.6) or did not say how the system runs were made.
+  Declined:
+  - Keeping the bare-metal SSH key's guard (9.1 says why).
+  - Returning `REGISTRY_FILTER_SPEC_PATH` and registry-b's read and write gates to the
+    domain files: 9.3 moves every `REGISTRY_*` value into the profiles, and the base file
+    still binds the API-credit specification at the path the profile names.
+  - Replacing the VM base file's `${HOME}/.ssh/id_ed25519` bind, which predates the change
+    and is an operator's real key, not a committed value.
+  - Pinning `pyyaml` in `test-release-tooling`, whose other `--with` packages but
+    `eth-account` are unpinned too.
+
+  Handoff to section 10 and closeout:
+  - Comments section 10 makes true or must fix: the overlays' headers say the lane
+    targets "do exactly this" with no `--env-file`, true once 10.3 lands; the root
+    `Makefile`'s mode comment says the compose files default to real, while the overlays
+    default to `mock`; `docker-compose.yml`'s header (10.6).
+  - `tools/payments-lane-double/README.md` and `e2e-tests/README.md` still describe
+    `SSL_CERT_FILE`, `PAYMENTS_LANE_*` and the env-file wiring; 10.6 rewrites them.
+    `dev-env/identities/README.md` is already rewritten for the stack; its runner
+    paragraph (lane_env.py `runner`, the env targets, the Makefile seed) is 10.6's.
+  - `lane_env.py compose` has no reader once 10.4 retires the targets.
+  - For closeout: `DEPLOYMENT_AND_CONFIG.md` "Bare-metal role configuration" ("The
+    Compose wrapper mounts the operator's storefront.toml…") and "Per-domain stack
+    composition"'s `VMS_`/`BARE_METAL_PROVISIONING_ACTIVE_PROFILES` paragraph are now
+    false; the first is not in the promotion list.
+  - The full local stack was not brought up here.
 
 ## 10. The runner's lane profiles and the Make targets
 

@@ -189,7 +189,7 @@ dist-helm: ## Package helm chart so it's ready for pushing into .dist/
 
 test-release-tooling: dist-identity ## Run release verifier and portable wheelhouse contract tests.
 	uv run --no-project --with pytest --with 'eth-account>=0.13,<0.14' \
-		--with 'arkhai-kit-identity' --find-links "$(DIST_DIR)" \
+		--with 'arkhai-kit-identity' --with pyyaml --find-links "$(DIST_DIR)" \
 		pytest -q scripts/tests
 
 test-deployment-packaging: test-release-tooling ## Run release tooling plus Helm schema/render contracts.

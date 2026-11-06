@@ -1,26 +1,34 @@
 """The development storefronts bind independent provisioning authorities."""
 
 import json
+import os
 import subprocess
 import tomllib
 from pathlib import Path
 
+import yaml
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_storefront_authorities_are_isolated(tmp_path):
-    env_file = tmp_path / "identities.env"
-    with env_file.open("w") as output:
-        subprocess.run(
-            ["make", "-s", "--no-print-directory", "e2e-dev-identities-env"],
-            cwd=REPO_ROOT, stdout=output, check=True,
-        )
+def _site_profile(service: dict) -> dict:
+    """The site profile a provisioning service loads: the second of its
+    ACTIVE_PROFILES, bound into its CONFIG_DIRECTORY."""
+    environment = service["environment"]
+    site = environment["ACTIVE_PROFILES"].split(",")[1]
+    target = f"{environment['CONFIG_DIRECTORY']}/config-{site}.yml"
+    (source,) = [v["source"] for v in service["volumes"] if v["target"] == target]
+    return yaml.safe_load(Path(source).read_text(encoding="utf-8"))
+
+
+def test_storefront_authorities_are_isolated():
+    env = {key: value for key, value in os.environ.items() if key != "PROVISIONING_MODE"}
     result = subprocess.run(
-        ["docker", "compose", "--env-file", str(env_file),
+        ["docker", "compose",
          "-f", "docker-compose.yml", "-f", "compose.vms-local.yml",
          "-f", "compose.apicredits-local.yml",
          "config", "--format", "json"],
-        cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+        cwd=REPO_ROOT, capture_output=True, text=True, check=True, env=env,
     )
     services = json.loads(result.stdout)["services"]
     authority_ids = set()
@@ -33,21 +41,17 @@ def test_storefront_authorities_are_isolated(tmp_path):
         )
         service = services[authority]
         env = service["environment"]
+        site = _site_profile(service)
         principal = profile["Identity"]["principal"]
-        assert env["PROVISIONING_STOREFRONT_IDENTITY__IDENTIFIER"] == (
-            "@str " + principal["identifier"]
-        )
+        assert site["storefront_identity"] == principal
         assert env["PROVISIONING_STOREFRONT_URL"] == f"http://{seller}-storefront:{port}"
-        expected = {
-            "scheme": env["PROVISIONING_IDENTITY__SCHEME"],
-            "identifier": env["PROVISIONING_IDENTITY__IDENTIFIER"].removeprefix("@str "),
-        }
+        expected = site["identity"]
         authority_ids.add(tuple(expected.values()))
         # The site's responses verify against its service peer alone.
         assert "identity" not in profile["provisioning"]
         peer = profile["Identity"]["service_peers"]["provisioning_default"]
         assert peer["principals"] == [expected]
-        assert peer["site_id"] == env["PROVISIONING_STOREFRONT_SITE_ID"]
+        assert peer["site_id"] == site["storefront_site_id"]
         assert profile["capacity"]["sites"]["default"] == f"http://{authority}:8081"
         assert profile["provisioning"]["service_url"] == f"http://{authority}:8081"
         assert "use_site_projection_for_listings" not in profile["capacity"]

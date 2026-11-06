@@ -1,0 +1,29 @@
+# Site profile for Alice's provisioning authority, `alice-provisioning`, in the
+# VM lane and the full local stack: compose.vms-local.yml binds it into
+# CONFIG_DIRECTORY=/app/config beside the packaged config.yml and
+# config-docker.yml, and loads ACTIVE_PROFILES=docker,vms-alice-site,<mode>.
+#
+# Public development identities, never for a public network; see
+# dev-env/identities/README.md. Quoted, so each hex identifier stays a string. A
+# repository test holds them to the signer credential the service mounts
+# (dev-env/identities/provisioning-alice.identity.env), the storefront principal
+# storefront.alice.toml states, and the runner's pins in
+# e2e-tests/config/config-docker.yml.
+
+# The service's own Ed25519 signer.
+identity:
+  scheme: "ed25519"
+  identifier: "3NPn0gInwKKqVkrFl5_C07yYcjLOfVszbq51kw6EnPw"
+
+# The storefront whose requests this authority serves: Alice, Anvil 4.
+storefront_identity:
+  scheme: "eip191"
+  identifier: "0x15d34aaf54267db7d7c367839aaf71a00a2c6a65"
+
+# The site alias Alice's storefront resolves against this authority.
+storefront_site_id: "default"
+
+# The provisioning administrator: Anvil 5.
+admin_identity:
+  scheme: "eip191"
+  identifier: "0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc"

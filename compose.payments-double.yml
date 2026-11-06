@@ -1,8 +1,9 @@
 # The payments lane double, for the VM, bare-metal and API-credit end-to-end lanes.
 #
 # Layered with `-f` into each lane's compose list in e2e-tests/Makefile; each
-# lane's own overlay points its payment storefront at it, trusts the lane CA, and
-# makes the storefront wait for it. The full local stack never layers this file.
+# lane's own overlay mounts its payment storefront's lane configuration, which
+# points at it, and the lane CA that configuration trusts, and makes the
+# storefront wait for it. The full local stack never layers this file.
 #
 # The image carries the double's committed fixtures and TLS files, public
 # development values never to be used on a public network

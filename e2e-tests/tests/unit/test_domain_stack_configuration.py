@@ -24,16 +24,23 @@ def _compose(relative: str) -> dict:
 
 
 def test_api_credit_stack_has_no_committed_admin_credential():
+    """The domain file names the admin key's container path and binds nothing;
+    the development overlay binds the committed development key there for each
+    service that reads it."""
     compose = (_REPO_ROOT / "domains/apicredits/compose.yml").read_text(
         encoding="utf-8"
     )
     storefront = (
         _REPO_ROOT / "domains/apicredits/storefront/storefront.credits.toml"
     ).read_text(encoding="utf-8")
+    overlay = _compose("compose.apicredits-local.yml")["services"]
 
     assert "test-api-key" not in compose + storefront
-    assert "${APICREDITS_ADMIN_KEY_FILE:?" in compose
-    assert compose.count("/run/secrets/arkhai/api-credits-admin-key:ro") == 3
+    assert "api-credits-admin-key:ro" not in compose
+    binding = "./dev-env/identities/api-credits-admin-key:/run/secrets/arkhai/api-credits-admin-key:ro"
+    assert [name for name, service in overlay.items() if binding in service.get("volumes", [])] == [
+        "credits-service", "sample-app", "credits-storefront",
+    ]
     assert 'admin_key_file      = "/run/secrets/arkhai/api-credits-admin-key"' in storefront
 
 
@@ -77,18 +84,28 @@ def test_bare_metal_stack_requires_real_selected_site_inputs():
     rendered = domain_compose + wrapper
 
     assert "arkhai:bare-metal-storefront" in domain_compose
-    # Real by default; a run selects the mock profile through the environment.
-    assert "ACTIVE_PROFILES=${BARE_METAL_PROVISIONING_ACTIVE_PROFILES:-docker}" in domain_compose
-    assert "ACTIVE_PROFILES=mock" not in rendered
+    # Real provisioning; only the lane's overlay appends the run's mode.
+    assert "ACTIVE_PROFILES=docker\n" in domain_compose
+    provisioning = yaml.safe_load(domain_compose)["services"]["bare-metal-provisioning"]
+    assert not [item for item in provisioning["environment"] if "mock" in item]
     assert "MOCK_PROVISIONING" not in rendered
-    # The storefront's sites, registries, and terms are its mounted configuration.
-    assert "${BARE_METAL_STOREFRONT_CONFIG_FILE:?" in domain_compose
-    assert "${BARE_METAL_POOL_DEFINITIONS_FILE:?" in domain_compose
-    assert "${BARE_METAL_PROVISIONING_HOST_DEFINITIONS_FILE:?" in domain_compose
+    # The definition documents' container paths are topology; the documents
+    # themselves, and the storefront's configuration, are the deployment's, with
+    # no committed fallback.
     assert "PROVISIONING_HOST_DEFINITIONS_PATH=/run/config/host-definitions.yaml" in domain_compose
+    assert "PROVISIONING_POOL_DEFINITIONS_PATH=/run/config/resource-pools.yaml" in domain_compose
+    services = {
+        **yaml.safe_load(domain_compose)["services"], **yaml.safe_load(wrapper)["services"],
+    }
+    for name, service in services.items():
+        binds = [str(entry) for entry in service.get("volumes", [])]
+        binds += list(service.get("env_file", []))
+        assert not [
+            bind for bind in binds
+            if "dev-env" in bind or bind.endswith(":/etc/arkhai/storefront.toml:ro")
+        ], name
     # The service refuses either retired inventory setting at startup.
     assert "INVENTORY" not in rendered
-    assert "${BARE_METAL_PROVISIONING_SSH_PRIVATE_KEY_FILE:?" in domain_compose
 
 
 def test_bare_metal_lane_delivers_seller_mail_to_its_mail_sink():
@@ -129,15 +146,25 @@ def test_bare_metal_stack_keeps_role_credentials_and_state_separate():
         encoding="utf-8"
     )
     wrapper = (_REPO_ROOT / "compose.bare-metal.yml").read_text(encoding="utf-8")
+    overlay = _compose("compose.bare-metal-local.yml")["services"]
 
     assert "ARKHAI_IDENTITY_CREDENTIAL=" not in wrapper
-    assert "BARE_METAL_REGISTRY_IDENTITY_CREDENTIAL_FILE:?" in wrapper
-    assert "BARE_METAL_STOREFRONT_IDENTITY_ENV_FILE:?" in wrapper
-    # The seller wallet's key arrives in the storefront's secret overlay file,
-    # never inline.
-    assert "BARE_METAL_STOREFRONT_SECRETS_FILE:?" in wrapper
     assert "private_key" not in wrapper.lower()
-    assert "BARE_METAL_PROVISIONING_IDENTITY_ENV_FILE:?" in wrapper
+    # Each role's credential is its own file, bound by the lane's overlay; the
+    # seller wallet's key arrives in the storefront's secret overlay file, never
+    # inline.
+    assert (
+        "./dev-env/identities/registry-a.eip191:/run/secrets/arkhai/registry-identity/credential:ro"
+        in overlay["bare-metal-registry"]["volumes"]
+    )
+    assert overlay["bare-metal-provisioning"]["env_file"] == [
+        "./dev-env/identities/provisioning.identity.env"
+    ]
+    assert overlay["bare-metal-storefront"]["env_file"] == ["./dev-env/identities/bob.identity.env"]
+    assert (
+        "./dev-env/identities/bare-metal.storefront.secrets.toml:/etc/arkhai/storefront.secrets.toml:ro"
+        in overlay["bare-metal-storefront"]["volumes"]
+    )
     for name in (
         "bare-metal-registry-data",
         "bare-metal-redis-data",
@@ -166,7 +193,8 @@ _LANE_STOREFRONTS = (
      "compose.apicredits-lane.yml", "credits-storefront",
      "domains/apicredits/storefront/storefront.credits.toml"),
 )
-# Every registry a lane's storefronts publish to or its buyers discover through.
+# Every registry a lane's storefronts publish to or its buyers discover through,
+# and the overlay that sets its lane profiles.
 _LANE_REGISTRIES = (
     ("compose.vms-lane.yml", "registry"),
     ("compose.vms-lane.yml", "registry-b"),
@@ -174,6 +202,9 @@ _LANE_REGISTRIES = (
     ("compose.apicredits-lane.yml", "api-credits-registry"),
     ("compose.apicredits-lane.yml", "compute-registry"),
 )
+# Variables a storefront would read its payments trust or key from; the lanes
+# configure both instead.
+_PAYMENTS_VARIABLES = {"SSL_CERT_FILE", "ARKHAI_PAYMENTS_API_KEY"}
 
 
 def _environment(service: dict) -> dict[str, str]:
@@ -219,49 +250,37 @@ def test_each_lane_storefront_settles_against_the_double(lane, settlement):
     payments = config[settlement]["arkhai_payments"]
 
     assert _PAYMENTS in config[settlement]["priority"]
+    # The key is in the storefront's secret overlay, never named here.
     assert payments == {
         "enabled": True,
         "service_url": "https://payments-double:8443",
         "service_identity": accounts["receipt_identity"],
         "fee_bps": accounts["fee_bps"],
         "livemode": False,
-        "api_key_env": "ARKHAI_PAYMENTS_API_KEY",
+        "ca_bundle_path": _CA_MOUNT,
     }
     # The dispute authority reaches the seller through its registries alone.
     assert "dispute" not in {key.lower() for key in config}
 
 
-@pytest.mark.parametrize(("overlay", "service"), [item[2:4] for item in _LANE_STOREFRONTS])
-def test_each_lane_overlay_wires_its_storefront_to_the_double(overlay, service):
+@pytest.mark.parametrize(("lane", "overlay", "service"), [
+    (item[0], *item[2:4]) for item in _LANE_STOREFRONTS
+])
+def test_each_lane_overlay_wires_its_storefront_to_the_double(lane, overlay, service):
     storefront = _compose(overlay)["services"][service]
-    environment = _environment(storefront)
 
     assert storefront["depends_on"]["payments-double"] == {"condition": "service_healthy"}
-    assert environment["SSL_CERT_FILE"] == _CA_MOUNT
-    assert environment["ARKHAI_PAYMENTS_API_KEY"].startswith("${PAYMENTS_LANE_SELLER_API_KEY:?")
-    assert any(
-        volume.startswith("${PAYMENTS_LANE_CA_FILE:?") and volume.endswith(f":{_CA_MOUNT}:ro")
-        for volume in storefront["volumes"]
-    )
+    assert not set(_environment(storefront)) & _PAYMENTS_VARIABLES
+    assert f"./tools/payments-lane-double/tls/lane-ca.pem:{_CA_MOUNT}:ro" in storefront["volumes"]
+    assert f"./{lane}:/etc/arkhai/storefront.toml:ro" in storefront["volumes"]
 
 
 @pytest.mark.parametrize(("overlay", "service"), _LANE_REGISTRIES)
-def test_each_lane_registry_recommends_the_pinned_dispute_authority(overlay, service):
+def test_each_lane_registry_layers_the_lane_profile(overlay, service):
     environment = _environment(_compose(overlay)["services"][service])
 
-    assert environment["REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES"].startswith(
-        "${PAYMENTS_LANE_DISPUTE_AUTHORITIES:?"
-    )
-
-
-def test_the_vm_lane_storefront_holds_a_credential_for_the_pinned_authority():
-    authority = _toml(_DOUBLE / "fixtures/dispute-authority.toml")
-    (credential,) = _toml("domains/vms/storefront/storefront.bob.lane.toml")["DisputeCredential"]
-    environment = _environment(_compose("compose.vms-lane.yml")["services"]["bob-storefront"])
-
-    identity = ("interface", "origin", "account", "record_key")
-    assert {key: credential[key] for key in identity} == {key: authority[key] for key in identity}
-    assert environment[credential["api_key_env"]]
+    assert environment["ACTIVE_PROFILES"].split(",")[-1] == "payments-lane"
+    assert not {key for key in environment if key.startswith("REGISTRY_")}
 
 
 def test_the_api_credit_lane_listing_pays_the_double_seller_account():
@@ -283,4 +302,11 @@ def test_the_double_runs_only_in_the_lanes_and_publishes_no_host_port():
     assert makefile.count("-f compose.payments-double.yml") == 3
     assert "payments" not in full_stack
     for shared in ("compose.vms-local.yml", "compose.apicredits-local.yml"):
-        assert "PAYMENTS_LANE" not in (_REPO_ROOT / shared).read_text(encoding="utf-8")
+        services = _compose(shared)["services"]
+        assert "payments-double" not in services
+        for name, service in services.items():
+            environment = service.get("environment") or []
+            assert not [item for item in environment if "payments-lane" in str(item)], name
+            assert not set(_environment(service) if isinstance(environment, list) else environment) & (
+                _PAYMENTS_VARIABLES
+            ), name
