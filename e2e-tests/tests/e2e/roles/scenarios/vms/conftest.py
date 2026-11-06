@@ -832,22 +832,25 @@ def lease_watchdog_held(provisioning_client):
 
 
 @pytest.fixture(scope="module")
-def reap_buyer_settle_subprocess(deal_state: DealState):
-    """Stop the buyer-CLI ``market settle`` subprocess if it outlived the test.
+def reap_buyer_settle_subprocess(deal_state):
+    """Stop a buyer-CLI subprocess still polling its settlement after the test.
 
-    The deal flow normally lets the subprocess exit cleanly at phase 09b
-    once settlement is ready. If an earlier assertion failed and bailed
-    out, the process is still polling the seller — terminate it so the
-    module run doesn't leak a child.
+    The buyer-CLI deal's ``market settle`` and a buyer purchase's ``market
+    buy`` each run in the background and exit once their settlement is ready.
+    If an earlier assertion failed and bailed out, the process is still
+    polling the seller — terminate it so the module run doesn't leak a child.
+    The buyer-CLI deal's state holds its run as ``settle_run_handle``, a
+    purchase's as ``purchase_run``; other modules' states hold neither.
     """
     yield
-    run = deal_state.settle_run_handle
-    if run is None:
-        return
-    try:
-        run.terminate()
-    except Exception as exc:
-        log.warning("[teardown] could not terminate settle subprocess: %s", exc)
+    for field_name in ("settle_run_handle", "purchase_run"):
+        run = getattr(deal_state, field_name, None)
+        if run is None:
+            continue
+        try:
+            run.terminate()
+        except Exception as exc:
+            log.warning("[teardown] could not terminate the buyer's %s: %s", field_name, exc)
 
 
 @pytest.fixture(scope="module")

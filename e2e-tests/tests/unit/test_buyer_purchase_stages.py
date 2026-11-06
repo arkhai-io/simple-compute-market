@@ -43,12 +43,23 @@ MOCK_LANE_MARKER = "MockLaneStage"
 MOCK_TEST_CLIENT = "provisioning_test_client"
 
 
+#: The two endings a purchase's lease may end by, each a run of shared stages.
+BUYER_TEARDOWN = ("Purchase10_BuyerTeardown",)
+EXPIRY = (
+    "Stage10a_LeaseExpirySetup",
+    "Stage10b_LeaseCycleBeginsTeardown",
+    "Stage11a_TeardownDispatch",
+)
+
+
 @dataclass(frozen=True)
 class Purchase:
     name: str
     scenario: Path
     #: Whether the purchase delivers through the provisioning mock profile.
     mock: bool
+    #: The ending its lease ends by.
+    ending: tuple[str, ...]
 
 
 PURCHASES = (
@@ -56,15 +67,14 @@ PURCHASES = (
         "bare_metal",
         ROLES / "scenarios" / "bare_metal" / "test_bare_metal_payment_deal.py",
         mock=True,
+        ending=BUYER_TEARDOWN,
     ),
-)
-
-#: The two endings a purchase's lease may end by, each a run of shared stages.
-BUYER_TEARDOWN = ("Purchase10_BuyerTeardown",)
-EXPIRY = (
-    "Stage10a_LeaseExpirySetup",
-    "Stage10b_LeaseCycleBeginsTeardown",
-    "Stage11a_TeardownDispatch",
+    Purchase(
+        "vms",
+        ROLES / "scenarios" / "vms" / "test_vm_payment_purchase.py",
+        mock=True,
+        ending=EXPIRY,
+    ),
 )
 
 
@@ -97,6 +107,7 @@ def expected_order(*, mock: bool, ending: tuple[str, ...]) -> list[str]:
         "Stage09a_FulfillmentConvergesToActive",
         "Stage09b_SettlementReadyAndCredentials",
         "Stage09c_LeaseRecorded",
+        "Purchase09_PurchaseRunEnded",
         *gate("Stage09c2_ArmTeardownGate"),
         *ending,
         *gate("Stage11a2_ReleaseTeardownGateAndDrain"),
@@ -104,8 +115,11 @@ def expected_order(*, mock: bool, ending: tuple[str, ...]) -> list[str]:
     ]
 
 
-def purchase_faults(scenario: Path, *, mock: bool) -> list[str]:
-    """What a purchase module declares against the stage set's rules."""
+def purchase_faults(
+    scenario: Path, *, mock: bool, ending: tuple[str, ...] | None = None,
+) -> list[str]:
+    """What a purchase module declares against the stage set's rules: with
+    ``ending``, the ending its lease must end by too."""
     faults = []
     declared = []
     for node in domain_stages(scenario):
@@ -124,6 +138,9 @@ def purchase_faults(scenario: Path, *, mock: bool) -> list[str]:
             "runs both the buyer-teardown ending and the expiry stages" if endings
             else "runs no ending"
         )
+        return faults
+    if ending is not None and endings[0] != ending:
+        faults.append(f"ends by {list(endings[0])}; its lease ends by {list(ending)}")
         return faults
     expected = expected_order(mock=mock, ending=endings[0])
     if declared != expected:
@@ -183,8 +200,8 @@ def test_each_purchase_stage_takes_the_purchase_driver():
 
 
 @pytest.mark.parametrize("purchase", PURCHASES, ids=lambda purchase: purchase.name)
-def test_a_purchase_declares_the_shared_stages_once_in_order_with_one_ending(purchase: Purchase):
-    assert purchase_faults(purchase.scenario, mock=purchase.mock) == []
+def test_a_purchase_declares_the_shared_stages_once_in_order_with_its_ending(purchase: Purchase):
+    assert purchase_faults(purchase.scenario, mock=purchase.mock, ending=purchase.ending) == []
 
 
 def _constructed(names: list[str], *, replaced: str | None = None, own: str = "") -> str:
@@ -223,6 +240,14 @@ def test_a_constructed_purchase_is_held_to_the_rules(tmp_path, names, replaced, 
     scenario = tmp_path / "test_constructed_purchase.py"
     scenario.write_text(_constructed(names, replaced=replaced, own=_OWN_STAGE))
     assert purchase_faults(scenario, mock=True) == faults
+
+
+def test_a_purchase_ending_other_than_its_lease_ends_is_refused(tmp_path):
+    scenario = tmp_path / "test_constructed_purchase.py"
+    scenario.write_text(_constructed(expected_order(mock=True, ending=BUYER_TEARDOWN)))
+    assert purchase_faults(scenario, mock=True, ending=EXPIRY) == [
+        f"ends by {list(BUYER_TEARDOWN)}; its lease ends by {list(EXPIRY)}"
+    ]
 
 
 def test_a_shared_stage_out_of_order_is_refused(tmp_path):

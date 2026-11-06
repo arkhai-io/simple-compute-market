@@ -101,6 +101,12 @@ PURCHASE_LANES = (
         ROLES / "scenarios" / "bare_metal" / "test_bare_metal_payment_deal.py",
         "BareMetalPurchaseState",
     ),
+    Lane(
+        "vms_purchase",
+        ROLES / "scenarios" / "vms" / "test_vm_payment_purchase.py",
+        ROLES / "scenarios" / "vms" / "test_vm_payment_purchase.py",
+        "VmPurchaseState",
+    ),
 )
 ALL_LANES = (*LANES, *REAL_LANES, *PURCHASE_LANES)
 BARE_METAL_STAGES = classes(tree(ROLES / "scenarios" / "bare_metal" / "publication_stages.py"))

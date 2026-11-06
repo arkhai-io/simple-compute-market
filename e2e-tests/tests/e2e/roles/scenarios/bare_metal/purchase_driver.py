@@ -56,6 +56,9 @@ class BareMetalPurchaseDriver(BareMetalComputeDealDriver):
     buy_command = "market bare-metal buy (arkhai.payments.v1)"
     teardown_command = "market bare-metal teardown"
     buy_timeout_seconds = PAYMENT_TIMEOUT_SECONDS + 30.0
+    # After its approval, ``market bare-metal buy`` records its end only once
+    # the seller has accepted its commit; a failed commit ends it unrecorded.
+    committed_event = "run_ended"
 
     @property
     def declared_host_id(self) -> str:
@@ -123,7 +126,17 @@ class BareMetalPurchaseDriver(BareMetalComputeDealDriver):
         return ["bare-metal", "teardown", "--run-id", run_id, "--config", self.config_path]
 
     def purchase_fulfillment(self, negotiation_id: str) -> dict[str, Any]:
+        # The command ended after the seller accepted its commit, which
+        # dispatches the fulfillment.
         return self.fulfillment.status(negotiation_id)
+
+    def check_run_ended(self, ended: dict[str, Any], deal_state: Any) -> None:
+        """The run ended agreed, naming the transaction and the fulfillment its
+        commit began."""
+        assert ended["status"] == "agreed", ended
+        assert ended["transaction_id"] == deal_state.settlement_id, ended
+        assert ended["fulfillment"]["settlement_ref"] == deal_state.settlement_id, ended
+        assert ended["fulfillment"]["negotiation_id"] == deal_state.negotiation_id, ended
 
     def lease_view(self, deal_state: Any) -> BareMetalDealLease:
         # A payments fulfillment's hold names the deal's negotiation.

@@ -100,6 +100,7 @@ markers = [
     "provisioning_security: Provisioning smoke tests that an unauthenticated request is refused, writing nothing; run by the default Helm hook",
     "e2e_deal: Full buyer-seller deal lifecycle e2e test (synthetic-buyer + force-accept, follows the dry-run + advance stage pattern)",
     "e2e_vm_payment_deal: Hosted VM commit, servicing, operator end with mediation case, refund and callback-proven release; commit and servicing run against the VM lane's payments double, and the case and refund stages are blocked without MEDIATION.SERVICE_URL",
+    "e2e_vm_payment_purchase: VM buyer purchase through the shared buyer-purchase stages — `market buy` in arkhai.payments.v1 against the VM lane's payments double, receipt-gated mock delivery, payment records and the payer's balance checked, ending by a back-dated lease and a stepped lease-watchdog cycle",
     "e2e_deal_buyer_cli: Full deal driven by the buyer's `market` CLI subprocess against the live storefront (two-machine production interaction)",
     "e2e_buy: One-shot `market buy` (discovery-driven) lifecycle from the buyer machine, against the live storefront",
     "e2e_compute_dynamic_listings: Compute dynamic listing lifecycle from admin reserve through release callbacks",

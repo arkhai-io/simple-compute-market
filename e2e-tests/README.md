@@ -59,8 +59,8 @@ ACTIVE_PROFILES=staging,staging-secrets
 
 ### Shared payment-scenario configuration
 
-The payment scenarios — `e2e_credits_payment_deal`, `e2e_bare_metal_payment_deal`
-and `e2e_vm_payment_deal` — read the `PAYMENTS` section (environment prefix
+The payment scenarios — `e2e_credits_payment_deal`, `e2e_bare_metal_payment_deal`,
+`e2e_vm_payment_deal` and `e2e_vm_payment_purchase` — read the `PAYMENTS` section (environment prefix
 `ARKHAI_PAYMENTS__`) through `tests/e2e/roles/helpers/payments.py`. SERVICE_URL
 names the payments target; leave it blank and the scenario reports `blocked` and
 skips. With it set, supply the other four: SERVICE_IDENTITY (public Ed25519
@@ -261,6 +261,18 @@ provide the direct entry point and observed stages; the gate reads the mediation
 origin it checks as `PAYMENTS.MEDIATION_URL`, apart from the scenario's
 MEDIATION.SERVICE_URL, so an external run sets both. Without a configured payment
 target all four stages report blocked skips; no Alkahest fallback is used.
+
+### VM buyer purchase
+
+`e2e_vm_payment_purchase` runs in the VM lane. The lane's buyer, configured with
+no wallet and Arkhai payments as its only settlement, buys one hour of a VM
+through `market buy`, which selects the scenario's listing by discovery and
+polls its settlement until delivery while the scenario steps it. The scenario
+runs the shared buyer-purchase stages, checks the transaction against its
+Agreement and the payer's balance drop against its debit, and ends the lease by
+back-dating it and stepping one lease-watchdog cycle. The listing names its own
+resource, host, pool and GPU model, and its payment stays held in the double
+until the lane ends.
 
 ### Real bare-metal provisioning
 

@@ -420,6 +420,11 @@ description.
   configuration's `receipt_trust`, as the buyer and seller roles do, so a retiring
   receipt key a target configures is accepted. Unit (source checks): `make
   test-e2e-unit` passes, the purchase row included.
+  Amended by section 4: `Purchase03` runs the command in the background and waits for
+  `payment_approved`, then the driver's `committed_event`. `Purchase04` correlates from
+  `negotiation_completed` and `payment_approved` alone, with the Agreement naming the
+  listing and option. The `run_ended` checks moved to a new shared `Purchase09`, through
+  the driver's `check_run_ended` (4.1's note).
 - [x] 3.2 Payment records (D4). A stage checks each transaction: bound to its Agreement,
   its receipt over that mandate, its snapshot naming the configured payer and payee, its
   parts' gross equal to the Agreement's price for its duration. The balance sum check reads
@@ -480,6 +485,8 @@ description.
   code, and the pipeline run is the first observation. Unit: the module collects and
   resolves its fixtures under `test_scenario_cleanup_order.py`'s `--setup-plan` (holds
   released after `purchase_cleanup`).
+  Amended by section 4: the module also declares the shared `Purchase09` after `09c`,
+  where the run's `run_ended` is now checked.
 - [x] 3.5 The source check (D1; delta "defined once"). `test_buyer_purchase_stages.py`, on
   the pattern of `test_compute_deal_stages.py` and `stage_sources.py`: every scenario
   buying through the shipped buyer declares the purchase stages in order without replacing
@@ -614,7 +621,7 @@ Files: a VM purchase driver in `e2e-tests/tests/e2e/roles/scenarios/vms/` (besid
 section 3's `test_buyer_purchase_stages.py` (its row); `e2e-tests/README.md`'s
 marker list.
 
-- [ ] 4.1 The VM purchase driver and module (D17). The module declares its own resource id,
+- [x] 4.1 The VM purchase driver and module (D17). The module declares its own resource id,
   registers its host enabled and its pool in `host_registry.py` (as `E2E_PAYMENT_DEAL_HOST`
   and `E2E_PAYMENT_DEAL_POOL_ID` do), and creates its listing with an
   `arkhai.payments.v1` settlement through the seller client. It runs the purchase stages
@@ -622,19 +629,116 @@ marker list.
   convergence, as `test_full_deal_buyer_cli.py` does, then `09a`–`09c`, the payment-record
   and balance checks, `09c2`, `10a`, `10b`, `11a`, `11a2` and `11b`. It holds the loops for
   the whole module.
-- [ ] 4.2 The expiry ending on a payments deal (D17). The back-dated lease, stepped with
+  Done as `test_vm_payment_purchase.py` (`VmPurchaseState`) over `VmPurchaseDriver` in
+  `scenarios/vms/purchase_driver.py`, a `VmComputeDealDriver` with its own resource
+  (`compute-e2e-payment-purchase-001`), host and pool (`E2E_PAYMENT_PURCHASE_HOST`,
+  `E2E_PAYMENT_PURCHASE_POOL_ID`) and GPU model (`RTX 4080`, in no other scenario).
+  `VmComputeDealDriver` gained a `gpu_model` field (default the canonical deal's) for that.
+  The module declares the readiness stages, its own `03` listing (open, so published),
+  `Purchase01`–`02`, `07a`, `Purchase03`–`04`, `08b2`, `Purchase05`, `09a`, its own `09a2`
+  capacity-event step (which `09b` needs for `_listing_reconciled`), `09b`, `09c`,
+  `Purchase09`, `09c2`, `10a`, `10b`, `11a`, `11a2`, `11b`.
+  Decided here, as section 3's handoff left it: `market buy` takes no listing and polls its
+  settlement until delivery, and it logs differently from `market bare-metal buy`. So the
+  shared stages changed, and each domain's difference is a driver part:
+  - `Purchase03` runs the command in the background and waits for `payment_approved`,
+    then the driver's `committed_event` (VM `settlement_submitted`, bare metal
+    `run_ended`), stopping a run that never commits.
+  - `Purchase04` correlates from the events both buyers write (`negotiation_completed`,
+    `payment_approved`), and checks that the Agreement names the discovered listing and
+    option. `market buy` selects its listing by discovery (`--resource
+    gpu_model="RTX 4080"`), so this check is what ties the purchase to its listing.
+  - A new shared `Purchase09_PurchaseRunEnded`, after `09c`, waits for the command to
+    end (30s once the settlement reads ready) and passes its `run_ended` to the driver's
+    `check_run_ended`: VM `ready` with the negotiation as its reference; bare metal the
+    checks `Purchase04` held before (`agreed`, the transaction, the fulfillment).
+  - VM's `purchase_fulfillment` waits for the storefront's `job_submitted` event by
+    negotiation, then reads the buyer's settle status. `assert_delivery` reads that status
+    by negotiation rather than the escrow.
+  The buyer is the lane's own (`BUYER.MARKETPLACE_CREDENTIAL`, its scheme), not the
+  payments section's Ed25519 seed, so the lane buyer's storefront client reads the deal's
+  settle status. It is profiled with no wallet, with Arkhai payments as its only
+  settlement, and its prices are the hourly gross in base units (the CLI scales only
+  Alkahest prices by decimals).
+  The lane's `reap_buyer_settle_subprocess` now also stops a `purchase_run` still running,
+  so the module keeps the lane cleanup `test_scenario_cleanup_order.py` requires. The
+  module's own `purchase_cleanup` opens and removes its mock rules. `payments_config` is
+  listed first, so a run with no target is a blocked skip before any hold.
+  Unit (source checks and stage bodies against fakes): `make test-e2e-unit`, 599 passed.
+  That covers the VM row of both stage-set checks, its `--setup-plan` cleanup order and
+  hold checks, and `test_buyer_purchase_run.py`: `Purchase03` runs in the background,
+  waits for approval then commit, and stops a run that never commits; `Purchase09` hands
+  the run's end to the driver, and fails on a run still running or ended for another
+  negotiation. Not run: no VM lane locally, so no `market buy` against a storefront. The
+  driver's run-log events, arguments and routes are read from the code, and the pipeline
+  is their first run.
+- [x] 4.2 The expiry ending on a payments deal (D17). The back-dated lease, stepped with
   the watchdog held, tears the guest down and releases capacity while the pinned authority
   is unreachable; the module's `11b` asserts it. A stall caused by the unreachable
   authority is product behaviour the change does not alter, and stops the section for the
   owner rather than being worked around.
-- [ ] 4.3 Lane membership. `e2e_vm_payment_purchase` is registered in
+  Done: the module runs the canonical deal's `09c2`, `10a`, `10b`, `11a`, `11a2` and `11b`
+  unchanged on the payments deal. Read from the code, no stall is expected. The lease
+  watchdog and convergence are mechanism-neutral. The VM storefront's capacity-released
+  callback records the release locally and calls no authority
+  (`admin_controller.py` `_record_capacity_released`, `deal_lifecycle.py`
+  `capacity_released`). The storefront's settlement-servicing loop, which reads the
+  authority, is held and never stepped by these stages. The pipeline run is the first
+  observation; a stall there stops the change for the owner, as this task says.
+- [x] 4.3 Lane membership. `e2e_vm_payment_purchase` is registered in
   `e2e-tests/pyproject.toml` and added to `E2E_MODULE`; `test_buyer_purchase_stages.py`
   gains the VM row; `e2e-tests/README.md` lists the marker.
-- [ ] 4.4 **Verification checkpoint.** Unit: `make test-e2e-unit`. Run `make test` and
+  Done. `test_buyer_purchase_stages.py`'s rows now state their ending (`ending=EXPIRY`
+  for VM, `BUYER_TEARDOWN` for bare metal), and a row declaring the other ending fails (a
+  constructed case). `test_compute_deal_stages.py` gains the `vms_purchase` lane. The
+  README gains the marker in the payment scenarios' list and a "VM buyer purchase"
+  section.
+- [x] 4.4 **Verification checkpoint.** Unit: `make test-e2e-unit`. Run `make test` and
   `make check-comment-hygiene`.
   End-to-end: `e2e_vm_payment_purchase` (VM lane) runs the purchase, the shared
   post-settlement stages and the expiry ending against the lane's payments double.
   Owed by validation: `tests.yml`, job `test · test-e2e-unit` — passes with the VM row.
+  Unit: `make test-e2e-unit`, 599 passed, after the fresh-context fixes. `make test`
+  passed before those fixes. The fixes touched only `e2e-tests` sources, the VM conftest
+  and this file, and the e2e unit suite was run again after them. `make check-change`
+  passed all 12 checks, comment hygiene among them. No dependency or lock changed, so
+  `make check-packaging` was not run. No lane was run locally.
+  End-to-end scenarios, confirmed and extended:
+  - `e2e_vm_payment_purchase` (VM lane) runs the purchase, `09a`–`09c` with `09b` on the
+    negotiation, `Purchase09`, and the expiry ending.
+  - `e2e_bare_metal_payment_deal` (bare-metal lane) runs the changed `Purchase03`–`04`
+    and the new `Purchase09`.
+  - `e2e_deal` (VM lane) runs the `gpu_model` field's default.
+  Owed by validation: `tests.yml`, job `test · test-e2e-unit` — passes with the VM row
+  (confirmed).
+
+Handoff from section 4:
+
+- **For section 8.** A qualification module adds its `PURCHASES` row with its `ending`
+  and a `PURCHASE_LANES` row. It declares `Purchase09` after `09c`. Its driver supplies
+  `committed_event` and `check_run_ended`. A VM qualification module can build on
+  `VmPurchaseDriver`, and must supply a real-lane `purchase_fulfillment`, since
+  `job_submitted` is the storefront's event, not the mock's.
+- **Not proven locally.** That `market buy` accepts the arguments as given, reads its
+  configuration, and writes the events as read from the code. That the lane buyer, a
+  wallet-free profile, can negotiate a payments option at the VM storefront. That the
+  expiry ending completes on a payments deal (4.2). The pipeline is the first run of
+  each. If `market buy` derives its prices or selects its option otherwise than read,
+  the failure shows at `Purchase03` with the run's events and stderr.
+- **Fresh-context check.** Blocking finding fixed: the buyer's configuration sections
+  were never passed to `create_profiled_buyer_cli`. Also fixed:
+  - `payments_config` listed first, so a run with no target is a blocked skip (before,
+    the module went on to register supply and list with a payee of `"None"`);
+  - `Purchase03` now waits for `payment_approved` first, so a bare-metal run ending
+    refused fails at the buy stage with its exit status;
+  - the module builds its buyer configuration from the SSH key alone, not the lane
+    buyer's wallet settings, so it does not skip naming a wallet it never uses;
+  - the purchase's mock rules are removed in cleanup, after its gates are opened;
+  - the reap fixture's docstring.
+
+  Declined: making `PURCHASE_RUN_EXIT_SECONDS` a driver part. It bounds the wait for a
+  command that has already read its settlement ready or ended. A driver whose command
+  polls more slowly fails at `Purchase09`, naming the run.
 
 ## 5. One listing offers every composed mechanism on a real resource
 

@@ -100,7 +100,7 @@ BUYER_MODULE ?= e2e_deal_buyer_cli or e2e_buy
 # the dev chain's own deployments. `e2e_vm_real_provisioning` is in no lane: it
 # provisions on a real KVM host an operator provides, which the pipeline never
 # has, and runs from the operator's machine through `test-module`.
-E2E_MODULE ?= e2e_vm_payment_deal or e2e_deal or e2e_deal_buyer_cli or e2e_buy or multi_registry \
+E2E_MODULE ?= e2e_vm_payment_deal or e2e_vm_payment_purchase or e2e_deal or e2e_deal_buyer_cli or e2e_buy or multi_registry \
               or e2e_compute_dynamic_listings or e2e_alkahest_escrow_codecs \
               or e2e_alkahest_trusted_oracle \
               or e2e_listing_shapes or e2e_vm_introduction \

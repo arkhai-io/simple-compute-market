@@ -52,6 +52,7 @@ from tests.e2e.roles.helpers.buyer_purchase_stages import (
     Purchase03_Bought,
     Purchase04_PurchaseCorrelated,
     Purchase05_PaymentRecordsChecked,
+    Purchase09_PurchaseRunEnded,
     Purchase10_BuyerTeardown,
     PurchaseState,
 )
@@ -423,6 +424,10 @@ class TestStage09b_SettlementReadyAndCredentials(Stage09b_SettlementReadyAndCred
 
 
 class TestStage09c_LeaseRecorded(Stage09c_LeaseRecorded):
+    pass
+
+
+class TestPurchase09_PurchaseRunEnded(Purchase09_PurchaseRunEnded):
     pass
 
 

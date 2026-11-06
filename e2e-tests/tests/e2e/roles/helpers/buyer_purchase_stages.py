@@ -21,10 +21,18 @@ A purchase module declares, in order:
   before the buy and releasing and draining through ``Stage08b2`` after the
   correlation, then ``Purchase05``'s payment records;
 - ``Stage09a``, ``Stage09b`` and ``Stage09c``, ``09b`` waiting on the
-  negotiation through the storefront's settle wait;
+  negotiation through the storefront's settle wait, then ``Purchase09``, the
+  buyer's command ended;
 - the ending its lease ends by: the canonical deal's expiry stages, or
   ``Purchase10``'s buyer teardown, which a mock lane surrounds with
   ``Stage09c2`` and ``Stage11a2``; then ``Stage11b``.
+
+The purchase command runs in the background from ``Purchase03`` on, because a
+domain's buyer may keep polling its settlement until delivery, as ``market
+buy`` does: fulfillment convergence is held for the module, so delivery is a
+step later stages ask for, and a command run in the foreground would wait for
+it forever. ``Purchase03`` waits only until the command has committed the paid
+purchase, and ``Purchase09`` until it has ended, once delivery is ready.
 
 What differs between domains reaches a stage two ways, as in the canonical
 deal. Fixtures supply who is calling, under the canonical deal's names
@@ -45,6 +53,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import subprocess
 from dataclasses import dataclass
 from typing import Any, Optional, Protocol
 
@@ -67,6 +76,11 @@ from tests.e2e.roles.helpers.domain_deal import (
 from tests.e2e.roles.helpers.payments import buyer_payments_client, payment_setting
 
 log = logging.getLogger(__name__)
+
+#: How long ``Purchase09`` waits for the buyer's command to end once the
+#: settlement reads ready: a command polling its settlement reads it ready at
+#: its next poll, and one that ended at its commit has ended already.
+PURCHASE_RUN_EXIT_SECONDS = 30.0
 
 
 @dataclass
@@ -103,8 +117,13 @@ class PurchaseDriver(ComputeDealDriver, Protocol):
     buy_command: str
     #: The domain's teardown command, as a failure names it.
     teardown_command: str
-    #: How long the purchase command may run, its payment wait included.
+    #: How long the purchase command may take to commit, its payment wait
+    #: included.
     buy_timeout_seconds: float
+    #: The run-log event the purchase command writes once the seller has
+    #: accepted its commit of the paid purchase; read after the command's
+    #: ``payment_approved``, so an end it records without paying is not one.
+    committed_event: str
 
     def discover(self, listing_id: str) -> Any:
         """The listing, read from the registry as the buyer's purchase profile."""
@@ -119,7 +138,11 @@ class PurchaseDriver(ComputeDealDriver, Protocol):
         """The domain's buyer teardown of the run's deal, and its arguments."""
 
     def purchase_fulfillment(self, negotiation_id: str) -> dict[str, Any]:
-        """The deal's fulfillment as the seller reports it to the buyer."""
+        """The deal's fulfillment as the seller reports it to the buyer, once
+        the seller has dispatched it."""
+
+    def check_run_ended(self, ended: dict[str, Any], deal_state: Any) -> None:
+        """Assert what the domain's purchase command records as it ends."""
 
 
 def _available(balance: Any) -> dict[str, int]:
@@ -189,17 +212,32 @@ class Purchase03_Bought:
     def test_p03_the_buyer_buys_through_its_cli(
         self, purchase_cli, deal_driver: PurchaseDriver, deal_state: PurchaseState,
     ):
-        """One run of the domain's purchase command negotiates, approves and commits."""
+        """One run of the domain's purchase command negotiates, approves and commits.
+
+        The command runs in the background, and the stage waits for its
+        commit, not its end: a command that polls its settlement until
+        delivery ends only after the later stages have stepped delivery
+        (``Purchase09``). The approval comes first: a command may record its
+        end without paying, as a refused negotiation does, and a run that ends
+        before its approval fails here with its exit status. A run that has
+        not committed is stopped here, so no stage after it depends on a
+        purchase still in flight.
+        """
         require_state(deal_state, "seller_listing_id", "purchase_option_id",
                       "_settlement_imminent")
         run = purchase_cli.run(
             deal_driver.buy_arguments(deal_state.seller_listing_id, deal_state.purchase_option_id),
-            timeout=deal_driver.buy_timeout_seconds,
+            background=True,
         )
-        assert_market_run_succeeded(run, command=deal_driver.buy_command)
+        try:
+            run.wait_for_event("payment_approved", timeout=deal_driver.buy_timeout_seconds)
+            run.wait_for_event(deal_driver.committed_event, timeout=deal_driver.buy_timeout_seconds)
+        except BaseException:
+            run.terminate()
+            raise
         deal_state.purchase_run = run
-        log.info("[p03] Buyer run %s bought option %s of listing %s",
-                 run.run_id, deal_state.purchase_option_id, deal_state.seller_listing_id)
+        log.info("[p03] Buyer run %s committed its purchase (%s) of listing %s",
+                 run.run_id, deal_driver.committed_event, deal_state.seller_listing_id)
 
 
 class Purchase04_PurchaseCorrelated:
@@ -208,29 +246,31 @@ class Purchase04_PurchaseCorrelated:
     ):
         """The run's Agreement, settlement data, transaction and fulfillment name one deal.
 
+        Read from the run-log events every domain's purchase command writes:
+        the accepted negotiation, carrying the Agreement's exact bytes and the
+        seller's settlement data, and the approval naming its transaction. The
+        Agreement names the listing and option the buyer discovered, which a
+        command selecting its listing by discovery must have bought.
+
         The fulfillment is the one the seller reports to the buyer, read in
         provisioning dispatched and not yet converged: fulfillment convergence
         is held for the module, so only ``Stage09a``'s advance moves it.
         """
         require_state(deal_state, "purchase_run", "seller_listing_id", "purchase_option_id")
         run = deal_state.purchase_run
-        started, accepted, approved, ended = ordered_events(
-            run.read_events(),
-            "run_started", "negotiation_completed", "payment_approved", "run_ended",
+        started, accepted, approved = ordered_events(
+            run.read_events(), "run_started", "negotiation_completed", "payment_approved",
         )
-        assert ended["status"] == "agreed", ended
-        assert all(event["run_id"] == run.run_id for event in (started, accepted, approved, ended))
-        assert started["listing_id"] == deal_state.seller_listing_id, started
-        assert started["option_id"] == deal_state.purchase_option_id, started
+        assert all(event["run_id"] == run.run_id for event in (started, accepted, approved))
+        assert accepted["status"] == "agreed", accepted
         negotiation_id = accepted["negotiation_id"]
-        assert accepted["agreement_ref"] == negotiation_id == ended["negotiation_id"]
         agreement = agreement_from_bytes(base64.b64decode(accepted["agreement_bytes"], validate=True))
         data = PaymentSettlementData.parse(accepted["settlement_data"])
         data.require_bound_to(agreement)
-        assert agreement["settlement"]["option_id"] == deal_state.purchase_option_id
-        assert approved["transaction_id"] == data.transaction_id == ended["transaction_id"]
-        assert ended["fulfillment"]["settlement_ref"] == data.transaction_id, ended
-        assert ended["fulfillment"]["negotiation_id"] == negotiation_id, ended
+        assert agreement["negotiation_id"] == negotiation_id, agreement
+        assert agreement["listing_id"] == deal_state.seller_listing_id, agreement
+        assert agreement["settlement"]["option_id"] == deal_state.purchase_option_id, agreement
+        assert approved["transaction_id"] == data.transaction_id, approved
 
         status = deal_driver.purchase_fulfillment(negotiation_id)
         fulfillment_id = str(status.get("fulfillment_id") or "")
@@ -313,6 +353,42 @@ class Purchase05_PaymentRecordsChecked:
             f"payer {payer}'s available balance fell by {dropped}; the scenario's own "
             f"transaction {deal_state.settlement_id} debited {debits}"
         )
+
+
+# ===========================================================================
+# After delivery
+# ===========================================================================
+
+class Purchase09_PurchaseRunEnded:
+    def test_p09_the_buyers_purchase_command_ended_successfully(
+        self, deal_driver: PurchaseDriver, deal_state: PurchaseState,
+    ):
+        """The purchase command ended successfully, recording the deal it bought.
+
+        Run once the settlement reads ready (``Stage09b``): a command that
+        polls its settlement until delivery ends at its next poll, and one
+        that ended at its commit has ended already. What the command records
+        as it ends is the domain's.
+        """
+        require_state(deal_state, "purchase_run", "negotiation_id", "settlement_id",
+                      "fulfillment_id", "settlement_status")
+        run = deal_state.purchase_run
+        try:
+            run.wait(timeout=PURCHASE_RUN_EXIT_SECONDS)
+        except subprocess.TimeoutExpired:
+            raise AssertionError(
+                f"{deal_driver.buy_command} run {run.run_id} was still running "
+                f"{PURCHASE_RUN_EXIT_SECONDS}s after its settlement read ready; last events "
+                f"{[event.get('event') for event in run.events_or_empty()[-6:]]}"
+            ) from None
+        assert_market_run_succeeded(run, command=deal_driver.buy_command)
+        (ended,) = ordered_events(run.read_events(), "run_ended")
+        assert ended["run_id"] == run.run_id, ended
+        assert ended["negotiation_id"] == deal_state.negotiation_id, ended
+        deal_driver.check_run_ended(ended, deal_state)
+        log.info("[p09] Buyer run %s ended %s for Agreement %s, transaction %s",
+                 run.run_id, ended.get("status"), deal_state.negotiation_id,
+                 deal_state.settlement_id)
 
 
 # ===========================================================================
