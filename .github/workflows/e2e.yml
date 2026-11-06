@@ -27,6 +27,9 @@ permissions:
 # - e2e-apicredits: the API-credit market and a compute registry of its own
 #   (`make -C e2e-tests test-e2e-apicredits`).
 #
+# Every lane's stack also runs the payments double (`tools/payments-lane-double`),
+# the stand-in Arkhai Payments service its payment scenarios settle against.
+#
 # Each lane's targets name its compose project and files; the log collection
 # and teardown below go through the same targets, so a job names none of them
 # itself.
