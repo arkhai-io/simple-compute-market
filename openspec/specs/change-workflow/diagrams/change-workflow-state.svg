@@ -40,8 +40,8 @@
 <text x="42" y="95" font-size="13">their editor project; a change's workflow meets it for reading</text>
 <text x="782" y="79" font-size="13" font-weight="bold">The change's clone</text>
 <text x="782" y="95" font-size="13">&lt;workspace&gt;.changes/&lt;change&gt;/</text>
-<text x="42" y="579" font-size="13" font-weight="bold">origin</text>
-<text x="42" y="595" font-size="13">the shared Git remote</text>
+<text x="42" y="579" font-size="13" font-weight="bold">the branch's remote</text>
+<text x="42" y="595" font-size="13">its upstream's, read from Git</text>
 <text x="782" y="659" font-size="13" font-weight="bold">Session transcripts</text>
 <text x="782" y="675" font-size="13">on the machine that ran them, in each harness's own store</text>
 <text x="790" y="828" font-size="12">keyed to the checkout's path: a run resumes where it ran</text>
@@ -62,13 +62,13 @@
 <text x="1020" y="137" font-weight="bold">a clone of the workspace, not a worktree</text>
 <text x="1020" y="152">refs of its own; a local clone hard-links objects</text>
 <text x="1020" y="207" font-weight="bold">branch feat/&lt;change&gt;, checked out here</text>
-<text x="1020" y="222">it tracks origin's branch, never the workspace's</text>
+<text x="1020" y="222">it tracks its name on the push remote, never the workspace</text>
 <text x="1020" y="292" font-weight="bold">openspec/changes/&lt;change&gt;/reviews/</text>
 <text x="1020" y="307">records NN-*.md, the log workflow.jsonl,</text>
 <text x="1020" y="322">transcripts/ with each run's .progress;</text>
 <text x="1020" y="337">untracked, so no merge carries them</text>
 <text x="1020" y="377" font-weight="bold">remotes</text>
-<text x="1020" y="392">origin, the workspace's origin URL; workspace</text>
+<text x="1020" y="392">workspace; the upstreams, by the workspace's names</text>
 <text x="1020" y="447" font-weight="bold">wheelhouse and environments</text>
 <text x="1020" y="462">built by the repository's bootstrap, in the background</text>
 <text x="1020" y="497" font-weight="bold">.snapshot/</text>
@@ -78,7 +78,7 @@
 <text x="280" y="637" font-weight="bold">feat/&lt;change&gt;, pushed</text>
 <text x="280" y="652">exactly HEAD, never forced; validation and CI run it</text>
 <text x="280" y="702" font-weight="bold">the branch a change lands on</text>
-<text x="280" y="717">where a new change's branch starts by default</text>
+<text x="280" y="717">recorded with the clone; where its branch starts</text>
 <text x="1020" y="717" font-weight="bold">Claude Code</text>
 <text x="1020" y="732">~/.claude/projects/&lt;checkout path&gt;/&lt;session&gt;.jsonl,</text>
 <text x="1020" y="747">its subagents' transcripts beside it</text>
@@ -99,8 +99,8 @@
 <text x="650" y="391.5">workspace remote</text>
 <rect x="615" y="598.75" width="70" height="18" fill="#ffffff"/>
 <text x="650" y="611.75">push, fetch</text>
-<rect x="229.5" y="491" width="101" height="18" fill="#ffffff"/>
-<text x="280" y="504">the same origin</text>
+<rect x="226.5" y="491" width="107" height="18" fill="#ffffff"/>
+<text x="280" y="504">the same remotes</text>
 <rect x="923" y="603.5" width="194" height="18" fill="#ffffff"/>
 <text x="1020" y="616.5">step sessions run in the clone</text>
 </g>

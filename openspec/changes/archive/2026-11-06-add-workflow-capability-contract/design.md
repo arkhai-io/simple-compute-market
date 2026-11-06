@@ -638,6 +638,63 @@ One round, reviewed once, in three sessions:
    check-repository` and `make check-change` running `run pre-commit`; the guide; and
    the assumptions test and its tables (D18).
 
+## Decisions settled during implementation
+
+Questions the design left open, or that implementation and its triage found, and
+how each was settled. Each is recorded in the task note named, and moved here at
+closeout so the notes can be compressed.
+
+- **Two sections owing one workflow are one run (1.5).** A run is named, and its
+  marker kept, by part and workflow (D10), so two `Owed by validation:` lines naming
+  the same workflow give one run owed by both sections; CW-g4oz's "once per line"
+  and "once per owed workflow" agree only so.
+- **`pre-push` takes `{remote}` alone (4.1).** D8 gives `{change}` and `{base}`
+  everywhere, but the guarded push pushes a branch, not a change, and has neither to
+  give; D13 refuses a placeholder unavailable where it is used as the file is
+  checked, so the check refuses them in `pre-push`.
+- **What a placeholder is (1.1).** A name in braces not preceded by `$`, so a shell's
+  `${HOME}` passes, while `awk '{print}'` would be refused as an unknown
+  placeholder. A part's `run`, `start`, or `collect` may not be an empty list,
+  though a hook may: a part running nothing would pass without evidence.
+  `defaults.disable` entries are inline tables `{ check = "…", reason = "…" }`.
+- **How an inert path matches (2.4).** An entry matches whole path components: `docs/`
+  covers a file under it, not one under `docsite/`. The tier and the next-step
+  computation share the one matcher, so they never disagree. A change's records
+  outside the inert paths make a commit functional for the tier, as CW-e1sg reads;
+  D7's exemption of records is the next-step computation's alone.
+- **Commands run outside the calling make (3.2, triage 31 A1).** A session launched by
+  a make target inherits `MAKELEVEL`, so a declared `make` command ran as a sub-make
+  and printed a directory line after its marker, which the engine kept as `{after}`.
+  The engine runs declared commands without `MAKELEVEL`, `MAKEFLAGS`, `MFLAGS`, and
+  `MAKEOVERRIDES`; a variable given on the outer make's command line still reaches the
+  command through the environment.
+- **The marker variable is not a make variable (2.2).** The make fragment assigned a
+  variable of the marker's name, which overrides the environment variable in every
+  recipe, so a target an unattended run started would have run unrestricted; the
+  fragment's variable was renamed.
+- **The roadmap as a read for a purpose (7.4).** Closeout and the review read the
+  roadmap for a part's work — closeout's roadmap part, the goal a change serves — not
+  as the guidance a session loads as it starts, so `load` names it only for design. A
+  fresh-context check judged these reads an exception to CW-l7hn; declined, since
+  they are no session guidance. The owner may instead give `load.review` and
+  `load.closeout` the roadmap, an edit of the protected configuration.
+- **The configured OpenSpec command (8.5, triage 45 F2).** A bare `bunx` command fails
+  on a machine without it, where the old closing check fell back to `npx --yes`. The
+  owner chose a runner script, `scripts/openspec`, which runs the pinned validator
+  through `bunx`, else `npx --yes`, over configuring `npx` alone or requiring `bunx`.
+- **The functional tier clears the wheelhouse (6.1, triage 29 O2).** On the owner's
+  word, `pre-commit-functional` begins with `make dist-clean`, so the packaging check
+  builds every wheel from the commit. Whether each suite's `uv run --find-links`
+  reinstalls a rebuilt wheel of unchanged name and version is unconfirmed; if not,
+  the guard is partial.
+- **`make code-snapshot` stays (6.4, triage 29 O1).** Its removal was reverted on the
+  owner's word: it is a target of the repository's own that no skill names (D20).
+- **A Codex review records no Claude session (3.4).** Codex is given no
+  `CLAUDE_CODE_SESSION_ID`, so a review started from a Claude session never lands on
+  that session's line. A review on Claude retried after a network error takes only
+  its last attempt's session's invocations; reviews run on Codex first and rarely run
+  a hook, so this is left.
+
 ## Open Questions
 
 - **A structured result from a validation part.** Parts report only an exit status
@@ -649,3 +706,46 @@ One round, reviewed once, in three sessions:
   `extract-change-workflow-repository`'s design, which decides what moves.
 - **Loading guidance by tag.** `[load]` holds paths (D6). Revisit when
   `layer-engineering-guidance` settles its tag vocabulary.
+
+The three open questions are recorded as limits in
+`openspec/specs/change-workflow/README.md#current-limits`, each naming the change
+that owns its revisit.
+
+## Design promotion record
+
+The `spec.md` of both capabilities is written by the archive from the change's
+deltas; each row naming a requirement id points there. `README` below means
+`openspec/specs/change-workflow/README.md` and `MCW README`
+`openspec/specs/market-change-workflow/README.md`.
+
+| Accepted decision | Permanent location |
+|---|---|
+| P1–P4, the owner's principles | `README#a-repositorys-configuration` |
+| D1 — one configuration file; what stays fixed in the engine | CW-f3qk; `README#a-repositorys-configuration`, `README#the-engines-own-assumptions`, `README#current-limits` |
+| D2 — hooks named by when they run, a command or a list | CW-b2xr, CW-k9vd; `README#the-hooks` |
+| D3 — validation runs the declared parts; `config parts`; order within each shape; `run cleanup`; a cleanup's tracked file committed alone | CW-g4oz, CW-zkhs, CW-ikmm, CW-o6kc, CW-e1sg; `README#validation-observes-a-committed-slice`, `README#the-hooks`; `MCW README#validations-parts` |
+| D4 — the landing branch recorded with the clone; the remote from the upstream; clone remotes from Git; clone removal | CW-s3ju, CW-hdxi, CW-59c7, CW-8jyb, CW-xx5f; `README#the-merge-before-closeout`, `README#a-change-is-worked-in-its-own-clone`, `README#pushing-is-guarded-never-repaired`, `README#history-lives-in-the-owners-workspace`; the diagrams `change-workflow-state` and `change-workflow-engine-parts` (`.drawio` and `.svg`) |
+| D5 — models per step in the configuration; no forbidden list | CW-ebmo, CW-zq4h, CW-w2ld; MCW-y37w retired (`openspec/specs/market-change-workflow/index.md#retired-ids`); `README#models-are-policy-with-no-same-vendor-fallback`, `README#its-parts`; the diagram `change-workflow-step-run`; `MCW README#branches-models-and-the-clones-bootstrap` |
+| D6 — documents to load; `config load common` | CW-l7hn; `README#inert-paths-and-the-documents-a-step-loads` |
+| D7 — inert paths; the pre-commit tier | CW-n7ra, CW-e1sg, CW-trdu, CW-j1ab, CW-gqav, CW-8tdv, CW-tnp6; `README#inert-paths-and-the-documents-a-step-loads`, `README#the-hooks` |
+| D8 — placeholders, per hook; machine values through the environment | CW-v2dq; `README#the-hooks`; `MCW README#validations-parts` (`HELM_ALL_SCENARIOS`, `HELM_CONTEXT`) |
+| D9 — the engine's hook table; the marker naming the step | CW-u4pc, CW-y6mj; `README#restrictions-bind-unattended-runs-only` |
+| D10 — exit status, the closing line, the kept marker, `invoked` | CW-x9bt, CW-q5fy, CW-8npg; `README#validation-observes-a-committed-slice`, `README#a-step-runs-life` |
+| D11 — default checks unless disabled; `openspec.command`; `make check-change` over `run pre-commit`, `make check-repository` | CW-c8lw, CW-i2we, MCW-r4tx; `README#the-hooks`; `MCW README#the-closing-checks`; `docs/agents/change-workflow.md#skills` |
+| D12 — required and optional fields | CW-t5hz; `README#a-repositorys-configuration` |
+| D13 — the configuration checked whenever read | CW-w8ne; `README#a-repositorys-configuration` |
+| D14 — the configuration protected from steps | CW-z5me; `README#restrictions-bind-unattended-runs-only` |
+| D15 — place, format, key style | `README#a-repositorys-configuration` |
+| D16 — `config`, `config load`, `config parts`, `openspec` | CW-o6kc, CW-l7hn, CW-i2we; `README#interfaces-are-tiered`, `README#the-command-and-its-tiers`; `docs/agents/change-workflow.md#the-engines-command` |
+| D17 — the skills invoke hooks; the fragment's targets stay | CW-h8vm; `docs/agents/change-workflow.md#skills`; `README#its-parts` (the fragment sets no repository value) |
+| D18 — the inventory becomes the configuration's description | CW-m4ps, MCW-5tgp; `README#what-an-adopting-repository-provides`, `MCW README#how-this-repository-provides-the-workflows-roles`; `scripts/tests/test_change_workflow_assumptions.py` |
+| D19 — compatibility | no permanent destination: the proposal's statement, as CW-c2tw requires until the engine is versioned |
+| D20 — `make pre-push`, the dispatch markers, `dist-clean` in the parts, `code-snapshot` unnamed, `make check-repository` | MCW-r4tx, MCW-k3vy; MCW-ca51 retired (`openspec/specs/market-change-workflow/index.md#retired-ids`); `MCW README#this-repository-is-the-workflows-first-adopter`, `MCW README#validations-parts`, `MCW README#branches-models-and-the-clones-bootstrap`, `MCW README#the-closing-checks` |
+| D21 — implementation cadence | no permanent destination: change history |
+| Decisions settled during implementation | `README#a-repositorys-configuration` and `README#the-hooks` (placeholders, the tier); the rest are implementation detail kept in this design |
+| The engine package's module list (section 11) | `scripts/change_workflow/__init__.py`'s docstring, which CW-r3ka's Evidence names; `README#its-parts` |
+| Roadmap currency | no goal of `docs/development/ROADMAP.md` covers the change workflow; nothing to update |
+| Campaign index currency | `openspec/changes/README.md`: this change's row; the lesser goal "Make the change workflow a tool any repository can adopt" — its current state describes the configuration, and its gap row "No single file states what the workflow assumes about a repository" is removed; dependents left as they are until archive cleanup |
+| Indexes | `openspec/specs/change-workflow/index.md` (19 entries added in their groups, 3 links moved, summaries revised) and `openspec/specs/market-change-workflow/index.md` (2 entries added, MCW-ca51 and MCW-y37w retired, MCW-5tgp revised) |
+| The capability index | `openspec/specs/README.md`: no new capability; both rows still hold, unchanged |
+| The specifications' text the deltas do not carry | written by hand after the archive merged the deltas: `openspec/specs/change-workflow/spec.md`'s Purpose (the hooks, the configuration) and Evidence (the configuration, `config`, `hooks`, `run pre-commit`, models in the configuration); `openspec/specs/market-change-workflow/spec.md`'s Evidence (`.agents/workflow.toml`, `make pre-push`, `make check-repository`, `post-clone`, the removed constants and fragment variables gone) |
