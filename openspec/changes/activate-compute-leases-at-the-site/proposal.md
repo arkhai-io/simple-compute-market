@@ -8,44 +8,47 @@ before billing starts and before access is disclosed, in both domains and on eve
 recovery path. The site has no such transition today. A lease is `leased` from commit
 to release, with nothing recording that the resource was ever provisioned against it.
 
-This change gives the site that transition and nothing else: an activation phase, an
-idempotent activation call by reservation identity, and the typed contract and
-client every compute caller uses for it. It reads no pool policy and carries no
-deadline, so it depends on nothing outside the goal and lands before
-`renewable-compute-lease-deadlines`, which adds the delivery deadline that an
-unactivated lease expires at and depends on the pool-authority port.
+This change gives the site that transition and nothing else: one recorded instant, an
+idempotent activation by reservation identity, and the path every storefront takes
+to it. It reads no pool policy and carries no deadline, so it depends on nothing
+outside the goal and lands before `renewable-compute-lease-deadlines`, which adds the
+delivery deadline an unactivated lease expires at and depends on the pool-authority
+port.
 
 ## What Changes
 
-- Add nullable `renewal_phase`, `renew_by_utc` and `activated_at_utc` to the site's lease row, with a
-  service-owned migration that leaves every existing row null. `lease_end_utc` keeps
-  meaning the agreed end and moves only through truncation. The phase takes the
-  values `awaiting_activation` and `active`; this change sets only `active`, and
-  `renew_by_utc` stays null until the deadline change writes it at commit.
-- Add one conditional activation transition: from `leased`, in phase
-  `awaiting_activation` or null, to phase `active`, setting the lease's due instant to
-  its current `lease_end_utc`. The request names the reservation and carries no
-  payment fact and no target time. Retried in `active` it returns the current lease
-  unchanged; from `releasing`, terminal, failed-release or operator-owned states it
-  refuses without a write. Activation never changes the reservation's end, and a
-  verified earlier truncation is adopted, never extended.
-- Expose activation and lease inspection — the phase, the nullable due instant and
-  `activated_at_utc`, the instant the transition writes once and never moves — through
-  the site's typed authority, HTTP models,
-  router and client, and through the shared compute contract and client, offering-mode
-  neutral, under the existing authenticated service boundary with exact response
-  verification.
-- A null-phase lease — one with no deadline written, which is every lease before the
-  deadline change is switched on — reads as null and activates like any other on a site
-  that exposes the operation; the legacy no-op is only for a site that exposes none,
-  with a verified legacy view.
+- Add one nullable column, `activated_at_utc`, to the site's reservation row, with an
+  ordered migration in each service that hosts the ledger — compute provisioning and
+  API credits — leaving every existing row null. Whether a lease is activated is
+  derived from it; no phase is stored.
+- Add one conditional activation transition, admissible only from `leased`: it writes
+  `activated_at_utc` from the site's clock where it is null, in one transaction, and
+  never updates it. A retry on an activated lease returns it unchanged; from any other
+  state activation is refused with nothing written. The request names the reservation
+  and carries no payment fact, no target time and no instant. Activation never changes
+  the lease's window, so an earlier truncation is adopted, never extended.
+- Expose activation through the storefront's guarded capacity path, beside commit and
+  truncation: the site's ledger and capacity router, the site client, core's
+  `SiteCapacityAuthority` protocol and `AggregateCapacityClient`, and the kit's
+  `CapacityEffects` and `CapacityRuntime`. It answers 200 with the recorded
+  reservation, 404 for an unknown reservation and 409 from any state but `leased`.
+- Show `activated_at_utc` on both views of the lease: the site's reservation view and
+  the compute provisioning contract's `LeaseView`. The compute contract gains no
+  activation route.
+- Name activation among the storefront capacity effects that `market-composition` and
+  `storefront-publication` bind to the listing's binding and its admission guard.
 
 ## Capabilities
 
 ### Modified Capabilities
 
-- `site-capacity`: the activation phase and the activation transition.
-- `compute-provisioning-contract`: typed activation and lease inspection.
+- `site-capacity`: the activation instant, the transition, its answers and the
+  migration.
+- `compute-provisioning-contract`: `activated_at_utc` on the lease view.
+- `market-composition`: activation among the capacity effects that pass the kit's
+  guarded boundary under the persisted binding.
+- `storefront-publication`: activation among the operations the binding's backing
+  delegate guards.
 
 ### New Capabilities
 
@@ -53,49 +56,68 @@ None.
 
 ## Non-Goals
 
-- The delivery deadline: the pool's `delivery_deadline_seconds`, the accepted value
-  and its anchor at commit, the expiry claim of the observed tuple, the
+- The delivery deadline: its column, the pool's `delivery_deadline_seconds`, the
+  accepted value and its anchor at commit, the expiry claim, the
   `activation_deadline_lapsed` cause and the `activation_deadlines_enabled` switch.
-  All of it is `renewable-compute-lease-deadlines`, which writes the deadline this
-  change's activation then replaces with the agreed end.
+  All of it is `renewable-compute-lease-deadlines`, which derives "awaiting
+  activation" from its own deadline and this change's instant.
 - Renewal of active leases, lease extension, any payment or refund operation.
 - Wiring the compute delivery callers: `unify-compute-delivery-path` owns that.
+- Any compatibility path for a site without activation: storefronts and sites are
+  deployed together.
 
 ## Dependencies and Related Changes
 
-- No dependency outside Goal 8. The work is site-local and the site imports nothing
-  new.
+- No dependency. The work is the site's ledger and the client chain over it, and no
+  package imports anything new.
 - `unify-compute-delivery-path` depends on this change and activates every compute
-  commit caller once, including recovery and Alkahest, through the contract this
-  change ships.
-- `renewable-compute-lease-deadlines` depends on this change: it writes
-  `renew_by_utc` and `awaiting_activation` at commit into the fields this change adds,
-  and conditions expiry on the phase this change's activation sets.
-- `capacity-reservation-lifecycle-hardening` owns hold expiry indexing on the same
-  table; this change's migration adds columns only and coordinates its order with
-  that change's migrations.
+  commit caller once, including recovery and Alkahest, through `CapacityEffects`.
+- `renewable-compute-lease-deadlines` depends on this change: it adds its deadline
+  column and conditions expiry on whether the lease is activated.
+- Both, and `lapse-billing-with-the-site-lease`, describe the columns and the legacy
+  no-op this design replaced; `design.md` names each difference for their own design
+  work to reconcile.
 
 ## Impact and acceptance boundary
 
-Site persistence and migration, one ledger transition, the typed site authority,
-models, router and client, and the shared compute contract and client. Exercised
-through the site API with a real embedded database and no storefront, payment
-authority or deadline: activation from each admissible phase, idempotent retry,
-refusal from every non-admissible state, adoption of an earlier truncation, and
-null-phase leases activating like any other on a site with the operation. It does not claim that any delivery caller
-activates; that is `unify-compute-delivery-path`'s evidence.
+Site persistence and two migrations, one ledger transition, the site's router and
+client, core's capacity protocol and aggregate, the kit's capacity effects, and the
+compute contract's lease view. Exercised through the site API with a real embedded
+database and no storefront, payment authority or deadline: activation of a leased
+lease, an idempotent retry returning the same instant, refusal with no write from
+every other state, adoption of an earlier truncation before activation and between a
+lost acknowledgement and its retry, the instant surviving restart and truncation, and
+existing rows migrating with null in both services; and through the client chain:
+activation routed to the binding's site and refused for an unbacked listing, and the
+instant visible on `LeaseView`. It does not claim that any delivery caller activates;
+that is `unify-compute-delivery-path`'s evidence.
 
 ## Permanent documentation impact
 
-- [x] `docs/development/ARCHITECTURE.md` — capacity reservation: the activation phase.
+- [x] `docs/development/ARCHITECTURE.md` — capacity reservation flow; the storefront
+  capacity effects; deployment topology.
 - [x] Existing subsystem specifications — `site-capacity`,
-  `compute-provisioning-contract`.
+  `compute-provisioning-contract`, `market-composition`, `storefront-publication`,
+  and the `site-capacity` and `market-composition` architecture companions.
 - [ ] New subsystem specification.
 - [ ] No permanent documentation change.
 
 ### Knowledge to promote
 
-- D1 (phase and transition) to `openspec/specs/site-capacity/spec.md` and its
-  architecture companion; capacity reservation in `docs/development/ARCHITECTURE.md`.
-- D2 (typed activation and inspection) to
-  `openspec/specs/compute-provisioning-contract/spec.md`.
+- D1 (the instant, the transition and the derived phase) to
+  `openspec/specs/site-capacity/spec.md` and the reservation-lifecycle section of
+  `openspec/specs/site-capacity/architecture.md`; the capacity reservation flow in
+  `docs/development/ARCHITECTURE.md`.
+- D2 (the write path) to `openspec/specs/market-composition/spec.md` and
+  `openspec/specs/storefront-publication/spec.md`; the capacity effects named in
+  `openspec/specs/market-composition/architecture.md` and
+  `docs/development/ARCHITECTURE.md`.
+- D3 (both views) to `openspec/specs/compute-provisioning-contract/spec.md`.
+- D4 (storefront and site deployed together) to the deployment topology in
+  `docs/development/ARCHITECTURE.md`.
+- D5 (the answers) to `openspec/specs/site-capacity/spec.md`.
+- D6 (both migrations) to `openspec/specs/site-capacity/spec.md`.
+- D7 (no event, no push) to `openspec/specs/site-capacity/spec.md`.
+- D8: no permanent destination — the implementation cadence is this change's plan,
+  not current behaviour.
+- D9 (the instant's representation) to `openspec/specs/site-capacity/spec.md`.

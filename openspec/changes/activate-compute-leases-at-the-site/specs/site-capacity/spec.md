@@ -1,40 +1,69 @@
 ## ADDED Requirements
 
-### Requirement: A lease carries an activation phase
+### Requirement: A lease records when it was activated
 
-A lease row MUST carry nullable `renewal_phase` (`awaiting_activation`, `active` or null), nullable `renew_by_utc` and nullable `activated_at_utc`. Migration MUST leave all three null on existing rows, and an existing active lease MUST NOT become awaiting activation during upgrade. `lease_end_utc` MUST keep meaning the agreed end and MUST move only through truncation. Admission MUST account the full agreed window whatever the phase.
+A reservation MUST carry a nullable `activated_at_utc`, written only by activation as an ISO-8601 UTC instant from the site's clock. Whether a lease is activated MUST be derived from it and stored nowhere else. Every service hosting the site ledger MUST add it in its migration chain, leaving it null on every existing reservation.
 
-#### Scenario: Existing leases migrate unchanged
+#### Scenario: Existing reservations migrate unactivated
 
-- **WHEN** the site migrates a database with leased rows
-- **THEN** every existing lease has null phase, null due instant and null activation instant, and expires only at its agreed end
+- **WHEN** a compute provisioning or API-credits database holding leased reservations is migrated
+- **THEN** every reservation has a null `activated_at_utc`, and its state, window and expiry are unchanged
 
-### Requirement: Activation moves a lease to active and sets its due instant to the agreed end
+#### Scenario: The instant is read
 
-Activation MUST move a `leased` reservation in phase `awaiting_activation` or null conditionally to phase `active`, setting its due instant to its current `lease_end_utc`. It MUST write `activated_at_utc` from the site's clock in the same transaction, once, and MUST NOT update it afterwards; the activation's reference is the reservation identity with that instant. It MUST accept no target deadline and no payment fact and MUST be addressed by reservation identity. Retried in `active` it MUST return the current lease unchanged; from `releasing`, terminal, failed-release or operator-owned states it MUST refuse without a write. Activation MUST NOT change the reservation's end.
+- **WHEN** a reservation is read through the site's reservation view
+- **THEN** it carries `activated_at_utc`, null until activation and the recorded instant after it
 
-#### Scenario: Each compute billing shape activates
+### Requirement: Activation records its instant once and changes nothing else
 
-- **WHEN** a reserved, on-demand, spot or Alkahest delivery activates its lease
-- **THEN** the site sets the phase to active and the due instant to that lease's current agreed end, never to a payment-derived instant
+Activation MUST be admissible only for a `leased` reservation. Where `activated_at_utc` is null it MUST write it in one transaction; where set, it MUST return the reservation unchanged. From any other state it MUST be refused with nothing written. It MUST NOT change state or window, record a capacity event, or alter admission. It MUST answer 200 with the recorded reservation, 404 for an unknown one, and 409 naming the state when refused.
 
-#### Scenario: Activation is retried after truncation
+#### Scenario: A leased reservation is activated
 
-- **WHEN** an active lease is truncated and activation is retried
-- **THEN** the site returns the current lease without extending its end or moving its `activated_at_utc`
+- **WHEN** activation is requested for a `leased` reservation with no `activated_at_utc`
+- **THEN** the site records the instant from its own clock and returns the reservation with it
+- **AND** the lease's state, start and end are unchanged and no capacity event is recorded
 
-#### Scenario: A shortened lease activates and the acknowledgement is lost
+#### Scenario: Activation is retried
 
-- **WHEN** end service truncates a lease before activation and activation then succeeds without a persisted acknowledgement
-- **THEN** the retry returns the current shorter end and the original `activated_at_utc`
-- **AND** neither call extends the lease toward its original commit end
+- **WHEN** activation is requested again for an activated lease, including after the site restarts
+- **THEN** the site returns the reservation with the instant the first activation recorded
+
+#### Scenario: A lease is truncated before activation
+
+- **WHEN** a lease committed until T2 is truncated to T1 and then activated
+- **THEN** the response carries the end T1 and the activation instant, and the lease still ends at T1
+
+#### Scenario: A truncation falls between a lost acknowledgement and its retry
+
+- **WHEN** activation succeeds without its answer reaching the caller, the lease is then truncated, and activation is retried
+- **THEN** the retry returns the shorter end and the original activation instant, and neither call extends the lease
 
 #### Scenario: Release already claimed the lease
 
-- **WHEN** activation arrives after the reservation entered releasing
-- **THEN** it is refused and the release is not undone
+- **WHEN** activation is requested for a reservation that is `releasing`, `release_failed`, `unmanaged`, `released` or `force_released`
+- **THEN** the site answers 409 naming the state, writes nothing, and the release is not undone
 
-#### Scenario: A legacy lease is activated
+#### Scenario: An uncommitted hold is activated
 
-- **WHEN** activation is called on a lease with null phase and null due instant
-- **THEN** the phase becomes active, the due instant stays the agreed end, and nothing else about the lease changes
+- **WHEN** activation is requested for a `reserved` reservation
+- **THEN** the site answers 409 and the hold stays uncommitted and unactivated
+
+#### Scenario: An unknown reservation is activated
+
+- **WHEN** activation names a reservation the site does not hold
+- **THEN** the site answers 404 and writes nothing
+
+#### Scenario: Admission around an activated lease
+
+- **WHEN** a new reservation overlaps an activated lease's agreed window
+- **THEN** admission accounts the activated lease against capacity exactly as before activation
+
+### Requirement: Activation is addressed by reservation identity alone
+
+An activation request MUST name only the reservation, by its `capacity_reservation_id`, and MUST carry no payment fact, billing kind, target time or instant. The instant MUST be the site's, whatever time the caller acted.
+
+#### Scenario: A storefront activates a lease
+
+- **WHEN** a storefront activates a lease through the site's capacity API
+- **THEN** the request carries the reservation identity and nothing else, and the recorded instant is the site's clock at the transition

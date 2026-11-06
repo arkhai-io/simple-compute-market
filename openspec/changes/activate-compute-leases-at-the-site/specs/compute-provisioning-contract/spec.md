@@ -1,30 +1,20 @@
 ## ADDED Requirements
 
-### Requirement: Typed compute lease activation and lease inspection
+### Requirement: A lease view shows when the lease was activated
 
-The shared compute client and contract MUST expose offering-mode-neutral activation by reservation identity and lease inspection carrying nullable `renew_by_utc`, nullable `renewal_phase`, and nullable `activated_at_utc`, the instant the site's activation transition wrote once. Activation MUST accept no payment fact or target deadline and MUST return the site's recorded lease through every client layer. It MUST use the existing authenticated service boundary and exact response verification.
+The compute contract's lease view MUST carry a nullable `activated_at_utc`, the instant the site's activation recorded, null for a lease not activated. It MUST NOT default or infer the instant. The contract MUST offer no operation that activates a lease: activation is written only through the site's capacity API.
 
-#### Scenario: A caller activates through the shared client
+#### Scenario: An activated lease is read
 
-- **WHEN** a VM or bare-metal caller activates an awaiting-activation lease
-- **THEN** the client returns the site's active lease, its due instant equal to its current agreed end, without importing a VM-specific model
+- **WHEN** a VM or bare-metal caller reads an activated lease through the shared client
+- **THEN** the lease view carries the instant the site recorded, without the caller importing a VM-specific model
 
-#### Scenario: An older lease is inspected or activated
+#### Scenario: A lease not yet activated is read
 
-- **WHEN** a lease with null deadline and phase is read through the client
-- **THEN** its null fields are visible as null, not defaulted
+- **WHEN** a caller reads a lease that was never activated, including one that predates activation
+- **THEN** its `activated_at_utc` is null, not a default or another instant of the lease
 
-#### Scenario: A null-phase lease is activated on a site with the operation
+#### Scenario: A caller looks for an activation operation on the contract
 
-- **WHEN** a lease with null deadline and phase is activated through the client on a site that exposes activation
-- **THEN** the client returns the lease as active, its due instant the agreed end, and a repeat returns the same lease
-
-#### Scenario: The site has no activation operation
-
-- **WHEN** the site exposes no activation route and the caller holds a verified legacy lease view
-- **THEN** the caller treats the lease as already active without a site write, and any other phase or an unverified view is repair-required
-
-#### Scenario: A response is signed by a different service
-
-- **WHEN** a principal other than the independently configured site authority signs an activation response
-- **THEN** the client refuses it instead of accepting activation
+- **WHEN** a caller wants to activate a lease
+- **THEN** no lease route of the compute contract accepts it, and the caller activates through the site's capacity API
