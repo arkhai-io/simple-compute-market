@@ -8,19 +8,20 @@ added by this reconciliation.
 
 ## 1. Freeze dependency contracts and decision gates
 
-- [ ] 1.1 Reverify `negotiation-driven-capacity-resize`'s landed multiplier contract
+- [x] 1.1 Reverify `negotiation-driven-capacity-resize`'s landed multiplier contract
   against `core/src/market_core/schemas.py` and `core/tests/unit/test_rate_helpers.py`.
   Record scalar, rounding and amount-range behavior before migrating readers. Resolve resize task
   2.1a's accepted rate-structure carrier before recovery/mandate reads; retain its bound evidence,
   never substitute a current listing after restart or repricing.
-- [ ] 1.2 With `agreed-evidence-and-early-termination`, once `kit/deal-lifecycle` exists,
-  add a regression test that the option's top-level `lifecycle` round-trips through
+- [x] 1.2 With `agreed-evidence-and-early-termination`, once `kit/deal-lifecycle` exists,
+  run a replayable regression diagnostic (rather than a new permanent acceptance
+  test, per the standing owner instruction) that the option's top-level `lifecycle` round-trips through
   hosted publication, the registry carrier and both buyer commitment checks by the same
   codec (D4), and that an Alkahest option carries none and is refused if it does (the
   binding rule). Do not implement a mechanism-specific term codec. `placement-probe.md`
   records the rejected in-params placement; the nested-shape check there is the
   regression, not a decision gate.
-- [ ] 1.3 With the reconciled rate change (`spot-deals-through-arkhai-payments`),
+- [x] 1.3 With the reconciled rate change (`spot-deals-through-arkhai-payments`),
   freeze the injected preset-helper interface (D3), `period`, `reserve_ahead_seconds`, separate setup pricing, accessor unit and
   servicing-declaration contracts. The option carries no maximum term: the horizon
   is resolved into `duration_seconds` at acceptance and the option's ID is unchanged
@@ -32,7 +33,7 @@ added by this reconciliation.
   `registry-as-published` (PR #349) as `faa339eea`. D-a–D-e remain accepted
   for implementation, pending maintainer review. The webapp owner authorized
   implementation before design review; the campaign row records that disposition.
-- Task 1.1 was exercised, but remains unchecked because the observed contract
+- At this initial checkpoint, task 1.1 was exercised but left unchecked because the observed contract
   contradicts D2: resize negotiates basis points but writes the **derived monetary
   total** to `Agreement.amount`. The multiplier remains in the transcript and
   `negotiation_threads.agreed_price`. `design.md`'s dependency re-verification
@@ -47,13 +48,49 @@ added by this reconciliation.
   and pinned strict OpenSpec validation passed. The change check initially
   refused missing D1–D8 destination bullets; commit `7cb03533e` names the already
   planned post-review destinations without promoting behavior.
-- No tests were added, no production readers migrated, and tasks 1.2 onward
-  have not started. No deployment/E2E or closeout evidence is claimed.
-- Restart here: resolve the scalar-versus-money question in design D2, update
+- At this initial checkpoint, no tests were added, no production readers migrated,
+  and tasks 1.2 onward had not started. No deployment/E2E or closeout evidence is claimed.
+- Initial restart point (resolved by D2a below): resolve the scalar-versus-money question in design D2, update
   its delta and tasks to the chosen contract, then finish 1.1 and proceed to 1.2.
   Do not divide or multiply the current Agreement amount as if it were basis
   points. Use `make dist-ci` and the focused commands in the evidence packet
   to recreate the local package environments; they are not committed state.
+
+### D2a continuation (2026-11-06)
+
+- The webapp owner resolved the checkpoint: keep `Agreement.amount` monetary;
+  transcript state keeps the multiplier. D2a and the negotiation delta record
+  pre-acceptance per-period derivation and accepted-evidence verification on
+  recovery/mandate checks. Maintainer review is pending on the PR.
+- 1.1 contract verification and 1.3 consumer handoff are recorded in
+  `dependency-contracts.md`. Actual accepted snapshot/proof retention and verification
+  before recovery/mandate reads remain in 2.1; the existing field subset is not
+  sufficient evidence and is not claimed otherwise.
+- 1.2 evidence: hosted once builder → neutral carrier → shared codec → exact
+  Agreement and both domain pre-approval checks pass; actual registry publication,
+  readback and historical seller-signature verification pass in an invocation-owned
+  in-process app with real SQLite. Alkahest with no lifecycle is admitted, while
+  attaching lifecycle is refused. Early-termination identity/round-trip is structural
+  only, not a claim of hosted recurring support. The probes are temporary change
+  evidence, not new permanent acceptance tests.
+- Existing focused suites passed: lifecycle terms (unit, 47), payments agreement/
+  buyer/config (unit, 51), registry listings (application integration through its
+  typed client, 17), VM stage-dispatch/orchestrator (unit, 21), bare-metal composition/
+  recovery (unit and controlled in-process application paths, 15). The bare-metal
+  invocation initially inherited an unsupported SOCKS proxy; clearing proxy variables
+  for that invocation made it pass without changing code or installing a dependency.
+- `make check-packaging` and `make check-change
+  CHANGE=negotiate-open-ended-compute-terms` passed. No product code, live approval,
+  or deployment is claimed. Exact setup/probe commands and limits:
+  `docs/attachments/negotiate-open-ended-compute-terms/codec-contract.md`.
+- No deployed E2E marker proves these dark, injected contracts yet. Section 4.3
+  names the existing listing/reserved system regressions; rate consumer evidence
+  remains owned by spot. No push-only workflow evidence is owed for section 1's
+  contract freeze. Independent implementation review remains pending.
+- Resume at 2.1: implement the accessor without reinterpreting monetary Agreement
+  amounts; preserve verified acceptance evidence before migrating recovery readers,
+  then migrate both domains and install the fail-closed direct-read guard. Work
+  through 2.2 onward in order. Promotion and archival remain post-review.
 
 ## 2. Quote and capacity terms
 

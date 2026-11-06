@@ -38,10 +38,30 @@ terms for a mechanism with no lifecycle adapter.
 
 ### D2. Quote once with its unit; guard every read
 
-`Agreement.amount` follows `negotiation-driven-capacity-resize`: basis points over
-a resolvable advertised rate structure, otherwise an absolute amount. Billing kind
-changes the evaluation duration: Agreement duration for prepaid, option period for
-recurring. Retain upward rounding and the asset's amount-range refusal.
+`Agreement.amount` is the accepted monetary quote, following the implemented
+resize carrier (D2a), never the negotiation multiplier. Billing kind changes the
+evaluation duration before acceptance: Agreement duration for prepaid, option
+period for recurring. Retain upward rounding once and the asset's amount-range
+refusal.
+
+#### D2a. Keep the signed Agreement monetary
+
+**decided by webapp owner 2026-11-06, pending maintainer review**
+
+The signed Agreement is what both parties commit to, and payment mandates bind
+money. A buyer or verifier must be able to read what is owed from the Agreement
+alone without re-deriving it from rates and a multiplier. Resize already writes
+money there and keeps the basis-point scalar in the negotiation transcript; keep
+that mechanism rather than introducing a protocol migration.
+
+The multiplier stays negotiation-transcript state. Recurring quotes are derived
+before acceptance using one option period and upward rounding once, and that
+per-period monetary amount is written to the Agreement. `agreed_price(agreement,
+listing)` returns the accepted amount, with `total` or `per_period` determined by
+the selected option's billing kind bound in acceptance. Recovery and buyer mandate
+checks still verify the amount against the acceptance-bound rate structure and
+multiplier, never a current listing. Revisit if a consumer needs the multiplier
+from signed evidence rather than the transcript.
 
 Core's `agreed_price(agreement, listing)` returns price and unit `total` or
 `per_period` (with the actual period for presentation), never an unlabelled integer.
@@ -341,8 +361,8 @@ implementation gates, not claimed evidence here.
 
 ## Dependency re-verification (2026-11-06)
 
-The stacked resize implementation does not give `Agreement.amount` the meaning
-D2 assumes. Its `design.md`, "Slice B scalar and payment boundary", deliberately
+The initial D2 wording assumed a scalar Agreement carrier; D2a reconciles that
+wording with the stacked resize implementation. Its `design.md`, "Slice B scalar and payment boundary", deliberately
 keeps policy scalars separate from monetary outcomes:
 
 - `domains/vms/negotiation/src/arkhai_vms_negotiation/amounts.py` applies the
@@ -361,20 +381,37 @@ keeps policy scalars separate from monetary outcomes:
   are available after PR #349's merge; their carrier/authority decisions D-a–D-e
   are not reopened by this finding.
 
-**Decision needed before task 1.1 can close:** either preserve the existing
-monetary Agreement carrier and make the unit-bearing accessor label the accepted
-monetary quote (with recurring amounts derived per period before acceptance), or
-change the accepted Agreement to carry the multiplier, together with an explicit
+**Resolved by D2a:** the alternatives were preserving the existing monetary
+Agreement carrier and labeling the accepted quote (with recurring amounts derived
+per period before acceptance), or carrying the multiplier with an explicit
 acceptance-bound pricing carrier and coordinated settlement-reader migration.
-The former is recommended because it preserves the signed and persisted
-settlement contract delivered by resize. It requires revising D2 and the
-10,000-bps Agreement scenario, not silently interpreting today's monetary amount
-as basis points. The latter follows D2's present wording but is a protocol and
-recovery change, not a mechanical accessor migration. No choice is made here;
-production behavior remains unchanged until the owner answers.
+The owner chose the former because it preserves the signed and persisted
+settlement contract delivered by resize. D2 and the sub-hour scenario now retain
+the monetary carrier. The scalar alternative would require a protocol and
+recovery migration and is rejected. This decision alone does not change product
+behavior; recurring derivation and accepted-evidence validation remain work to
+implement.
 
 Evidence and repeatable focused commands:
 `docs/attachments/negotiate-open-ended-compute-terms/dependency-contract.md`.
+
+## Frozen dependency handoff
+
+`dependency-contracts.md` records the section 1 price/evidence, helper and servicing
+inputs for the terms, rate and continuation implementations. The terms change
+owns publication and acceptance qualification, not hosted rate execution. Existing
+regressions plus `codec_probe.py` and `registry_codec_probe.py` exercise the shared
+codec and retained carrier without adding permanent acceptance tests. The hosted
+builder and both buyer checks exercise once-only terms; early termination is a
+structural codec/identity check, not a qualified recurring mandate.
+
+Implementation choice: preserve the standing no-new-tests instruction by replacing
+1.2's proposed permanent regression with these reproducible diagnostics and the
+existing foundation suites. No mechanism-specific lifecycle codec is introduced.
+The core accessor must remain schema-opaque: billing interpretation belongs to the
+selected mechanism's accepted-option projection, not a core branch on a mechanism
+schema. The exact projection plumbing is part of 2.1; the frozen behavioral contract
+is D2a's accepted monetary amount and acceptance-bound unit.
 
 ## Design promotion record
 
@@ -382,7 +419,7 @@ Destinations are planned, not claims of implemented behavior.
 
 | Accepted decision | Permanent location |
 |---|---|
-| D1, D2 classes and quote unit | `docs/development/ARCHITECTURE.md`; `openspec/specs/negotiation-protocol/spec.md` |
+| D1, D2/D2a classes and monetary quote unit | `docs/development/ARCHITECTURE.md`; `openspec/specs/negotiation-protocol/spec.md` |
 | D3 penalty preset default (24 periods) and buyer acceptance recommendations; D4 placement result | `openspec/specs/settlement-configuration/spec.md`; foundation-owned lifecycle contract |
 | D5 the horizon as the Agreement's, listing bounds and omission | `openspec/specs/negotiation-protocol/spec.md`; `openspec/specs/storefront-publication/spec.md`; `openspec/specs/storefront-publication/architecture.md`; `openspec/specs/resource-pool-management/spec.md` |
 | D6 servicing doors | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/storefront-publication/architecture.md` |
