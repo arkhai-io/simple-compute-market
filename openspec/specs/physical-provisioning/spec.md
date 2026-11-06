@@ -1903,6 +1903,10 @@ its readiness rather than serve it. Once any Ansible executor is real, the Ansib
 readiness component MUST refuse an enabled host's `ssh` connection exactly as execution
 refuses it, reporting itself not ready with a reason naming the host, and MUST report
 every other host as it would without it; it MUST skip a host of another connection kind.
+The Ansible component's detail MUST be of kind `compute_provisioning.ansible.readiness` at
+schema version 2, the only version it produces: an embedded key's `exists` says whether the
+key decrypts under the configured key, and a host whose stored connection execution refuses
+has no `ssh_keys` entry.
 
 #### Scenario: Every executor is mocked
 

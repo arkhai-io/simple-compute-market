@@ -193,12 +193,14 @@ class SshConnectionCodec:
         or it was protected under another key.
         """
         if not self._encryption_key:
-            # A host's key cannot be submitted again without a key to protect
-            # it, so configuring the key is the one recovery.
+            # A host's key cannot be submitted again until some key is
+            # configured to protect it, but any key will do, so both recoveries
+            # start by configuring one.
             raise ProtectedKeyUnreadableError(
                 host_id,
                 "because no ssh_decryption_key is configured; configure the "
-                "ssh_decryption_key it was protected under",
+                "ssh_decryption_key it was protected under, or configure one and "
+                "submit the host's private key again",
             )
         try:
             return decrypt_secret(ciphertext, self._encryption_key)

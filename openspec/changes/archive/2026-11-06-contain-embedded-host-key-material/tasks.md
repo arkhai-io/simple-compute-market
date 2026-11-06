@@ -622,6 +622,19 @@ implementation.
       `make check-change` on the archived change passed, `openspec validate
       --specs --strict` among its checks.
 
+*Closeout review 42's corrections, made after archival on the owner's
+direction:* the permanent requirement "Execution readiness is reported in
+system status" now states the Ansible detail's kind and schema version 2 and
+their meanings (42 F1). With no `ssh_decryption_key` configured, the handbook
+and the codec's message name both recoveries, configuring the original key or
+configuring any key and submitting the host's private key again; the unit
+test's expected text and the design's D4 refinement follow (42 F2). Evidence:
+unit, `make test-compute-provisioning-ansible` (187 passed, 4 skipped);
+`make check-packaging` passed; `make test` exit 0; `make check-comment-hygiene`
+and `make check-change` passed. The fresh-context check of the diff found
+nothing to fix; it offered the spec sentence's field meanings as MUST clauses,
+declined since the spec states such definitions plainly elsewhere.
+
 The design-promotion record is in `design.md`, "Design promotion record".
 Closeout ran its parts in the order above.
 

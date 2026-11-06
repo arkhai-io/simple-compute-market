@@ -356,9 +356,11 @@ submit the host's private key again under the configured key: update the host
 through `PUT /api/v1/hosts/{host_id}` with a connection carrying the key in its
 `secrets`, which replaces the whole connection, or import it through the INI
 import route's `embedded` mode. A host document cannot carry a key. With no
-`ssh_decryption_key` configured, the message says so, and configuring the key it
-was protected under is the one recovery, since no key can be submitted without
-one to protect it.
+`ssh_decryption_key` configured, the message says so. No private key can be
+submitted until a key is configured to protect it, but it need not be the
+original: configure the key the host's key was protected under, which recovers
+every host it protected, or configure a new one and submit each affected host's
+private key again.
 
 ### Capacity definitions
 

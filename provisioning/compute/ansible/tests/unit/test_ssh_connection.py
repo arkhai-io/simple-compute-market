@@ -102,13 +102,14 @@ _RESTORE_OR_RESUBMIT = (
         (_KEY, _protected_under(_OTHER_KEY), _RESTORE_OR_RESUBMIT),
         (_KEY, "not-a-fernet-token", _RESTORE_OR_RESUBMIT),
         ("not-a-fernet-key", _protected_under(_KEY), _RESTORE_OR_RESUBMIT),
-        # Without a key a private key cannot be submitted again, so the one
-        # recovery named is configuring the key.
+        # Without a key a private key cannot be submitted again, so both
+        # recoveries named start by configuring one.
         (
             None,
             _protected_under(_KEY),
             "because no ssh_decryption_key is configured; configure the "
-            "ssh_decryption_key it was protected under",
+            "ssh_decryption_key it was protected under, or configure one and "
+            "submit the host's private key again",
         ),
     ],
     ids=["another-key", "malformed", "invalid-key", "no-key"],

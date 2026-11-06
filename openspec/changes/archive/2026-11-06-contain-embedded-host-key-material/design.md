@@ -157,9 +157,11 @@ report one text for one failure.
 
 Implementation refined two points. The codec checks for an unconfigured key
 itself, before Fernet, so that cause's message says no `ssh_decryption_key` is
-configured and names the one recovery that works there, configuring the key the
-host's key was protected under: without a key, a private key cannot be submitted
-again, since the codec's `build` refuses it. And catching `InvalidToken` imports
+configured and names both recoveries that work there: configuring the key the
+host's key was protected under, or configuring a key and submitting the host's
+private key again. Without some key a private key cannot be submitted, since the
+codec's `build` refuses it, but any configured key protects a new submission
+(42 F2). And catching `InvalidToken` imports
 `cryptography.fernet`, so the distribution declares `cryptography` as a runtime
 dependency; it was already in every lock that installs the distribution. The
 alternative, `market_config` raising an error of its own, would widen the change
@@ -379,7 +381,7 @@ None.
 | D2 — the packaged configuration names no log file, an operator's own is not overridden, and the connectivity result is redacted with the generic fields | `openspec/specs/physical-provisioning/spec.md#requirement-ansible-output-is-kept-only-redacted-unless-an-operator-configures-otherwise`, by the archive; `docs/operator-handbook.md#ansible-configuration` |
 | D3 — the existing transient files keep their layout | no permanent destination; `openspec/specs/physical-provisioning/spec.md#requirement-connection-secrets-stay-protected` governs the layout, and the revisit trigger stays in this design and in the relay change's revised 2A.7 |
 | D4 — a protected key that cannot be decrypted is named at dispatch and at the probe | `openspec/specs/physical-provisioning/spec.md#requirement-a-protected-key-that-cannot-be-decrypted-is-named-not-hidden`, by the archive; `docs/operator-handbook.md#a-hosts-protected-key-no-longer-decrypts` |
-| D5 — readiness reads hosts through `execution_hosts`, decrypts embedded keys in memory, and refuses a stored connection as execution does; detail schema version 2 | `openspec/specs/physical-provisioning/spec.md#requirement-execution-readiness-is-reported-in-system-status` and `#requirement-connection-secrets-stay-protected`, by the archive; `docs/operator-handbook.md#a-hosts-protected-key-no-longer-decrypts` and `#host-definitions` (the version-2 rule); the schema version's meaning in `readiness.py`'s constant |
+| D5 — readiness reads hosts through `execution_hosts`, decrypts embedded keys in memory, and refuses a stored connection as execution does; detail schema version 2 | `openspec/specs/physical-provisioning/spec.md#requirement-execution-readiness-is-reported-in-system-status` and `#requirement-connection-secrets-stay-protected`, by the archive, the former also stating the detail's kind and schema version 2 and their meanings (42 F1); `docs/operator-handbook.md#a-hosts-protected-key-no-longer-decrypts` and `#host-definitions` (the version-2 rule) |
 | D6 — relay task 2A.7's requirement is met by the existing variables-file handling; no prerequisite edge | `openspec/changes/README.md` (the relay row's Notes, the campaign graph, its introduction and its paragraph on this change); `openspec/changes/relay-vm-access-without-a-dashboard/tasks.md` (2A.7, the implementation-progress handoff, the promotion row, the sequencing paragraph, and a correction note on 11.5) and `design.md` (the resolved variables file paragraph) |
 | D7 — per-host keys are registered through the host API and diagnosed when unusable | `docs/development/ROADMAP.md#goal-1--consolidate-physical-resource-authority-in-the-provisioning-service` (gap row removed, current state amended) |
 | D8 — two added and two modified requirements | `openspec/specs/physical-provisioning/spec.md`, by the archive |
