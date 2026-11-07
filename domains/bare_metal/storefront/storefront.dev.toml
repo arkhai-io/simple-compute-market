@@ -85,9 +85,10 @@ interruptible_oracle_addresses = []
 # Contact exchange is enabled so the introduction scenario can offer it through
 # a pool override; the publication clauses below stay Alkahest-only, so no
 # other listing changes. The seller contact is a development value on a
-# reserved domain. A 5-second retention window lets the scenario watch an
-# introduction expire; the day-long sweep interval keeps the timer out of the
-# way of the steps the scenario takes itself.
+# reserved domain. The scenario reads the retention window back from the
+# storefront's disclosure; no stage waits for it to pass, and the day-long sweep
+# interval keeps the timer out of the way of the steps the scenario takes
+# itself.
 [Settlement.contact]
 enabled = true
 contact_payload = { email = "seller@bare-metal-e2e.invalid" }

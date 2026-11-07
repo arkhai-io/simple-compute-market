@@ -474,14 +474,22 @@ Files: `e2e-tests/tests/e2e/roles/scenarios/bare_metal/test_bare_metal_introduct
 `e2e-tests/tests/e2e/roles/scenarios/apicredits/test_credits_deal_buyer_cli.py`;
 `e2e-tests/tests/e2e/roles/scenarios/bare_metal/test_bare_metal_payment_deal.py`.
 
-- [ ] 5.1 Remove `TestStage04_RetentionSweep` from `test_bare_metal_introduction.py`
+- [x] 5.1 Remove `TestStage04_RetentionSweep` from `test_bare_metal_introduction.py`
   (D4), with `RETENTION`, `EXPIRY_DEADLINE_SECONDS`, `EXPIRY_POLL_SECONDS`, and any import
   left unused. Rewrite the module docstring's sweep sentence: the scenario ends with the
   operator's deletion, and the held sweep is proven by the storefronts' integration tests
   (`domains/bare_metal/storefront/tests/test_http_introductions.py`).
   Verify: the module defines stages 00–03 only and no loop polls a dry run;
   `make test-e2e-unit` passes.
-- [ ] 5.2 Set `APICREDITS_MIDDLEWARE_VERIFY_TTL_SECONDS=0` on the sample app in
+  Done. The module defines stages 00–03 and calls no dry run; no import became unused
+  (`time` serves stage 02's expiration, `IntroductionPayloadsDeleted` stage 03). The
+  docstring names the integration test's file, whose
+  `test_held_retention_sweep_deletes_what_it_previewed` back-dates a reveal and steps
+  the held sweep. The scenario still reveals two introductions and deletes the first;
+  `IntroductionState.operator_deleted` is now set and read by no later stage, kept as
+  the stage's record. `make test-e2e-unit` passed (568). The bare-metal lane locally
+  ran stages 00–03, passing (5.4).
+- [x] 5.2 Set `APICREDITS_MIDDLEWARE_VERIFY_TTL_SECONDS=0` on the sample app in
   `compose.apicredits-lane.yml` (D5), with a comment saying every request re-verifies so
   a top-up is visible to the next request, and the cache's own behaviour is proven by the
   middleware conformance trace. Correct the comment in `domains/apicredits/compose.yml`
@@ -494,18 +502,77 @@ Files: `e2e-tests/tests/e2e/roles/scenarios/bare_metal/test_bare_metal_introduct
   `E2E_APICREDITS_COMPOSE` in `e2e-tests/Makefile` names them) shows the sample app's TTL
   `0`; `make test-e2e-unit` passes; any lane-compose test
   (`scripts/tests/test_lane_compose.py`) still passes.
-- [ ] 5.3 In `test_bare_metal_payment_deal.py` (D8), replace the status poll after
+  Done. The overlay overrides the included `sample-app` service's environment, as
+  `compose.apicredits-local.yml` already overrides its volumes. With a TTL of 0 the
+  gate's cached verify expires at once (`gate.py` keeps it only while
+  `verify_expires > now`), so every request re-verifies, and a valid verify clears the
+  key's cached exhaustion; the first drain still answers 402 through the consume path.
+  The scenario's poll is one request expecting 200 and the forecast; its failure
+  message names the overlay setting. `time` is no longer imported. The plan's
+  `docker compose … config` was refused under this step's rules (don't-ask mode);
+  in its place, beyond the plan, `scripts/tests/test_lane_compose.py` gained
+  `test_only_the_api_credit_lane_runs_the_sample_app_with_no_verify_cache`, which
+  renders both stacks with `docker compose config` and requires the lane's TTL `0` and
+  the full stack's `3`. `make test-release-tooling` (which runs `scripts/tests`): 2681
+  passed, none skipped, so Compose was present and the new case ran.
+  `make test-e2e-unit` passed (568). The API-credit lane locally passed (5.4); that
+  run cannot be relied on to separate TTL 0 from 3, since the top-up's own negotiation
+  and settlement between the drained request and the next likely outlast a 3 s
+  cache, so the render test is the evidence for the value.
+- [x] 5.3 In `test_bare_metal_payment_deal.py` (D8), replace the status poll after
   `advance_fulfillment_to(..., "active")` with one `payment_fulfillment.status(...)` read
   asserting `state == "active"`, with a message saying the storefront reads provisioning's
   status live; drop the `time` import if unused.
   Verify: no loop remains between the advance and the delivery assertions;
   `make test-e2e-unit` passes.
-- [ ] 5.4 Verification point: `make test-e2e-unit` passes;
+  Done. One read after the advance, its message saying the storefront reads
+  provisioning's status live; no loop remains before `assert_delivery`. `time` was
+  used nowhere else and is no longer imported. `make test-e2e-unit` passed (568); the
+  bare-metal lane locally passed `test_payment_deal_delivers_after_a_verified_receipt`
+  with the single read (5.4).
+- [x] 5.4 Verification point: `make test-e2e-unit` passes;
   `scripts/change-workflow run pre-commit shorten-the-end-to-end-pipeline` passes.
   End-to-end: `e2e_bare_metal_introduction` passes stages 00–03;
   `e2e_credits_deal` passes, its post-top-up request answering 200 at once;
   `e2e_bare_metal_payment_deal` passes, its status read answering `active` once.
   Owed by validation: `tests.yml`, job `test · test-e2e-unit` — passes.
+  Done on the section's local evidence. `make test-e2e-unit` 568 passed;
+  `make test-release-tooling` 2681 passed. Pre-commit, on the final content:
+  `after-functional-change`, `pre-commit-functional` (every suite, packaging), and
+  `pre-commit` passed.
+  Local evidence (system level, each lane's stack with mock provisioning, on the
+  section's code before the fresh-context fixes, which changed only comments, a marker
+  description, and a test docstring): `make -C e2e-tests test-e2e-bare-metal` 69
+  passed in 28.51 s, against 70 in 50.48 s before the stage's removal (4.3); the run
+  lists `test_bare_metal_introduction`'s stages 00–03 and no 04, and
+  `test_payment_deal_delivers_after_a_verified_receipt` passed with the single read.
+  `make -C e2e-tests test-e2e-apicredits`: 4 passed in 11.72 s, `e2e_credits_deal`'s
+  post-top-up request answering 200 (5.2 says why that run alone does not pin the
+  TTL). Each stack was taken down after its run (`make -C e2e-tests
+  e2e-<lane>-down`), since the lanes share the `anvil` container name.
+  Outside the plan's file list, from the fresh-context check: three texts still
+  described the removed stage — the `e2e_bare_metal_introduction` marker in
+  `e2e-tests/pyproject.toml`, and the retention-window comments in
+  `domains/bare_metal/storefront/storefront.dev.toml` and
+  `e2e-tests/config/config-docker.yml` — now say the window is read back from the
+  disclosure. The 5-second window itself is unchanged: stage 00 compares the disclosure
+  with it, and any value would serve.
+  Declined, for the round's review: the introduction scenario still declares two
+  hosts and reveals two introductions, though only the first now feeds a later stage
+  (the second fed the removed sweep). D4 keeps stages 00–03 as they are; dropping to
+  one host is a scenario edit the design did not ask for.
+  End-to-end scenarios: `e2e_bare_metal_introduction` and `e2e_bare_metal_payment_deal`
+  (bare-metal lane), `e2e_credits_deal` (API-credit lane); the pipeline's run of them
+  is validation's.
+  Owed by validation: confirmed as stated — `tests.yml`, job `test · test-e2e-unit`.
+  Owed by validation: `tests.yml`, job `test · test-deployment-packaging` — runs
+  `scripts/tests` through `make test-release-tooling`; the new
+  `test_only_the_api_credit_lane_runs_the_sample_app_with_no_verify_cache` runs, not
+  skipped for want of Compose, and passes.
+  Handoff: `TESTING.md`'s bare-metal lane bullet and the `e2e-tests/roles/README.md`
+  text describing scenarios were not edited here; closeout's promotion (6.9) owns the
+  former, and the latter was not found to describe the removed stage. Every section of
+  the round is now implemented; the pipeline run is validation's.
 
 ## 6. Closeout
 

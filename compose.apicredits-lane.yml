@@ -39,6 +39,14 @@ services:
       # only authority its payments client trusts for the double.
       - ./tools/payments-lane-double/tls/lane-ca.pem:/run/payments-lane-double/lane-ca.pem:ro
 
+  sample-app:
+    environment:
+      # No verify cache: every request re-verifies its key, so a top-up is
+      # visible to the very next request and the scenario waits on nothing.
+      # The cache's own behaviour, including no service call on a key known
+      # to be exhausted, is proven by the middleware conformance trace.
+      - APICREDITS_MIDDLEWARE_VERIFY_TTL_SECONDS=0
+
   compute-registry:
     # The registry image's default filter specification is the compute one.
     image: arkhai:registry

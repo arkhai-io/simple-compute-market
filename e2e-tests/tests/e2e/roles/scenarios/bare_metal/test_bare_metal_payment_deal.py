@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import os
-import time
 from typing import Any
 
 import pytest
@@ -357,10 +356,11 @@ def test_payment_deal_delivers_after_a_verified_receipt(
     advance_fulfillment_to(
         provisioning_client, payment_deal_state.fulfillment_ref, "active", max_advances=8,
     )
-    deadline = time.monotonic() + 30
-    while payment_fulfillment.status(payment_deal_state.negotiation_id)["state"] != "active":
-        assert time.monotonic() < deadline, "purchase fulfillment did not become ready"
-        time.sleep(0.2)
+    delivered_status = payment_fulfillment.status(payment_deal_state.negotiation_id)
+    assert delivered_status["state"] == "active", (
+        "the storefront reads provisioning's fulfillment status live, so once "
+        f"provisioning reports it active the storefront does too: {delivered_status}"
+    )
     payment_supply.assert_delivery(payment_deal_state)
     delivered = payment_fulfillment.result(payment_deal_state.negotiation_id)
     assert delivered["receipt"]["access_ref"]["fulfillment_id"] == payment_deal_state.fulfillment_ref
