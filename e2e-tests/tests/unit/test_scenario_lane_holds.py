@@ -1,11 +1,15 @@
 """Every scenario module a compute pipeline lane selects holds its lane's timers.
 
 A lane is its marker expression in ``e2e-tests/Makefile``, the one place lane
-membership is written, collected over its lane's scenario directory. Each module
-it selects holds, for the whole module, its lane's storefront loops, fulfillment
-convergence, and lease watchdog, and a VM-lane module also Alice's storefront
-loops: a timer left running is a participant no stage scripted. A module no lane
-selects, such as one an operator runs against a real host, is outside the rule.
+membership is written, collected as the lane collects it: over pytest's own
+test paths, not its lane's directory, so a module in any directory that joins a
+lane comes under the rule. Each module it selects holds, for the whole module,
+its lane's storefront loops, fulfillment convergence, and lease watchdog, and a
+VM-lane module also Alice's storefront loops: a timer left running is a
+participant no stage scripted. Two kinds of module are outside the rule: one no
+lane selects, such as one an operator runs against a real host, and one under
+``scenarios/core/``, which reaches only the dev chain and messages no storefront
+or provisioning service, so it meets none of the timers its lane holds.
 Which fixtures a module sets up is pytest's resolution, not its source's, so it
 is read from ``pytest --setup-plan`` over the real lane conftests and modules.
 See ``openspec/specs/test-compatibility/spec.md``, "Scenarios hold shared
@@ -27,6 +31,8 @@ TESTS = Path(__file__).resolve().parents[1]
 PROJECT = TESTS.parent
 MAKEFILE = PROJECT / "Makefile"
 SCENARIOS = TESTS / "e2e" / "roles" / "scenarios"
+#: The chain-only scenario modules, which no lane's holds cover.
+CHAIN_ONLY = SCENARIOS / "core"
 
 VM_HOLDS = (
     "storefront_loops_held",
@@ -39,11 +45,11 @@ BARE_METAL_HOLDS = (
     "fulfillment_convergence_held",
     "lease_watchdog_held",
 )
-#: Each compute pipeline lane: its marker-expression variable, its scenario
-#: directory, and the holds every module it selects takes.
+#: Each compute pipeline lane's marker-expression variable, and the holds every
+#: module it selects takes.
 LANES = {
-    "E2E_MODULE": (SCENARIOS / "vms", VM_HOLDS),
-    "E2E_BARE_METAL_MODULE": (SCENARIOS / "bare_metal", BARE_METAL_HOLDS),
+    "E2E_MODULE": VM_HOLDS,
+    "E2E_BARE_METAL_MODULE": BARE_METAL_HOLDS,
 }
 
 
@@ -64,22 +70,36 @@ def makefile_variable(text: str, name: str) -> str:
     )
 
 
-def lane_plans(directory: Path, expression: str, *, cwd: Path = PROJECT) -> dict[str, dict]:
-    """The setup plan of every module ``expression`` selects in ``directory``,
-    by the module path pytest reports; empty when it selects none.
+def lane_plans(expression: str, *, cwd: Path = PROJECT) -> dict[str, dict]:
+    """The setup plan of every module ``expression`` selects, by the module
+    path pytest reports relative to its rootdir, which is ``cwd`` wherever this
+    check runs; empty when it selects none.
 
-    Skip marks are not evaluated (``-p no:skipping``): a module skipped in this
-    environment may still run in its lane, and one skipped there needs its holds
-    no less once it is not.
+    No path is given, so pytest collects its configured test paths, as the
+    lane's own run does. Skip marks are not evaluated (``-p no:skipping``): a
+    module skipped in this environment may still run in its lane, and one
+    skipped there needs its holds no less once it is not.
     """
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "--setup-plan", "-q", "-p", "no:cacheprovider",
-         "-p", "no:skipping", "-m", expression, str(directory.relative_to(cwd))],
+         "-p", "no:skipping", "-m", expression],
         cwd=cwd, capture_output=True, text=True, check=False,
     )
     # pytest exits 5 when the expression selects no test.
     assert result.returncode in (0, 5), result.stdout[-4000:] + result.stderr[-4000:]
     return module_plans(result.stdout)
+
+
+def held_plans(
+    plans: dict[str, dict], *, cwd: Path = PROJECT, chain_only: Path = CHAIN_ONLY,
+) -> dict[str, dict]:
+    """The plans of the modules the hold rule covers: every one but those
+    under ``chain_only``."""
+    return {
+        module: plan
+        for module, plan in plans.items()
+        if not (cwd / module).resolve().is_relative_to(chain_only.resolve())
+    }
 
 
 def missing_holds(plans: dict[str, dict], holds: tuple[str, ...]) -> list[str]:
@@ -94,21 +114,21 @@ def missing_holds(plans: dict[str, dict], holds: tuple[str, ...]) -> list[str]:
 
 def check_lane(variable: str, plans: dict[str, dict], holds: tuple[str, ...]) -> None:
     assert plans, (
-        f"{variable} selects no scenario module, so the lane runs nothing and "
-        "no hold of it can be checked"
+        f"{variable} selects no scenario module the hold rule covers, so no "
+        "hold of it can be checked"
     )
     missing = missing_holds(plans, holds)
     assert not missing, (
         f"modules {variable} selects lack their lane's holds; list them first in "
-        f"the module's `usefixtures`: {missing}"
+        "the module's `usefixtures`, after moving a module outside its lane's "
+        f"directory into it, where the hold fixtures are defined: {missing}"
     )
 
 
 @pytest.mark.parametrize("variable", sorted(LANES))
 def test_every_module_a_lane_selects_holds_its_lanes_timers(variable: str):
-    directory, holds = LANES[variable]
     expression = makefile_variable(MAKEFILE.read_text(), variable)
-    check_lane(variable, lane_plans(directory, expression), holds)
+    check_lane(variable, held_plans(lane_plans(expression)), LANES[variable])
 
 
 def test_a_continued_variable_is_read_whole():
@@ -146,11 +166,12 @@ def test_a_planted_plan_missing_a_hold_names_the_module_and_the_hold():
     ]
 
 
-def test_a_module_outside_the_selection_is_not_required(tmp_path: Path):
-    """Over a planted lane, through the real setup plan: the modules the lane's
-    expression selects are held to the holds, including one skipped where the
-    check runs, and one it leaves out is not; an expression selecting nothing
-    yields no plan."""
+def test_the_selection_is_the_expression_not_the_directory(tmp_path: Path):
+    """Over a planted tree, through the real setup plan: every module the
+    lane's expression selects is held to the holds — in the lane's directory,
+    skipped where the check runs, or in another directory — except one under
+    the chain-only directory; one the expression leaves out is not required,
+    and an expression selecting nothing yields no plan."""
     (tmp_path / "conftest.py").write_text(
         "import pytest\n"
         "def pytest_configure(config):\n"
@@ -160,7 +181,9 @@ def test_a_module_outside_the_selection_is_not_required(tmp_path: Path):
             for hold in BARE_METAL_HOLDS
         )
     )
-    (tmp_path / "test_selected.py").write_text(
+    for directory in ("lane", "elsewhere", "core"):
+        (tmp_path / directory).mkdir()
+    (tmp_path / "lane" / "test_selected.py").write_text(
         "import pytest\n"
         "pytestmark = [\n"
         "    pytest.mark.usefixtures('storefront_loops_held', 'fulfillment_convergence_held'),\n"
@@ -168,18 +191,29 @@ def test_a_module_outside_the_selection_is_not_required(tmp_path: Path):
         "]\n"
         "def test_a():\n    pass\n"
     )
-    (tmp_path / "test_skipped_here.py").write_text(
+    (tmp_path / "lane" / "test_skipped_here.py").write_text(
         "import pytest\n"
         "pytestmark = [pytest.mark.skipif(True, reason='not here'), pytest.mark.planted_lane]\n"
         "def test_c():\n    pass\n"
     )
-    (tmp_path / "test_by_hand.py").write_text("def test_b():\n    pass\n")
+    (tmp_path / "elsewhere" / "test_joined.py").write_text(
+        "import pytest\npytestmark = pytest.mark.planted_lane\ndef test_d():\n    pass\n"
+    )
+    (tmp_path / "core" / "test_chain_only.py").write_text(
+        "import pytest\npytestmark = pytest.mark.planted_lane\ndef test_e():\n    pass\n"
+    )
+    (tmp_path / "lane" / "test_by_hand.py").write_text("def test_b():\n    pass\n")
 
-    plans = lane_plans(tmp_path, "planted_lane", cwd=tmp_path)
+    plans = lane_plans("planted_lane", cwd=tmp_path)
+    held = held_plans(plans, cwd=tmp_path, chain_only=tmp_path / "core")
 
-    assert sorted(plans) == ["test_selected.py", "test_skipped_here.py"]
-    assert missing_holds(plans, BARE_METAL_HOLDS) == [
-        "test_selected.py: lease_watchdog_held",
-        *(f"test_skipped_here.py: {hold}" for hold in BARE_METAL_HOLDS),
+    assert sorted(plans) == [
+        "core/test_chain_only.py", "elsewhere/test_joined.py",
+        "lane/test_selected.py", "lane/test_skipped_here.py",
     ]
-    assert lane_plans(tmp_path, "no_such_lane", cwd=tmp_path) == {}
+    assert missing_holds(held, BARE_METAL_HOLDS) == [
+        *(f"elsewhere/test_joined.py: {hold}" for hold in BARE_METAL_HOLDS),
+        "lane/test_selected.py: lease_watchdog_held",
+        *(f"lane/test_skipped_here.py: {hold}" for hold in BARE_METAL_HOLDS),
+    ]
+    assert lane_plans("no_such_lane", cwd=tmp_path) == {}

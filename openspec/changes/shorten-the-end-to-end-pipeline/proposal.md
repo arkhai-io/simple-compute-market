@@ -62,7 +62,8 @@ the work it does.
   storefront's lifecycle loops, fulfillment convergence, and the lease watchdog, and in
   the VM lane Alice's storefront loops. A source check reads the resolved fixtures of the
   modules each lane's marker expression selects and fails one missing a hold; modules no
-  lane selects, such as the real-host ones, keep the holds they have.
+  lane selects, such as the real-host ones, keep the holds they have, and the chain-only
+  modules under `scenarios/core/` take none.
 - **Buy scenarios step convergence.** `test_buy_oneshot_buyer_cli` and
   `test_listing_shapes` run `market buy` in the background and advance convergence once
   the job is submitted, through one shared helper.

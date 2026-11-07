@@ -6,13 +6,14 @@ Every end-to-end scenario module a compute pipeline lane selects MUST hold, for 
 module, its lane's storefront lifecycle loops, provisioning's fulfillment convergence,
 and its lease watchdog; a module the VM lane selects MUST also hold Alice's storefront
 loops. A lane's selection is its marker expression, not its directory; a module no lane
-selects is outside this rule. Each hold MUST be the
+selects is outside this rule, and so is a module under `scenarios/core/`, which reaches
+only the dev chain and messages no storefront or provisioning service. Each hold MUST be the
 lane's hold fixture, built on one shared helper per pause kind, taken before the module's
 first stage, waiting until each held loop reports itself paused at its gate, and released
 in a finaliser whatever the module's outcome, after the module's other cleanup. A stage
 MUST assert a hold and MUST NOT pause or resume a service itself. Source checks MUST refuse
-a scenario or stage that calls a pause route directly, and a module a compute pipeline
-lane selects whose resolved fixtures lack one of its lane's holds. Every lane that holds
+a scenario or stage that calls a pause route directly, and a module this rule covers whose
+resolved fixtures lack one of its lane's holds. Every lane that holds
 MUST use the same mechanism.
 
 #### Scenario: A deal scenario fails part-way
@@ -34,8 +35,8 @@ MUST use the same mechanism.
 
 #### Scenario: A compute-lane module omits a hold
 
-- **WHEN** the resolved fixtures of a scenario module a compute pipeline lane selects lack
-  its lane's storefront, fulfillment-convergence, or lease-watchdog hold, or a module the
+- **WHEN** the resolved fixtures of a scenario module a compute pipeline lane selects,
+  outside `scenarios/core/`, lack its lane's storefront, fulfillment-convergence, or lease-watchdog hold, or a module the
   VM lane selects lacks Alice's storefront hold
 - **THEN** the source check fails, naming the module and the missing hold
 
@@ -44,6 +45,13 @@ MUST use the same mechanism.
 - **WHEN** a scenario module in a compute lane's directory is selected by no pipeline
   lane, such as one run by hand against a real host
 - **THEN** the hold check does not require its lane's holds of it
+
+#### Scenario: A lane selects a module outside its directory
+
+- **WHEN** a compute lane's marker expression selects a scenario module outside the lane's
+  directory
+- **THEN** the hold check requires the lane's holds of it, unless it is a chain-only module
+  under `scenarios/core/`, such as the Alkahest escrow codec module the VM lane selects
 
 ## ADDED Requirements
 

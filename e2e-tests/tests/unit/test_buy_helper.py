@@ -3,14 +3,22 @@
 The helper's sequence runs here over a fake run and recording clients: the
 buyer CLI that starts the run, the storefront's stage-event log and the buyer's
 settle status, the mock provisioning job queue, and fulfillment convergence.
+Its cleanup also runs once over a real child process standing in for the buy,
+since reaping crosses the process boundary a fake run cannot.
 """
 
 from __future__ import annotations
 
+import json
+import signal
+import subprocess
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from tests.e2e.roles.buyer_cli import MarketRun
 from tests.e2e.roles.helpers.buy import buy_to_ready
 
 ESCROW = "escrow-1"
@@ -226,3 +234,64 @@ def test_a_buy_that_ended_is_not_terminated_again():
 
     assert "stdout (tail): buy stdout" in str(raised.value)
     assert run.terminations == 0
+
+
+class RealBuyerCli:
+    """Starts a real child interpreter in place of `market buy`: it ignores
+    SIGTERM, writes the run-log events of a buy that submitted its settlement,
+    and then sleeps, as a buy polling a settlement no one steps does."""
+
+    def __init__(self, run_dir: Path) -> None:
+        self.run_dir = run_dir
+        self.started: list[subprocess.Popen] = []
+
+    def run(self, args, *, background: bool = False) -> MarketRun:
+        assert background
+        events = [
+            {"event": "negotiation_completed", "status": "agreed", "negotiation_id": NEGOTIATION},
+            {"event": "escrow_created", "escrow_uid": ESCROW},
+            {"event": "settlement_submitted", "escrow_uid": ESCROW},
+        ]
+        # The handler is installed before any event is written, and the helper
+        # terminates only after reading them, so SIGTERM always meets it.
+        script = (
+            "import signal, sys, time\n"
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            "with open(sys.argv[1], 'w', encoding='utf-8') as log:\n"
+            "    log.write(sys.argv[2])\n"
+            "time.sleep(600)\n"
+        )
+        popen = subprocess.Popen(
+            [sys.executable, "-c", script, str(self.run_dir / "run-1.jsonl"),
+             "".join(json.dumps(event) + "\n" for event in events)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        self.started.append(popen)
+        return MarketRun(run_dir=self.run_dir, popen=popen)
+
+
+def test_a_failed_buy_kills_and_reaps_a_process_that_ignores_sigterm(tmp_path: Path):
+    calls: list = []
+    cli = RealBuyerCli(tmp_path)
+    try:
+        with pytest.raises(AssertionError, match="stalled at the storefront's provision/job_submitted event"):
+            buy_to_ready(
+                cli,
+                BUY_ARGS,
+                storefront_admin_client=FakeStorefrontAdmin(calls, logged=False),
+                storefront_client=FakeBuyerStorefront(calls),
+                provisioning_client=FakeProvisioning(calls),
+                provisioning_test_client=FakeProvisioningTest(calls),
+            )
+
+        (process,) = cli.started
+        # `returncode` is set only once the child is reaped, and SIGKILL is the
+        # only signal this child does not survive.
+        assert process.returncode == -signal.SIGKILL
+    finally:
+        for process in cli.started:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            process.stdout.close()
+            process.stderr.close()

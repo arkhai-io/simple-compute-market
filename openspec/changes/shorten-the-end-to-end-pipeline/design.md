@@ -203,11 +203,19 @@ storefront loops.
 
 A source check reads the resolved fixtures from `pytest --setup-plan`, as
 `e2e-tests/tests/unit/test_scenario_cleanup_order.py` already does, of the modules each
-lane selects — its lane directory collected with the lane's marker expression, taken
-from `e2e-tests/Makefile`, the one place lane membership is written — and fails a module
-whose plan lacks any of its lane's holds, naming the module and the hold. A module
-joining a lane comes under the rule with no second list to update. The existing check
-refusing a pause outside the hold fixtures stays.
+lane selects — collected as the lane collects them, over pytest's configured test paths
+with the lane's marker expression, taken from `e2e-tests/Makefile`, the one place lane
+membership is written — and fails a module whose plan lacks any of its lane's holds,
+naming the module and the hold. A module joining a lane, from any directory, comes under
+the rule with no second list to update. The existing check refusing a pause outside the
+hold fixtures stays.
+
+Modules under `scenarios/core/` are outside the rule (review 17 F1). The VM lane's
+expression selects the two there, `e2e_alkahest_escrow_codecs` and
+`e2e_alkahest_trusted_oracle`; they reach only the dev chain and message no storefront or
+provisioning service, so no timer their lane holds is one they meet, and the lane's hold
+fixtures do not resolve outside its own directory. The exemption is by directory, so it
+rests on `core/` keeping that meaning, which the package's own docstring states.
 
 A module no lane selects is outside the rule and keeps the holds it has: the two
 real-provisioning modules and `test_bare_metal_deal.py` run against real hosts an
@@ -237,6 +245,12 @@ Rejected:
 - **The lane directories minus a named list of out-of-lane modules.** Simpler and fails
   closed, but the list duplicates the Makefile's lane membership, and a module promoted
   into a lane while still listed would run unchecked.
+- **Each lane's directory collected with its expression** (as first implemented; review
+  17 F1). Excludes the chain-only modules with no exemption to state, but a module outside
+  the lane directory joining the lane runs unchecked.
+- **Holding the lane's timers in the chain-only modules too** (review 17 F1). Needs the
+  hold fixtures moved to a shared conftest or the modules moved, and makes chain-only
+  tests depend on services they never message.
 
 ### D7 — Buy scenarios step convergence through one helper
 

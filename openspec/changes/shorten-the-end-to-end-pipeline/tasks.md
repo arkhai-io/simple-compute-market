@@ -269,6 +269,16 @@ Files: a new `e2e-tests/tests/e2e/roles/helpers/buy.py`;
   The success case asserts the call order, which `TESTING.md`'s unit level calls
   orchestration; it is kept, as the plan's level for the harness's own helper logic,
   whose integration is the lane run (3.4).
+  Round fix, review 17 F2: `test_a_failed_buy_kills_and_reaps_a_process_that_ignores_sigterm`
+  runs the helper's failure cleanup over a real `MarketRun` around a real child
+  interpreter (`TESTING.md`'s subprocess boundary, kept in `tests/unit` beside the other
+  real-child checks). The child ignores SIGTERM, writes the run log's agreed
+  negotiation, `escrow_created`, and `settlement_submitted`, and sleeps; the storefront
+  fake logs no dispatch, so the helper fails naming its stage-event step, and the test
+  requires the child's `returncode` to be SIGKILL's, which is set only once it is
+  reaped. It takes about 5 s, `terminate`'s SIGTERM bound. With the wait after the kill
+  removed from `MarketRun.terminate`, the case failed (`returncode` None); restored, it
+  passed. `make -C e2e-tests test-unit`: 569 passed.
 - [x] 3.3 `test_buy_oneshot_buyer_cli` and `test_listing_shapes` take their lane's holds
   (D6) and buy through the helper (D7). Their `usefixtures` list first
   `storefront_loops_held`, `alice_loops_held`, `fulfillment_convergence_held`,
@@ -423,6 +433,33 @@ Files: the VM modules `test_full_deal.py`, `test_full_deal_buyer_cli.py`,
   them. Holding Bob's and Alice's timers for chain-only modules would be harmless but
   pointless; the requirement's wording, or the check's directories, is the design's to
   settle.
+  Round fix, review 17 F1 (the owner chose the exemption, D6 amended): the check now
+  collects each lane's expression with no path, over pytest's configured test paths as
+  the lane's own run does, and `held_plans` drops modules under `scenarios/core/`
+  (`CHAIN_ONLY`); every other selected module, from any directory, is held to the lane's
+  holds. The delta requirement states the exemption and gains the scenario "A lane
+  selects a module outside its directory"; `proposal.md`'s line says the same. The
+  planted case is now `test_the_selection_is_the_expression_not_the_directory`: over a
+  temporary tree, a marked module in the lane directory, one skipped there, and one in
+  another directory are each held to the holds, a marked one under the planted `core/`
+  is not, an unmarked one is not, and an expression selecting nothing yields no plan.
+  With `CHAIN_ONLY` pointed at a missing directory, the `E2E_MODULE` case failed naming
+  exactly the two `core` modules' four holds each; restored, it passed.
+  `make -C e2e-tests test-unit` (unit level, with this check's real child pytest, as
+  above): 569 passed.
+  The round's fresh-context check (both fixes, against `6216a4504`) found nothing
+  blocking; fixed from it: `scenarios/core/__init__.py` gained a docstring stating the
+  directory's chain-only meaning the exemption rests on (D6 cites it); the delta's
+  source-check clause and the "omits a hold" scenario now carry the exemption; the
+  check's failure message says a module outside its lane's directory moves into it,
+  where the hold fixtures are defined; `lane_plans`' docstring says pytest reports
+  paths relative to its rootdir. Also corrected, outside the findings: 5.4's handoff
+  cited the roles README without its `tests/e2e/` segment, which the citations check
+  refused; it now cites `e2e-tests/tests/e2e/roles/README.md`.
+  Pre-commit on the round's fixes (both findings), final content:
+  `after-functional-change … passed, exit 0`; `pre-commit-functional … passed, exit 0`
+  (`make test`, the e2e unit suite 569 passed, `scripts/tests` 2681 passed, packaging);
+  `pre-commit … passed, exit 0` (citations included).
 - [x] 4.3 Verification point: `make test-e2e-unit` passes;
   `scripts/change-workflow run pre-commit shorten-the-end-to-end-pipeline` passes.
   End-to-end: every marker the VM and bare-metal lanes select passes with the new holds:
@@ -460,7 +497,8 @@ Files: the VM modules `test_full_deal.py`, `test_full_deal_buyer_cli.py`,
   parser moves both checks. Section 5 edits `test_bare_metal_introduction.py` and
   `test_bare_metal_payment_deal.py`, whose holds are now complete; it must keep them
   first in `usefixtures`. The `core` modules' place under the rule is open for the
-  round's review (4.2's note).
+  round's review (4.2's note). Settled by review 17 F1: they are exempt by directory,
+  and the check collects what the lane collects (4.2's round fix).
 
 ## 5. The remaining waits
 
@@ -569,7 +607,7 @@ Files: `e2e-tests/tests/e2e/roles/scenarios/bare_metal/test_bare_metal_introduct
   `scripts/tests` through `make test-release-tooling`; the new
   `test_only_the_api_credit_lane_runs_the_sample_app_with_no_verify_cache` runs, not
   skipped for want of Compose, and passes.
-  Handoff: `TESTING.md`'s bare-metal lane bullet and the `e2e-tests/roles/README.md`
+  Handoff: `TESTING.md`'s bare-metal lane bullet and the `e2e-tests/tests/e2e/roles/README.md`
   text describing scenarios were not edited here; closeout's promotion (6.9) owns the
   former, and the latter was not found to describe the removed stage. Every section of
   the round is now implemented; the pipeline run is validation's.
