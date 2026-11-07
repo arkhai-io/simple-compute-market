@@ -27,7 +27,6 @@ def _release(tmp_path: Path) -> tuple[Path, str]:
     artifacts: dict[str, dict[str, str]] = {}
     for name, filename in {
         "wheelhouse": "marketplace-wheelhouse.tar.gz",
-        "settlement_config_schema": "settlement-config-schema.json",
         "provenance": "provenance.intoto.json",
     }.items():
         path = tmp_path / filename
@@ -37,7 +36,7 @@ def _release(tmp_path: Path) -> tuple[Path, str]:
     manifest.write_text(
         json.dumps(
             {
-                "contract": "arkhai.marketplace-release.v1",
+                "contract": "arkhai.marketplace-release.v2",
                 "repository": "arkhai-io/simple-compute-market",
                 "source_commit": COMMIT,
                 "workflow_ref": WORKFLOW_REF,
@@ -76,7 +75,6 @@ def test_exact_attested_marketplace_release_set_is_accepted(tmp_path: Path) -> N
     assert result["service_image_digest"] == IMAGE_DIGEST
     assert set(result["artifacts"]) == {
         "wheelhouse",
-        "settlement_config_schema",
         "provenance",
     }
 
