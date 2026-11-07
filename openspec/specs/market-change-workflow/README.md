@@ -273,7 +273,9 @@ body edited beneath an unchanged header is invisible to a scanner reading the
 change's patch, which holds no header. A random credential in no provider's format
 — a generated password, say — has the character class of the identifiers
 `generic-api-key` matched, so the gate does not look for it; the audit reports that
-class across the whole tree.
+class across the whole tree, except a credential holding one of the rule's stop
+words — common words such as `menu` or `boot` — since `generic-api-key` passes any
+value holding one.
 
 ## Every resource is per change, shared, or checked
 

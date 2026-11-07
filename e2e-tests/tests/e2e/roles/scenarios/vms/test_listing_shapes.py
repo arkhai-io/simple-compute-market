@@ -12,7 +12,8 @@ scenario proves the cross-service path from that declaration to discovery:
    nothing at `ram_gb>=33`: the registry's range filters match the published
    quantities, which a GPU-only listing never carries.
 4. `market buy`, discovering through the same memory query, negotiates, escrows,
-   settles, and provisions it to ready.
+   and settles it; with convergence held, the stage steps the fulfillment to
+   active once the buy's job is submitted, and the buy reaches ready.
 5. The site's reservation holds every declared quantity, and the provisioning
    job sizes the VM from them rather than from the pool's defaults.
 6. A storefront override, written through the typed administrator client,
@@ -64,6 +65,7 @@ from compute_provisioning_contracts import MockRuleCreate
 from market_pool_overrides import SyncPoolOverrideClient, pool_override_statuses
 from market_resource_pools_contracts import PoolUpdate
 
+from tests.e2e.roles.helpers.buy import buy_to_ready
 from tests.e2e.roles.helpers.compute_deal import (
     advance_storefront,
     assert_storefront_loops_held,
@@ -82,11 +84,13 @@ from tests.e2e.roles.scenarios.vms.host_registry import (
 log = logging.getLogger(__name__)
 
 pytestmark = [
-    # Listed first, so the hold is taken before, and released after, every
-    # other fixture of the module; the lane's cleanup follows it, so it runs
-    # while the hold stands.
+    # Listed first, so the holds are taken before, and released after, every
+    # other fixture of the module; the lane's cleanup follows them, so it runs
+    # while the holds stand. Each buy reaches ready only when its stage steps
+    # convergence.
     pytest.mark.usefixtures(
-        "storefront_loops_held",
+        "storefront_loops_held", "alice_loops_held",
+        "fulfillment_convergence_held", "lease_watchdog_held",
         "ensure_storefront_resumed", "reap_buyer_settle_subprocess", "release_reserved_resources",
     ),
     pytest.mark.e2e_listing_shapes,
@@ -293,8 +297,8 @@ class TestStage02_Discovery:
 
 class TestStage03_Provisioning:
     def test_03a_arm_a_create_rule_that_completes(self, provisioning_test_client, shape_state):
-        """The one-shot buy blocks until ready, so the mock create job must finish
-        on its own."""
+        """The create job completes without a pause: once the storefront logs
+        the buy's job submitted, stage 04 drains it, then steps convergence."""
         require_state(shape_state, "listing_id")
         rules = provisioning_test_client.vm_rules
         delete_mock_rules_if_present(rules, CREATE_RULE_ID)
@@ -310,12 +314,13 @@ class TestStage03_Provisioning:
 
 class TestStage04_Buy:
     def test_04a_market_buy_discovers_by_memory_and_reaches_ready(
-        self, buyer_cli, shape_state
+        self, buyer_cli, storefront_admin_client, storefront_client,
+        provisioning_client, provisioning_test_client, shape_state,
     ):
         require_state(shape_state, "listing_id", "provisioning_armed")
-        run = buyer_cli.run(
+        _, terminal = buy_to_ready(
+            buyer_cli,
             [
-                "buy",
                 "--resource", f'gpu_model="{GPU_MODEL}" ram_gb>=32',
                 "--settlement", f"mechanism=alkahest.v1 asset={TOKEN}",
                 "--initial-price", str(BUYER_INITIAL_PRICE),
@@ -328,16 +333,12 @@ class TestStage04_Buy:
                 "--expiration", "3600",
                 "--yes",
             ],
-            timeout=300.0,
+            storefront_admin_client=storefront_admin_client,
+            storefront_client=storefront_client,
+            provisioning_client=provisioning_client,
+            provisioning_test_client=provisioning_test_client,
         )
-        assert run.returncode == 0, (
-            f"`market buy` exited {run.returncode}; expected 0 (ready).\n"
-            f"stdout (tail): {run.stdout()[-2500:]}\nstderr (tail): {run.stderr()[-2500:]}"
-        )
-        terminal = next(
-            (e for e in reversed(run.read_events()) if e.get("event") == "run_ended"), None
-        )
-        assert terminal is not None and terminal.get("status") == "ready", terminal
+        assert terminal.get("status") == "ready", terminal
         assert terminal.get("listing_id") in (None, shape_state.listing_id)
         shape_state.escrow_uid = str(terminal["escrow_uid"])
         shape_state.negotiation_id = str(terminal["negotiation_id"])
@@ -668,11 +669,14 @@ class TestStage09_ShapeWithoutGpus:
         )
         shape_state.cpu_provisioning_armed = True
 
-    def test_09e_market_buy_discovers_by_vcpus_and_reaches_ready(self, buyer_cli, shape_state):
+    def test_09e_market_buy_discovers_by_vcpus_and_reaches_ready(
+        self, buyer_cli, storefront_admin_client, storefront_client,
+        provisioning_client, provisioning_test_client, shape_state,
+    ):
         require_state(shape_state, "cpu_listing_id", "cpu_provisioning_armed")
-        run = buyer_cli.run(
+        _, terminal = buy_to_ready(
+            buyer_cli,
             [
-                "buy",
                 "--resource", f'region="{CPU_REGION}" vcpu_count>=8',
                 "--settlement", f"mechanism=alkahest.v1 asset={TOKEN}",
                 "--initial-price", str(BUYER_INITIAL_PRICE),
@@ -685,16 +689,12 @@ class TestStage09_ShapeWithoutGpus:
                 "--expiration", "3600",
                 "--yes",
             ],
-            timeout=300.0,
+            storefront_admin_client=storefront_admin_client,
+            storefront_client=storefront_client,
+            provisioning_client=provisioning_client,
+            provisioning_test_client=provisioning_test_client,
         )
-        assert run.returncode == 0, (
-            f"`market buy` exited {run.returncode}; expected 0 (ready).\n"
-            f"stdout (tail): {run.stdout()[-2500:]}\nstderr (tail): {run.stderr()[-2500:]}"
-        )
-        terminal = next(
-            (e for e in reversed(run.read_events()) if e.get("event") == "run_ended"), None
-        )
-        assert terminal is not None and terminal.get("status") == "ready", terminal
+        assert terminal.get("status") == "ready", terminal
         assert terminal.get("listing_id") in (None, shape_state.cpu_listing_id)
         shape_state.cpu_negotiation_id = str(terminal["negotiation_id"])
 
