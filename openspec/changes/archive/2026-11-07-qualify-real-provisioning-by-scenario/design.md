@@ -758,6 +758,111 @@ an operator can settle-wait a bare-metal payments deal.
   whole change's cycle, for an understood fix whose first end-to-end proof is this
   change's bare-metal purchase.
 
+## Implementation findings
+
+What implementation found that the decisions above do not state, kept here when the task
+notes were compressed at closeout.
+
+- **The buyer-purchase stage set (D15, D17).** `07a`'s prerequisite was `real_escrow_uid`,
+  which a purchase never writes; it is `_settlement_imminent`, written by `07` beside the
+  escrow and by `Purchase02` once the option is found, so no rule is armed for a deal that
+  will not settle. `08c` (the mock job evaluation) is not run by a purchase: its preview is
+  `08a`'s, by escrow. `seller_listing_id` is written by each module's own listing stage,
+  as `ComputeDealState` gives listing stages to the domain. `market buy` takes no listing
+  and polls its settlement until delivery, so `Purchase03` runs the command in the
+  background and waits for `payment_approved`, then the driver's `committed_event`; a
+  shared `Purchase09` after `09c` checks the run's end through the driver; `Purchase04`
+  ties the purchase to its listing by the Agreement naming the discovered listing and
+  option, since `market buy` selects its listing by discovery. Rejected: making the run's
+  exit bound (`PURCHASE_RUN_EXIT_SECONDS`) a driver part — it bounds a wait for a command
+  that has already read its settlement ready. The VM lane purchase buys as the lane's own
+  buyer, profiled with no wallet and Arkhai payments as its only settlement, so its
+  storefront client reads the deal's settle status.
+- **D15's return-to-design case did not arise.** Read from the code: the seller's
+  end-delivery route drives the physical end synchronously, bare metal's `apply_end`
+  terminates the lease at provisioning, and `LeaseLifecycle.terminate_lease` requests
+  release as expiry does, so the buyer's teardown leaves the lease `releasing` for `11b`.
+  The pipeline confirmed it.
+- **D17's expiry ending on a payments deal needs no authority.** The lease watchdog and
+  convergence are mechanism-neutral, the VM storefront's capacity-released callback records
+  the release locally, and the settlement-servicing loop that reads the authority is held
+  and never stepped by these stages.
+- **D23's bindings.** VM's delivery status reports the evidence's own status (`pending`,
+  `verified`, `refunding`, `refunded`: none terminal) when no delivery record exists; bare
+  metal's wake reads `source.obligation_ref` and calls the worker's `wake` directly. API
+  credits' schema admits `failed` evidence, which ends a wait; nothing writes it, and a
+  failed settlement is one never to be delivered, so the comment states it as intended.
+  None of the three admin wait routes takes an injected clock and the route refuses a zero
+  timeout, so a storefront test proves a non-terminal answer below the route — through the
+  route service with a ticking clock, or the delivery status read directly — and through
+  the typed client waits only on what ends at the first poll ("Tests wait on events, never
+  on durations"). The bare-metal "wakes no obligation" test guards the payments path rather
+  than discriminating the wake's new condition, which the Alkahest lease-active test covers.
+- **D2's listing helper.** A create request with settlement clauses builds options only for
+  its clauses' mechanisms, so a listing offering two mechanisms needs a clause for each; the
+  Alkahest real module states its terms as a clause in place of `accepted_escrows`, the
+  storefront resolving the escrow address and the token's decimals itself. Readiness is
+  read only on the creation path, so adoption never depends on it, and the created
+  listing's mechanisms are compared as sets, since one mechanism may publish several
+  options.
+- **D5's host diagnostics.** The VM role's prerequisites skip starting libvirtd for
+  `diagnose`, and the script reads the units before `virsh` counts guests, since a read
+  that started an idle socket-activated daemon would show a new invocation; the count
+  itself still starts it, which the pass criterion allows for. A failed `systemctl show` or
+  `virsh` fails the job rather than reading as empty or zero guests, and a number systemd
+  does not report is printed as text so the typed parse refuses it by name. The unit-name
+  check sits on the wire model (`HostDiagnosticsRequest`), per `ARCHITECTURE.md`'s order of
+  checks, so the route answers 422 before its service runs and the typed client refuses
+  before sending. Disposed of at the round-1 triage: a mistyped or absent management unit
+  reads back `inactive` with an empty invocation, since `systemctl show` answers for an
+  unloaded unit, and the stage's message says a not-started unit may be a wrong name rather
+  than the job reporting `LoadState`, which is beyond D5's field list; the provisioning
+  service's published `adapters` extra keeps its older bound, since deployments install from
+  its lock. Declined: escaping control characters other than tab, CR and LF (systemd's
+  properties here are words, IDs, numbers and timestamps), and a machine-splittable error
+  path (unit names contain dots; the field path is for a reader).
+- **D8's outcomes.** A module's stages are read from its classes, not the run's items, so a
+  deselected or uncollected stage reads "did not run". Any failed phase fails a stage, its
+  teardown's included, so a failure in the module's cleanup fails its last declared stage:
+  conservative. The outcomes are logged from the report hook after the last item's teardown
+  report, with a session-end fallback for a run stopped early, because a fixture inside the
+  last item had read a failed teardown as made. A module run once per cycle runs each
+  cycle's compensation as that cycle's last stage, because pytest finalizes a cycle's
+  module fixtures in the next cycle's first setup, which would count a normal-cycle cleanup
+  failure against observation 5; that cleanup first repairs a planted fixture still in
+  place, so the reclaim can complete. Compensation carries the stages' job identifiers into
+  the real lane's recovery, so it tells the create job from a teardown job. The refusal
+  cycle skips, not fails, when the normal cycle's cleanup was not verified, so observation 5
+  is never failed by inference from observation 4.
+- **D9's reader.** A direct target delivers no relayed lease, so the check passes; only a
+  relayed target without `admission_log` skips. The deployment's copy may trail the relay's
+  log, so the check re-reads it within a bound before failing; an unreadable file fails at
+  once, and lines that are not decisions are skipped.
+- **Observation 2's second purchase** runs the shared stage definitions on its own state,
+  driver and CLI profile through `run_stage`, since the purchase source check allows each
+  shared stage once per module. It does not run `11b`, which requires the whole resource
+  free while the first guest still holds its slice; its own stage completes the second
+  guest's teardown, re-reserving one guest's shape, as the Alkahest real module's second
+  deal does. Each guest is probed for a GPU (review 61 F1): a display or 3D controller from
+  NVIDIA or AMD, the rule host preparation applies, and an unavailable, unreadable or
+  malformed device list fails the probe rather than reading as no GPU.
+- **Observation 6 takes no second hold of a site.** The bare-metal site may be the VM
+  site's own service, whose timers the module already holds, and a second hold of that
+  service would resume it when the first hold ended. It settles both storefronts with a
+  publication cycle before its "before" read, so a listing the earlier modules left closed
+  is reopened there rather than read as changed.
+- **The real bare-metal listing's terms are the deployment's.** The real purchase checks
+  only what any backed whole-host payments listing states (backed, pinned publisher, USD/6
+  by the hour); the lane's driver adds the terms its own pool override writes.
+- **Dispute coverage is a run setting** (pre-closeout triage 78, revisited). The harness
+  stated a fixed 15-day compute dispute coverage, so a run against a test authority
+  advertising a short minimum filing window could not buy under a short hold.
+  `PAYMENTS.DISPUTE_WINDOW_SECONDS` sets it for every compute payments option the harness
+  states and the purchase checks expect, defaulting to 15 days (the mediation contract's
+  14-day default minimum plus a day, covering the 300-second delivery deadline); no lane
+  profile sets it, and the authority's own minimum is enforced at publication. The real
+  bare-metal machine's listing is the deployment storefront's and is unaffected.
+
 ## Principles stated for promotion
 
 These go to the new `TESTING.md` section, with the repository-wide rule in
