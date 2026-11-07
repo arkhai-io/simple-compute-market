@@ -336,7 +336,7 @@ Files: the VM modules `test_full_deal.py`, `test_full_deal_buyer_cli.py`,
 `test_bare_metal_unbacked_introduction.py`; a new
 `e2e-tests/tests/unit/test_scenario_lane_holds.py`.
 
-- [ ] 4.1 Add the missing holds, listed first in each module's `usefixtures`, before its
+- [x] 4.1 Add the missing holds, listed first in each module's `usefixtures`, before its
   cleanup (D6). VM lane: `test_full_deal`, `test_full_deal_buyer_cli`, and
   `test_vm_payment_deal` gain `alice_loops_held`; `test_multi_registry` gains
   `fulfillment_convergence_held` and `lease_watchdog_held`;
@@ -353,7 +353,26 @@ Files: the VM modules `test_full_deal.py`, `test_full_deal_buyer_cli.py`,
   design's risk); a module that does is a finding to raise, not a hold to drop.
   Verify: `make test-e2e-unit` passes, including `test_scenario_holds.py` and
   `test_scenario_cleanup_order.py`.
-- [ ] 4.2 Write the lane-hold check, `tests/unit/test_scenario_lane_holds.py` (D6). It
+  Done. Holds added as listed; `test_vm_payment_deal` keeps `payments_config` ahead of
+  its holds, as before. `make test-e2e-unit` passed (568), the holds and cleanup-order
+  checks among them. Read for reliance on a running convergence or watchdog: none.
+  `test_non_erc20_settlement` (gaining the watchdog) settles with its own
+  `advance_fulfillment_convergence_cycle` and reads settlement readiness from the
+  storefront; it never expires a lease. `test_multi_registry` and
+  `test_compute_dynamic_listings` settle nothing. `test_vm_introduction` and the two
+  bare-metal introduction modules settle by introduction, which dispatches no
+  fulfillment and records no lease; `test_bare_metal_publication` settles nothing. The
+  introduction module's stage 04 waits on the storefront's own retention window, not
+  on convergence or the watchdog (section 5 removes it). The full VM lane run locally
+  with the new holds passed (4.3). The VM modules' cleanup is
+  the storefront's fleet-wide release, `ensure_storefront_resumed`, and
+  `reap_buyer_settle_subprocess`, none of which needs a provisioning timer; the
+  bare-metal modules list no cleanup. Beyond the plan: the hold fixtures' docstrings in
+  both lane conftests, and `fulfillment_convergence_held`'s and
+  `lease_watchdog_held`'s in `helpers/compute_deal.py`, said a module took the hold to
+  advance it itself; they now say the hold is the module's and a module that needs a
+  transition steps it.
+- [x] 4.2 Write the lane-hold check, `tests/unit/test_scenario_lane_holds.py` (D6). It
   reads `E2E_MODULE` and `E2E_BARE_METAL_MODULE` from `e2e-tests/Makefile`, joining
   backslash continuations, and runs `pytest --setup-plan -q -p no:cacheprovider -m
   <expression>` over each lane's directory (`tests/e2e/roles/scenarios/vms`,
@@ -368,7 +387,43 @@ Files: the VM modules `test_full_deal.py`, `test_full_deal_buyer_cli.py`,
   actual lanes.
   Verify: `make test-e2e-unit` passes; temporarily removing one hold from one VM module
   makes the check fail naming that module and hold (then restore it).
-- [ ] 4.3 Verification point: `make test-e2e-unit` passes;
+  Done. `make test-e2e-unit`: 568 passed, the check's seven cases among them. The two
+  real-lane cases read each variable from `e2e-tests/Makefile` and collect its lane
+  directory's setup plan in a child pytest with the lane's expression: real child
+  processes, `TESTING.md`'s third integration flavour, kept in `tests/unit` beside
+  `test_scenario_cleanup_order.py`, which does the same and which `TESTING.md` places
+  there. They pass, which also shows the out-of-lane modules excluded:
+  `vms/test_real_provisioning_deal.py` lacks `alice_loops_held` and
+  `bare_metal/test_bare_metal_deal.py` holds none, and neither fails it. Cases over
+  planted inputs: a continued variable read whole, a variable assigned no value
+  failing by name (an absent one takes the same path), a lane with no plan failing by
+  name (through `check_lane`), and a planted plan missing one hold named by module and
+  hold. The "module outside the selection" case runs the real setup plan over a
+  planted lane in a temporary directory (a conftest defining the holds; a marked module
+  lacking the watchdog hold; a marked module skipped by a `skipif` mark; an unmarked
+  module holding nothing): both marked modules are checked, each missing hold named,
+  the unmarked one is not, and an expression selecting nothing yields no plan
+  (pytest's exit 5). Beyond the plan: the setup plan runs with `-p no:skipping`, so a
+  module skipped where the check runs is still held to its lane's holds; without it a
+  skip mark would hide the module from the plan and the check would pass it. A module
+  skipped at collection (`pytest.skip` at module level, `importorskip`) still escapes,
+  as it does collection itself. With `lease_watchdog_held` removed from
+  `test_vm_introduction.py`, the `E2E_MODULE` case failed with
+  `tests/e2e/roles/scenarios/vms/test_vm_introduction.py: lease_watchdog_held`; with
+  `fulfillment_convergence_held` removed from `test_bare_metal_publication.py` (on the
+  final code), the `E2E_BARE_METAL_MODULE` case failed naming it; each restored, both
+  passed. The variable is read by pattern, its first non-empty assignment: a later
+  `+=` or a conditional assignment would be missed and read the lane short. The lanes'
+  variables have one `?=` each, which the pipeline's lane targets use as they are.
+  Outside the plan, for the round's review: the VM lane's expression also selects
+  `e2e_alkahest_escrow_codecs` and `e2e_alkahest_trusted_oracle`, modules in
+  `scenarios/core/` that talk only to the dev chain. D6's check reads each lane's own
+  directory, so they are outside it, as the design intends; the delta requirement's
+  "every module a compute pipeline lane selects" reads wider than that and would cover
+  them. Holding Bob's and Alice's timers for chain-only modules would be harmless but
+  pointless; the requirement's wording, or the check's directories, is the design's to
+  settle.
+- [x] 4.3 Verification point: `make test-e2e-unit` passes;
   `scripts/change-workflow run pre-commit shorten-the-end-to-end-pipeline` passes.
   End-to-end: every marker the VM and bare-metal lanes select passes with the new holds:
   `e2e_vm_payment_deal`, `e2e_deal`, `e2e_deal_buyer_cli`, `e2e_buy`, `multi_registry`,
@@ -379,6 +434,33 @@ Files: the VM modules `test_full_deal.py`, `test_full_deal_buyer_cli.py`,
   `e2e_bare_metal_payment_deal`.
   Owed by validation: `tests.yml`, job `test · test-e2e-unit` — the lane-hold check runs
   over both lanes and passes.
+  Done on the section's local evidence. Pre-commit: `after-functional-change`,
+  `pre-commit-functional` (every suite, packaging), and `pre-commit` (citations
+  included, now that the check's file exists) passed.
+  `make test-e2e-unit` 568 passed. The full VM lane locally
+  (`make -C e2e-tests test-e2e-vm`, system level, with sections 3–4's holds): 153
+  passed, 2 skipped, in 100.65 s of scenarios. The two skips are
+  `test_vm_payment_deal`'s operator-end and refund stages, which skip by design where
+  no dispute authority is configured, as in the lane. The design's baseline counts 153
+  VM scenarios; this host's time is not comparable with the pipeline runner's. The
+  full bare-metal lane locally (`make -C e2e-tests test-e2e-bare-metal`): 70 passed in
+  50.48 s, its retention-sweep stage still present (section 5 removes it). A first
+  bare-metal run failed to start because the VM stack left up held the `anvil`
+  container name (`TESTING.md`: the lanes run one at a time); `make -C e2e-tests
+  e2e-vm-down` cleared it.
+  Correction to the list above: `e2e_alkahest_escrow_codecs` and
+  `e2e_alkahest_trusted_oracle` are `scenarios/core/` modules, which take no hold and
+  are outside the check (4.2's note); they pass in the VM lane without holds.
+  End-to-end scenarios: every marker listed above, in the VM and bare-metal lanes
+  (`E2E_MODULE`, `E2E_BARE_METAL_MODULE`); the pipeline's run of them is validation's.
+  Owed by validation: confirmed as stated — `tests.yml`, job `test · test-e2e-unit`,
+  collects `test_scenario_lane_holds.py`.
+  Handoff: the check imports `module_plans` from `test_scenario_cleanup_order.py`, as
+  that module imports `HOLD_FIXTURE_NAMES` from `test_scenario_holds.py`; moving either
+  parser moves both checks. Section 5 edits `test_bare_metal_introduction.py` and
+  `test_bare_metal_payment_deal.py`, whose holds are now complete; it must keep them
+  first in `usefixtures`. The `core` modules' place under the rule is open for the
+  round's review (4.2's note).
 
 ## 5. The remaining waits
 

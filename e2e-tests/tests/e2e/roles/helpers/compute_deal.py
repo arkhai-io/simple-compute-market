@@ -157,10 +157,10 @@ def assert_storefront_loops_held(storefront_admin_client) -> dict:
 def fulfillment_convergence_held(provisioning_client) -> Iterator[Any]:
     """Hold fulfillment convergence's timer for a module, and release it after.
 
-    For a module that advances convergence itself: every convergence transition
-    it asserts is triggered by an explicit advance. A timer cycle that claimed a
-    row while its provider call was still gated would hold the claim lease, and
-    the stage's own cycle would then reach nothing at all. Yields once the
+    Every convergence transition a held module asserts is triggered by an
+    explicit advance. A timer cycle that claimed a row while its provider call
+    was still gated would hold the claim lease, and the stage's own cycle would
+    then reach nothing at all. Yields once the
     watchdog is at its gate; a failed pause fails the hold. Resumed in the
     `finally`, which also covers a hold that never reached its gate, since the
     provisioning service is shared across modules. See the module-hold rule
@@ -183,9 +183,9 @@ def fulfillment_convergence_held(provisioning_client) -> Iterator[Any]:
 def lease_watchdog_held(provisioning_client) -> Iterator[Any]:
     """Hold the lease watchdog's timer for a module, and release it after.
 
-    For a module that steps lease expiry itself (`check_leases`): with the
-    timer held, an expiry a stage back-dates sits unobserved until the stage
-    runs one cycle, so trigger and reaction are separate, asserted steps.
+    With the timer held, an expiry a stage back-dates sits unobserved until the
+    stage runs one cycle (`check_leases`), so trigger and reaction are separate,
+    asserted steps.
     Yields the watchdog's pause state once it is at its gate; resumed in the
     `finally`, which also covers a hold that never reached its gate. Stages
     read the hold back with `assert_lease_watchdog_held`. See the module-hold

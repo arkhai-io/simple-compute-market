@@ -30,11 +30,13 @@ from tests.e2e.roles.scenarios.vms.conftest import capacity_site_id, capacity_so
 log = logging.getLogger(__name__)
 
 pytestmark = [
-    # Listed first, so the hold is taken before, and released after, every
-    # other fixture of the module; the lane's cleanup follows it, so it runs
-    # while the hold stands.
+    # Listed first, so the holds are taken before, and released after, every
+    # other fixture of the module; the lane's cleanup follows them, so it runs
+    # while the holds stand. Every VM-lane module holds the lane's timers, so
+    # no cycle a stage did not ask for runs while it observes the stack.
     pytest.mark.usefixtures(
-        "storefront_loops_held",
+        "storefront_loops_held", "alice_loops_held",
+        "fulfillment_convergence_held", "lease_watchdog_held",
         "ensure_storefront_resumed", "reap_buyer_settle_subprocess", "release_reserved_resources",
     ),
     pytest.mark.e2e_compute_dynamic_listings,
