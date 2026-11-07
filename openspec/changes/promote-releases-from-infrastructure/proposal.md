@@ -24,9 +24,18 @@ repository's CI.
 
 ## What Changes
 
-- **This repository's CI publishes to no public channel.** `publish-pypi.yml` stops
-  publishing (its push trigger, and its publishing job, go), and `release.yml` stops
-  pushing and attesting a ghcr image.
+- **This repository's CI publishes to no public channel on its own.** `release.yml`
+  stops pushing and attesting a ghcr image, and `publish-pypi.yml` loses its push
+  trigger. Its manual dispatch stays for one purpose: creating a new distribution's
+  PyPI project. A project exists only once something is uploaded to it, and only a
+  trusted-publishing upload against a pending publisher the organization registered
+  creates it in the organization; an upload with a person's token creates it under that
+  person's account. So a distribution's first version is published by dispatching the
+  workflow on the release tag, once the organization has registered its pending
+  publisher, and every later version is promoted externally. The wheel builds are
+  reproducible (marketplace v0.3.0: twenty-seven wheels the workflow published are
+  byte-identical to the deployment's), so the bootstrap publishes the same bytes the
+  promotion would.
 - **The release contract no longer names an image.** `release.yml`'s manifest
   (`arkhai.marketplace-release.v2`) carries `service_image`, the ghcr digest; a new
   contract version omits it, or names the image only as a reference the promotion
@@ -39,8 +48,9 @@ repository's CI.
 - **`docs/development/RELEASING.md` describes the release as built, loaded and promoted**:
   what this repository produces (a tagged release, its wheelhouse, its publish
   targets), and that public channels are reached only by an external promotion that
-  copies those artifacts without rebuilding them. The per-package trusted-publishing
-  setup is retired from it.
+  copies those artifacts without rebuilding them, into PyPI projects the organization
+  already owns; and how a new distribution's project is created in the organization (its
+  pending publisher, then one dispatch on the release tag).
 
 ## Capabilities
 
@@ -64,12 +74,16 @@ None.
   tagging and documentation work, and dropping Section 4), or keep this change for
   that work and narrow the other to Sections 1–3. Recommended: fold, since both
   retire the same CI publication path and share `RELEASING.md`.
-- `configure-pypi-trusted-publishing` (ready for design) configures the CI trusted
-  publishers this change retires; it is superseded.
+- `configure-pypi-trusted-publishing` (ready for design) configures trusted publishers
+  for every distribution so CI can publish each release. Publishing each release is no
+  longer CI's; its pending publishers remain needed only to create new projects. Its
+  scope narrows to that, or folds into this change; its design decides.
 
 ## Non-Goals
 
 - No promotion tooling in this repository.
+- No removal of trusted publishing: it remains how a new project is created in the
+  organization.
 - No change to what the release workflow builds into the wheelhouse, or to versioning.
 - Artifacts already published for a release stay as they are; PyPI and ghcr keep them.
 
@@ -79,6 +93,5 @@ None.
 `scripts/verify-marketplace-release.py` and its tests, `scripts/publish_artifacts.py` and
 the `push-images` target, `scripts/tests/test_publish_matrix.py` and
 `test_image_publication_contract.py`, `docs/development/RELEASING.md`, and the
-`deployment-state` specification. External: PyPI pending publishers and the GitHub
-`pypi-*` environments become unused; removing them is the owner's, after no workflow
-references them. No runtime behavior changes.
+`deployment-state` specification. External: the GitHub `pypi-*` environments and the
+organization's pending publishers stay, used only for a new project's first version. No runtime behavior changes.
