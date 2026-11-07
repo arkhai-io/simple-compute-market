@@ -212,7 +212,7 @@ Files: a new `e2e-tests/tests/e2e/roles/helpers/buy.py`;
 `e2e-tests/tests/e2e/roles/scenarios/vms/test_listing_shapes.py`; a new
 `e2e-tests/tests/unit/test_buy_helper.py`.
 
-- [ ] 3.1 Write `buy_to_ready` in `helpers/buy.py` (D7). Given the buyer CLI, the
+- [x] 3.1 Write `buy_to_ready` in `helpers/buy.py` (D7). Given the buyer CLI, the
   `market buy` arguments, the storefront admin client, the buyer-signed storefront client,
   the provisioning client, and the provisioning test client, it:
   1. starts `market buy` with `background=True`;
@@ -230,7 +230,24 @@ Files: a new `e2e-tests/tests/e2e/roles/helpers/buy.py`;
   service. Its docstring states why the buy runs in the background (with convergence
   held, a foreground buy would block until a convergence cycle no one steps) and cites
   `docs/development/TESTING.md`'s system-test discipline.
-- [ ] 3.2 Unit tests, `tests/unit/test_buy_helper.py`, with a fake run and recording
+  Done. Signature `buy_to_ready(buyer_cli, buy_args, *, storefront_admin_client,
+  storefront_client, provisioning_client, provisioning_test_client)`; `buy_args` omits
+  `buy`, which the helper adds. The negotiation id is the run log's last
+  `negotiation_completed` event with status `agreed` (the event `market buy` writes
+  with the id; `escrow_created` carries none). Beyond the plan: after `run_ended` it
+  waits for the process to exit and requires 0, as the stages' foreground buys did;
+  each wait has its own module-level bound (escrow 120 s, submit 60 s, stage event
+  30 s, drain 30 s, ready 60 s, exit 20 s). `_run_log_digest` moved from the oneshot
+  module into the helper as `run_log_digest`. A step's failure, including the
+  `pytest.fail` that `wait_for_stage_event` and `advance_fulfillment_to` raise, is
+  re-raised as an `AssertionError` naming the step, with the digest and, for a buy
+  that has exited, its stdout and stderr tails, which the stages' foreground buys
+  reported (a running buy's streams are not read, since reading them waits for its
+  exit). Outside the plan's file list:
+  `MarketRun.terminate` (`roles/buyer_cli.py`) killed a process that outlived SIGTERM
+  without waiting for it; it now waits, bounded, after the kill, so the helper's
+  `finally` reaps what it starts.
+- [x] 3.2 Unit tests, `tests/unit/test_buy_helper.py`, with a fake run and recording
   clients (D7): the success path calls start, the two run-log waits, the stage-event wait,
   the settle status read, the drain, the convergence advance, and the `run_ended` wait, in
   that order, and returns the terminal event; a missing `settlement_submitted` event, a
@@ -238,7 +255,21 @@ Files: a new `e2e-tests/tests/e2e/roles/helpers/buy.py`;
   terminate the run once; a buy that ended is not terminated again.
   `test_scenario_holds.py` passes over the new helper module.
   Verify: `make test-e2e-unit` passes with the new cases.
-- [ ] 3.3 `test_buy_oneshot_buyer_cli` and `test_listing_shapes` take their lane's holds
+  Done. `make test-e2e-unit`: 561 passed, the six new unit cases among them, and
+  `test_scenario_holds.py` over `helpers/buy.py`. The fakes stand in for the run
+  (whose waits fail, as the real ones do, for an event it never writes), the buyer
+  CLI, the storefront's stage-event wait (which can time out, as the typed client's
+  does) and the buyer's settle status, the job queue's drain, and convergence (one
+  advance reaches `active`, or none does); the helper's real `advance_fulfillment_to`
+  and `wait_for_stage_event` run over them. The order the success case asserts also
+  includes the exit wait after `run_ended`. Beyond the plan: a case for a dispatch the
+  storefront never logs (the `pytest.fail` of `wait_for_stage_event`, named as its
+  step). The missing-event case also checks the failure carries the run log's digest,
+  the run-ended case the status it ended with, and the ended-buy case its stdout tail.
+  The success case asserts the call order, which `TESTING.md`'s unit level calls
+  orchestration; it is kept, as the plan's level for the harness's own helper logic,
+  whose integration is the lane run (3.4).
+- [x] 3.3 `test_buy_oneshot_buyer_cli` and `test_listing_shapes` take their lane's holds
   (D6) and buy through the helper (D7). Their `usefixtures` list first
   `storefront_loops_held`, `alice_loops_held`, `fulfillment_convergence_held`,
   `lease_watchdog_held`, then the lane's cleanup, as now. Stage B4 and stages 04a and 09e
@@ -249,7 +280,19 @@ Files: a new `e2e-tests/tests/e2e/roles/helpers/buy.py`;
   reports no convergence hold to read back, and none is added here.
   Verify: `make test-e2e-unit` passes, including `test_scenario_holds.py` and
   `test_scenario_cleanup_order.py`.
-- [ ] 3.4 Verification point: `make test-e2e-unit` passes;
+  Done. `make test-e2e-unit` passed (561): the cleanup-order check finds no cleanup in
+  either module released after a hold, and the holds check passes. Neither check
+  requires the four holds to be present; section 4's lane-hold check does. The one
+  stage relying on the watchdog is the oneshot module's B4c, whose two dry runs must
+  agree; it asserts `assert_lease_watchdog_held` first. `test_listing_shapes` has no
+  such stage. The oneshot docstring's stage map now names B4's stepping and B4c, which
+  it omitted; B3's docstring and the rule-id comment, and listing shapes' 03a docstring
+  and module step 4, describe a job drained and convergence stepped. Each stage keeps
+  its assertions on the terminal event, including `status == "ready"`, which the
+  helper also requires; the stages' returncode checks are the helper's. The oneshot
+  docstring's "untested at the live-subprocess level until now" was history wording,
+  rewritten.
+- [x] 3.4 Verification point: `make test-e2e-unit` passes;
   `scripts/change-workflow run pre-commit shorten-the-end-to-end-pipeline` passes; where
   Docker is available, `make -C e2e-tests test-e2e-vm` with `E2E_MODULE="e2e_buy or
   e2e_listing_shapes"` passes.
@@ -257,6 +300,28 @@ Files: a new `e2e-tests/tests/e2e/roles/helpers/buy.py`;
   log showing a convergence advance before `ready`; record the lane's scenario time.
   Owed by validation: `tests.yml`, job `test · test-e2e-unit` — the new
   `test_buy_helper.py` cases and the hold checks pass.
+  Done on the section's local evidence. `make test-e2e-unit`: 561 passed. The VM lane
+  locally (`make -C e2e-tests test-e2e-vm E2E_MODULE="e2e_buy or e2e_listing_shapes"`,
+  system level, the lane's stack with mock provisioning): 32 passed in 32.1 s, on the
+  final code; a run before the fresh-context fixes passed the same 32 in 24.1 s. With
+  the four holds logged taken, each of the three buys logged `[buy] … ready` 4–7 s
+  after it started, so none waited out convergence's 30 s timer; `advance_fulfillment_to`
+  returns only once the fulfillment reads `active`, and with convergence held only its
+  advance can make that transition. The log has no per-advance line; the provisioning
+  service's own log of the advance was not read (the step's rules refuse the lane's
+  log target). Pre-commit: `after-functional-change` and `pre-commit-functional`
+  passed; `pre-commit` failed only on the citations check's
+  `e2e-tests/tests/unit/test_scenario_lane_holds.py`, which section 4 creates.
+  End-to-end scenarios: `e2e_buy` and `e2e_listing_shapes`, both in the VM lane
+  (`E2E_MODULE`), exercise this section once deployed; the pipeline's run of them is
+  validation's to produce. Owed by validation: confirmed as stated — `tests.yml`, job
+  `test · test-e2e-unit`, runs `make test-e2e-unit`, which collects
+  `test_buy_helper.py` and the hold checks.
+  Handoff: the helper is VM-lane only today; a bare-metal buy would need its own
+  stage-event and settle-status clients but the same sequence. `buy_to_ready` reads the
+  negotiation id from `negotiation_completed`, so a buyer CLI that stops writing it
+  there breaks the helper at its named step. Section 4 must not add holds to these
+  two modules again: they already list all four VM holds.
 
 ## 4. Every lane-selected module holds its lane's timers
 

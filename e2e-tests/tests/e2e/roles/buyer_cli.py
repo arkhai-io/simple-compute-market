@@ -244,12 +244,15 @@ class MarketRun:
             raise
 
     def terminate(self) -> None:
+        """Stop a running CLI and reap it: a bounded wait after SIGTERM, then
+        SIGKILL, which a process cannot ignore, and a wait for its exit."""
         if self.popen is not None and self.popen.poll() is None:
             self.popen.terminate()
             try:
                 self.popen.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 self.popen.kill()
+                self.popen.wait(timeout=5)
 
     @property
     def returncode(self) -> Optional[int]:
