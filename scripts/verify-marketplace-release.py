@@ -10,7 +10,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-_CONTRACT = "arkhai.marketplace-release.v1"
+_CONTRACT = "arkhai.marketplace-release.v2"
 _REPOSITORY = "arkhai-io/simple-compute-market"
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -18,7 +18,6 @@ _WORKFLOW_REF = re.compile(r"^[A-Za-z0-9.][A-Za-z0-9._/@:-]{7,255}$")
 _IMAGE_REFERENCE = re.compile(r"^[a-z0-9][a-z0-9._/-]{2,255}$")
 _REQUIRED_ARTIFACTS = {
     "wheelhouse": "marketplace-wheelhouse.tar.gz",
-    "settlement_config_schema": "settlement-config-schema.json",
     "provenance": "provenance.intoto.json",
 }
 

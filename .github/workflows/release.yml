@@ -81,22 +81,6 @@ jobs:
           tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" \
             --owner=0 --group=0 --numeric-owner \
             -czf "$RELEASE_DIR/marketplace-wheelhouse.tar.gz" .dist
-          uv run --project kit/settlement-runtime --no-sources --no-dev \
-            --find-links "$GITHUB_WORKSPACE/.dist" python - <<'PY'
-          import json
-          from pathlib import Path
-          from market_settlement_runtime import SettlementConfig
-
-          Path("marketplace-release/settlement-config-schema.json").write_text(
-              json.dumps(
-                  SettlementConfig.model_json_schema(),
-                  separators=(",", ":"),
-                  sort_keys=True,
-              )
-              + "\n",
-              encoding="utf-8",
-          )
-          PY
           python - <<'PY'
           import hashlib
           import json
@@ -156,7 +140,7 @@ jobs:
               }
 
           manifest = {
-              "contract": "arkhai.marketplace-release.v1",
+              "contract": "arkhai.marketplace-release.v2",
               "repository": "arkhai-io/simple-compute-market",
               "source_commit": source_commit,
               "workflow_ref": workflow_ref,
@@ -167,7 +151,6 @@ jobs:
               },
               "artifacts": {
                   "wheelhouse": identity("marketplace-wheelhouse.tar.gz"),
-                  "settlement_config_schema": identity("settlement-config-schema.json"),
                   "provenance": identity("provenance.intoto.json"),
               },
           }
