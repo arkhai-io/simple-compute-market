@@ -611,6 +611,25 @@ Files: `e2e-tests/tests/e2e/roles/scenarios/bare_metal/test_bare_metal_introduct
   text describing scenarios were not edited here; closeout's promotion (6.9) owns the
   former, and the latter was not found to describe the removed stage. Every section of
   the round is now implemented; the pipeline run is validation's.
+  Fix outside the plan, 24 V1 (the triage of validation 24, option A):
+  `scripts/tests/test_check_secrets.py::test_the_audit_reports_what_the_gate_passes`,
+  which this change does not otherwise touch, failed in CI's `test-release-tooling`.
+  The pinned gitleaks' `generic-api-key` rule passes a value holding one of its stop
+  words. With the audit configuration, 49 of 5,000 random 40-character passwords
+  drawn as the test drew them escaped it, and inserting `menu`, `task`, `atom`,
+  `lock`, `boot`, `side` or `math` into a draw it caught made it escape. The test now
+  draws `wordless_password()`, a letter then a digit twenty times, of which 0 in
+  50,000 escaped; the `ghp_` token case is unaffected (0 missed in 20,000).
+  `market-change-workflow`'s README, "Secret scanning", now states the audit's limit.
+  The scenario "The audit reports what the gate passes" is unchanged: the draw is
+  still a random 40-character password with no provider format.
+  Evidence: `scripts/tests/test_check_secrets.py` (system level: the real pinned
+  gitleaks over temporary Git repositories) 31 passed, none skipped. Pre-commit, on
+  the fix's final code and README, before this sentence was written: `after-functional-change`, `pre-commit-functional` (every suite,
+  `scripts/tests` 2681 passed, packaging) and `pre-commit` passed. The fresh-context
+  check found nothing blocking; taken: the README clause's wording, the helper's
+  docstring and its place beside `random_text`, and a fixed length. Declined: narrowing
+  the scenario's wording, which the owner's option A leaves as it is.
 
 ## 6. Closeout
 
